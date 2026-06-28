@@ -4,7 +4,7 @@ import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import {
   LayoutDashboard, Grid3x3, Cctv, Building2, ScanLine, Car, Bell, Map,
-  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, ShieldCheck, Cpu, HardDrive, MemoryStick,
+  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, ShieldCheck, Cpu, HardDrive, MemoryStick, BellRing,
 } from "lucide-react";
 
 const NAV = [
@@ -22,6 +22,7 @@ const NAV = [
   ]},
   { group: "nav.admin", items: [
     { to: "/audit", icon: ScrollText, key: "nav.audit", role: "technician" },
+    { to: "/notifications", icon: BellRing, key: "nav.notifications", role: "technician" },
     { to: "/users", icon: Users, key: "nav.users", role: "admin" },
     { to: "/settings", icon: Settings, key: "nav.settings" },
   ]},

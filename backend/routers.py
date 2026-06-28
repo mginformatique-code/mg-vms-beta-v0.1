@@ -7,12 +7,13 @@ import base64
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from database import db
 from auth import get_current_user, require_role, public_user, log_audit, hash_password, ROLES
+from notifications import send_notification
 
 api_router = APIRouter(prefix="/api", tags=["core"])
 
@@ -346,6 +347,31 @@ async def ack_alert(alert_id: str, user: dict = Depends(require_role("client")))
         raise HTTPException(404, "Alerte introuvable")
     await log_audit(user, "alert_acknowledged", alert_id)
     return {"ok": True}
+
+
+class AlertCreate(BaseModel):
+    message: str
+    severity: str = "warning"
+    camera_id: str = ""
+    site_id: str = ""
+
+
+@api_router.post("/alerts")
+async def create_alert(data: AlertCreate, background: BackgroundTasks, user: dict = Depends(require_role("technician"))):
+    cam = await db.cameras.find_one({"id": data.camera_id}, {"_id": 0}) if data.camera_id else await db.cameras.find_one({}, {"_id": 0})
+    doc = {
+        "id": str(uuid.uuid4()), "type": "manual", "severity": data.severity, "message": data.message,
+        "camera_id": cam["id"] if cam else "", "camera_name": cam["name"] if cam else "—",
+        "site_id": cam["site_id"] if cam else "", "site_name": cam["site_name"] if cam else "—",
+        "acknowledged": False, "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.alerts.insert_one(dict(doc))
+    await log_audit(user, "alert_created", data.message, data.severity)
+    if data.severity == "critical":
+        body = f"Alerte: {data.message}\nCaméra: {doc['camera_name']} · Site: {doc['site_name']}\nHorodatage: {doc['timestamp']}"
+        background.add_task(send_notification, "ALERTE CRITIQUE", body)
+    doc.pop("_id", None)
+    return {**doc, "dispatched": data.severity == "critical"}
 
 
 # ============ AUDIT ============

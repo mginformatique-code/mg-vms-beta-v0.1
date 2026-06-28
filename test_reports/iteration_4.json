@@ -1,0 +1,31 @@
+{
+  "summary": "Notifications/Integrations feature fully verified end-to-end. Backend: 20/20 pytest tests pass covering GET masking (no password/webhook_url/bot_token returned, has_* booleans correct), PUT admin-only with secret encryption + empty-secret preservation, RBAC (client/viewer 403 on GET+PUT+test; tech can GET+test but not PUT), POST /test channel validation (400 invalid/unconfigured, 500 French 'Échec' on dummy config proving real send path), POST /alerts dispatched=true on critical / false on warning, RBAC on alert create. Frontend: admin sees nav-notifications, all 3 tabs render (tab-smtp/discord/telegram), all input fields editable + filled (smtp-host/port/username/password/from/to, discord-webhook, telegram-token/chatid), per-channel toggles work, save button persists config with success toast 'Configuration enregistrée', test buttons trigger backend (500 visible in console as expected). Alerts /alerts page: trigger-alert-btn visible for tech+, creates critical alert and shows toast 'Alerte critique déclenchée — notifications envoyées', alert list increments. RBAC UI: viewer correctly hidden from nav-notifications AND trigger-alert-btn; tech sees nav + test buttons but save button hidden and all input fields disabled (admin-only edit).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_notifications.py",
+    "/app/test_reports/pytest/notifications_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "notifications.py: Fernet key is derived from JWT_SECRET via sha256. If JWT_SECRET ever rotates, all previously encrypted notification secrets become unrecoverable (dec() returns ''). Consider a dedicated NOTIF_ENC_KEY env var so secrets survive JWT rotation.",
+    "notifications.py send_smtp/discord/telegram lack explicit timeout fallback handling beyond client timeouts; httpx raise_for_status throws HTTPStatusError which is fine, but Discord/Telegram should validate webhook_url/bot_token format (basic URL check) before attempting send to give clearer 400 error rather than generic 500.",
+    "routers.py create_alert: when no camera_id is supplied it falls back to `db.cameras.find_one({})` (random first camera). For a real critical alert that's not tied to any camera, the alert ends up associated with an arbitrary camera. Consider leaving camera fields blank when none specified.",
+    "Notifications.jsx: save() sends the on-screen password value as-is even when the input shows the masked placeholder (placeholder is just placeholder, value stays empty when untouched, so this is OK — verified empty-preserve works). Good design.",
+    "Notifications.jsx line 15: `<input>` uses raw element instead of the shadcn Input — inconsistent with the rest of the app's styling system (minor).",
+    "BackgroundTasks dispatch on critical alert: failures inside send_notification are swallowed silently (no logging visible to user). Consider logging dispatch results to audit log for traceability."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_notifications.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (20/20)", "frontend": "100% (14/14 flows)"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026, tech@mg-vms.com / Tech@2026, client@mg-vms.com / Client@2026, viewer@mg-vms.com / Viewer@2026",
+  "seed_data_creation": "Test class TestSettingsPut writes a fake SMTP/Discord/Telegram config; TestCleanup.test_zzz_reset_notifications_config resets it back to empty/disabled at the end so subsequent runs and other test suites are not affected.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Notifications backend pytest at /app/backend/tests/test_notifications.py — 20 tests, all green. Existing /app/backend/tests/backend_test.py untouched. Frontend Notifications page UI is fully wired (tabs/save/test/toggles/RBAC). UI test for the SMTP-test error toast was timing-sensitive (toast was already dismissed when polled) but the network call 500 was confirmed in console; backend pytest separately verifies 500 with French 'Échec' detail. No outstanding issues for this feature."
+}
