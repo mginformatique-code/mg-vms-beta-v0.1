@@ -1,0 +1,123 @@
+{
+  "project_name": "MG-VMS",
+  "domain": "Enterprise Video Surveillance (SaaS)",
+  "theme": "Dark (Default Control Room) & Light (Toggle)",
+  "archetype": "Archetype 4 (Swiss & High-Contrast)",
+  "design_philosophy": {
+    "core_principles": [
+      "Objective, rigid, and functional. Purely designed for high-stakes operational environments.",
+      "Density without clutter: Use the 'Control Room Grid' (Mode B). Every pixel utilized.",
+      "Color is Function Only: 95% of UI is monochrome. Color exists only to indicate status (Online, Offline, Alert, Recording).",
+      "Optical Alignment over Geometrical: Data must align perfectly for rapid scanning by operators."
+    ]
+  },
+  "typography": {
+    "headings": {
+      "family": "Chivo",
+      "weights": ["font-semibold", "font-bold", "font-black"],
+      "tracking": "tracking-tight",
+      "usage": "Use for widget titles, numerical KPI highlights, and system status headers. Do not use generic sans."
+    },
+    "body": {
+      "family": "IBM Plex Sans",
+      "weights": ["font-normal", "font-medium"],
+      "tracking": "tracking-normal",
+      "usage": "Use for dense data tables, logs, settings menus, and tooltips."
+    },
+    "mono": {
+      "family": "IBM Plex Mono",
+      "usage": "Crucial for tabular data, IPs, MAC addresses, timestamps, and license plates (ANPR)."
+    },
+    "hierarchy": {
+      "h1": "text-2xl sm:text-3xl",
+      "h2": "text-lg sm:text-xl",
+      "h3": "text-base font-semibold",
+      "body": "text-sm",
+      "small": "text-xs uppercase tracking-[0.15em]"
+    }
+  },
+  "colors": {
+    "functional": {
+      "alert_red": "#FF3333",
+      "online_green": "#00E676",
+      "warning_yellow": "#FFB800",
+      "active_blue": "#0044FF"
+    },
+    "dark_mode": {
+      "background": "#050505",
+      "surface": "#0E0E0E",
+      "surface_hover": "#1A1A1A",
+      "border": "#262626",
+      "text_primary": "#FFFFFF",
+      "text_secondary": "#A1A1AA"
+    },
+    "light_mode": {
+      "background": "#F4F4F5",
+      "surface": "#FFFFFF",
+      "surface_hover": "#F9FAFB",
+      "border": "#E4E4E7",
+      "text_primary": "#090A0B",
+      "text_secondary": "#71717A"
+    }
+  },
+  "layout": {
+    "strategy": "The 'Control Room' Grid (Mode B)",
+    "grid_gaps": "gap-2 or gap-4",
+    "surfaces": "Grid Borders (The 'Technical' Look). border-collapse style layouts for widgets. 1px borders, NO DROP SHADOWS.",
+    "radii": "rounded-none or max rounded-sm (2px)",
+    "padding": "p-3 or p-4 in widgets"
+  },
+  "components": {
+    "video_wall": {
+      "structure": "Dynamic CSS grid based on selection (grid-cols-1 up to grid-cols-8).",
+      "spacing": "gap-1",
+      "camera_feed": "Relative container, absolute overlay for Camera Name, Timestamp (Mono font), and Red Recording Dot. Hover reveals PTZ controls."
+    },
+    "data_tables": {
+      "style": "Highly condensed, border-b only for rows, text-sm or text-xs.",
+      "anpr_list": "Display license plate in a stylized Badge (resembling physical plate), timestamp, camera location, and site."
+    },
+    "navigation": {
+      "sidebar": "Left-aligned, icon-heavy with collapsable text. Active state uses border-l-2 border-active_blue and bg-surface_hover.",
+      "topbar": "System health metrics (CPU, RAM, Storage) displayed as mini sparklines or percentage bars, plus global Alert center dropdown."
+    }
+  },
+  "icons": {
+    "library": "lucide-react",
+    "stroke_width": 1.5,
+    "instructions": "Use sharp, technical icons. Fill icons only when representing an 'active/recording' state."
+  },
+  "media": {
+    "image_urls": [
+      {
+        "url": "https://images.unsplash.com/photo-1707829248830-578d2b0cbe65?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwyfHxjY3R2JTIwY2FtZXJhJTIwZm9vdGFnZSUyMHN0cmVldHxlbnwwfHx8fDE3ODI2ODczODZ8MA&ixlib=rb-4.1.0&q=85",
+        "category": "camera_feed_placeholder_1",
+        "description": "PTZ security camera on pole - Use as placeholder for camera stream 1"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1693541684739-e714db2637e2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwxfHxjY3R2JTIwY2FtZXJhJTIwZm9vdGFnZSUyMHN0cmVldHxlbnwwfHx8fDE3ODI2ODczODZ8MA&ixlib=rb-4.1.0&q=85",
+        "category": "camera_feed_placeholder_2",
+        "description": "Street CCTV camera - Use as placeholder for camera stream 2"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1489169413288-513451305ec1",
+        "category": "anpr_vehicle_1",
+        "description": "Mercedes Benz with license plate - Use for ANPR vehicle search result / timeline thumbnail"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1689702301603-08bd1b92d985",
+        "category": "anpr_plate_1",
+        "description": "License Plate close-up - Use for ANPR log details"
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "CRITICAL: ALL interactive elements MUST include a data-testid attribute in kebab-case based on role (e.g., data-testid='login-submit-button', data-testid='camera-grid-4x4').",
+    "LAYOUT: Build the app exactly like a high-end control room dashboard. Minimal whitespace between widgets (use gap-2 or gap-4). Fill the screen height (h-screen, overflow-hidden on body, independent scrolling areas).",
+    "THEME: Ensure robust dark and light mode support via Tailwind class strategy. Default to dark mode if possible.",
+    "COMPONENTS: Use Shadcn UI extensively for Dialogs, Selects, and Tabs. Override border-radius to be rounded-none or rounded-sm to maintain the 'Swiss Brutalist/Technical' feel.",
+    "FONTS: Install and use 'Chivo' (Google Font) for headers/numbers, 'IBM Plex Sans' for body, and 'IBM Plex Mono' for IPs/timestamps/plates.",
+    "VIDEO WALL: Construct the video grid using pure CSS Grid (e.g., className={`grid grid-cols-${Math.sqrt(cameras)} gap-1`}). Overlay camera name, status dot, and timestamp absolute positioned inside the feed.",
+    "STATUS: Use neon/high-contrast colors strictly for status (Green = Online, Red = Offline/Alert). The rest of the UI must remain monochrome to let the video feeds and alerts stand out."
+  ]
+}
