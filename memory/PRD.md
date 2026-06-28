@@ -23,6 +23,7 @@ React + FastAPI + MongoDB (Kubernetes single backend/frontend). Note: the reques
 8. Bilingue FR/EN, thème clair/sombre
 
 ## Implemented (2026-06)
+- ✅ Notifications/Intégrations: page de config SMTP + Discord + Telegram (saisie admin), secrets chiffrés (Fernet) + masqués en lecture, test d'envoi par canal, activation/désactivation par canal, envoi auto sur alertes critiques (BackgroundTasks). POST /api/alerts déclenche la dispatch. Tests: backend 20/20, frontend 14/14.
 - ✅ JWT Bearer auth, RBAC require_role, 2FA TOTP (setup/verify/disable), admin+3 demo users seeded
 - ✅ Sites CRUD, Cameras CRUD + test/snapshot/PTZ endpoints (simulated)
 - ✅ Live View video wall with 1/4/9/16/25/36/49/64 layouts
