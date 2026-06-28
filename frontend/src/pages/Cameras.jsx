@@ -120,13 +120,13 @@ export default function Cameras() {
       </Dialog>
 
       {snap && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-6" onClick={() => setSnap(null)}>
-          <div className="bg-card border border-border max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-3 py-2 border-b border-border"><span className="text-sm mono">{snap.name} — {t("common.snapshot")}</span><button onClick={() => setSnap(null)}><X size={18} /></button></div>
-            <img src={snap.snapshot_url} alt="" className="w-full" />
+        <Dialog open={!!snap} onOpenChange={(o) => !o && setSnap(null)}>
+          <DialogContent className="rounded-none border-border max-w-2xl p-0">
+            <DialogHeader className="px-3 py-2 border-b border-border"><DialogTitle className="text-sm mono">{snap.name} — {t("common.snapshot")}</DialogTitle></DialogHeader>
+            <img src={snap.snapshot_url} alt="snapshot" className="w-full" data-testid="snapshot-image" />
             <div className="px-3 py-2 text-[10px] mono text-muted-foreground">{new Date(snap.captured_at).toLocaleString()}</div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       )}
       <style>{`.inp{width:100%;padding:0.5rem 0.625rem;background:hsl(var(--card));border:1px solid hsl(var(--input));font-size:0.875rem;outline:none}.inp:focus{border-color:#0044FF}`}</style>
     </div>

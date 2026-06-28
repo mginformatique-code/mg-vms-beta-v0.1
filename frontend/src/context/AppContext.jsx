@@ -44,8 +44,8 @@ export function AppProvider({ children }) {
     setUser(false);
   };
 
-  const toggleTheme = () => setTheme((p) => (p === "dark" ? "light" : "dark"));
-  const toggleLang = () => setLang((p) => (p === "fr" ? "en" : "fr"));
+  const toggleTheme = () => setTheme(theme === "dark" ? "light" : "dark");
+  const toggleLang = () => setLang(lang === "fr" ? "en" : "fr");
 
   const can = (role) => {
     const lvl = { guest: 0, readonly: 1, client: 2, technician: 3, admin: 4 };
@@ -53,7 +53,7 @@ export function AppProvider({ children }) {
   };
 
   return (
-    <AppContext.Provider value={{ user, setUser, login, logout, lang, setLang, toggleLang, theme, toggleTheme, t, can }}>
+    <AppContext.Provider value={{ user, setUser, login, logout, lang, setLang, toggleLang, theme, setTheme, toggleTheme, t, can }}>
       {children}
     </AppContext.Provider>
   );

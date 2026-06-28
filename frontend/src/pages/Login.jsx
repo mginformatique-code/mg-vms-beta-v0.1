@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import { formatApiErrorDetail } from "@/lib/api";
@@ -15,7 +15,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  if (user) navigate("/");
+  useEffect(() => { if (user) navigate("/"); }, [user, navigate]);
 
   const submit = async (e) => {
     e.preventDefault();
