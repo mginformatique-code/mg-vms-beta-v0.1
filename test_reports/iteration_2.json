@@ -1,0 +1,81 @@
+{
+  "summary": "Frontend e2e testing of MG-VMS as admin and viewer. Login + 11 nav pages + Live View layouts + Cameras + Sites + ANPR + Vehicles + Alerts + Audit + Users + Settings + RBAC all tested via Playwright. ~85% of frontend flows work. 2 critical theme-toggle bugs found (topbar + Settings page), 1 moderate (snapshot modal), plus minor accessibility/console warnings.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Layout.jsx topbar theme toggle",
+        "issue": "Clicking [data-testid=theme-toggle] does NOT change theme. After click html.classList stays 'dark' and localStorage mg_theme stays 'dark'. Likely React.StrictMode double-invokes the non-idempotent functional updater in AppContext.toggleTheme (setTheme((p) => p === 'dark' ? 'light' : 'dark')) -> dark->light->dark net no-op. Fix: use plain non-functional setTheme(theme === 'dark' ? 'light' : 'dark') OR disable StrictMode for this updater.",
+        "selector": "[data-testid=theme-toggle]",
+        "priority": "HIGH"
+      },
+      {
+        "component": "Settings.jsx theme buttons",
+        "issue": "Clicking [data-testid=theme-dark] or [data-testid=theme-light] does NOT change theme. Root cause: AppContext.Provider value object exports 'toggleTheme' but NOT 'setTheme'. Settings.jsx destructures setTheme from useApp() which is undefined; calling setTheme('light') silently fails inside React onClick handler. Fix: add setTheme to AppContext provider value (line 56 of AppContext.jsx).",
+        "selector": "[data-testid=theme-dark], [data-testid=theme-light]",
+        "priority": "HIGH"
+      },
+      {
+        "component": "Cameras.jsx snapshot modal",
+        "issue": "Clicking [data-testid=snapshot-btn] does not open any [role=dialog]. Expected snapshot modal to appear with placeholder image per spec.",
+        "selector": "[data-testid^=snapshot-btn]",
+        "priority": "MEDIUM"
+      },
+      {
+        "component": "Cameras.jsx site filter select",
+        "issue": "Hydration warning: <span> cannot be a child of <option>. Affects the camera-site filter <select> (line ~53). Likely caused by translated label string being wrapped — verify children are plain text only, not JSX with spans.",
+        "selector": "select[data-testid=camera-sit*] option",
+        "priority": "LOW"
+      },
+      {
+        "component": "Login.jsx",
+        "issue": "React console error: 'Cannot update a component (BrowserRouter) while rendering a different component (Login)'. Likely a navigate() call inside render path. Wrap navigation in useEffect.",
+        "selector": "n/a",
+        "priority": "LOW"
+      },
+      {
+        "component": "Dialogs (Camera/Snapshot/User/AI)",
+        "issue": "Accessibility warning: 'Missing Description or aria-describedby for DialogContent' on all DialogContent usages. Add DialogDescription or aria-describedby attribute.",
+        "selector": "[role=dialog]",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Settings page (when 2FA disabled)",
+        "issues": ["After clicking enable-2fa-btn, the QR code SECRET is displayed in plain text below the QR — fine for setup but consider masking or warn user not to share."]
+      }
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "FIX (HIGH): Add 'setTheme' to AppContext.Provider value in /app/frontend/src/context/AppContext.jsx line 56 so Settings page theme buttons work.",
+    "FIX (HIGH): Rewrite toggleTheme/toggleLang to NOT use functional state updater (React.StrictMode double-invokes it making toggle a no-op). Change to: const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : 'dark'). Same for toggleLang.",
+    "FIX (MEDIUM): Snapshot modal should open when clicking snapshot-btn on Cameras page (currently no dialog appears).",
+    "FIX (LOW): Cameras site-select <option> contains a <span> child causing hydration warning — render plain text only.",
+    "FIX (LOW): Move navigate() out of Login render into useEffect to remove React warning.",
+    "FIX (LOW): Add DialogDescription/aria-describedby to all DialogContent for a11y."
+  ],
+  "critical_code_review_comments": [
+    "AppContext: setTheme not exported but Settings expects it. setLang is exported correctly.",
+    "Non-idempotent functional state updaters in toggleTheme/toggleLang are unsafe under React.StrictMode (double-invocation).",
+    "Settings.jsx 2FA QR uses external service (api.qrserver.com) — consider using local QR generation to avoid external dependency and CSP issues.",
+    "Layout.jsx polls /dashboard/stats every 15s — consider react-query for caching/cancellation."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (not tested this iteration)", "frontend": "85%"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 and viewer@mg-vms.com / Viewer@2026 verified working",
+  "seed_data_creation": "None. Used existing seeded data (25 cameras, 5 sites, ANPR/vehicle/alert/audit mock data).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend fully passed in iteration_1 (30/30). This iteration covered frontend only as admin + viewer RBAC. All 11 navs load; Live View layout grid switching works; Cameras/Sites/ANPR/Vehicles/Alerts/Audit/Users CRUD UI works; 2FA QR renders; viewer RBAC correctly hides admin/audit nav and add buttons. Key bugs to retest after main agent fix: (1) topbar theme-toggle changes theme dark<->light, (2) Settings theme-dark/theme-light buttons work, (3) snapshot-btn opens modal. Use existing seeded admin & viewer credentials. The hydration warning on <option><span> originates from a dev-mode source-tracker x-component attribute injection — verify the actual JSX in Cameras.jsx line ~53 is text-only.",
+  "rca_of_the_issues": {
+    "topbar_theme_toggle": "toggleTheme = () => setTheme((p) => p === 'dark' ? 'light' : 'dark') is a non-idempotent functional updater. React 18 StrictMode (enabled in /app/frontend/src/index.js) intentionally double-invokes functional state updaters during dev to surface bugs. Net effect: dark -> light -> dark, no observable change. Fix: use non-functional form, e.g., setTheme(theme === 'dark' ? 'light' : 'dark').",
+    "settings_theme_buttons": "Settings.jsx destructures { setTheme } from useApp(). AppContext provider value (AppContext.jsx line 56) only exports toggleTheme, not setTheme. Calling undefined inside onClick raises TypeError that React swallows silently. Fix: include setTheme in the provider value.",
+    "reproduction": "1) login as admin, 2) on Settings page click theme-light -> theme stays dark; 3) click topbar theme-toggle -> theme stays dark; 4) localStorage mg_theme remains 'dark' across both."
+  }
+}
