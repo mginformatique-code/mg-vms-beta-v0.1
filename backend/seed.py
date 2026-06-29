@@ -185,3 +185,44 @@ async def seed():
             "acknowledged": random.random() > 0.6, "timestamp": ts.isoformat(),
         })
     await db.alerts.insert_many(alerts)
+
+
+async def seed_recordings():
+    """Idempotent : génère une timeline d'enregistrements sur 3 jours pour les caméras en ligne."""
+    if await db.recordings.count_documents({}) > 0:
+        return
+    cam_docs = await db.cameras.find({"status": "online"}, {"_id": 0}).to_list(1000)
+    if not cam_docs:
+        return
+    REC_THUMBS = [
+        "https://images.unsplash.com/photo-1707829248830-578d2b0cbe65?w=400&q=70",
+        "https://images.unsplash.com/photo-1693541684739-e714db2637e2?w=400&q=70",
+    ]
+    recs = []
+    now_dt = datetime.now(timezone.utc)
+    for cam in cam_docs:
+        for day in range(3):
+            for hour in range(24):
+                start = (now_dt - timedelta(days=day)).replace(minute=0, second=0, microsecond=0) - timedelta(hours=hour)
+                if start > now_dt:
+                    continue
+                end = start + timedelta(hours=1)
+                roll = random.random()
+                mode = "ai" if roll > 0.88 else ("motion" if roll > 0.7 else "continuous")
+                has_event = mode in ("ai", "motion") and random.random() > 0.4
+                recs.append({
+                    "id": str(uuid.uuid4()),
+                    "camera_id": cam["id"], "camera_name": cam["name"],
+                    "site_id": cam["site_id"], "site_name": cam.get("site_name", ""),
+                    "start": start.isoformat(),
+                    "end": min(end, now_dt).isoformat(),
+                    "duration_sec": int((min(end, now_dt) - start).total_seconds()),
+                    "mode": mode,
+                    "size_mb": round(random.uniform(60, 480), 1),
+                    "thumbnail": random.choice(REC_THUMBS),
+                    "has_event": has_event,
+                    "event_type": random.choice(EVENT_TYPES) if has_event else None,
+                })
+    if recs:
+        await db.recordings.insert_many(recs)
+

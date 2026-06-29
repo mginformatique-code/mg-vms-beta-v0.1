@@ -4,13 +4,14 @@ import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import {
   LayoutDashboard, Grid3x3, Cctv, Building2, ScanLine, Car, Bell, Map,
-  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, ShieldCheck, Cpu, HardDrive, MemoryStick, BellRing, Puzzle,
+  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, ShieldCheck, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film,
 } from "lucide-react";
 
 const NAV = [
   { group: "nav.operations", items: [
     { to: "/", icon: LayoutDashboard, key: "nav.dashboard", end: true },
     { to: "/live", icon: Grid3x3, key: "nav.live" },
+    { to: "/recordings", icon: Film, key: "nav.recordings" },
     { to: "/cameras", icon: Cctv, key: "nav.cameras" },
     { to: "/sites", icon: Building2, key: "nav.sites" },
     { to: "/map", icon: Map, key: "nav.map" },

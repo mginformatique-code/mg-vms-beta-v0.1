@@ -1,7 +1,7 @@
 # Moteur vidéo (ingestion + WebRTC/HLS + ONVIF)
 fastapi==0.110.0
 uvicorn==0.25.0
-httpx==0.26.0
+httpx==0.28.1
 onvif-zeep==0.2.12
 WSDiscovery==2.0.0
 SQLAlchemy==2.0.25

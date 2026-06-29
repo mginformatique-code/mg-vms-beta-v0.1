@@ -2,6 +2,18 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [1.5.0] — 2026-06 — Cœur Vidéo P0 (artefacts /deploy) + Timeline d'enregistrements (sandbox)
+### Ajouté — Artefacts production `/deploy` (NON exécutables ici)
+- **Moteur IA** `/deploy/ai-engine/` : `worker.py` (YOLOv11 Ultralytics + tracking ByteTrack, dédup par piste, écriture `events`, Redis Pub/Sub) ; `anpr.py` (LAPI réelle via fast-alpr → `plates` + alerte critique liste noire) ; `requirements.txt`.
+- **Service d'enregistrement** `/deploy/recording/recorder.py` : segmentation MP4 FFmpeg, upload MinIO/S3, indexation `recordings`, API timeline + URL présignée de lecture, rétention/quota.
+- **Cœur vidéo ffmpeg** complété : `stream_manager.py` (RTSP→HLS + reconnexion + snapshot + WebRTC go2rtc), `onvif_discovery.py` (WS-Discovery + profils média), `go2rtc.yaml`.
+- Correction du conflit de dépendance `ffmpeg/requirements.txt` (httpx 0.26→0.28.1).
+### Ajouté — Incrément testable (sandbox, MongoDB)
+- **Page Enregistrements & Timeline** (`/recordings`) : sélection caméra + date, timeline 24h colorée par mode (continu/mouvement/IA), marqueurs d'événements, lecteur (lecture simulée), liste de segments, stats (couverture/volume/segments/événements).
+- Endpoints `GET /api/recordings/timeline` et `GET /api/recordings/{id}/playback` (cloisonnés par site) ; seed idempotent de segments sur 3 jours.
+### Tests
+- Backend testé (curl e2e : timeline + playback OK), frontend vérifié (screenshot, lecture d'un segment).
+
 ## [1.4.0] — 2026-06 — Sprint 3 : Plugins + ANPR liste noire auto + Artefacts /deploy
 ### Ajouté
 - **Socle d'architecture de plugins** : registre de 10 modules (ANPR cœur, IA YOLO, tracking, reconnaissance faciale, parking, thermique, radar, drone, MQTT, contrôle d'accès), activation/désactivation dynamique persistée (`GET/PUT /api/plugins`), page UI Plugins (admin), protection des plugins cœur.

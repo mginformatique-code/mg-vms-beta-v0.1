@@ -13,9 +13,21 @@ deploy/
 ├── .env.example                # Variables d'environnement
 ├── api/Dockerfile              # Backend FastAPI (+ workers Celery via la même image)
 ├── frontend/Dockerfile         # Build React servi par Nginx (+ nginx.conf)
-├── ai-engine/Dockerfile        # YOLOv11 + ByteTrack (CUDA/GPU)
-├── ffmpeg/Dockerfile           # Ingestion RTSP/ONVIF + transcodage WebRTC/HLS
-├── recording/Dockerfile        # Enregistrement, rotation, quota, archivage
+├── ai-engine/                  # YOLOv11 + ByteTrack (CUDA/GPU)
+│   ├── Dockerfile
+│   ├── worker.py               # Inférence + tracking -> events + déclenche ANPR
+│   ├── anpr.py                 # LAPI réelle (fast-alpr) -> plates + alertes liste noire
+│   └── requirements.txt
+├── ffmpeg/                     # Ingestion RTSP/ONVIF + transcodage WebRTC/HLS
+│   ├── Dockerfile
+│   ├── stream_manager.py       # Pipelines FFmpeg RTSP->HLS + reconnexion auto + snapshot
+│   ├── onvif_discovery.py      # WS-Discovery + profils média ONVIF -> upsert caméras
+│   ├── go2rtc.yaml             # Passerelle WebRTC/HLS faible latence
+│   └── requirements.txt
+├── recording/                  # Enregistrement, rotation, quota, archivage
+│   ├── Dockerfile
+│   ├── recorder.py             # Segments MP4 -> MinIO/S3 + timeline + rétention
+│   └── requirements.txt
 ├── notification/Dockerfile     # Relais Email/Discord/Telegram/Webhook/MQTT/SMS/Push
 ├── backup/Dockerfile + backup.sh   # Sauvegarde/restauration (DB + médias -> S3/MinIO)
 ├── db/

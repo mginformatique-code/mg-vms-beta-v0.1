@@ -444,6 +444,59 @@ async def create_alert(data: AlertCreate, background: BackgroundTasks, user: dic
     return {**doc, "dispatched": data.severity == "critical"}
 
 
+# ============ RECORDINGS / TIMELINE ============
+@api_router.get("/recordings/timeline")
+async def recordings_timeline(camera_id: str, date: Optional[str] = None, user: dict = Depends(get_current_user)):
+    """Segments enregistrés d'une caméra pour une journée (date ISO AAAA-MM-JJ).
+    Sandbox : flux/lecture simulés. En production, sert le service `recording-service`."""
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "password": 0})
+    if not cam:
+        raise HTTPException(404, "Caméra introuvable")
+    allowed = allowed_sites(user)
+    if allowed is not None and cam.get("site_id") not in allowed:
+        raise HTTPException(403, "Accès refusé à cette caméra")
+    if date:
+        try:
+            day_start = datetime.fromisoformat(date).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(400, "Date invalide")
+    else:
+        now = datetime.now(timezone.utc)
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = day_start + timedelta(days=1)
+    q = {"camera_id": camera_id, "start": {"$gte": day_start.isoformat(), "$lt": day_end.isoformat()}}
+    segments = await db.recordings.find(q, {"_id": 0}).sort("start", 1).to_list(500)
+    total_sec = sum(s.get("duration_sec", 0) for s in segments)
+    total_mb = round(sum(s.get("size_mb", 0) for s in segments), 1)
+    return {
+        "camera": {"id": cam["id"], "name": cam["name"], "site_name": cam.get("site_name", "")},
+        "date": day_start.date().isoformat(),
+        "segments": segments,
+        "coverage_sec": total_sec,
+        "total_size_mb": total_mb,
+        "event_count": sum(1 for s in segments if s.get("has_event")),
+    }
+
+
+@api_router.get("/recordings/{recording_id}/playback")
+async def recordings_playback(recording_id: str, user: dict = Depends(get_current_user)):
+    rec = await db.recordings.find_one({"id": recording_id}, {"_id": 0})
+    if not rec:
+        raise HTTPException(404, "Enregistrement introuvable")
+    allowed = allowed_sites(user)
+    if allowed is not None and rec.get("site_id") not in allowed:
+        raise HTTPException(403, "Accès refusé")
+    await log_audit(user, "recording_playback", rec["camera_name"], rec["start"])
+    # Sandbox : pas de fichier réel. En production -> URL présignée MinIO/S3 (cf. recording-service).
+    return {
+        "recording": rec,
+        "poster": rec.get("thumbnail"),
+        "stream_url": None,
+        "simulated": True,
+        "message": "Lecture simulée (sandbox). En production : flux MP4 via recording-service / MinIO.",
+    }
+
+
 # ============ AUDIT ============
 @api_router.get("/audit")
 async def list_audit(response: Response, limit: int = 100, offset: int = 0, user: dict = Depends(require_role("technician"))):
