@@ -1,0 +1,45 @@
+{
+  "summary": "Sprint 2 (TEMPS RÉEL) fully verified — backend + frontend. Backend pytest /app/backend/tests/test_sprint2_realtime.py = 12/12 PASSED in ~14s covering: (1) Real psutil metrics in GET /api/dashboard/stats — all 6 system keys present (cpu/ram/storage/temperature/bandwidth_mbps/uptime_days), values are plausible (cpu in container ~4–5%, ram 23%, storage 41%, uptime_days 6) and NOT the old random 28–62 range; (2) Pagination — /api/plates, /api/events, /api/alerts, /api/audit all return JSON arrays (non-breaking) with X-Total-Count header (plates=80, audit=206). offset=10 returns disjoint ids from offset=0. (3) WebSocket /api/ws — invalid token rejected (close 1008), missing token rejected, valid admin token receives first message {type:'metrics',data:{cpu,ram,...}}, REST POST /api/alerts critical with admin token is broadcast to admin ws as {type:'alert',data:{message:...}} within 10s. (4) Site scoping — client@mg-vms.com ws (assigned only to Mairie Centrale) does NOT receive an alert created on a camera in Parking Bellecour while admin alerts triggered on Mairie still reach client. Backend regression /app/backend/tests/backend_test.py = 30/30 PASSED (auth, RBAC, dashboard, sites, cameras, ANPR/plates, watchlist, alerts, audit, users, 2FA, AI ANPR). Frontend Playwright: admin login → /dashboard, topbar [data-testid=live-indicator] visible with live CPU/RAM/STO updating; /anpr [data-testid=plates-count] '50 / 80' → after click [data-testid=load-more-plates] → '80 / 80'; /audit [data-testid=audit-count] '50 / 206' → click [data-testid=load-more-audit] → '100 / 206'; /alerts [data-testid=trigger-alert-btn] click → green toast 'Alerte critique déclenchée — notifications envoyées' + new alert 'Intrusion détectée — zone périmètre' appears at top of list without manual refresh (WebSocket alertPing reload working).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/alerts", "issue": "AlertCreate.site_id from request body is IGNORED — server always derives site_id from the chosen camera (cam['site_id']). If camera_id is omitted, the first camera in DB is used, so callers cannot pin an alert to an arbitrary site without choosing a camera in that site. Test (test_ws_site_scoping_client) had to be rewritten to pass camera_id of a camera in the target site. Consider either removing site_id from AlertCreate or honoring it when camera_id is empty."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_sprint2_realtime.py",
+    "/app/test_reports/pytest/sprint2_results.xml",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/regression_results.xml"
+  ],
+  "action_items": [
+    "(MINOR) AlertCreate.site_id is silently ignored — either drop the field from the model or honor it when camera_id is not provided so creators can target a specific site without picking a camera.",
+    "(NOTE) Frontend Alerts page renders alert items as <div> not <table tr>, so any selectors that expect tbody rows must use list-item testids; current data-testids are sufficient for trigger+toast verification."
+  ],
+  "critical_code_review_comments": [
+    "realtime.py ws_endpoint: token is passed as a query parameter (?token=...). Query params can leak via access logs/Referer headers. For production prefer Sec-WebSocket-Protocol subprotocol header or a one-shot ticket exchange via /api/ws/ticket -> short-lived ws token.",
+    "realtime.py metrics_snapshot: psutil.cpu_percent(interval=None) returns the cpu% since last call, so the very first call after process start returns 0.0. The container value of 4-5% looks fine but on cold start metrics would briefly show CPU=0. Consider seeding once in startup with interval=0.1 or document this.",
+    "realtime.py ConnectionManager.active is an in-memory dict — not shared across uvicorn workers. With >1 worker/replica a REST alert created on worker A will only be broadcast to ws clients connected to A. For multi-instance deploy use Redis pub/sub or a message bus.",
+    "realtime.py metrics_broadcaster loop runs forever but only sends when manager.active is non-empty — good. However asyncio.create_task is created in server startup but there is no graceful cancellation on shutdown — task will be cancelled by uvicorn but consider lifespan handler.",
+    "routers.py create_alert: ignores AlertCreate.site_id (see backend_issues.minor) — root cause: site_id is derived from chosen camera doc, not from the request. Either honor request site_id or remove from model to avoid client confusion.",
+    "routers.py list_alerts/list_plates/list_events/list_audit: X-Total-Count counts ALL rows but does NOT include applied filters total when filters are set — verify each list endpoint either counts the filtered set or documents the global count. From tests: total values look filtered (80 plates, 206 audit) so OK, but recommend explicit assertion.",
+    "routers.py list_audit: total = db.audit_logs.count_documents({}) uses an empty filter even if query params filter later — confirmed (no filters on audit currently, so OK). If filters are added later, update count accordingly.",
+    "AppContext.jsx: ws URL is derived client-side from REACT_APP_BACKEND_URL by replacing http->ws. Already works on https->wss. Recommend a small util + try/catch + visible reconnect indicator if ws dies (currently silent reconnects/no-reconnects).",
+    "Layout.jsx: live metrics in topbar use last-received ws metrics (every 5s). If ws disconnects, the metrics freeze without warning — the LIVE indicator stays green. Consider greying out / removing the LIVE pill when ws.readyState !== 1."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_sprint2_realtime.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (12/12 sprint2 + 30/30 regression = 42/42)", "frontend": "100% (live-indicator, plates+audit pagination load-more, alert trigger + toast + live append all verified)"},
+  "test_credentials": "admin@mg-vms.com/Admin@2026, tech@mg-vms.com/Tech@2026, client@mg-vms.com/Client@2026 (no changes — no password resets performed in this iteration)",
+  "seed_data_creation": "Tests created throwaway alerts with TEST_WS_ALERT_* and TEST_SCOPE_* prefixes (and a TEST_user_* user lifecycle in regression, cleaned up by the test). These remain in db.alerts and are visible in the Alerts page (~5 TEST_* rows visible). Suggest periodic prune via mongosh: db.alerts.deleteMany({message:/^TEST_/}). No login_attempts or password_reset_tokens written in this iteration.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Sprint 2 test suite /app/backend/tests/test_sprint2_realtime.py uses websockets 16.0 (already installed). It is serial-safe (no -n needed; pytest.ini default -n 2 is fine but the ws tests use asyncio.new_event_loop().run_until_complete() rather than pytest-asyncio so no plugin required). WS URL is wss://video-command-6.preview.emergentagent.com/api/ws?token=<access>. Site scoping test depends on (a) admin login OK, (b) at least one site other than 'Mairie Centrale' with >=1 camera attached (regression suite TestCameras already provisions cameras on each site). If you need to retest after backend restart, metrics_broadcaster ticks every 5s but the FIRST ws message comes synchronously on connect via ws.send_json({'type':'metrics',...}) so tests don't need to wait 5s. Frontend testids: live-indicator, plates-count, load-more-plates, audit-count, load-more-audit, trigger-alert-btn — all stable. The Alerts page list uses divs not table rows; use the testids if you need to assert row counts. AlertCreate.site_id is ignored server-side: always pass camera_id to control which site an alert is broadcast to.",
+  "rca of the issue": "Only issue found: AlertCreate.site_id is silently ignored. RCA: routers.py:create_alert derives site_id/site_name/camera_name from the camera document fetched via data.camera_id (or the first camera if camera_id is empty). The data.site_id is never read. This caused the initial site-scoping ws test to fail because the body-supplied site_id was ignored and the server picked an arbitrary camera (which happened to be in Mairie Centrale, the very site the client IS allowed to see). Mitigation in test: pass camera_id of a camera in the target site (GET /api/cameras?site_id=<non-Mairie>). Server-side fix recommended: either honor request.site_id when camera_id is empty (do db.cameras.find_one({'site_id': data.site_id})) or remove site_id from AlertCreate to make the contract explicit."
+}

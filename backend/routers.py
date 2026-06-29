@@ -7,13 +7,14 @@ import base64
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from database import db
 from auth import get_current_user, require_role, public_user, log_audit, hash_password, ROLES, site_scope, allowed_sites
 from notifications import send_notification
+from realtime import metrics_snapshot, broadcast_alert, broadcast_camera_status
 
 api_router = APIRouter(prefix="/api", tags=["core"])
 
@@ -33,8 +34,6 @@ async def dashboard_stats(user: dict = Depends(get_current_user)):
     plates_today = await db.plates.count_documents({
         **sf, "timestamp": {"$gte": (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()}
     })
-    seed = int(datetime.now(timezone.utc).timestamp() / 30)
-    rnd = random.Random(seed)
     return {
         "cameras_total": total_cams,
         "cameras_online": online,
@@ -43,14 +42,7 @@ async def dashboard_stats(user: dict = Depends(get_current_user)):
         "events_today": events_today,
         "alerts_active": alerts_active,
         "plates_today": plates_today,
-        "system": {
-            "cpu": rnd.randint(28, 62),
-            "ram": rnd.randint(40, 70),
-            "storage": rnd.randint(55, 82),
-            "temperature": rnd.randint(42, 58),
-            "bandwidth_mbps": rnd.randint(120, 480),
-            "uptime_days": 47,
-        },
+        "system": metrics_snapshot(),
     }
 
 
@@ -203,6 +195,7 @@ async def test_camera(camera_id: str, user: dict = Depends(get_current_user)):
     status = "online" if success else "offline"
     await db.cameras.update_one({"id": camera_id}, {"$set": {"status": status, "last_seen": datetime.now(timezone.utc).isoformat()}})
     await log_audit(user, "camera_tested", cam["name"], f"Résultat: {status}")
+    await broadcast_camera_status({**cam, "status": status})
     return {
         "success": success,
         "status": status,
@@ -238,8 +231,8 @@ async def ptz_command(camera_id: str, command: str = Query(...), user: dict = De
 
 # ============ EVENTS ============
 @api_router.get("/events")
-async def list_events(type: Optional[str] = None, site_id: Optional[str] = None,
-                      camera_id: Optional[str] = None, limit: int = 100,
+async def list_events(response: Response, type: Optional[str] = None, site_id: Optional[str] = None,
+                      camera_id: Optional[str] = None, limit: int = 100, offset: int = 0,
                       user: dict = Depends(get_current_user)):
     q = {}
     if type:
@@ -249,18 +242,20 @@ async def list_events(type: Optional[str] = None, site_id: Optional[str] = None,
     if camera_id:
         q["camera_id"] = camera_id
     site_scope(q, user)
-    events = await db.events.find(q, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+    total = await db.events.count_documents(q)
+    response.headers["X-Total-Count"] = str(total)
+    events = await db.events.find(q, {"_id": 0}).sort("timestamp", -1).skip(offset).limit(limit).to_list(limit)
     return events
 
 
 # ============ ANPR / PLATES ============
 @api_router.get("/plates")
-async def search_plates(plate: Optional[str] = None, color: Optional[str] = None,
+async def search_plates(response: Response, plate: Optional[str] = None, color: Optional[str] = None,
                         make: Optional[str] = None, vtype: Optional[str] = None,
                         site_id: Optional[str] = None, camera_id: Optional[str] = None,
                         direction: Optional[str] = None, list_status: Optional[str] = None,
                         date_from: Optional[str] = None, date_to: Optional[str] = None,
-                        limit: int = 200, user: dict = Depends(get_current_user)):
+                        limit: int = 50, offset: int = 0, user: dict = Depends(get_current_user)):
     q = {}
     if plate:
         q["plate"] = {"$regex": plate.upper().replace(" ", ""), "$options": "i"}
@@ -286,7 +281,9 @@ async def search_plates(plate: Optional[str] = None, color: Optional[str] = None
             rng["$lte"] = date_to
         q["timestamp"] = rng
     site_scope(q, user)
-    plates = await db.plates.find(q, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+    total = await db.plates.count_documents(q)
+    response.headers["X-Total-Count"] = str(total)
+    plates = await db.plates.find(q, {"_id": 0}).sort("timestamp", -1).skip(offset).limit(limit).to_list(limit)
     return plates
 
 
@@ -340,12 +337,14 @@ async def delete_watchlist(wid: str, user: dict = Depends(require_role("technici
 
 # ============ ALERTS ============
 @api_router.get("/alerts")
-async def list_alerts(acknowledged: Optional[bool] = None, limit: int = 100, user: dict = Depends(get_current_user)):
+async def list_alerts(response: Response, acknowledged: Optional[bool] = None, limit: int = 100, offset: int = 0, user: dict = Depends(get_current_user)):
     q = {}
     if acknowledged is not None:
         q["acknowledged"] = acknowledged
     site_scope(q, user)
-    return await db.alerts.find(q, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+    total = await db.alerts.count_documents(q)
+    response.headers["X-Total-Count"] = str(total)
+    return await db.alerts.find(q, {"_id": 0}).sort("timestamp", -1).skip(offset).limit(limit).to_list(limit)
 
 
 @api_router.post("/alerts/{alert_id}/ack")
@@ -375,17 +374,20 @@ async def create_alert(data: AlertCreate, background: BackgroundTasks, user: dic
     }
     await db.alerts.insert_one(dict(doc))
     await log_audit(user, "alert_created", data.message, data.severity)
+    doc.pop("_id", None)
+    await broadcast_alert(doc)
     if data.severity == "critical":
         body = f"Alerte: {data.message}\nCaméra: {doc['camera_name']} · Site: {doc['site_name']}\nHorodatage: {doc['timestamp']}"
         background.add_task(send_notification, "ALERTE CRITIQUE", body)
-    doc.pop("_id", None)
     return {**doc, "dispatched": data.severity == "critical"}
 
 
 # ============ AUDIT ============
 @api_router.get("/audit")
-async def list_audit(limit: int = 200, user: dict = Depends(require_role("technician"))):
-    return await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+async def list_audit(response: Response, limit: int = 100, offset: int = 0, user: dict = Depends(require_role("technician"))):
+    total = await db.audit_logs.count_documents({})
+    response.headers["X-Total-Count"] = str(total)
+    return await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).skip(offset).limit(limit).to_list(limit)
 
 
 # ============ USERS (admin) ============

@@ -18,6 +18,7 @@ function Plate({ value, status }) {
 export default function Anpr() {
   const { t, can } = useApp();
   const [plates, setPlates] = useState([]);
+  const [total, setTotal] = useState(0);
   const [q, setQ] = useState("");
   const [watch, setWatch] = useState([]);
   const [wlOpen, setWlOpen] = useState(false);
@@ -27,9 +28,14 @@ export default function Anpr() {
   const [aiResult, setAiResult] = useState(null);
   const [file, setFile] = useState(null);
 
-  const load = () => api.get(`/plates?plate=${encodeURIComponent(q)}`).then((r) => setPlates(r.data));
+  const load = async (reset = true) => {
+    const offset = reset ? 0 : plates.length;
+    const r = await api.get(`/plates?plate=${encodeURIComponent(q)}&limit=50&offset=${offset}`);
+    setTotal(parseInt(r.headers["x-total-count"] || "0", 10));
+    setPlates((prev) => (reset ? r.data : [...prev, ...r.data]));
+  };
   const loadWatch = () => api.get("/watchlist").then((r) => setWatch(r.data));
-  useEffect(() => { load(); loadWatch(); }, []);
+  useEffect(() => { load(true); loadWatch(); }, []);
 
   const exportCsv = async () => {
     const token = localStorage.getItem("mg_token");
@@ -41,10 +47,10 @@ export default function Anpr() {
 
   const addWatch = async () => {
     if (!wlForm.plate) return toast.error("Plaque requise");
-    try { await api.post("/watchlist", wlForm); toast.success("Ajouté à la liste"); setWlOpen(false); setWlForm({ plate: "", list_type: "black", reason: "" }); loadWatch(); load(); }
+    try { await api.post("/watchlist", wlForm); toast.success("Ajouté à la liste"); setWlOpen(false); setWlForm({ plate: "", list_type: "black", reason: "" }); loadWatch(); load(true); }
     catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
-  const delWatch = async (id) => { await api.delete(`/watchlist/${id}`); loadWatch(); load(); };
+  const delWatch = async (id) => { await api.delete(`/watchlist/${id}`); loadWatch(); load(true); };
 
   const analyze = async () => {
     if (!file) return toast.error("Sélectionnez une image");
@@ -52,7 +58,7 @@ export default function Anpr() {
     try {
       const fd = new FormData(); fd.append("file", file);
       const { data } = await api.post("/ai/analyze-plate", fd, { headers: { "Content-Type": "multipart/form-data" } });
-      setAiResult(data); toast.success("Analyse IA terminée"); load();
+      setAiResult(data); toast.success("Analyse IA terminée"); load(true);
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); } finally { setAiLoading(false); }
   };
 
@@ -73,10 +79,10 @@ export default function Anpr() {
           <div className="flex gap-2 mb-3">
             <div className="flex-1 relative">
               <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} data-testid="plate-search-input"
+              <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load(true)} data-testid="plate-search-input"
                 placeholder={`${t("common.search")} ${t("anpr.plate").toLowerCase()}...`} className="w-full pl-9 pr-3 py-2 bg-card border border-input outline-none text-sm focus:border-[#0044FF] mono uppercase" />
             </div>
-            <button onClick={load} data-testid="plate-search-btn" className="px-4 py-2 bg-[#0044FF] text-white text-sm">{t("common.search")}</button>
+            <button onClick={() => load(true)} data-testid="plate-search-btn" className="px-4 py-2 bg-[#0044FF] text-white text-sm">{t("common.search")}</button>
             <button onClick={exportCsv} data-testid="export-csv-btn" className="flex items-center gap-2 px-4 py-2 border border-border text-sm hover:bg-secondary"><Download size={15} /> {t("common.export")}</button>
           </div>
           <div className="border border-border bg-card overflow-x-auto">
@@ -99,6 +105,12 @@ export default function Anpr() {
                 ))}
               </tbody>
             </table>
+          </div>
+          <div className="flex items-center justify-between mt-2">
+            <span className="text-xs text-muted-foreground mono" data-testid="plates-count">{plates.length} / {total}</span>
+            {plates.length < total && (
+              <button onClick={() => load(false)} data-testid="load-more-plates" className="px-4 py-2 border border-border text-sm hover:bg-secondary">{t("common.load_more")}</button>
+            )}
           </div>
         </TabsContent>
 

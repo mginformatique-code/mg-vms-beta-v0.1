@@ -11,7 +11,7 @@ const SEV = {
 };
 
 export default function Alerts() {
-  const { t, can } = useApp();
+  const { t, can, alertPing } = useApp();
   const [alerts, setAlerts] = useState([]);
   const [filter, setFilter] = useState("all");
 
@@ -20,6 +20,7 @@ export default function Alerts() {
     api.get(`/alerts${q}`).then((r) => setAlerts(r.data));
   };
   useEffect(load, [filter]);
+  useEffect(() => { if (alertPing) load(); }, [alertPing]);
 
   const ack = async (id) => { try { await api.post(`/alerts/${id}/ack`); toast.success(t("alerts.acked")); load(); } catch (e) { toast.error("Erreur"); } };
   const trigger = async () => {

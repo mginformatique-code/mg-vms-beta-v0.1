@@ -5,6 +5,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 import os
+import asyncio
 import logging
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
@@ -13,6 +14,7 @@ from database import create_indexes
 from auth import auth_router
 from routers import api_router
 from notifications import notif_router
+from realtime import realtime_router, metrics_broadcaster
 from security import SecurityMiddleware
 from seed import seed
 
@@ -24,6 +26,7 @@ app = FastAPI(title="MG-VMS API", version="1.0.0", description="MG-VMS - Platefo
 app.include_router(auth_router)
 app.include_router(api_router)
 app.include_router(notif_router)
+app.include_router(realtime_router)
 
 app.add_middleware(SecurityMiddleware)
 
@@ -33,6 +36,7 @@ app.add_middleware(
     allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Total-Count"],
 )
 
 
@@ -40,7 +44,8 @@ app.add_middleware(
 async def on_startup():
     await create_indexes()
     await seed()
-    logger.info("MG-VMS API démarré - données initialisées")
+    asyncio.create_task(metrics_broadcaster())
+    logger.info("MG-VMS API démarré - données initialisées + broadcaster temps réel actif")
 
 
 @app.get("/api/")

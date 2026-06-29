@@ -43,22 +43,26 @@ function MiniBar({ label, value, icon: Icon }) {
 }
 
 export default function Layout({ children }) {
-  const { t, user, logout, theme, toggleTheme, lang, toggleLang, can } = useApp();
+  const { t, user, logout, theme, toggleTheme, lang, toggleLang, can, liveMetrics, alertPing } = useApp();
   const navigate = useNavigate();
   const [sys, setSys] = useState({ cpu: 0, ram: 0, storage: 0 });
   const [alertCount, setAlertCount] = useState(0);
 
+  const loadStats = () => {
+    api.get("/dashboard/stats").then((r) => {
+      setSys(r.data.system);
+      setAlertCount(r.data.alerts_active);
+    }).catch(() => {});
+  };
   useEffect(() => {
-    const load = () => {
-      api.get("/dashboard/stats").then((r) => {
-        setSys(r.data.system);
-        setAlertCount(r.data.alerts_active);
-      }).catch(() => {});
-    };
-    load();
-    const i = setInterval(load, 15000);
+    loadStats();
+    const i = setInterval(loadStats, 30000);
     return () => clearInterval(i);
   }, []);
+
+  // Mise à jour live via WebSocket
+  useEffect(() => { if (liveMetrics) setSys(liveMetrics); }, [liveMetrics]);
+  useEffect(() => { if (alertPing) setAlertCount((c) => c + 1); }, [alertPing]);
 
   return (
     <div className="h-screen flex overflow-hidden bg-background text-foreground">
@@ -113,6 +117,11 @@ export default function Layout({ children }) {
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-14 shrink-0 border-b border-border bg-card flex items-center justify-between px-4 gap-4">
           <div className="flex items-center gap-5">
+            {liveMetrics && (
+              <span data-testid="live-indicator" className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider mg-online">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#00E676] rec-dot" /> LIVE
+              </span>
+            )}
             <MiniBar label="CPU" value={sys.cpu} icon={Cpu} />
             <MiniBar label="RAM" value={sys.ram} icon={MemoryStick} />
             <MiniBar label="STO" value={sys.storage} icon={HardDrive} />

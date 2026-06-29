@@ -36,16 +36,25 @@ function Health({ icon: Icon, label, value, unit, max = 100 }) {
 }
 
 export default function Dashboard() {
-  const { t, theme } = useApp();
+  const { t, theme, liveMetrics, alertPing } = useApp();
   const [stats, setStats] = useState(null);
   const [ts, setTs] = useState({ hourly: [], breakdown: [] });
   const [alerts, setAlerts] = useState([]);
 
-  useEffect(() => {
+  const loadAll = () => {
     api.get("/dashboard/stats").then((r) => setStats(r.data)).catch(() => {});
-    api.get("/dashboard/timeseries").then((r) => setTs(r.data)).catch(() => {});
     api.get("/alerts?limit=6").then((r) => setAlerts(r.data)).catch(() => {});
+  };
+  useEffect(() => {
+    loadAll();
+    api.get("/dashboard/timeseries").then((r) => setTs(r.data)).catch(() => {});
   }, []);
+
+  // Temps réel : métriques live + rechargement sur nouvelle alerte
+  useEffect(() => {
+    if (liveMetrics) setStats((s) => (s ? { ...s, system: liveMetrics } : s));
+  }, [liveMetrics]);
+  useEffect(() => { if (alertPing) loadAll(); }, [alertPing]);
 
   const grid = theme === "dark" ? "#1a1a1a" : "#e4e4e7";
   const sev = { critical: "#FF3333", warning: "#FFB800", info: "#0044FF" };

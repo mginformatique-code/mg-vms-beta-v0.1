@@ -8,7 +8,14 @@ const ACTION_COLOR = (a) => a.includes("delete") || a.includes("failed") ? "#FF3
 export default function Audit() {
   const { t } = useApp();
   const [logs, setLogs] = useState([]);
-  useEffect(() => { api.get("/audit").then((r) => setLogs(r.data)).catch(() => {}); }, []);
+  const [total, setTotal] = useState(0);
+  const load = async (reset = true) => {
+    const offset = reset ? 0 : logs.length;
+    const r = await api.get(`/audit?limit=50&offset=${offset}`);
+    setTotal(parseInt(r.headers["x-total-count"] || "0", 10));
+    setLogs((prev) => (reset ? r.data : [...prev, ...r.data]));
+  };
+  useEffect(() => { load(true).catch(() => {}); }, []);
 
   return (
     <div className="p-4">
@@ -30,6 +37,12 @@ export default function Audit() {
             ))}
           </tbody>
         </table>
+      </div>
+      <div className="flex items-center justify-between mt-2">
+        <span className="text-xs text-muted-foreground mono" data-testid="audit-count">{logs.length} / {total}</span>
+        {logs.length < total && (
+          <button onClick={() => load(false)} data-testid="load-more-audit" className="px-4 py-2 border border-border text-sm hover:bg-secondary">{t("common.load_more")}</button>
+        )}
       </div>
     </div>
   );
