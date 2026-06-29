@@ -2,6 +2,15 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [2.0.0] — 2026-06 — Permissions granulaires par utilisateur (gérées par admin)
+### Ajouté
+- **Permissions granulaires** par utilisateur (en plus des rôles), **gérées uniquement par l'admin** : `view_live`, `view_recordings`, `read_plates`, `stream_hd`, `ptz_control`, `export_files`. Admin = bypass (toutes accordées). Défauts par rôle + overrides par utilisateur (`effective_permissions`).
+- Backend : `require_permission(perm)` (auth.py) appliqué sur snapshot/stream (view_live), qualité **HD/SD** (`GET /api/cameras/{id}/stream`, stream_hd), recordings timeline+playback (view_recordings), `/plates`+`/anpr/detect` (read_plates), PTZ (ptz_control), recordings/plates export (export_files). `permissions` exposé dans `/auth/me` et `/users`.
+- Gestion utilisateur réservée admin (déjà le cas) : création/édition incluent un éditeur de **permissions** (UserCreate/UserUpdate + `_clean_permissions`).
+- Frontend : `hasPerm()` (AppContext), **dialog de permissions** par utilisateur dans `/users` (6 bascules), masquage de la navigation (Enregistrements/ANPR/Véhicules) selon les permissions.
+### Tests
+- Backend 22/22 (test_permissions.py), frontend 100% (gating nav, éditeur de perms, persistance, bypass admin). Itération 11.
+
 ## [1.9.1] — 2026-06 — Déploiement Docker testable (app réelle) + compose prod cohérent
 ### Ajouté — `deploy-app/` (test Docker fonctionnel)
 - `docker-compose.yml` : MongoDB + **backend FastAPI** (`backend/Dockerfile`, python:3.11-slim, extra-index pour emergentintegrations) + **frontend React/Nginx** (`frontend/Dockerfile` multi-stage node:20 → nginx, `nginx.conf` SPA) → `docker compose up -d --build` lance MG-VMS complet (http://localhost:3000, API :8001).
