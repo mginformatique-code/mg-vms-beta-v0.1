@@ -15,6 +15,7 @@ from database import db
 from auth import get_current_user, require_role, public_user, log_audit, hash_password, ROLES, site_scope, allowed_sites
 from notifications import send_notification
 from realtime import metrics_snapshot, broadcast_alert, broadcast_camera_status
+from plugins import is_enabled
 
 api_router = APIRouter(prefix="/api", tags=["core"])
 
@@ -309,6 +310,56 @@ class WatchInput(BaseModel):
     reason: str = ""
 
 
+async def maybe_blacklist_alert(plate_doc: dict, background: BackgroundTasks):
+    """Crée une alerte critique + diffuse + notifie si la plaque est en liste noire."""
+    if plate_doc.get("list_status") != "black":
+        return None
+    alert = {
+        "id": str(uuid.uuid4()), "type": "anpr_blacklist", "severity": "critical",
+        "message": f"Plaque en liste noire détectée : {plate_doc['plate']}",
+        "camera_id": plate_doc.get("camera_id", ""), "camera_name": plate_doc.get("camera_name", "—"),
+        "site_id": plate_doc.get("site_id", ""), "site_name": plate_doc.get("site_name", "—"),
+        "acknowledged": False, "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.alerts.insert_one(dict(alert))
+    alert.pop("_id", None)
+    await broadcast_alert(alert)
+    body = (f"Plaque en liste noire détectée : {plate_doc['plate']}\n"
+            f"Caméra : {alert['camera_name']} · Site : {alert['site_name']}\n"
+            f"Horodatage : {alert['timestamp']}")
+    background.add_task(send_notification, "PLAQUE LISTE NOIRE", body)
+    return alert
+
+
+class AnprDetect(BaseModel):
+    plate: str
+    camera_id: str = ""
+
+
+@api_router.post("/anpr/detect")
+async def anpr_detect(data: AnprDetect, background: BackgroundTasks, user: dict = Depends(require_role("client"))):
+    if not await is_enabled("anpr"):
+        raise HTTPException(400, "Module ANPR désactivé")
+    plate = data.plate.upper().strip()
+    cam = await db.cameras.find_one({"id": data.camera_id}, {"_id": 0}) if data.camera_id else await db.cameras.find_one({}, {"_id": 0})
+    wl = await db.watchlist.find_one({"plate": plate}, {"_id": 0})
+    rec = {
+        "id": str(uuid.uuid4()), "plate": plate,
+        "camera_id": cam["id"] if cam else "", "camera_name": cam["name"] if cam else "—",
+        "site_id": cam["site_id"] if cam else "", "site_name": cam["site_name"] if cam else "—",
+        "confidence": 0.95, "vehicle_color": "", "vehicle_make": "", "vehicle_model": "",
+        "vehicle_type": "Inconnu", "country": "France", "direction": "Entrée",
+        "lat": cam["lat"] if cam else 0, "lng": cam["lng"] if cam else 0,
+        "list_status": wl["list_type"] if wl else "none",
+        "vehicle_crop": "", "plate_crop": "", "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.plates.insert_one(dict(rec))
+    rec.pop("_id", None)
+    await log_audit(user, "anpr_detection", plate, rec["list_status"])
+    alert = await maybe_blacklist_alert(rec, background)
+    return {"detection": rec, "blacklist_alert": bool(alert), "list_status": rec["list_status"]}
+
+
 @api_router.get("/watchlist")
 async def list_watchlist(user: dict = Depends(get_current_user)):
     return await db.watchlist.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
@@ -462,7 +513,7 @@ async def delete_user(user_id: str, user: dict = Depends(require_role("admin")))
 
 # ============ AI IMAGE ANALYSIS (ANPR) ============
 @api_router.post("/ai/analyze-plate")
-async def analyze_plate(file: UploadFile = File(...), user: dict = Depends(require_role("client"))):
+async def analyze_plate(background: BackgroundTasks, file: UploadFile = File(...), user: dict = Depends(require_role("client"))):
     content = await file.read()
     if len(content) > 8 * 1024 * 1024:
         raise HTTPException(400, "Image trop volumineuse (max 8MB)")
@@ -510,4 +561,6 @@ async def analyze_plate(file: UploadFile = File(...), user: dict = Depends(requi
             "plate_crop": "", "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         await db.plates.insert_one(dict(rec))
+        rec.pop("_id", None)
+        await maybe_blacklist_alert(rec, background)
     return data
