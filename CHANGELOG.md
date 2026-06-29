@@ -2,6 +2,16 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [1.3.0] — 2026-06 — Sprint 2 : Temps réel (P1)
+### Ajouté
+- **WebSocket** `/api/ws` (authentifié par token, cloisonné par site) : push live des **métriques système** (toutes les 5s) et des **alertes** (à la création). Reconnexion auto côté front.
+- **Métriques système réelles** via **psutil** dans `/api/dashboard/stats` (CPU/RAM/stockage/température/bande passante/uptime) — remplacent les valeurs aléatoires.
+- **Pagination serveur** non-cassante sur `/plates`, `/events`, `/alerts`, `/audit` : params `limit`/`offset` + header `X-Total-Count` (le corps reste un tableau JSON). UI « Charger plus » sur ANPR et Audit.
+- **Front** : indicateur « LIVE » (topbar), toasts d'alerte temps réel, badge d'alertes live, rechargement auto du dashboard/alertes sur nouvelle alerte.
+- `POST /api/alerts` : `broadcast_alert` ; `site_id` désormais honoré (alerte rattachable à un site sans caméra) ; `test_camera` diffuse le changement de statut.
+### Tests
+- 12/12 Sprint 2 + 30/30 régression = **42/42 backend**, frontend 100% (itération 6).
+
 ## [1.2.0] — 2026-06 — Sprint 1 : Sécurité (P1)
 ### Ajouté
 - **Anti brute-force** : verrouillage du compte 15 min après 5 échecs (clé IP:email, collection `login_attempts`), HTTP 423.

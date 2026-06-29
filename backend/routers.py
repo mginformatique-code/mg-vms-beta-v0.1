@@ -365,11 +365,22 @@ class AlertCreate(BaseModel):
 
 @api_router.post("/alerts")
 async def create_alert(data: AlertCreate, background: BackgroundTasks, user: dict = Depends(require_role("technician"))):
-    cam = await db.cameras.find_one({"id": data.camera_id}, {"_id": 0}) if data.camera_id else await db.cameras.find_one({}, {"_id": 0})
+    cam = None
+    if data.camera_id:
+        cam = await db.cameras.find_one({"id": data.camera_id}, {"_id": 0})
+    elif data.site_id:
+        cam = await db.cameras.find_one({"site_id": data.site_id}, {"_id": 0})
+    if cam is None and not data.site_id:
+        cam = await db.cameras.find_one({}, {"_id": 0})
+    site = None
+    if data.site_id:
+        site = await db.sites.find_one({"id": data.site_id}, {"_id": 0})
+    site_id = (cam["site_id"] if cam else "") or data.site_id
+    site_name = (cam["site_name"] if cam else "") or (site["name"] if site else "—")
     doc = {
         "id": str(uuid.uuid4()), "type": "manual", "severity": data.severity, "message": data.message,
         "camera_id": cam["id"] if cam else "", "camera_name": cam["name"] if cam else "—",
-        "site_id": cam["site_id"] if cam else "", "site_name": cam["site_name"] if cam else "—",
+        "site_id": site_id, "site_name": site_name,
         "acknowledged": False, "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     await db.alerts.insert_one(dict(doc))
