@@ -141,3 +141,46 @@ def playback_url(recording_id: str):
     url = s3.generate_presigned_url("get_object",
                                     Params={"Bucket": S3_BUCKET, "Key": row[0]}, ExpiresIn=3600)
     return {"url": url}
+
+
+@app.post("/export")
+def export_clip(camera_id: str, frm: str, to: str, fmt: str = "mp4"):
+    """Assemble les segments d'une plage en un clip MP4 (concat FFmpeg) -> MinIO + URL présignée.
+    PRODUCTION uniquement (FFmpeg requis). `fmt` : mp4 | zip."""
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT id::text, storage_key, start_ts FROM recordings "
+            "WHERE camera_id=:cam AND start_ts >= :frm AND start_ts <= :to ORDER BY start_ts"
+        ), {"cam": camera_id, "frm": frm, "to": to}).mappings().all()
+    if not rows:
+        raise HTTPException(404, "aucun segment dans la plage")
+
+    work = REC_ROOT / "exports"
+    work.mkdir(parents=True, exist_ok=True)
+    out_key = f"exports/{camera_id}/{frm}_{to}.{fmt}".replace(":", "-")
+
+    # Télécharge les segments depuis MinIO et construit la liste de concaténation FFmpeg
+    local = []
+    for r in rows:
+        p = work / Path(r["storage_key"]).name
+        s3.download_file(S3_BUCKET, r["storage_key"], str(p))
+        local.append(p)
+
+    if fmt == "mp4":
+        listfile = work / f"{camera_id}.txt"
+        listfile.write_text("".join(f"file '{p}'\n" for p in local))
+        out_local = work / Path(out_key).name
+        subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(listfile),
+                        "-c", "copy", str(out_local)], check=True, timeout=600)
+        s3.upload_file(str(out_local), S3_BUCKET, out_key)
+    else:  # zip des segments bruts
+        import zipfile
+        out_local = work / Path(out_key).name
+        with zipfile.ZipFile(out_local, "w", zipfile.ZIP_STORED) as zf:
+            for p in local:
+                zf.write(p, p.name)
+        s3.upload_file(str(out_local), S3_BUCKET, out_key)
+
+    url = s3.generate_presigned_url("get_object",
+                                    Params={"Bucket": S3_BUCKET, "Key": out_key}, ExpiresIn=3600)
+    return {"url": url, "segments": len(rows), "format": fmt}

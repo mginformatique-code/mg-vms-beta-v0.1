@@ -497,6 +497,107 @@ async def recordings_playback(recording_id: str, user: dict = Depends(get_curren
     }
 
 
+# ============ EXPORT DE SÉQUENCE ============
+class ExportRequest(BaseModel):
+    camera_id: str
+    start: str   # ISO datetime
+    end: str     # ISO datetime
+    format: str = "zip"   # zip | mp4
+
+
+@api_router.post("/recordings/export")
+async def create_export(data: ExportRequest, user: dict = Depends(get_current_user)):
+    cam = await db.cameras.find_one({"id": data.camera_id}, {"_id": 0, "password": 0})
+    if not cam:
+        raise HTTPException(404, "Caméra introuvable")
+    allowed = allowed_sites(user)
+    if allowed is not None and cam.get("site_id") not in allowed:
+        raise HTTPException(403, "Accès refusé à cette caméra")
+    try:
+        start_dt = datetime.fromisoformat(data.start)
+        end_dt = datetime.fromisoformat(data.end)
+    except ValueError:
+        raise HTTPException(400, "Plage horaire invalide")
+    if end_dt <= start_dt:
+        raise HTTPException(400, "La fin doit être après le début")
+    fmt = data.format if data.format in ("zip", "mp4") else "zip"
+    # Segments chevauchant la plage
+    segs = await db.recordings.find(
+        {"camera_id": data.camera_id, "start": {"$lt": data.end}, "end": {"$gt": data.start}},
+        {"_id": 0}
+    ).sort("start", 1).to_list(500)
+    duration_sec = int((end_dt - start_dt).total_seconds())
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": str(uuid.uuid4()), "user_id": user["id"],
+        "camera_id": cam["id"], "camera_name": cam["name"], "site_name": cam.get("site_name", ""),
+        "start": data.start, "end": data.end, "format": fmt,
+        "segment_count": len(segs), "duration_sec": duration_sec,
+        "segment_ids": [s["id"] for s in segs],
+        "created_at": now,
+    }
+    if fmt == "zip":
+        doc["status"] = "ready"
+        doc["simulated"] = False
+        doc["message"] = "Archive ZIP prête (manifeste + vignettes des segments)."
+    else:  # mp4
+        doc["status"] = "queued"
+        doc["simulated"] = True
+        doc["message"] = "Job MP4 mis en file — assemblé en production via FFmpeg (recording-service / MinIO)."
+    await db.exports.insert_one(dict(doc))
+    doc.pop("_id", None)
+    await log_audit(user, "recording_export", cam["name"], f"{fmt} · {len(segs)} segments")
+    return doc
+
+
+@api_router.get("/recordings/exports")
+async def list_exports(user: dict = Depends(get_current_user)):
+    return await db.exports.find({"user_id": user["id"]}, {"_id": 0, "segment_ids": 0}).sort("created_at", -1).to_list(50)
+
+
+@api_router.get("/recordings/exports/{export_id}/download")
+async def download_export(export_id: str, user: dict = Depends(get_current_user)):
+    exp = await db.exports.find_one({"id": export_id, "user_id": user["id"]}, {"_id": 0})
+    if not exp:
+        raise HTTPException(404, "Export introuvable")
+    if exp["format"] != "zip" or exp["status"] != "ready":
+        raise HTTPException(400, "Export non téléchargeable dans le sandbox (MP4 généré en production)")
+    import zipfile
+    import urllib.request
+    segs = await db.recordings.find({"id": {"$in": exp.get("segment_ids", [])}}, {"_id": 0}).sort("start", 1).to_list(500)
+    manifest = {
+        "camera": exp["camera_name"], "site": exp["site_name"],
+        "range": {"start": exp["start"], "end": exp["end"]},
+        "duration_sec": exp["duration_sec"], "segment_count": len(segs),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "note": "Export sandbox : manifeste + vignettes. En production, ce ZIP contient les clips MP4 concaténés (FFmpeg).",
+        "segments": [{"start": s["start"], "end": s["end"], "mode": s["mode"],
+                      "size_mb": s["size_mb"], "has_event": s.get("has_event", False)} for s in segs],
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("manifest.json", __import__("json").dumps(manifest, ensure_ascii=False, indent=2))
+        readme = (f"MG-VMS — Export de séquence\nCaméra : {exp['camera_name']}\n"
+                  f"Plage : {exp['start']} -> {exp['end']}\nSegments : {len(segs)}\n\n"
+                  "Sandbox : vignettes incluses. En production, les clips MP4 sont assemblés "
+                  "par le recording-service (FFmpeg) puis stockés sur MinIO/S3.\n")
+        zf.writestr("README.txt", readme)
+        for i, s in enumerate(segs):
+            thumb = s.get("thumbnail")
+            if not thumb:
+                continue
+            try:
+                with urllib.request.urlopen(thumb, timeout=5) as r:
+                    zf.writestr(f"thumbnails/seg_{i+1:03d}.jpg", r.read())
+            except Exception:
+                continue
+    buf.seek(0)
+    fname = f"mgvms_export_{exp['camera_name']}_{exp['id'][:8]}.zip".replace(" ", "_")
+    await log_audit(user, "export_downloaded", exp["camera_name"], exp["id"])
+    return StreamingResponse(iter([buf.getvalue()]), media_type="application/zip",
+                             headers={"Content-Disposition": f"attachment; filename={fname}"})
+
+
 # ============ AUDIT ============
 @api_router.get("/audit")
 async def list_audit(response: Response, limit: int = 100, offset: int = 0, user: dict = Depends(require_role("technician"))):

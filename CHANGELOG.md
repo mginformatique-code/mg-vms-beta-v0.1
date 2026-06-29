@@ -2,6 +2,15 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [1.7.0] — 2026-06 — Export de séquence vidéo (timeline → ZIP/MP4)
+### Ajouté — Sandbox
+- **Export de séquence** depuis la timeline (`/recordings`) : sélection de plage par **glisser sur la timeline** (surbrillance) + champs début/fin + choix de format. **ZIP réel téléchargeable** (manifeste JSON + README + vignettes des segments de la plage). **MP4 mis en file**, marqué « généré en production (FFmpeg) ». Liste des **exports récents** avec statut (Prêt/En file) et téléchargement.
+- Endpoints : `POST /api/recordings/export`, `GET /api/recordings/exports`, `GET /api/recordings/exports/{id}/download` (ZIP streamé via zipfile, cloisonné par utilisateur/site).
+### Ajouté — Artefacts production `/deploy`
+- `recording/recorder.py` : endpoint `POST /export` (concat FFmpeg `-f concat -c copy` → MP4, ou ZIP des segments bruts) → upload MinIO/S3 + URL présignée.
+### Tests
+- Backend testé curl (ZIP 194Ko vérifié : manifest+thumbnails ; MP4 queued ; list), frontend vérifié (drag-select + export + exports récents).
+
 ## [1.6.0] — 2026-06 — Supervision réseau (SNMP/ICMP) + topologie
 ### Ajouté — Sandbox (MongoDB)
 - **Module Supervision réseau** (`/network`, visible dès le rôle client) : inventaire d'équipements (Switch/Routeur/NAS/UPS/Serveur/NVR/Caméra/Générique), **carte de topologie** hiérarchique (SVG, liens parent/enfant up/down colorés par statut), vue tableau, **fiche équipement** (statut, latence, uptime, fabricant, modèle, IP, site ; UPS : batterie/sur batterie/autonomie).

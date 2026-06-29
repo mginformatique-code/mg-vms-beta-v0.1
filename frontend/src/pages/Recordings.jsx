@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
-import { Film, Play, Calendar, Clock, HardDrive, Activity, Cctv, AlertTriangle, Circle } from "lucide-react";
+import { Film, Play, Calendar, Clock, HardDrive, Activity, Cctv, AlertTriangle, Circle, Scissors, Download, FileArchive, Loader2, X } from "lucide-react";
+import { toast } from "sonner";
 
 const MODE_COLORS = { continuous: "#0044FF", motion: "#FFB800", ai: "#00E676" };
 const HOURS = Array.from({ length: 25 });
@@ -13,6 +14,14 @@ function fmtDur(sec) {
 }
 function fmtTime(iso) {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+function secToHHMM(sec) {
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+}
+function hhmmToSec(v) {
+  const [h, m] = v.split(":").map(Number);
+  return (h || 0) * 3600 + (m || 0) * 60;
 }
 
 function Stat({ icon: Icon, label, value }) {
@@ -35,12 +44,24 @@ export default function Recordings() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null);
+  // export
+  const [selStart, setSelStart] = useState(8 * 3600);
+  const [selEnd, setSelEnd] = useState(10 * 3600);
+  const [hasSel, setHasSel] = useState(false);
+  const [format, setFormat] = useState("zip");
+  const [exporting, setExporting] = useState(false);
+  const [exports, setExports] = useState([]);
+  const timelineRef = useRef(null);
+  const dragRef = useRef(null);
 
   useEffect(() => {
     api.get("/cameras", { params: { status: "online" } })
       .then((r) => { setCams(r.data); if (r.data[0]) setCameraId(r.data[0].id); })
       .catch(() => {});
   }, []);
+
+  const loadExports = () => api.get("/recordings/exports").then((r) => setExports(r.data)).catch(() => {});
+  useEffect(() => { loadExports(); }, []);
 
   useEffect(() => {
     if (!cameraId) return;
@@ -66,6 +87,60 @@ export default function Recordings() {
     setSelected(seg);
     api.get(`/recordings/${seg.id}/playback`).catch(() => {});
   };
+
+  const xToSec = (clientX) => {
+    const el = timelineRef.current;
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    return Math.round(ratio * 86400);
+  };
+  const onDown = (e) => { dragRef.current = { x: e.clientX, sec: xToSec(e.clientX), moved: false }; };
+  const onMove = (e) => {
+    if (!dragRef.current) return;
+    if (Math.abs(e.clientX - dragRef.current.x) < 4) return;
+    dragRef.current.moved = true;
+    const cur = xToSec(e.clientX);
+    const a = Math.min(dragRef.current.sec, cur), b = Math.max(dragRef.current.sec, cur);
+    setSelStart(a); setSelEnd(b); setHasSel(true);
+  };
+  const onUp = () => { dragRef.current = null; };
+
+  const isoFromSec = (sec) => {
+    const d = new Date(`${date}T00:00:00`);
+    d.setSeconds(sec);
+    return d.toISOString();
+  };
+
+  const doExport = async () => {
+    if (selEnd <= selStart) return toast.error("La fin doit être après le début");
+    setExporting(true);
+    try {
+      const { data: exp } = await api.post("/recordings/export", {
+        camera_id: cameraId, start: isoFromSec(selStart), end: isoFromSec(selEnd), format,
+      });
+      if (exp.format === "zip" && exp.status === "ready") {
+        toast.success(`Export ZIP prêt (${exp.segment_count} segments)`);
+        await downloadExport(exp.id);
+      } else {
+        toast.info(t("rec.mp4_production"));
+      }
+      loadExports();
+    } catch (e) { toast.error("Échec de l'export"); } finally { setExporting(false); }
+  };
+
+  const downloadExport = async (id) => {
+    try {
+      const r = await api.get(`/recordings/exports/${id}/download`, { responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([r.data]));
+      const a = document.createElement("a");
+      a.href = url; a.download = `mgvms_export_${id.slice(0, 8)}.zip`;
+      document.body.appendChild(a); a.click(); a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) { toast.error("Téléchargement indisponible (MP4 = production)"); }
+  };
+
+  const selPct = { left: `${(selStart / 86400) * 100}%`, width: `${((selEnd - selStart) / 86400) * 100}%` };
 
   return (
     <div className="p-4 md:p-6 space-y-5" data-testid="recordings-page">
@@ -138,12 +213,18 @@ export default function Recordings() {
 
               {/* Timeline 24h */}
               <div className="border border-border bg-card p-3" data-testid="rec-timeline">
-                <div className="relative h-10 bg-secondary/50 overflow-hidden">
+                <div ref={timelineRef} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
+                  className="relative h-10 bg-secondary/50 overflow-hidden cursor-crosshair select-none">
                   {/* hour grid */}
                   {HOURS.map((_, h) => (
                     <div key={h} className="absolute top-0 bottom-0 border-l border-border/40"
                       style={{ left: `${(h / 24) * 100}%` }} />
                   ))}
+                  {/* selection overlay */}
+                  {hasSel && (
+                    <div className="absolute top-0 bottom-0 bg-[#0044FF]/25 border-x-2 border-[#0044FF] pointer-events-none z-20"
+                      style={selPct} data-testid="rec-selection" />
+                  )}
                   {/* segments */}
                   {segments.map((seg) => (
                     <button key={seg.id} data-testid={`rec-segment-${seg.id}`} title={`${fmtTime(seg.start)} · ${t(`rec.mode.${seg.mode}`)}`}
@@ -171,6 +252,75 @@ export default function Recordings() {
                     <span className="w-1.5 h-1.5 rounded-full bg-[#FF3333]" /> {t("rec.event_marker")}
                   </span>
                 </div>
+
+                {/* Export controls */}
+                <div className="mt-4 pt-3 border-t border-border" data-testid="rec-export-panel">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Scissors size={14} className="text-[#0044FF]" />
+                    <span className="text-xs uppercase tracking-wider font-medium">{t("rec.export")}</span>
+                    <span className="text-[10px] text-muted-foreground">— {t("rec.drag_hint")}</span>
+                  </div>
+                  <div className="flex items-end gap-2 flex-wrap">
+                    <div>
+                      <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("rec.from")}</label>
+                      <input type="time" data-testid="rec-export-from" value={secToHHMM(selStart)}
+                        onChange={(e) => { setSelStart(hhmmToSec(e.target.value)); setHasSel(true); }}
+                        className="bg-card border border-input text-sm px-2 py-1.5 outline-none mono" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("rec.to")}</label>
+                      <input type="time" data-testid="rec-export-to" value={secToHHMM(selEnd)}
+                        onChange={(e) => { setSelEnd(hhmmToSec(e.target.value)); setHasSel(true); }}
+                        className="bg-card border border-input text-sm px-2 py-1.5 outline-none mono" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("rec.format")}</label>
+                      <select data-testid="rec-export-format" value={format} onChange={(e) => setFormat(e.target.value)}
+                        className="bg-card border border-input text-sm px-2 py-1.5 outline-none">
+                        <option value="zip">ZIP</option>
+                        <option value="mp4">MP4</option>
+                      </select>
+                    </div>
+                    <button onClick={doExport} disabled={exporting} data-testid="rec-export-btn"
+                      className="flex items-center gap-2 px-3 py-2 bg-[#0044FF] text-white text-sm hover:bg-[#0033cc] disabled:opacity-60">
+                      {exporting ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} {t(exporting ? "rec.exporting" : "rec.export_btn")}
+                    </button>
+                    {hasSel && (
+                      <button onClick={() => setHasSel(false)} data-testid="rec-clear-sel"
+                        className="flex items-center gap-1 px-2 py-2 border border-border text-xs hover:bg-secondary">
+                        <X size={13} /> {t("rec.clear_sel")}
+                      </button>
+                    )}
+                    <span className="text-[11px] text-muted-foreground mono ml-auto">{secToHHMM(selStart)} → {secToHHMM(selEnd)} · {fmtDur(selEnd - selStart)}</span>
+                  </div>
+                </div>
+
+                {/* Recent exports */}
+                {exports.length > 0 && (
+                  <div className="mt-3 space-y-1" data-testid="rec-exports-list">
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("rec.recent_exports")}</div>
+                    {exports.slice(0, 4).map((ex) => (
+                      <div key={ex.id} className="flex items-center gap-2 text-xs border border-border px-2 py-1.5" data-testid={`rec-export-${ex.id}`}>
+                        <FileArchive size={13} className="text-muted-foreground shrink-0" />
+                        <span className="mono truncate">{ex.camera_name}</span>
+                        <span className="text-muted-foreground">{fmtTime(ex.start)}–{fmtTime(ex.end)}</span>
+                        <span className="text-[9px] uppercase px-1 py-0.5 border border-border">{ex.format}</span>
+                        <span className="text-[9px] uppercase" style={{ color: ex.status === "ready" ? "#00E676" : "#FFB800" }}>
+                          {t(ex.status === "ready" ? "rec.status.ready" : "rec.status.queued")}
+                        </span>
+                        <div className="ml-auto">
+                          {ex.format === "zip" && ex.status === "ready" ? (
+                            <button onClick={() => downloadExport(ex.id)} data-testid={`rec-dl-${ex.id}`} className="flex items-center gap-1 text-[#0044FF] hover:underline">
+                              <Download size={12} /> {t("rec.download")}
+                            </button>
+                          ) : (
+                            <span className="text-[9px] text-muted-foreground">{t("rec.mp4_production")}</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
