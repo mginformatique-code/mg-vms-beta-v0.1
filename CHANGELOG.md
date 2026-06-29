@@ -2,6 +2,16 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [1.4.0] — 2026-06 — Sprint 3 : Plugins + ANPR liste noire auto + Artefacts /deploy
+### Ajouté
+- **Socle d'architecture de plugins** : registre de 10 modules (ANPR cœur, IA YOLO, tracking, reconnaissance faciale, parking, thermique, radar, drone, MQTT, contrôle d'accès), activation/désactivation dynamique persistée (`GET/PUT /api/plugins`), page UI Plugins (admin), protection des plugins cœur.
+- **Alerte automatique « plaque liste noire »** : `POST /api/anpr/detect` + `analyze-plate` déclenchent une alerte critique + broadcast WebSocket + dispatch notifications quand la plaque est en liste noire. Simulateur de détection sur la page ANPR.
+- **Artefacts de production `/deploy`** (NON exécutables ici) : `docker-compose.yml` micro-services, `Dockerfile`s (api, frontend, ai-engine GPU, ffmpeg, recording, notification, backup), schéma **PostgreSQL** optimisé (index GIN trigram, partitions), **SQLAlchemy** + **Alembic**, configs **Prometheus/Grafana/Loki/Alertmanager**, manifests **Kubernetes** (Deployments, StatefulSet PG, Ingress WebSocket, HPA), README d'architecture.
+### Modifié
+- Rate-limit `/auth/login` assoupli (30/min) pour les IP partagées ; la protection anti brute-force reste le verrouillage après 5 échecs/compte.
+### Tests
+- 14/14 Sprint 3 backend + frontend 100% (itération 7).
+
 ## [1.3.0] — 2026-06 — Sprint 2 : Temps réel (P1)
 ### Ajouté
 - **WebSocket** `/api/ws` (authentifié par token, cloisonné par site) : push live des **métriques système** (toutes les 5s) et des **alertes** (à la création). Reconnexion auto côté front.

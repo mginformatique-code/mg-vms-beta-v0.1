@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse
 
 # Limites par IP : (max requêtes, fenêtre secondes) sur chemins sensibles
 SENSITIVE_LIMITS = {
-    "/api/auth/login": (10, 60),
+    "/api/auth/login": (30, 60),
     "/api/auth/forgot-password": (5, 300),
     "/api/auth/reset-password": (10, 300),
 }
