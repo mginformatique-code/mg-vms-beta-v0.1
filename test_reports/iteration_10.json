@@ -1,0 +1,38 @@
+{
+  "summary": "Itération 10 — Module 'Gestion intelligente des ressources matérielles (CPU/GPU)' Phase 1. Backend: nouvelle suite /app/backend/tests/test_hardware.py = 17/17 PASSED en ~3.75s. Couvre: GET /api/hardware/info (CPU cores/threads réels via psutil, RAM réelle, 4 GPU simulés [RTX 4070, RTX A2000, Intel UHD 770, Google Coral Edge TPU], accelerators agrégés [CUDA/NVENC/QuickSync/EdgeTPU/...], simulated_gpu=true), GET /api/hardware/config (10 fonctions, options/labels/priority_levels/priority_engines/profiles), POST /api/hardware/profile/performance (assignments.ai=gpu0, assignments.encode=nvenc, priorities.ai=realtime, persisté en DB), POST /api/hardware/profile/foobar -> 400, PUT /api/hardware/config (passage en profile='custom', valeurs invalides ignorées silencieusement), GET /api/hardware/monitor (cpu_pct/ram_pct/ai_load_pct/ffmpeg_load_pct/streams/fps/power_total_w/gpus[4] avec util_pct/vram/temp/power), RBAC: technician/viewer 403 sur PUT /config et POST /profile/{p}, unauth 401/403 sur /info, régression /api/reports/types et /api/network/stats OK. Profil 'balanced' restauré en fin de suite (teardown). Frontend Playwright (admin/tech/viewer): /hardware admin charge 4 onglets, onglet Matériel affiche 4 cartes GPU (hw-gpu-{gpu0,gpu1,igpu,coral}), CPU/RAM + chips accélérateurs ; Ressources affiche 10 lignes hw-assign-row-*, changer hw-assign-decode->nvdec puis hw-save-btn fait passer le profil à 'custom' (custom button surligné #0044FF) ; Profils: clic hw-profile-performance surligne le bouton perf, 16 selects priorities (8 engines × duplication aria), hw-auto-optimize présent, hw-save-profiles-btn visible admin ; Monitoring: 4 cartes hw-mon-gpu-*, refresh actif (poll 2s validé). Tech: nav-hardware visible, tous les selects hw-assign-* disabled, hw-save-btn et hw-save-profiles-btn ABSENTS (rendu conditionnel `can('admin')`), boutons profils disabled. Viewer: nav-hardware non présent dans la sidebar (rôle technician minimum dans Layout). Régression: /reports et /network chargent OK pour admin. Profil 'balanced' rétabli après tests UI.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Network.jsx ligne 174", "issues": ["Hydration warning React persistant: '<span> cannot be a child of <option>' (déjà signalé itération 9). Injection visual-editor x-* dans les options du select net-site-filter. Cosmétique, n'affecte pas /hardware."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_hardware.py",
+    "/app/test_reports/pytest/hardware_results.xml"
+  ],
+  "action_items": [
+    "(OPTIONNEL, cosmétique) Résoudre l'avertissement d'hydratation React Network.jsx L174 (option contenant un <span> dynamic du visual editor) — non bloquant.",
+    "(OBSERVATION) Le compteur du select 'priorities' est 16 au lieu de 8 attendu : le DOM contient deux ensembles de selects hw-prio-* (8 engines). Vérifier que ce n'est pas un doublon de rendu — probablement causé par le visual editor injectant des copies invisibles. À confirmer côté E1 si critique, sinon ignorer (testid présents et fonctionnels)."
+  ],
+  "critical_code_review_comments": [
+    "hardware.py _monitor_snapshot retourne des valeurs random.* à chaque appel — OK pour la démo, mais pour faire des graphes lissés dans l'UI il faudrait stocker un buffer (rolling window) en mémoire/Redis. Phase 2.",
+    "hardware.py: PUT /config valide les valeurs en silence (boucle `if k in FUNCTION_OPTIONS and v in FUNCTION_OPTIONS[k]`) — préférer renvoyer 400 sur valeur inconnue plutôt que d'ignorer. Sinon le frontend peut croire qu'une assignation a été persistée alors qu'elle ne l'est pas. Ajouter une réponse {accepted:[...], rejected:[...]}.",
+    "hardware.py: profil 'custom' n'a pas d'entrée dans PROFILE_ASSIGNMENTS/PROFILE_PRIORITIES — le code gère bien (`if profile != 'custom'`) mais le bouton hw-profile-custom dans l'UI ne fait que set profile=custom sans toucher aux assignments, ce qui est le comportement voulu. Documenter dans Hardware.jsx pour éviter une future régression.",
+    "hardware.py _detect_cpu/_detect_gpus s'exécutent au seed et sont mises en cache en DB ; OK, mais si l'hôte change (containers Kubernetes recyclés sur un autre nœud), l'info reste cachée. Ajouter une route POST /api/hardware/redetect (admin) pour forcer un refresh.",
+    "Hardware.jsx: le useEffect du monitoring ne nettoie pas l'intervalle si on change de tab rapidement (return clearInterval is OK), mais le tick() initial peut quand même se résoudre après démontage et appeler setMon — protéger avec un flag `cancelled` ou AbortController pour éviter le warning React 'Can't perform a state update on an unmounted component'.",
+    "Hardware.jsx: saveConfig() appelle loadCfg() après PUT mais la réponse de PUT est déjà le cfg mis à jour — utiliser directement `setCfg({...cfg, ...resp.data})` économise un round-trip.",
+    "hardware.py _monitor_snapshot dépend de `from realtime import metrics_snapshot` — import à l'intérieur de la fonction (lazy) : OK mais préférer en haut du module pour la lisibilité (sauf cycle import explicite)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_hardware.py (NEW — 17 tests)"
+  ],
+  "success_rate": {"backend": "100% (17/17)", "frontend": "100% (admin 4 onglets/GPU/profils/monitoring poll 2s, tech RBAC view-only, viewer nav masqué, régression /reports & /network)"},
+  "test_credentials": "admin@mg-vms.com/Admin@2026, tech@mg-vms.com/Tech@2026, viewer@mg-vms.com/Viewer@2026 — inchangés",
+  "seed_data_creation": "Aucune donnée seedée hors test. Le test_zz_restore_balanced rétablit le profil 'balanced' en fin de suite (idempotent).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Suite Hardware (Phase 1): /app/backend/tests/test_hardware.py — run avec `python -m pytest tests/test_hardware.py -o addopts='' -v` pour neutraliser le -n xdist du pytest.ini. 17 tests en ~3.75s. GPU et toutes métriques GPU sont SIMULÉS (4 GPU fixes: gpu0=RTX 4070, gpu1=RTX A2000, igpu=Intel UHD 770, coral=Google Coral). simulated_gpu=true est attendu en sandbox. CPU model peut être 'aarch64' (ARM) — acceptable. Endpoints: GET /api/hardware/info (any auth), GET /api/hardware/config (any auth), PUT /api/hardware/config (admin), POST /api/hardware/profile/{economy|balanced|performance|ultra|custom} (admin), GET /api/hardware/monitor (any auth). Toute modif via PUT /config bascule profile='custom'. Testids confirmés frontend: hardware-page, hw-tab-{hardware|resources|profiles|monitor}, hw-detection, hw-gpu-{gpu0|gpu1|igpu|coral}, hw-resources, hw-assign-row-<fn>, hw-assign-<fn> (10 fonctions: decode/encode/live/playback/ai/anpr/thumbnails/export/pdf/transcode), hw-save-btn, hw-profiles, hw-profile-{economy|balanced|performance|ultra|custom}, hw-prio-row-<eng>, hw-prio-<eng>, hw-auto-optimize, hw-save-profiles-btn, hw-monitor, hw-mon-gpu-<id>. Token localStorage = 'mg_token'. Nav: data-testid='nav-hardware' visible technician+. Bouton 'custom' est surligné après tout PUT /config car le backend fait cfg['profile']='custom'. Le profil actif a la classe Tailwind 'border-[#0044FF]'. Poll monitor: setInterval 2000ms démarré à l'entrée de l'onglet, nettoyé à la sortie.",
+  "rca of the issue": "Aucune RCA — toutes les fonctionnalités Phase 1 du module Hardware fonctionnent comme spécifié."
+}
