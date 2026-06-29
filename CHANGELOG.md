@@ -2,6 +2,20 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [1.9.0] — 2026-06 — Ressources matérielles CPU/GPU (Phase 1)
+### Ajouté
+- **Module Ressources matérielles** (`/hardware`, technician+ en lecture, admin en écriture) — 4 onglets :
+  - **Matériel** : détection réelle CPU (cœurs/threads, psutil) + RAM ; inventaire **GPU** (RTX 4070, RTX A2000, Intel UHD/QuickSync, Google Coral) **simulé** en sandbox (détection réelle nvidia-smi en prod) + matrice d'accélérations (CUDA/NVENC/NVDEC/TensorRT/QuickSync/OpenVINO/OpenCL/DirectML/Vulkan/EdgeTPU).
+  - **Ressources** : allocation du composant (CPU/GPU/NVDEC/NVENC/QuickSync/AMF/Auto/Coral…) pour 10 fonctions (décodage, encodage, Live, relecture, IA, ANPR, miniatures, export, PDF, reconversion).
+  - **Profils & priorités** : profils Économie/Équilibré/Performance/Ultra/Personnalisé (pré-configurent les allocations) + priorités par moteur (Temps réel/Normale/Basse) + bascule Optimisation automatique.
+  - **Monitoring** temps réel (poll 2s) : CPU/RAM/charge IA/FFmpeg, flux/FPS/consommation/températures, et par GPU util/VRAM/temp/conso/ventilateur (code couleur).
+- Endpoints : `GET /api/hardware/info|config|monitor`, `PUT /api/hardware/config` (admin), `POST /api/hardware/profile/{p}` (admin). Toute modif manuelle bascule en profil « custom ». Détection au démarrage (`seed_hardware`).
+### Tests
+- Backend 17/17 (test_hardware.py), frontend 100% (4 onglets, RBAC admin/tech/viewer, monitoring live). Itération 10.
+### À venir
+- Phase 2 : moteur d'auto-optimisation (règles de bascule GPU↔CPU), historique + graphiques + alertes (temp/VRAM/GPU indispo).
+- Phase 3 : Pools GPU (mode entreprise), GPU par caméra, benchmarks (décodage/encodage/IA/lecture/export), matrice de compatibilité étendue. Artefacts prod `/deploy` (pynvml/NVENC/OpenVINO/Coral).
+
 ## [1.8.0] — 2026-06 — Rapports + Alerte ANPR enrichie + Poll réseau périodique
 ### Ajouté
 - **Module Rapports** (`/reports`, role technician+) : génération CSV / Excel (openpyxl) / PDF (reportlab) pour 4 jeux — plaques ANPR, événements IA, alertes, équipements réseau. Filtres plage de dates + site (cloisonnés). Endpoints `GET /api/reports/types` et `GET /api/reports/{type}?format=&site_id=&date_from=&date_to=`.

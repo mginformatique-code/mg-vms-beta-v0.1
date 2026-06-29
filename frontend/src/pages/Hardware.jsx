@@ -49,10 +49,11 @@ export default function Hardware() {
   // monitoring temps réel (poll 2s quand l'onglet est actif)
   useEffect(() => {
     if (tab !== "monitor") { clearInterval(monRef.current); return; }
-    const tick = () => api.get("/hardware/monitor").then((r) => setMon(r.data)).catch(() => {});
+    let cancelled = false;
+    const tick = () => api.get("/hardware/monitor").then((r) => { if (!cancelled) setMon(r.data); }).catch(() => {});
     tick();
     monRef.current = setInterval(tick, 2000);
-    return () => clearInterval(monRef.current);
+    return () => { cancelled = true; clearInterval(monRef.current); };
   }, [tab]);
 
   const setAssign = (fn, val) => setCfg((c) => ({ ...c, assignments: { ...c.assignments, [fn]: val }, profile: "custom" }));
