@@ -1,0 +1,44 @@
+{
+  "summary": "Itération 9 — Rapports PDF/Excel/CSV + Alerte ANPR blacklist enrichie + Poll réseau périodique. Backend: nouveau suite /app/backend/tests/test_reports_sprint.py = 25/25 PASSED en ~8s. Couvre GET /api/reports/types (4 types: plates/events/alerts/equipment, equipment a date_filter=false), génération CSV/XLSX/PDF pour chaque type (content-type correct, fichier non vide, PDF démarre par %PDF, XLSX parsable par openpyxl), filtres date_from/date_to réduisent le jeu (1990 -> uniquement en-têtes), site_id réduit equipment, 404 sur type inconnu, 400 sur format invalide, viewer 403 sur les 4 types, sans auth 401, POST /api/anpr/detect ZZ-999-ZZ -> list_status=black + blacklist_alert=true + nouvelle alerte critique anpr_blacklist visible dans /api/alerts (aucune erreur 500 malgré l'envoi background enrichi vers Discord/Telegram qui retourne 4xx car creds factices), AA-111-AA -> blacklist_alert=false, /api/network/stats cohérent (total = online+offline+warning), /api/network/poll manuel OK, POST /api/recordings/export + download ZIP OK. Frontend Playwright (admin/tech/viewer): nav-reports visible pour tech, page /reports rend les 4 boutons rep-type-{plates,events,alerts,equipment}, téléchargement CSV (10558 bytes), XLSX et PDF OK depuis le bouton rep-generate-btn. Viewer: nav-reports masqué dans la sidebar (Layout.jsx filtre via can('technician')). Deep link /recordings?camera=<id> présélectionne bien la caméra dans le sélecteur (vérifié avec MAI-CAM-02). Page /network charge correctement.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/reports (gating route frontend)", "issue": "Le viewer voit la coquille de la page /reports en accès direct par URL (la route React n'est pas role-gated côté frontend); le backend protège correctement avec 403 sur GET /api/reports/types et /api/reports/{type}. Cosmétique: ajouter un Navigate->/ pour viewer dans App.js si requis. Aucun risque de fuite de données."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Network.jsx ligne 174", "issues": ["Hydration warning React: '<span> cannot be a child of <option>'. Provient sans doute d'un wrapper i18n/visual-editor injecté dans le texte de l'option du select net-site-filter. Cosmétique."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_reports_sprint.py",
+    "/app/test_reports/pytest/reports_sprint_results.xml"
+  ],
+  "action_items": [
+    "(OPTIONNEL, cosmétique) Ajouter un guard route côté frontend pour /reports (rediriger viewer vers /) — actuellement la page se charge mais les APIs renvoient 403.",
+    "(OPTIONNEL) Corriger l'avertissement d'hydratation React sur Network.jsx ligne 174 (option contenant un <span>).",
+    "(NON BLOQUANT) Le menu Rapports apparaît correctement pour tech/admin et est bien caché pour viewer (côté nav)."
+  ],
+  "critical_code_review_comments": [
+    "reports.py _fetch_rows fait .to_list(5000) sans pagination — OK pour un MVP mais pour de gros volumes prévoir limit/offset ou streaming row-by-row, surtout en CSV où on génère déjà en mémoire (io.StringIO).",
+    "reports.py date_from/date_to sont des strings ISO comparés tels quels en Mongo ($gte/$lte) : ça marche parce que les timestamps sont stockés en ISO. Si un jour les champs deviennent BSON Date, il faudra parser/convertir.",
+    "notifications.send_discord: l'embed met description=content[:2000] — le contenu de body inclut déjà la plage horaire + plaque + score, parfait. Vérifier que image_url accepte aussi les data: URIs (actuellement filtré par .startswith('http')) — si vehicle_crop est un data:image base64 (cas du POST /api/anpr/detect avec upload), il sera ignoré côté Discord. À documenter ou supporter via upload d'attachment.",
+    "notifications.send_telegram: si image_url est un data: URI il bascule sur sendMessage — correct, mais il manque le fallback de tester explicitement la longueur (Telegram caption limite 1024). Déjà tronqué à [:1024], OK.",
+    "routers.maybe_blacklist_alert construit link_url depuis CORS_ORIGINS.split(',')[0]. Si CORS_ORIGINS est vide ou commence par '*', link_url devient None — déjà géré (if frontend and cam_id). OK.",
+    "reports.py _cell: pour les valeurs flottantes (confidence, latency_ms), str() retourne 0.92 ou 0.9199999 — préférer arrondir à 2 décimales dans le rapport.",
+    "reports.py PDF: rows[:1500] tronque silencieusement — afficher 'Tronqué à 1500 lignes' en pied de page si len(rows)>1500."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_reports_sprint.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (25/25)", "frontend": "100% (tech/viewer nav, 4 type buttons, CSV/XLSX/PDF download, deep-link camera selection, /network loads)"},
+  "test_credentials": "admin@mg-vms.com/Admin@2026, tech@mg-vms.com/Tech@2026, viewer@mg-vms.com/Viewer@2026 — inchangés",
+  "seed_data_creation": "Le test TestBlacklistAlertEnriched ajoute 1 alerte critique anpr_blacklist (ZZ-999-ZZ) et 2 plates (ZZ-999-ZZ + AA-111-AA). Aucun rapport ou export persisté. Les downloads sont streamés, pas stockés.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Suite Sprint 9: /app/backend/tests/test_reports_sprint.py — run avec `python -m pytest tests/test_reports_sprint.py -o addopts='' -v` pour neutraliser le -n xdist du pytest.ini (xdist crée des conflits de fixtures module-scope avec les logins). 25 tests passent en ~8s. Le compte tech (require_role('technician')) suffit pour /api/reports/*. Endpoints rapports: GET /api/reports/types et GET /api/reports/{plates|events|alerts|equipment}?format={csv|xlsx|pdf}&site_id=&date_from=&date_to=. PDF démarre par %PDF, XLSX content-type spreadsheetml.sheet, CSV text/csv. La plaque blacklistée déclencheuse est 'ZZ-999-ZZ' (seeded uppercased dans db.watchlist). Le broadcaster network_poll_broadcaster tourne en background (NETWORK_POLL_INTERVAL=30s), pas besoin d'attendre 30s pour valider /api/network/stats — un POST /api/network/poll force un cycle. Discord/Telegram sont configurés avec creds factices (TEST_UI / 111111:TEST-UI-TOKEN) -> 400/401 dans les logs httpx mais l'API /api/anpr/detect retourne 200 car send_notification est en BackgroundTask. Frontend testids confirmés: nav-reports, reports-page, rep-type-{key}, rep-format-{csv|xlsx|pdf}, rep-site, rep-from, rep-to, rep-generate-btn. Token localStorage key = 'mg_token' (PAS 'mg_vms_token').",
+  "rca of the issue": "Aucune RCA — toutes les fonctionnalités demandées fonctionnent. Notes: (1) viewer accédant à /reports voit la page se charger mais sans données (toutes les APIs renvoient 403 via require_role('technician')). C'est un guard backend correct, mais le frontend pourrait rediriger pour une meilleure UX. (2) L'avertissement d'hydratation Network.jsx ligne 174 est un faux positif lié à l'éditeur visuel (les attributs x-* sont injectés dans les options du select), pas un bug fonctionnel."
+}

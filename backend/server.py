@@ -16,7 +16,8 @@ from routers import api_router
 from notifications import notif_router
 from realtime import realtime_router, metrics_broadcaster
 from plugins import plugins_router, seed_plugins
-from network import network_router, seed_equipment
+from network import network_router, seed_equipment, network_poll_broadcaster
+from reports import reports_router
 from security import SecurityMiddleware
 from seed import seed, seed_recordings
 
@@ -31,6 +32,7 @@ app.include_router(notif_router)
 app.include_router(realtime_router)
 app.include_router(plugins_router)
 app.include_router(network_router)
+app.include_router(reports_router)
 
 app.add_middleware(SecurityMiddleware)
 
@@ -52,6 +54,7 @@ async def on_startup():
     await seed_equipment()
     await seed_plugins()
     asyncio.create_task(metrics_broadcaster())
+    asyncio.create_task(network_poll_broadcaster())
     logger.info("MG-VMS API démarré - données initialisées + broadcaster temps réel actif")
 
 

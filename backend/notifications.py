@@ -85,18 +85,41 @@ async def send_smtp(cfg: dict, subject: str, body: str):
     )
 
 
-async def send_discord(cfg: dict, content: str):
+async def send_discord(cfg: dict, content: str, image_url: Optional[str] = None,
+                       link_url: Optional[str] = None, title: Optional[str] = None):
     async with httpx.AsyncClient(timeout=12) as http:
-        r = await http.post(cfg["webhook_url"], json={"content": content[:1900], "allowed_mentions": {"parse": []}})
+        if title or image_url or link_url:
+            embed = {"title": (title or "MG-VMS")[:256], "description": content[:2000], "color": 0xFF3333}
+            if image_url and image_url.startswith("http"):
+                embed["image"] = {"url": image_url}
+            if link_url:
+                embed["fields"] = [{"name": "Caméra", "value": f"[Ouvrir le flux]({link_url})"}]
+                embed["url"] = link_url
+            payload = {"embeds": [embed], "allowed_mentions": {"parse": []}}
+        else:
+            payload = {"content": content[:1900], "allowed_mentions": {"parse": []}}
+        r = await http.post(cfg["webhook_url"], json=payload)
         r.raise_for_status()
 
 
-async def send_telegram(cfg: dict, content: str):
+async def send_telegram(cfg: dict, content: str, image_url: Optional[str] = None,
+                        link_url: Optional[str] = None):
+    caption = content
+    if link_url:
+        caption = f'{content}\n<a href="{link_url}">Ouvrir la caméra</a>'
     async with httpx.AsyncClient(timeout=12) as http:
-        r = await http.post(
-            f"https://api.telegram.org/bot{cfg['bot_token']}/sendMessage",
-            json={"chat_id": cfg["chat_id"], "text": content, "disable_web_page_preview": True},
-        )
+        if image_url and image_url.startswith("http"):
+            r = await http.post(
+                f"https://api.telegram.org/bot{cfg['bot_token']}/sendPhoto",
+                json={"chat_id": cfg["chat_id"], "photo": image_url,
+                      "caption": caption[:1024], "parse_mode": "HTML"},
+            )
+        else:
+            r = await http.post(
+                f"https://api.telegram.org/bot{cfg['bot_token']}/sendMessage",
+                json={"chat_id": cfg["chat_id"], "text": caption, "parse_mode": "HTML",
+                      "disable_web_page_preview": False if link_url else True},
+            )
         r.raise_for_status()
         data = r.json()
         if not data.get("ok"):
@@ -118,26 +141,28 @@ async def _channel_cfg(doc: dict, channel: str) -> Optional[dict]:
     return c
 
 
-async def send_notification(subject: str, body: str) -> dict:
+async def send_notification(subject: str, body: str, image_url: Optional[str] = None,
+                            link_url: Optional[str] = None) -> dict:
     doc = await _load_raw()
     results = {}
     text = f"[MG-VMS] {subject}\n{body}"
     if doc.get("smtp", {}).get("enabled"):
         cfg = await _channel_cfg(doc, "smtp")
+        smtp_body = body + (f"\n\nCaméra : {link_url}" if link_url else "") + (f"\nPhoto : {image_url}" if image_url and image_url.startswith("http") else "")
         try:
-            await send_smtp(cfg, f"[MG-VMS] {subject}", body); results["smtp"] = "sent"
+            await send_smtp(cfg, f"[MG-VMS] {subject}", smtp_body); results["smtp"] = "sent"
         except Exception as e:
             results["smtp"] = f"error: {e}"
     if doc.get("discord", {}).get("enabled"):
         cfg = await _channel_cfg(doc, "discord")
         try:
-            await send_discord(cfg, f"**{subject}**\n{body}"); results["discord"] = "sent"
+            await send_discord(cfg, body, image_url=image_url, link_url=link_url, title=subject); results["discord"] = "sent"
         except Exception as e:
             results["discord"] = f"error: {e}"
     if doc.get("telegram", {}).get("enabled"):
         cfg = await _channel_cfg(doc, "telegram")
         try:
-            await send_telegram(cfg, text); results["telegram"] = "sent"
+            await send_telegram(cfg, text, image_url=image_url, link_url=link_url); results["telegram"] = "sent"
         except Exception as e:
             results["telegram"] = f"error: {e}"
     return results

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import { Film, Play, Calendar, Clock, HardDrive, Activity, Cctv, AlertTriangle, Circle, Scissors, Download, FileArchive, Loader2, X } from "lucide-react";
@@ -38,6 +39,7 @@ function Stat({ icon: Icon, label, value }) {
 
 export default function Recordings() {
   const { t } = useApp();
+  const [searchParams] = useSearchParams();
   const [cams, setCams] = useState([]);
   const [cameraId, setCameraId] = useState("");
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -56,7 +58,12 @@ export default function Recordings() {
 
   useEffect(() => {
     api.get("/cameras", { params: { status: "online" } })
-      .then((r) => { setCams(r.data); if (r.data[0]) setCameraId(r.data[0].id); })
+      .then((r) => {
+        setCams(r.data);
+        const q = searchParams.get("camera");
+        const pre = q && r.data.find((c) => c.id === q);
+        setCameraId(pre ? q : (r.data[0]?.id || ""));
+      })
       .catch(() => {});
   }, []);
 

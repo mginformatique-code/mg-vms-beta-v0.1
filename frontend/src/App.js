@@ -10,6 +10,7 @@ import Dashboard from "@/pages/Dashboard";
 import LiveView from "@/pages/LiveView";
 import Recordings from "@/pages/Recordings";
 import Network from "@/pages/Network";
+import Reports from "@/pages/Reports";
 import Cameras from "@/pages/Cameras";
 import Sites from "@/pages/Sites";
 import MapView from "@/pages/MapView";
@@ -38,6 +39,7 @@ function AppRoutes() {
       <Route path="/live" element={<Protected><LiveView /></Protected>} />
       <Route path="/recordings" element={<Protected><Recordings /></Protected>} />
       <Route path="/network" element={<Protected><Network /></Protected>} />
+      <Route path="/reports" element={<Protected><Reports /></Protected>} />
       <Route path="/cameras" element={<Protected><Cameras /></Protected>} />
       <Route path="/sites" element={<Protected><Sites /></Protected>} />
       <Route path="/map" element={<Protected><MapView /></Protected>} />

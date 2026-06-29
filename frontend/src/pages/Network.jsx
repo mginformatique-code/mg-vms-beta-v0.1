@@ -117,6 +117,10 @@ export default function Network() {
   };
   useEffect(() => { api.get("/sites").then((r) => setSites(r.data)).catch(() => {}); }, []);
   useEffect(load, [filterSite]);
+  useEffect(() => {
+    const i = setInterval(load, 30000);  // reflète le poll serveur périodique
+    return () => clearInterval(i);
+  }, [filterSite]);
 
   const poll = async () => {
     setPolling(true);

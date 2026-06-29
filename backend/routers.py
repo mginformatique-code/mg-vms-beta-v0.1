@@ -324,10 +324,14 @@ async def maybe_blacklist_alert(plate_doc: dict, background: BackgroundTasks):
     await db.alerts.insert_one(dict(alert))
     alert.pop("_id", None)
     await broadcast_alert(alert)
+    frontend = os.environ.get("CORS_ORIGINS", "").split(",")[0].strip().rstrip("/")
+    cam_id = plate_doc.get("camera_id", "")
+    link_url = f"{frontend}/recordings?camera={cam_id}" if frontend and cam_id else None
+    image_url = plate_doc.get("vehicle_crop") or plate_doc.get("plate_crop") or None
     body = (f"Plaque en liste noire détectée : {plate_doc['plate']}\n"
             f"Caméra : {alert['camera_name']} · Site : {alert['site_name']}\n"
             f"Horodatage : {alert['timestamp']}")
-    background.add_task(send_notification, "PLAQUE LISTE NOIRE", body)
+    background.add_task(send_notification, "PLAQUE LISTE NOIRE", body, image_url, link_url)
     return alert
 
 

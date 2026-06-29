@@ -6,7 +6,9 @@ Le poller de production réel se trouve dans /deploy/network-monitor/.
 Métriques : statut (online/offline/warning) + latence (ICMP). UPS : batterie.
 Alerte critique automatique sur passage hors-ligne ou UPS sur batterie.
 """
+import os
 import uuid
+import asyncio
 import random
 from datetime import datetime, timezone
 from typing import Optional
@@ -39,7 +41,7 @@ def _public(doc: dict) -> dict:
     return doc
 
 
-async def _raise_equipment_alert(eq: dict, reason: str, background: BackgroundTasks):
+async def _raise_equipment_alert(eq: dict, reason: str, background: Optional[BackgroundTasks] = None):
     """Alerte critique + diffusion + notification quand un équipement tombe / UPS sur batterie."""
     alert = {
         "id": str(uuid.uuid4()), "type": "network", "severity": "critical",
@@ -53,13 +55,16 @@ async def _raise_equipment_alert(eq: dict, reason: str, background: BackgroundTa
     await broadcast_alert(alert)
     body = (f"{reason}\nÉquipement : {eq['name']} ({eq['type']}) · IP {eq.get('ip', '—')}\n"
             f"Site : {alert['site_name']}\nHorodatage : {alert['timestamp']}")
-    background.add_task(send_notification, "ALERTE RÉSEAU", body)
+    if background is not None:
+        background.add_task(send_notification, "ALERTE RÉSEAU", body)
+    else:
+        await send_notification("ALERTE RÉSEAU", body)
     return alert
 
 
-def _simulate_ping(eq: dict) -> dict:
+def _simulate_ping(eq: dict, offline_prob: float = 0.12) -> dict:
     """Simule une réponse ICMP/SNMP et renvoie les champs mis à jour."""
-    up = random.random() > 0.12
+    up = random.random() > offline_prob
     update = {"last_seen": datetime.now(timezone.utc).isoformat()}
     if up:
         latency = round(random.uniform(0.4, 18.0), 1)
@@ -271,3 +276,29 @@ async def seed_equipment():
         docs.append(mk(f"SRV-{site['type'][:3].upper()}", "Serveur", site, sw1["id"], si + 30))
 
     await db.equipment.insert_many([dict(d) for d in docs])
+
+
+# ============ Poll périodique côté serveur ============
+async def _periodic_poll():
+    equipment = await db.equipment.find({}, {"_id": 0}).to_list(2000)
+    for eq in equipment:
+        prev_status = eq.get("status")
+        prev_battery = eq.get("on_battery", False)
+        update = _simulate_ping(eq, offline_prob=0.05)  # plus doux pour limiter le flapping
+        await db.equipment.update_one({"id": eq["id"]}, {"$set": update})
+        merged = {**eq, **update}
+        if prev_status != "offline" and update.get("status") == "offline":
+            await _raise_equipment_alert(merged, "Équipement hors-ligne")
+        if eq.get("type") == "UPS" and not prev_battery and update.get("on_battery"):
+            await _raise_equipment_alert(merged, "UPS bascule sur batterie")
+
+
+async def network_poll_broadcaster():
+    """Sonde l'inventaire réseau périodiquement (simulé) et lève les alertes de transition."""
+    interval = int(os.environ.get("NETWORK_POLL_INTERVAL", "30"))
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await _periodic_poll()
+        except Exception:
+            pass
