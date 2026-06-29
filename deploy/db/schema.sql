@@ -200,6 +200,30 @@ CREATE TABLE favorites (
     PRIMARY KEY (user_id, camera_id)
 );
 
+-- -------------------- Supervision réseau (équipements) --------------------
+CREATE TABLE equipment (
+    id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    site_id       UUID NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+    parent_id     UUID REFERENCES equipment(id) ON DELETE SET NULL,  -- topologie
+    name          VARCHAR(120) NOT NULL,
+    type          VARCHAR(20) NOT NULL,           -- Switch/Routeur/NAS/UPS/Serveur/NVR/Caméra/Générique
+    ip            INET,
+    vendor        VARCHAR(60),
+    model         VARCHAR(120),
+    snmp_enabled  BOOLEAN DEFAULT TRUE,
+    status        VARCHAR(12) DEFAULT 'offline',  -- online/warning/offline
+    latency_ms    REAL,
+    uptime_sec    BIGINT DEFAULT 0,
+    on_battery    BOOLEAN DEFAULT FALSE,          -- UPS
+    battery_pct   SMALLINT,                       -- UPS
+    autonomy_min  SMALLINT,                       -- UPS
+    last_seen     TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_equipment_site   ON equipment(site_id);
+CREATE INDEX idx_equipment_parent ON equipment(parent_id);
+CREATE INDEX idx_equipment_status ON equipment(status);
+
 -- Données de référence RBAC
 INSERT INTO roles (id, code, level) VALUES
  (4,'admin',4),(3,'technician',3),(2,'client',2),(1,'readonly',1),(0,'guest',0)

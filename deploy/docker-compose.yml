@@ -159,6 +159,16 @@ services:
     depends_on: [redis]
     networks: [mgvms]
 
+  # ---------------- Supervision réseau (ICMP/SNMP) ----------------
+  network-monitor:
+    build: { context: ./network-monitor }
+    <<: *restart
+    env_file: [.env]
+    depends_on: [postgres, redis]
+    # ICMP nécessite des capacités réseau étendues
+    cap_add: ["NET_RAW", "NET_ADMIN"]
+    networks: [mgvms]
+
   backup-service:
     build: { context: ./backup }
     <<: *restart

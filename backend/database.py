@@ -14,6 +14,8 @@ async def create_indexes():
     await db.events.create_index("timestamp")
     await db.recordings.create_index("camera_id")
     await db.recordings.create_index("start")
+    await db.equipment.create_index("site_id")
+    await db.equipment.create_index("parent_id")
     await db.audit_logs.create_index("timestamp")
     await db.login_attempts.create_index("identifier", unique=True)
     await db.password_reset_tokens.create_index("token", unique=True)

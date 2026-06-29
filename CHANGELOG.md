@@ -2,6 +2,16 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [1.6.0] — 2026-06 — Supervision réseau (SNMP/ICMP) + topologie
+### Ajouté — Sandbox (MongoDB)
+- **Module Supervision réseau** (`/network`, visible dès le rôle client) : inventaire d'équipements (Switch/Routeur/NAS/UPS/Serveur/NVR/Caméra/Générique), **carte de topologie** hiérarchique (SVG, liens parent/enfant up/down colorés par statut), vue tableau, **fiche équipement** (statut, latence, uptime, fabricant, modèle, IP, site ; UPS : batterie/sur batterie/autonomie).
+- **ICMP/SNMP simulé** : `POST /api/network/equipment/{id}/ping` et `POST /api/network/poll` (sweep) mettent à jour statut + latence ; **alerte critique automatique** sur passage hors-ligne ou UPS sur batterie (réutilise broadcast WebSocket + notifications).
+- Endpoints `network.py` : `GET /api/network/equipment|stats|topology|equipment/{id}`, `POST/PUT/DELETE /api/network/equipment`, `POST /api/network/{id}/ping`, `POST /api/network/poll`. Cloisonnement par site appliqué. Seed idempotent (routeur+UPS+switch+NAS+NVR+serveur par site).
+### Ajouté — Artefacts production `/deploy`
+- `network-monitor/` : `poller.py` (ICMP réel + SNMP UPS-MIB/IF-MIB via pysnmp, alertes), `Dockerfile` (iputils-ping + NET_RAW), `requirements.txt` ; service ajouté au `docker-compose.yml` ; table `equipment` (avec topologie `parent_id`) ajoutée au `schema.sql`.
+### Tests
+- Backend 12/12 (pytest test_network.py), frontend 100% (topologie, CRUD, ping/poll, fiche UPS, cloisonnement viewer). Itération 8.
+
 ## [1.5.0] — 2026-06 — Cœur Vidéo P0 (artefacts /deploy) + Timeline d'enregistrements (sandbox)
 ### Ajouté — Artefacts production `/deploy` (NON exécutables ici)
 - **Moteur IA** `/deploy/ai-engine/` : `worker.py` (YOLOv11 Ultralytics + tracking ByteTrack, dédup par piste, écriture `events`, Redis Pub/Sub) ; `anpr.py` (LAPI réelle via fast-alpr → `plates` + alerte critique liste noire) ; `requirements.txt`.
