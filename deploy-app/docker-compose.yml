@@ -1,0 +1,48 @@
+# MG-VMS — Déploiement Docker de l'application réelle (FastAPI + React + MongoDB)
+# Démarrage : cp .env.example .env  &&  docker compose up -d --build
+# Frontend : http://localhost:3000   ·   API : http://localhost:8001/api/
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    networks: [mgvms]
+
+  backend:
+    build:
+      context: ../backend
+    restart: unless-stopped
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      DB_NAME: ${DB_NAME:-mgvms}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      JWT_SECRET: ${JWT_SECRET:-please_change_this_secret}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@mg-vms.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@2026}
+      EMERGENT_LLM_KEY: ${EMERGENT_LLM_KEY:-}
+    depends_on:
+      - mongo
+    ports:
+      - "8001:8001"
+    networks: [mgvms]
+
+  frontend:
+    build:
+      context: ../frontend
+      args:
+        REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL:-http://localhost:8001}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+    networks: [mgvms]
+
+volumes:
+  mongo_data:
+
+networks:
+  mgvms:
+    driver: bridge

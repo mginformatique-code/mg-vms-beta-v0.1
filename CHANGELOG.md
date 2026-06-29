@@ -2,6 +2,14 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [1.9.1] — 2026-06 — Déploiement Docker testable (app réelle) + compose prod cohérent
+### Ajouté — `deploy-app/` (test Docker fonctionnel)
+- `docker-compose.yml` : MongoDB + **backend FastAPI** (`backend/Dockerfile`, python:3.11-slim, extra-index pour emergentintegrations) + **frontend React/Nginx** (`frontend/Dockerfile` multi-stage node:20 → nginx, `nginx.conf` SPA) → `docker compose up -d --build` lance MG-VMS complet (http://localhost:3000, API :8001).
+- `.env.example` (DB_NAME, CORS_ORIGINS, JWT_SECRET, ADMIN_*, REACT_APP_BACKEND_URL, EMERGENT_LLM_KEY) + `README.md` (démarrage, commandes, notes domaine/CORS). `.dockerignore` backend & frontend.
+### Vérifié
+- Compose YAML valide, contextes de build résolus, tous les Dockerfiles/nginx.conf présents, gestion env OK. ⚠️ **Non exécuté dans le sandbox** (pas de Docker) — à lancer sur la machine de l'utilisateur.
+- Compose production `/deploy` (18 services) revalidé : YAML OK, tous les contextes de build ont un Dockerfile. Pointeur ajouté vers `deploy-app/` pour le test rapide.
+
 ## [1.9.0] — 2026-06 — Ressources matérielles CPU/GPU (Phase 1)
 ### Ajouté
 - **Module Ressources matérielles** (`/hardware`, technician+ en lecture, admin en écriture) — 4 onglets :

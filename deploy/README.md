@@ -5,6 +5,10 @@
 > **Ils ne sont PAS exécutés ni testés dans l'environnement de développement actuel**
 > (sandbox mono-conteneur, sans Docker/PostgreSQL/GPU). Le backend de dev tourne sur
 > **FastAPI + MongoDB**. La migration vers PostgreSQL se fait via `db/` (schema + SQLAlchemy + Alembic).
+>
+> 👉 **Pour un TEST DOCKER immédiat et fonctionnel** (l'app réelle FastAPI+React+MongoDB,
+> identique au sandbox, en une commande), utilisez plutôt **`../deploy-app/`** :
+> `cd deploy-app && cp .env.example .env && docker compose up -d --build` → http://localhost:3000
 
 ## Contenu
 ```
