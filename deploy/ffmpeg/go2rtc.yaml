@@ -1,0 +1,13 @@
+# go2rtc — passerelle WebRTC/HLS faible latence (PRODUCTION).
+# Les caméras sont injectées dynamiquement par stream_manager via l'API go2rtc,
+# ou listées statiquement ici. Doc: https://github.com/AlexxIT/go2rtc
+api:
+  listen: ":1984"
+
+webrtc:
+  candidates:
+    - stun:8555
+
+streams:
+  # Exemple statique (sinon ajout dynamique via POST /api/streams) :
+  # cam-uuid-1: rtsp://admin:pass@192.168.10.20:554/stream1
