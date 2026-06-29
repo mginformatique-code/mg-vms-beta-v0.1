@@ -10,6 +10,46 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+let refreshing = null;
+
+api.interceptors.response.use(
+  (res) => res,
+  async (error) => {
+    const original = error.config;
+    const status = error.response?.status;
+    const url = original?.url || "";
+    const isAuthCall = url.includes("/auth/login") || url.includes("/auth/refresh") || url.includes("/auth/logout");
+
+    if (status === 401 && !original._retry && !isAuthCall) {
+      const refresh = localStorage.getItem("mg_refresh");
+      if (!refresh) {
+        localStorage.removeItem("mg_token");
+        return Promise.reject(error);
+      }
+      original._retry = true;
+      try {
+        if (!refreshing) {
+          refreshing = axios.post(`${API}/auth/refresh`, {}, { headers: { Authorization: `Bearer ${refresh}` } })
+            .then((r) => r.data.access_token)
+            .finally(() => { refreshing = null; });
+        }
+        const newToken = await refreshing;
+        localStorage.setItem("mg_token", newToken);
+        original.headers.Authorization = `Bearer ${newToken}`;
+        return api(original);
+      } catch (e) {
+        localStorage.removeItem("mg_token");
+        localStorage.removeItem("mg_refresh");
+        if (typeof window !== "undefined" && !window.location.pathname.includes("/login")) {
+          window.location.href = "/login";
+        }
+        return Promise.reject(e);
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 export function formatApiErrorDetail(detail) {
   if (detail == null) return "Une erreur est survenue.";
   if (typeof detail === "string") return detail;

@@ -13,3 +13,5 @@ async def create_indexes():
     await db.plates.create_index("timestamp")
     await db.events.create_index("timestamp")
     await db.audit_logs.create_index("timestamp")
+    await db.login_attempts.create_index("identifier", unique=True)
+    await db.password_reset_tokens.create_index("token", unique=True)

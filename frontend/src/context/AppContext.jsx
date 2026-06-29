@@ -34,6 +34,7 @@ export function AppProvider({ children }) {
     const { data } = await api.post("/auth/login", { email, password, totp_code });
     if (data.requires_2fa) return { requires_2fa: true };
     localStorage.setItem("mg_token", data.access_token);
+    if (data.refresh_token) localStorage.setItem("mg_refresh", data.refresh_token);
     setUser(data.user);
     return { ok: true };
   };
@@ -41,6 +42,7 @@ export function AppProvider({ children }) {
   const logout = async () => {
     try { await api.post("/auth/logout"); } catch (e) {}
     localStorage.removeItem("mg_token");
+    localStorage.removeItem("mg_refresh");
     setUser(false);
   };
 

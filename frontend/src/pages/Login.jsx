@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
-import { formatApiErrorDetail } from "@/lib/api";
+import api, { formatApiErrorDetail } from "@/lib/api";
 import { ShieldCheck, Loader2, Moon, Sun, Languages } from "lucide-react";
 import { toast } from "sonner";
 
@@ -14,6 +14,8 @@ export default function Login() {
   const [need2fa, setNeed2fa] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [forgotMode, setForgotMode] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
 
   useEffect(() => { if (user) navigate("/"); }, [user, navigate]);
 
@@ -24,6 +26,18 @@ export default function Login() {
       const res = await login(email, password, need2fa ? totp : undefined);
       if (res.requires_2fa) { setNeed2fa(true); toast.info("Code 2FA requis"); }
       else { toast.success("Connexion réussie"); navigate("/"); }
+    } catch (err) {
+      setError(formatApiErrorDetail(err.response?.data?.detail) || err.message);
+    } finally { setLoading(false); }
+  };
+
+  const submitForgot = async (e) => {
+    e.preventDefault();
+    setLoading(true); setError("");
+    try {
+      await api.post("/auth/forgot-password", { email: forgotEmail || email });
+      toast.success(t("auth.forgot_sent"));
+      setForgotMode(false);
     } catch (err) {
       setError(formatApiErrorDetail(err.response?.data?.detail) || err.message);
     } finally { setLoading(false); }
@@ -66,6 +80,22 @@ export default function Login() {
           <button onClick={toggleTheme} className="p-2 hover:bg-secondary">{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button>
         </div>
         <div className="flex-1 flex items-center justify-center px-6">
+          {forgotMode ? (
+            <form onSubmit={submitForgot} className="w-full max-w-sm fade-up" data-testid="forgot-form">
+              <h2 className="font-head font-bold text-2xl tracking-tight mb-1">{t("auth.forgot_title")}</h2>
+              <p className="text-sm text-muted-foreground mb-8">{t("auth.forgot_sub")}</p>
+              <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">{t("common.email")}</label>
+              <input data-testid="forgot-email" type="email" value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} required
+                className="w-full mb-2 px-3 py-2.5 bg-card border border-input focus:border-[#0044FF] outline-none text-sm" />
+              {error && <div className="text-xs text-[#FF3333] mb-3 py-2 px-3 border border-[#FF3333]/30 bg-[#FF3333]/10">{error}</div>}
+              <button data-testid="forgot-submit" type="submit" disabled={loading}
+                className="w-full mt-3 py-2.5 bg-[#0044FF] text-white font-medium text-sm hover:bg-[#0033cc] flex items-center justify-center gap-2 disabled:opacity-60">
+                {loading && <Loader2 size={16} className="animate-spin" />} {t("auth.forgot_btn")}
+              </button>
+              <button type="button" onClick={() => { setForgotMode(false); setError(""); }} data-testid="back-login"
+                className="w-full mt-2 py-2 text-xs text-muted-foreground hover:text-foreground">{t("auth.back_login")}</button>
+            </form>
+          ) : (
           <form onSubmit={submit} className="w-full max-w-sm fade-up" data-testid="login-form">
             <h2 className="font-head font-bold text-2xl tracking-tight mb-1">{t("login.title")}</h2>
             <p className="text-sm text-muted-foreground mb-8">{t("login.subtitle")}</p>
@@ -78,6 +108,8 @@ export default function Login() {
                 <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">{t("common.password")}</label>
                 <input data-testid="login-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required
                   className="w-full mb-2 px-3 py-2.5 bg-card border border-input focus:border-[#0044FF] outline-none text-sm" />
+                <button type="button" onClick={() => { setForgotMode(true); setForgotEmail(email); setError(""); }} data-testid="forgot-link"
+                  className="text-[11px] text-[#0044FF] hover:underline mb-2">{t("auth.forgot_title")} ?</button>
               </>
             ) : (
               <>
@@ -100,6 +132,7 @@ export default function Login() {
               viewer@mg-vms.com / Viewer@2026
             </div>
           </form>
+          )}
         </div>
       </div>
     </div>

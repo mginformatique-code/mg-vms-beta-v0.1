@@ -5,6 +5,7 @@ import { AppProvider, useApp } from "@/context/AppContext";
 import { Toaster } from "@/components/ui/sonner";
 import Layout from "@/components/Layout";
 import Login from "@/pages/Login";
+import ResetPassword from "@/pages/ResetPassword";
 import Dashboard from "@/pages/Dashboard";
 import LiveView from "@/pages/LiveView";
 import Cameras from "@/pages/Cameras";
@@ -29,6 +30,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/" element={<Protected><Dashboard /></Protected>} />
       <Route path="/live" element={<Protected><LiveView /></Protected>} />
       <Route path="/cameras" element={<Protected><Cameras /></Protected>} />

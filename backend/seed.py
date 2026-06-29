@@ -63,6 +63,17 @@ async def seed():
                 "active": True, "site_ids": [], "created_at": now,
             })
 
+    # Assigner les sites de démo (cloisonnement) — idempotent, basé sur les sites existants
+    async def assign_demo_sites():
+        existing = await db.sites.find({}, {"_id": 0, "id": 1}).sort("created_at", 1).to_list(20)
+        if not existing:
+            return
+        ids = [s["id"] for s in existing]
+        await db.users.update_one({"email": "client@mg-vms.com"}, {"$set": {"site_ids": ids[:1]}})
+        await db.users.update_one({"email": "viewer@mg-vms.com"}, {"$set": {"site_ids": ids[1:2] or ids[:1]}})
+
+    await assign_demo_sites()
+
     # If cameras already seeded, skip heavy seeding
     if await db.cameras.count_documents({}) > 0:
         return
@@ -73,6 +84,7 @@ async def seed():
         doc = {"id": str(uuid.uuid4()), "created_at": now, "camera_count": 0, **s}
         site_docs.append(doc)
     await db.sites.insert_many([dict(d) for d in site_docs])
+    await assign_demo_sites()
 
     # ---- Cameras ----
     cam_docs = []

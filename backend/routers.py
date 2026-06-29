@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from database import db
-from auth import get_current_user, require_role, public_user, log_audit, hash_password, ROLES
+from auth import get_current_user, require_role, public_user, log_audit, hash_password, ROLES, site_scope, allowed_sites
 from notifications import send_notification
 
 api_router = APIRouter(prefix="/api", tags=["core"])
@@ -21,15 +21,17 @@ api_router = APIRouter(prefix="/api", tags=["core"])
 # ============ DASHBOARD ============
 @api_router.get("/dashboard/stats")
 async def dashboard_stats(user: dict = Depends(get_current_user)):
-    total_cams = await db.cameras.count_documents({})
-    online = await db.cameras.count_documents({"status": "online"})
-    sites = await db.sites.count_documents({})
+    sf = site_scope({}, user)  # {} for admin/tech, {site_id:{$in:[...]}} otherwise
+    allowed = allowed_sites(user)
+    total_cams = await db.cameras.count_documents(sf)
+    online = await db.cameras.count_documents({**sf, "status": "online"})
+    sites = await db.sites.count_documents({} if allowed is None else {"id": {"$in": allowed}})
     events_today = await db.events.count_documents({
-        "timestamp": {"$gte": (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()}
+        **sf, "timestamp": {"$gte": (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()}
     })
-    alerts_active = await db.alerts.count_documents({"acknowledged": False})
+    alerts_active = await db.alerts.count_documents({**sf, "acknowledged": False})
     plates_today = await db.plates.count_documents({
-        "timestamp": {"$gte": (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()}
+        **sf, "timestamp": {"$gte": (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()}
     })
     seed = int(datetime.now(timezone.utc).timestamp() / 30)
     rnd = random.Random(seed)
@@ -84,7 +86,9 @@ class SiteInput(BaseModel):
 
 @api_router.get("/sites")
 async def list_sites(user: dict = Depends(get_current_user)):
-    sites = await db.sites.find({}, {"_id": 0}).to_list(500)
+    allowed = allowed_sites(user)
+    q = {} if allowed is None else {"id": {"$in": allowed}}
+    sites = await db.sites.find(q, {"_id": 0}).to_list(500)
     for s in sites:
         s["camera_count"] = await db.cameras.count_documents({"site_id": s["id"]})
     return sites
@@ -140,6 +144,7 @@ async def list_cameras(site_id: Optional[str] = None, status: Optional[str] = No
         q["site_id"] = site_id
     if status:
         q["status"] = status
+    site_scope(q, user)
     cams = await db.cameras.find(q, {"_id": 0, "password": 0}).to_list(1000)
     return cams
 
@@ -243,6 +248,7 @@ async def list_events(type: Optional[str] = None, site_id: Optional[str] = None,
         q["site_id"] = site_id
     if camera_id:
         q["camera_id"] = camera_id
+    site_scope(q, user)
     events = await db.events.find(q, {"_id": 0}).sort("timestamp", -1).to_list(limit)
     return events
 
@@ -279,6 +285,7 @@ async def search_plates(plate: Optional[str] = None, color: Optional[str] = None
         if date_to:
             rng["$lte"] = date_to
         q["timestamp"] = rng
+    site_scope(q, user)
     plates = await db.plates.find(q, {"_id": 0}).sort("timestamp", -1).to_list(limit)
     return plates
 
@@ -337,6 +344,7 @@ async def list_alerts(acknowledged: Optional[bool] = None, limit: int = 100, use
     q = {}
     if acknowledged is not None:
         q["acknowledged"] = acknowledged
+    site_scope(q, user)
     return await db.alerts.find(q, {"_id": 0}).sort("timestamp", -1).to_list(limit)
 
 
@@ -392,6 +400,7 @@ class UserUpdate(BaseModel):
     name: Optional[str] = None
     role: Optional[str] = None
     active: Optional[bool] = None
+    site_ids: Optional[List[str]] = None
 
 
 @api_router.get("/users")

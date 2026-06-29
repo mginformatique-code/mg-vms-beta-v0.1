@@ -1,0 +1,37 @@
+{
+  "summary": "Sprint Sécurité fully verified end-to-end (backend pytest + frontend Playwright). Backend: 17/17 tests pass covering (a) Security headers (X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy, Permissions-Policy) on every response; (b) Brute-force: 4×401 then 5th→423 with French message 'Trop de tentatives'/'Compte verrouillé', correct password also blocked while locked, cleanup unlocks; (c) Rate-limit: 10 POST /api/auth/login in 60s from same IP returns 429 with Retry-After header; (d) Password reset: forgot returns generic 200 message regardless of email existence, real account creates token in db.password_reset_tokens, reset 200 + reuse 400 + invalid 400 + short<8 chars 400, tech password restored to Tech@2026 at end; (e) Refresh: POST /api/auth/refresh with Bearer refresh_token returns new access_token, access-token rejected with 401; (f) Per-site permissions (cloisonnement): admin sees 5 sites, client@mg-vms.com sees only 'Mairie Centrale' (1), viewer@mg-vms.com sees only 'Parking Bellecour' (1), client /api/cameras strictly scoped to its site, admin PUT /api/users/{id} {site_ids:[...]} persists assignment; (g) RBAC unchanged: client and viewer both 403 on /api/users. Frontend: admin login → dashboard OK, forgot-link → forgot-form → forgot-submit shows generic French toast and returns to login, /reset-password?token=XXX page renders reset-form with both fields, short password shows 'au moins 8 caractères', invalid token shows 'Jeton invalide ou déjà utilisé'. Users page (/users) admin: 4 user rows visible, only client+viewer rows have user-sites-btn (admin/tech excluded ✓), clicking opens dialog with 5 site-checkbox entries and user-sites-save button. Allowed-sites column shows 'Tous les sites' for admin/tech and 'Mairie Centrale'/'Parking Bellecour' for client/viewer. Client login: Sites page shows ONLY Mairie Centrale (no Parking Bellecour, Stade Municipal, Zone Industrielle Nord); Users nav hidden from client (RBAC UI).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Users dialog (sites assignment)", "issues": ["Radix DialogContent missing aria-describedby — accessibility warning in console (no functional impact)"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_security_sprint.py",
+    "/app/test_reports/pytest/security_sprint_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "security.py: rate-limit cache (_hits) is in-memory per process — correctly noted in module docstring. For multi-instance / multi-replica preview deployments this is bypassable by load-balancing across pods. Move to Redis for production (already flagged in code).",
+    "security.py: lockout/rate-limit IP detection uses X-Forwarded-For first value with no validation/allowlist of trusted proxies. An attacker could spoof XFF to evade rate-limiting unless the ingress strips client-supplied XFF. Recommend documenting trusted-proxy assumption or using request.client.host behind a known reverse proxy.",
+    "auth.py login(): lockout identifier is f'{ip}:{email}'. If user logs in from a NAT/shared IP, a single attacker can lock out other tenants (different emails behind same IP are separate entries — OK), but an attacker on the SAME IP can lock the legitimate user by guessing their email. Consider also a per-account counter independent of IP to prevent stuffing across IPs.",
+    "auth.py reset_password: does not invalidate active refresh tokens / sessions after password change. A stolen refresh token survives the reset. Recommend bumping a user 'password_version' claim and rejecting tokens with stale version, or clearing refresh tokens.",
+    "auth.py login(): brute-force '_register_failure' counter does NOT increment when the account is locked (423 raised before failure registration), which is correct behavior but means lockout never extends. After 15 min the account auto-unlocks even if attacker kept hammering. Consider sliding lockout extension on attempts during the lockout window.",
+    "auth.py login(): response sets only access_token cookie (httpOnly+secure+samesite=lax) but the body ALSO returns access_token + refresh_token in JSON. Frontend stores both in localStorage (mg_token/mg_refresh). LocalStorage is XSS-readable; httpOnly cookie pattern is partially defeated. Pick one model: either cookie-only or document the localStorage choice with strict CSP.",
+    "frontend api.js: per problem statement uses 401 interceptor → refresh → retry. Verified working (refresh endpoint returns 200 with Bearer refresh token).",
+    "Users.jsx site dialog: missing DialogDescription causes Radix accessibility warning; add `<DialogDescription>` for screen-reader users.",
+    "auth.py forgot_password: token is logged via print() to stdout. In a real prod ops env this is sensitive — recommend gating behind DEBUG env var or logger.info with appropriate level, since console logs may be shipped to log aggregators."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_security_sprint.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (17/17)", "frontend": "100% (all flows verified)"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026, tech@mg-vms.com / Tech@2026 (restored), client@mg-vms.com / Client@2026, viewer@mg-vms.com / Viewer@2026",
+  "seed_data_creation": "Tests use throwaway emails (locktest_*@x.com, rl_*@x.com, TEST_assign_*@x.com) that don't lock real accounts. test_admin_can_assign_sites cleans up its temporary user. test_reset_password_flow_and_reuse_blocked restores tech@mg-vms.com password back to Tech@2026 at the end. db.login_attempts and db.password_reset_tokens collections are written to but tokens are marked used.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest at /app/backend/tests/test_security_sprint.py — 17 tests, all green. IMPORTANT for re-runs: this suite uses in-memory rate-limit (10 POST /api/auth/login per 60s per IP). The suite handles this by (1) ordering rate-limit class last (renamed TestZRateLimit), (2) adding 65s setup_class sleeps before TestPasswordReset and TestRefresh, (3) recommend running with `-n 0` (serial) — note pytest.ini hardcodes -n 2 --dist loadscope so add `-n 0` to override. Backend restart before suite gives a clean rate-limit window. Total runtime ~140s due to mandatory sleeps. Existing tests in /app/backend/tests/backend_test.py and /app/backend/tests/test_notifications.py were not modified. Frontend reset page is at /reset-password?token=XXX with data-testid reset-form/reset-pwd/reset-pwd2/reset-submit/reset-error. Users page sites dialog: data-testid user-sites-btn/site-checkbox/user-sites-save.",
+  "rca of the issue": "No live issues found. RCA notes during test development: initial parallel pytest (xdist -n 2) caused 429 cross-talk between TestRateLimit and other login-dependent tests; root cause is shared in-memory rate-limit counter at the backend keyed only by IP. Fixed in tests by serializing (-n 0), reordering rate-limit class last, and inserting 65s sleeps before classes that depend on fresh login budget."
+}

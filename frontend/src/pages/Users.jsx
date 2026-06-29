@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Trash2, UserCog, Loader2 } from "lucide-react";
+import { Plus, Trash2, UserCog, Loader2, Building2 } from "lucide-react";
 import { toast } from "sonner";
 
 const ROLES = ["admin", "technician", "client", "readonly", "guest"];
@@ -11,12 +11,15 @@ const ROLE_COLOR = { admin: "#FF3333", technician: "#0044FF", client: "#00E676",
 export default function UsersPage() {
   const { t, user: me } = useApp();
   const [users, setUsers] = useState([]);
+  const [sites, setSites] = useState([]);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ email: "", password: "", name: "", role: "client" });
+  const [siteUser, setSiteUser] = useState(null);
+  const [selSites, setSelSites] = useState([]);
 
   const load = () => api.get("/users").then((r) => setUsers(r.data)).catch(() => {});
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); api.get("/sites").then((r) => setSites(r.data)).catch(() => {}); }, []);
 
   const submit = async () => {
     if (!form.email || !form.password || !form.name) return toast.error("Tous les champs requis");
@@ -27,6 +30,16 @@ export default function UsersPage() {
   const changeRole = async (u, role) => { await api.put(`/users/${u.id}`, { role }); toast.success("Rôle modifié"); load(); };
   const toggleActive = async (u) => { await api.put(`/users/${u.id}`, { active: !u.active }); load(); };
   const del = async (u) => { if (!window.confirm(`Supprimer ${u.email} ?`)) return; try { await api.delete(`/users/${u.id}`); toast.success("Supprimé"); load(); } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); } };
+  const openSites = (u) => { setSiteUser(u); setSelSites(u.site_ids || []); };
+  const toggleSite = (id) => setSelSites((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]);
+  const saveSites = async () => { await api.put(`/users/${siteUser.id}`, { site_ids: selSites }); toast.success(t("users.sites")); setSiteUser(null); load(); };
+
+  const siteLabel = (u) => {
+    if (u.role === "admin" || u.role === "technician") return t("users.sites_all");
+    const ids = u.site_ids || [];
+    if (!ids.length) return "—";
+    return ids.map((id) => sites.find((s) => s.id === id)?.name || "?").join(", ");
+  };
 
   return (
     <div className="p-4">
@@ -38,7 +51,7 @@ export default function UsersPage() {
       <div className="border border-border bg-card overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-            <th className="px-3 py-2">{t("common.name")}</th><th className="px-3 py-2">{t("common.email")}</th><th className="px-3 py-2">{t("common.role")}</th><th className="px-3 py-2">{t("common.status")}</th><th className="px-3 py-2 text-right">{t("common.actions")}</th>
+            <th className="px-3 py-2">{t("common.name")}</th><th className="px-3 py-2">{t("common.email")}</th><th className="px-3 py-2">{t("common.role")}</th><th className="px-3 py-2">{t("users.sites")}</th><th className="px-3 py-2">{t("common.status")}</th><th className="px-3 py-2 text-right">{t("common.actions")}</th>
           </tr></thead>
           <tbody>
             {users.map((u) => (
@@ -51,8 +64,14 @@ export default function UsersPage() {
                     {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </td>
+                <td className="px-3 py-2 text-xs text-muted-foreground max-w-[180px] truncate" title={siteLabel(u)}>{siteLabel(u)}</td>
                 <td className="px-3 py-2"><button onClick={() => toggleActive(u)} disabled={u.id === me.id} className={`text-xs px-2 py-0.5 border ${u.active ? "mg-online border-[#00E676]/40" : "mg-offline border-[#FF3333]/40"}`}>{u.active ? t("common.active") : "Inactif"}</button></td>
-                <td className="px-3 py-2 text-right">{u.id !== me.id && <button onClick={() => del(u)} data-testid="delete-user-btn" className="p-1.5 hover:bg-secondary text-[#FF3333]"><Trash2 size={15} /></button>}</td>
+                <td className="px-3 py-2">
+                  <div className="flex items-center justify-end gap-1">
+                    {!["admin", "technician"].includes(u.role) && <button onClick={() => openSites(u)} data-testid="user-sites-btn" title={t("users.sites")} className="p-1.5 hover:bg-secondary"><Building2 size={15} /></button>}
+                    {u.id !== me.id && <button onClick={() => del(u)} data-testid="delete-user-btn" className="p-1.5 hover:bg-secondary text-[#FF3333]"><Trash2 size={15} /></button>}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -71,6 +90,25 @@ export default function UsersPage() {
           <DialogFooter>
             <button onClick={() => setOpen(false)} className="px-4 py-2 border border-border text-sm">{t("common.cancel")}</button>
             <button onClick={submit} disabled={saving} data-testid="user-form-submit" className="px-4 py-2 bg-[#0044FF] text-white text-sm flex items-center gap-2">{saving && <Loader2 size={15} className="animate-spin" />}{t("common.save")}</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!siteUser} onOpenChange={(o) => !o && setSiteUser(null)}>
+        <DialogContent className="rounded-none border-border">
+          <DialogHeader><DialogTitle className="font-head">{t("users.sites")} — {siteUser?.name}</DialogTitle></DialogHeader>
+          <div className="space-y-1 max-h-72 overflow-y-auto">
+            {sites.map((s) => (
+              <label key={s.id} className="flex items-center gap-2 px-2 py-2 border border-border hover:bg-secondary text-sm cursor-pointer" data-testid="site-checkbox">
+                <input type="checkbox" checked={selSites.includes(s.id)} onChange={() => toggleSite(s.id)} />
+                <span className="flex-1">{s.name}</span>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{s.type}</span>
+              </label>
+            ))}
+          </div>
+          <DialogFooter>
+            <button onClick={() => setSiteUser(null)} className="px-4 py-2 border border-border text-sm">{t("common.cancel")}</button>
+            <button onClick={saveSites} data-testid="user-sites-save" className="px-4 py-2 bg-[#0044FF] text-white text-sm">{t("common.save")}</button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

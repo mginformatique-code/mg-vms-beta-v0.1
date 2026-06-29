@@ -13,6 +13,7 @@ from database import create_indexes
 from auth import auth_router
 from routers import api_router
 from notifications import notif_router
+from security import SecurityMiddleware
 from seed import seed
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -23,6 +24,8 @@ app = FastAPI(title="MG-VMS API", version="1.0.0", description="MG-VMS - Platefo
 app.include_router(auth_router)
 app.include_router(api_router)
 app.include_router(notif_router)
+
+app.add_middleware(SecurityMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
