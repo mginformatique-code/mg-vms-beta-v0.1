@@ -11,7 +11,7 @@ const NAV = [
   { group: "nav.operations", items: [
     { to: "/", icon: LayoutDashboard, key: "nav.dashboard", end: true },
     { to: "/live", icon: Grid3x3, key: "nav.live" },
-    { to: "/recordings", icon: Film, key: "nav.recordings" },
+    { to: "/recordings", icon: Film, key: "nav.recordings", perm: "view_recordings" },
     { to: "/cameras", icon: Cctv, key: "nav.cameras" },
     { to: "/network", icon: Network, key: "nav.network", role: "client" },
     { to: "/hardware", icon: Server, key: "nav.hardware", role: "technician" },
@@ -19,8 +19,8 @@ const NAV = [
     { to: "/map", icon: Map, key: "nav.map" },
   ]},
   { group: "nav.intelligence", items: [
-    { to: "/anpr", icon: ScanLine, key: "nav.anpr" },
-    { to: "/vehicles", icon: Car, key: "nav.vehicles" },
+    { to: "/anpr", icon: ScanLine, key: "nav.anpr", perm: "read_plates" },
+    { to: "/vehicles", icon: Car, key: "nav.vehicles", perm: "read_plates" },
     { to: "/alerts", icon: Bell, key: "nav.alerts" },
   ]},
   { group: "nav.admin", items: [
@@ -48,7 +48,7 @@ function MiniBar({ label, value, icon: Icon }) {
 }
 
 export default function Layout({ children }) {
-  const { t, user, logout, theme, toggleTheme, lang, toggleLang, can, liveMetrics, alertPing } = useApp();
+  const { t, user, logout, theme, toggleTheme, lang, toggleLang, can, hasPerm, liveMetrics, alertPing } = useApp();
   const navigate = useNavigate();
   const [sys, setSys] = useState({ cpu: 0, ram: 0, storage: 0 });
   const [alertCount, setAlertCount] = useState(0);
@@ -86,7 +86,7 @@ export default function Layout({ children }) {
           {NAV.map((g) => (
             <div key={g.group} className="mb-4">
               <div className="px-4 mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground font-medium">{t(g.group)}</div>
-              {g.items.filter((it) => !it.role || can(it.role)).map((it) => (
+              {g.items.filter((it) => (!it.role || can(it.role)) && (!it.perm || hasPerm(it.perm))).map((it) => (
                 <NavLink key={it.to} to={it.to} end={it.end}
                   data-testid={`nav-${it.key.split(".")[1]}`}
                   className={({ isActive }) =>

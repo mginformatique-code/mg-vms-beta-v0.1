@@ -17,6 +17,37 @@ ROLES = ["admin", "technician", "client", "readonly", "guest"]
 # Role hierarchy: higher = more privileges
 ROLE_LEVEL = {"guest": 0, "readonly": 1, "client": 2, "technician": 3, "admin": 4}
 
+# Granular per-user permissions (gérées uniquement par l'admin)
+PERMISSIONS = ["view_live", "view_recordings", "read_plates", "stream_hd", "ptz_control", "export_files"]
+DEFAULT_PERMISSIONS = {
+    "admin":      {p: True for p in PERMISSIONS},
+    "technician": {p: True for p in PERMISSIONS},
+    "client":     {"view_live": True, "view_recordings": True, "read_plates": True,
+                   "stream_hd": True, "ptz_control": True, "export_files": False},
+    "readonly":   {"view_live": True, "view_recordings": True, "read_plates": False,
+                   "stream_hd": False, "ptz_control": False, "export_files": False},
+    "guest":      {p: False for p in PERMISSIONS},
+}
+
+
+def effective_permissions(user: dict) -> dict:
+    """Permissions par défaut du rôle + overrides par utilisateur (admin = tout)."""
+    role = user.get("role", "guest")
+    if role == "admin":
+        return {p: True for p in PERMISSIONS}
+    perms = dict(DEFAULT_PERMISSIONS.get(role, DEFAULT_PERMISSIONS["guest"]))
+    overrides = user.get("permissions") or {}
+    for k, v in overrides.items():
+        if k in PERMISSIONS and isinstance(v, bool):
+            perms[k] = v
+    return perms
+
+
+def has_permission(user: dict, perm: str) -> bool:
+    if user.get("role") == "admin":
+        return True
+    return bool(effective_permissions(user).get(perm, False))
+
 # Brute-force protection
 MAX_LOGIN_ATTEMPTS = 5
 LOCKOUT_MINUTES = 15
@@ -84,6 +115,7 @@ def public_user(user: dict) -> dict:
         "active": user.get("active", True),
         "created_at": user.get("created_at"),
         "site_ids": user.get("site_ids", []),
+        "permissions": effective_permissions(user),
     }
 
 
@@ -114,6 +146,15 @@ def require_role(min_role: str):
     async def checker(user: dict = Depends(get_current_user)) -> dict:
         if ROLE_LEVEL.get(user.get("role", "guest"), 0) < ROLE_LEVEL[min_role]:
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return user
+    return checker
+
+
+def require_permission(perm: str):
+    """Dépendance d'autorisation granulaire (admin = bypass)."""
+    async def checker(user: dict = Depends(get_current_user)) -> dict:
+        if not has_permission(user, perm):
+            raise HTTPException(status_code=403, detail=f"Permission requise : {perm}")
         return user
     return checker
 

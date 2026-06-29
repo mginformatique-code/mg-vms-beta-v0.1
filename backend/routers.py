@@ -5,14 +5,14 @@ import io
 import csv
 import base64
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from database import db
-from auth import get_current_user, require_role, public_user, log_audit, hash_password, ROLES, site_scope, allowed_sites
+from auth import get_current_user, require_role, require_permission, has_permission, public_user, log_audit, hash_password, ROLES, PERMISSIONS, site_scope, allowed_sites
 from notifications import send_notification
 from realtime import metrics_snapshot, broadcast_alert, broadcast_camera_status
 from plugins import is_enabled
@@ -208,7 +208,7 @@ async def test_camera(camera_id: str, user: dict = Depends(get_current_user)):
 
 
 @api_router.post("/cameras/{camera_id}/snapshot")
-async def snapshot_camera(camera_id: str, user: dict = Depends(get_current_user)):
+async def snapshot_camera(camera_id: str, user: dict = Depends(require_permission("view_live"))):
     cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
     if not cam:
         raise HTTPException(404, "Caméra introuvable")
@@ -221,13 +221,32 @@ async def snapshot_camera(camera_id: str, user: dict = Depends(get_current_user)
 
 
 @api_router.post("/cameras/{camera_id}/ptz")
-async def ptz_command(camera_id: str, command: str = Query(...), user: dict = Depends(require_role("client"))):
+async def ptz_command(camera_id: str, command: str = Query(...), user: dict = Depends(require_permission("ptz_control"))):
     cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
     if not cam:
         raise HTTPException(404, "Caméra introuvable")
     if not cam.get("ptz_enabled"):
         raise HTTPException(400, "PTZ non supporté sur cette caméra")
     return {"ok": True, "command": command}
+
+
+@api_router.get("/cameras/{camera_id}/stream")
+async def camera_stream(camera_id: str, user: dict = Depends(require_permission("view_live"))):
+    """Renvoie l'URL de flux live ; la qualité (HD/SD) dépend de la permission `stream_hd`."""
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "password": 0})
+    if not cam:
+        raise HTTPException(404, "Caméra introuvable")
+    allowed = allowed_sites(user)
+    if allowed is not None and cam.get("site_id") not in allowed:
+        raise HTTPException(403, "Accès refusé à cette caméra")
+    hd = has_permission(user, "stream_hd")
+    return {
+        "camera_id": cam["id"], "name": cam["name"],
+        "quality": "HD" if hd else "SD",
+        "resolution": "1920x1080" if hd else "640x480",
+        "stream_url": None,  # flux simulé en sandbox ; WebRTC/HLS via go2rtc en production
+        "simulated": True,
+    }
 
 
 # ============ EVENTS ============
@@ -256,7 +275,7 @@ async def search_plates(response: Response, plate: Optional[str] = None, color: 
                         site_id: Optional[str] = None, camera_id: Optional[str] = None,
                         direction: Optional[str] = None, list_status: Optional[str] = None,
                         date_from: Optional[str] = None, date_to: Optional[str] = None,
-                        limit: int = 50, offset: int = 0, user: dict = Depends(get_current_user)):
+                        limit: int = 50, offset: int = 0, user: dict = Depends(require_permission("read_plates"))):
     q = {}
     if plate:
         q["plate"] = {"$regex": plate.upper().replace(" ", ""), "$options": "i"}
@@ -289,7 +308,7 @@ async def search_plates(response: Response, plate: Optional[str] = None, color: 
 
 
 @api_router.get("/plates/export")
-async def export_plates(user: dict = Depends(get_current_user)):
+async def export_plates(user: dict = Depends(require_permission("export_files"))):
     plates = await db.plates.find({}, {"_id": 0}).sort("timestamp", -1).to_list(2000)
     output = io.StringIO()
     writer = csv.writer(output)
@@ -341,7 +360,7 @@ class AnprDetect(BaseModel):
 
 
 @api_router.post("/anpr/detect")
-async def anpr_detect(data: AnprDetect, background: BackgroundTasks, user: dict = Depends(require_role("client"))):
+async def anpr_detect(data: AnprDetect, background: BackgroundTasks, user: dict = Depends(require_permission("read_plates"))):
     if not await is_enabled("anpr"):
         raise HTTPException(400, "Module ANPR désactivé")
     plate = data.plate.upper().strip()
@@ -450,7 +469,7 @@ async def create_alert(data: AlertCreate, background: BackgroundTasks, user: dic
 
 # ============ RECORDINGS / TIMELINE ============
 @api_router.get("/recordings/timeline")
-async def recordings_timeline(camera_id: str, date: Optional[str] = None, user: dict = Depends(get_current_user)):
+async def recordings_timeline(camera_id: str, date: Optional[str] = None, user: dict = Depends(require_permission("view_recordings"))):
     """Segments enregistrés d'une caméra pour une journée (date ISO AAAA-MM-JJ).
     Sandbox : flux/lecture simulés. En production, sert le service `recording-service`."""
     cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "password": 0})
@@ -483,7 +502,7 @@ async def recordings_timeline(camera_id: str, date: Optional[str] = None, user: 
 
 
 @api_router.get("/recordings/{recording_id}/playback")
-async def recordings_playback(recording_id: str, user: dict = Depends(get_current_user)):
+async def recordings_playback(recording_id: str, user: dict = Depends(require_permission("view_recordings"))):
     rec = await db.recordings.find_one({"id": recording_id}, {"_id": 0})
     if not rec:
         raise HTTPException(404, "Enregistrement introuvable")
@@ -510,7 +529,7 @@ class ExportRequest(BaseModel):
 
 
 @api_router.post("/recordings/export")
-async def create_export(data: ExportRequest, user: dict = Depends(get_current_user)):
+async def create_export(data: ExportRequest, user: dict = Depends(require_permission("export_files"))):
     cam = await db.cameras.find_one({"id": data.camera_id}, {"_id": 0, "password": 0})
     if not cam:
         raise HTTPException(404, "Caméra introuvable")
@@ -560,7 +579,7 @@ async def list_exports(user: dict = Depends(get_current_user)):
 
 
 @api_router.get("/recordings/exports/{export_id}/download")
-async def download_export(export_id: str, user: dict = Depends(get_current_user)):
+async def download_export(export_id: str, user: dict = Depends(require_permission("export_files"))):
     exp = await db.exports.find_one({"id": export_id, "user_id": user["id"]}, {"_id": 0})
     if not exp:
         raise HTTPException(404, "Export introuvable")
@@ -616,6 +635,8 @@ class UserCreate(BaseModel):
     password: str
     name: str
     role: str = "client"
+    site_ids: Optional[List[str]] = None
+    permissions: Optional[Dict[str, bool]] = None
 
 
 class UserUpdate(BaseModel):
@@ -623,6 +644,13 @@ class UserUpdate(BaseModel):
     role: Optional[str] = None
     active: Optional[bool] = None
     site_ids: Optional[List[str]] = None
+    permissions: Optional[Dict[str, bool]] = None
+
+
+def _clean_permissions(perms: Optional[Dict[str, bool]]) -> Dict[str, bool]:
+    if not perms:
+        return {}
+    return {k: bool(v) for k, v in perms.items() if k in PERMISSIONS}
 
 
 @api_router.get("/users")
@@ -640,7 +668,9 @@ async def create_user(data: UserCreate, user: dict = Depends(require_role("admin
     doc = {
         "id": str(uuid.uuid4()), "email": email, "password_hash": hash_password(data.password),
         "name": data.name, "role": role, "twofa_enabled": False, "twofa_secret": None,
-        "active": True, "site_ids": [], "created_at": datetime.now(timezone.utc).isoformat(),
+        "active": True, "site_ids": data.site_ids or [],
+        "permissions": _clean_permissions(data.permissions),
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.users.insert_one(dict(doc))
     await log_audit(user, "user_created", email, role)
@@ -652,6 +682,8 @@ async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(requi
     update = {k: v for k, v in data.model_dump().items() if v is not None}
     if "role" in update and update["role"] not in ROLES:
         raise HTTPException(400, "Rôle invalide")
+    if "permissions" in update:
+        update["permissions"] = _clean_permissions(update["permissions"])
     res = await db.users.update_one({"id": user_id}, {"$set": update})
     if res.matched_count == 0:
         raise HTTPException(404, "Utilisateur introuvable")

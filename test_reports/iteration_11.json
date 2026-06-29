@@ -1,0 +1,38 @@
+{
+  "summary": "Itération 11 — Permissions granulaires par utilisateur (MG-VMS). Backend: nouvelle suite /app/backend/tests/test_permissions.py = 22/22 PASSED en ~5.5s. Couvre: (1) GET /api/auth/me renvoie 'permissions' avec 6 clés booléennes ; admin/tech=all true ; perm@ a view_live=true et 5 autres=false ; (2) RBAC /api/users : POST par tech/viewer → 403, GET /api/users par perm@ → 403 ; (3) CRUD permissions : POST /api/users {permissions:{...,bogus_key:true}} crée le user, clé invalide ignorée, /auth/me du nouvel utilisateur reflète les perms ; PUT /api/users/{id} {permissions:{...,fake:true}} met à jour et /auth/me reflète, fake key ignorée ; DELETE OK ; (4) Enforcement perm@ : GET /api/plates 403, GET /api/recordings/timeline?camera_id=... 403, POST /api/cameras/{id}/ptz?command=left 403, POST /api/recordings/export 403, GET /api/plates/export 403, POST /api/anpr/detect 403 ; (5) Stream HD/SD : perm@ → quality='SD' resolution='640x480' ; admin → 'HD' '1920x1080' (sur caméra du site assigné à perm@) ; (6) Admin/Tech bypass : /api/plates et /api/recordings/timeline OK 200 pour admin et tech. Frontend Playwright (admin + perm@): (a) Login perm@mg-vms.com → sidebar n'affiche PAS nav-recordings, nav-anpr, nav-vehicles ; nav-live PRÉSENT ; (b) Login admin → tous les liens visibles (nav-recordings/anpr/vehicles/reports/network/hardware) ; (c) Page /users : 5 lignes user-row, 4 boutons user-perms-btn (l'admin n'a PAS de bouton perms — comportement attendu) ; clic ouvre user-perms-dialog avec les 6 toggles perm-toggle-{view_live,view_recordings,read_plates,stream_hd,ptz_control,export_files} + user-perms-save ; (d) Toggle export_files sur viewer puis user-perms-save → PUT effectué, re-ouverture du dialog affiche le nouvel état (persistance OK) ; reverté ensuite ; (e) Régression admin : /recordings, /anpr, /reports, /network, /hardware chargent sans erreur. Aucun bug bloquant détecté.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dialogs Users.jsx (user-perms-dialog, user-sites-dialog)", "issues": ["Console warning Radix : 'Missing Description or aria-describedby for {DialogContent}'. Cosmétique a11y. Ajouter <DialogDescription> ou aria-describedby={undefined} pour silencer."]},
+      {"screen": "Network.jsx ligne 174 (régression itération 9-10)", "issues": ["Hydration error React persistant: '<span> cannot be a child of <option>' (injecté par le visual editor x-*). Non bloquant, déjà signalé."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_permissions.py",
+    "/app/test_reports/pytest/permissions_results.xml"
+  ],
+  "action_items": [
+    "(OPTIONNEL a11y) Ajouter une <DialogDescription> (ou aria-describedby) aux DialogContent de Users.jsx (user-perms-dialog, user-sites-dialog) pour supprimer les warnings Radix.",
+    "(OPTIONNEL — déjà signalé it.9/10) Corriger l'hydration warning Network.jsx L174 (span dans option)."
+  ],
+  "critical_code_review_comments": [
+    "routers.py _clean_permissions: silencieusement strip les clés inconnues. C'est OK pour le contrat, mais il serait préférable de renvoyer la liste des clés rejetées dans la réponse (debug côté admin UI). Pour l'instant, la réponse cohérente vue par le client suffit.",
+    "auth.py effective_permissions: bonne logique (admin bypass + override dict). Toutefois, si l'admin met `permissions: {}` sur un user via PUT, _clean_permissions renvoie `{}` puis `effective_permissions` repart sur les defaults du rôle — c'est implicite. À documenter dans /memory ou dans un docstring : « envoyer un dict vide = reset aux defaults du rôle ».",
+    "routers.py /api/cameras/{id}/stream: la dépendance `require_permission('view_live')` est bien appliquée AVANT le filtrage par site (comme noté dans l'agent_to_agent_context). Comportement confirmé par tests : perm@ a view_live=ON donc passe la dépendance, puis le filtrage site_id passe (perm@ a Mairie Centrale assigné), puis HD/SD est résolu par has_permission(stream_hd). OK.",
+    "Layout.jsx NAV: bonne filtration combinée `(!it.role || can(it.role)) && (!it.perm || hasPerm(it.perm))`. Mais la nav 'nav-vehicles' est filtrée sur read_plates seulement — si un futur produit veut séparer ANPR brut et Recherche véhicule, prévoir des perms distinctes (ex: vehicle_search).",
+    "Users.jsx ouverture dialog perms: pas de loading/skeleton si l'API PUT est lente. Pour une UX premium, ajouter un Loader2 spinning sur user-perms-save pendant la requête (comme déjà fait pour add-user via 'saving').",
+    "Users.jsx: le bouton perms n'apparaît PAS pour role==='admin', ce qui est correct (admin a toutes les perms par défaut, bypass). Mais aucun tooltip n'explique pourquoi le bouton est masqué — peut être déroutant. Ajouter un <span> 'Admin: toutes permissions' à la place pour info."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_permissions.py (NEW — 22 tests)"
+  ],
+  "success_rate": {"backend": "100% (22/22)", "frontend": "100% (nav gating perm@, dialog 6 toggles, PUT persistance, régression admin)"},
+  "test_credentials": "Inchangés. perm@mg-vms.com/Perm@2026 préservé (non supprimé par les tests).",
+  "seed_data_creation": "Aucune. Le test CRUD crée un user TEST_p_<hex>@mg-vms.com puis le supprime à la fin de la classe (test_delete_test_user). Le toggle viewer.export_files est reverté en fin de test UI.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Suite permissions: `python -m pytest tests/test_permissions.py -o addopts='' -v` (neutralise -n xdist). 22 tests en ~5.5s. Endpoints granulaires protégés via require_permission(perm) : view_live (snapshot/stream), stream_hd (qualité HD/SD sur /cameras/{id}/stream), view_recordings (timeline, playback), read_plates (/plates, /anpr/detect), ptz_control (/cameras/{id}/ptz), export_files (/recordings/export, /plates/export). Admin bypass dans has_permission. Frontend testids: user-perms-btn (par ligne non-admin), user-perms-dialog, perm-toggle-{view_live|view_recordings|read_plates|stream_hd|ptz_control|export_files}, user-perms-save. NAV gating dans Layout.jsx via NAV[].perm + hasPerm() du AppContext. perm@ doit conserver site 'Mairie Centrale' pour que /cameras/{id}/stream renvoie 200 SD (sinon 403 par filtrage site). Si tests stream HD/SD échouent : vérifier que perm@.site_ids contient au moins un site valide via /api/auth/me.",
+  "rca of the issue": "Aucune RCA — implémentation conforme à la spécification. require_permission s'exécute AVANT le filtrage site (cohérent avec la note agent_to_agent). _clean_permissions filtre les clés inconnues comme prévu. public_user injecte effective_permissions dans toutes les réponses /auth/me et /users. UI conditionne le bouton perms sur role!=='admin' (admin = bypass implicite)."
+}

@@ -58,6 +58,12 @@ export function AppProvider({ children }) {
     return user && lvl[user.role] >= lvl[role];
   };
 
+  const hasPerm = (perm) => {
+    if (!user) return false;
+    if (user.role === "admin") return true;
+    return !!(user.permissions && user.permissions[perm]);
+  };
+
   // ---- WebSocket temps réel ----
   useEffect(() => {
     if (!user) return;
@@ -91,7 +97,7 @@ export function AppProvider({ children }) {
   }, [user]);
 
   return (
-    <AppContext.Provider value={{ user, setUser, login, logout, lang, setLang, toggleLang, theme, setTheme, toggleTheme, t, can, liveMetrics, liveAlert, alertPing }}>
+    <AppContext.Provider value={{ user, setUser, login, logout, lang, setLang, toggleLang, theme, setTheme, toggleTheme, t, can, hasPerm, liveMetrics, liveAlert, alertPing }}>
       {children}
     </AppContext.Provider>
   );

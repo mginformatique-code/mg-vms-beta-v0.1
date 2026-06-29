@@ -2,11 +2,19 @@ import React, { useEffect, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Trash2, UserCog, Loader2, Building2 } from "lucide-react";
+import { Plus, Trash2, UserCog, Loader2, Building2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 const ROLES = ["admin", "technician", "client", "readonly", "guest"];
 const ROLE_COLOR = { admin: "#FF3333", technician: "#0044FF", client: "#00E676", readonly: "#FFB800", guest: "#71717a" };
+const PERMS = [
+  ["view_live", "Visionnage (live)"],
+  ["view_recordings", "Lecture des enregistrements"],
+  ["read_plates", "Lecture des plaques (ANPR)"],
+  ["stream_hd", "Affichage HD (sinon SD)"],
+  ["ptz_control", "Contrôle PTZ"],
+  ["export_files", "Export de fichiers"],
+];
 
 export default function UsersPage() {
   const { t, user: me } = useApp();
@@ -17,6 +25,8 @@ export default function UsersPage() {
   const [form, setForm] = useState({ email: "", password: "", name: "", role: "client" });
   const [siteUser, setSiteUser] = useState(null);
   const [selSites, setSelSites] = useState([]);
+  const [permUser, setPermUser] = useState(null);
+  const [selPerms, setSelPerms] = useState({});
 
   const load = () => api.get("/users").then((r) => setUsers(r.data)).catch(() => {});
   useEffect(() => { load(); api.get("/sites").then((r) => setSites(r.data)).catch(() => {}); }, []);
@@ -33,6 +43,10 @@ export default function UsersPage() {
   const openSites = (u) => { setSiteUser(u); setSelSites(u.site_ids || []); };
   const toggleSite = (id) => setSelSites((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]);
   const saveSites = async () => { await api.put(`/users/${siteUser.id}`, { site_ids: selSites }); toast.success(t("users.sites")); setSiteUser(null); load(); };
+
+  const openPerms = (u) => { setPermUser(u); setSelPerms({ ...(u.permissions || {}) }); };
+  const togglePerm = (k) => setSelPerms((p) => ({ ...p, [k]: !p[k] }));
+  const savePerms = async () => { await api.put(`/users/${permUser.id}`, { permissions: selPerms }); toast.success("Permissions mises à jour"); setPermUser(null); load(); };
 
   const siteLabel = (u) => {
     if (u.role === "admin" || u.role === "technician") return t("users.sites_all");
@@ -68,6 +82,7 @@ export default function UsersPage() {
                 <td className="px-3 py-2"><button onClick={() => toggleActive(u)} disabled={u.id === me.id} className={`text-xs px-2 py-0.5 border ${u.active ? "mg-online border-[#00E676]/40" : "mg-offline border-[#FF3333]/40"}`}>{u.active ? t("common.active") : "Inactif"}</button></td>
                 <td className="px-3 py-2">
                   <div className="flex items-center justify-end gap-1">
+                    {u.role !== "admin" && <button onClick={() => openPerms(u)} data-testid="user-perms-btn" title="Permissions" className="p-1.5 hover:bg-secondary text-[#0044FF]"><ShieldCheck size={15} /></button>}
                     {!["admin", "technician"].includes(u.role) && <button onClick={() => openSites(u)} data-testid="user-sites-btn" title={t("users.sites")} className="p-1.5 hover:bg-secondary"><Building2 size={15} /></button>}
                     {u.id !== me.id && <button onClick={() => del(u)} data-testid="delete-user-btn" className="p-1.5 hover:bg-secondary text-[#FF3333]"><Trash2 size={15} /></button>}
                   </div>
@@ -109,6 +124,26 @@ export default function UsersPage() {
           <DialogFooter>
             <button onClick={() => setSiteUser(null)} className="px-4 py-2 border border-border text-sm">{t("common.cancel")}</button>
             <button onClick={saveSites} data-testid="user-sites-save" className="px-4 py-2 bg-[#0044FF] text-white text-sm">{t("common.save")}</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!permUser} onOpenChange={(o) => !o && setPermUser(null)}>
+        <DialogContent className="rounded-none border-border" data-testid="user-perms-dialog">
+          <DialogHeader><DialogTitle className="font-head flex items-center gap-2"><ShieldCheck size={18} className="text-[#0044FF]" /> Permissions — {permUser?.name}</DialogTitle></DialogHeader>
+          <p className="text-xs text-muted-foreground">Activez ou désactivez chaque accès pour cet utilisateur. Les administrateurs disposent de tous les accès.</p>
+          <div className="space-y-1 max-h-80 overflow-y-auto mt-2">
+            {PERMS.map(([key, label]) => (
+              <label key={key} className="flex items-center gap-3 px-3 py-2.5 border border-border hover:bg-secondary text-sm cursor-pointer" data-testid={`perm-${key}`}>
+                <input type="checkbox" checked={!!selPerms[key]} onChange={() => togglePerm(key)} data-testid={`perm-toggle-${key}`} />
+                <span className="flex-1">{label}</span>
+                <span className="text-[9px] uppercase tracking-wider mono text-muted-foreground">{key}</span>
+              </label>
+            ))}
+          </div>
+          <DialogFooter>
+            <button onClick={() => setPermUser(null)} className="px-4 py-2 border border-border text-sm">{t("common.cancel")}</button>
+            <button onClick={savePerms} data-testid="user-perms-save" className="px-4 py-2 bg-[#0044FF] text-white text-sm">{t("common.save")}</button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
