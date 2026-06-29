@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Navigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import { FileText, FileSpreadsheet, FileType2, Download, Loader2, Calendar } from "lucide-react";
@@ -11,7 +12,7 @@ const FORMATS = [
 ];
 
 export default function Reports() {
-  const { t } = useApp();
+  const { t, can } = useApp();
   const [types, setTypes] = useState([]);
   const [sites, setSites] = useState([]);
   const [type, setType] = useState("");
@@ -27,6 +28,8 @@ export default function Reports() {
   }, []);
 
   const cur = types.find((x) => x.key === type);
+
+  if (!can("technician")) return <Navigate to="/" replace />;
 
   const generate = async () => {
     if (!type) return;

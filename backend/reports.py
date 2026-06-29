@@ -65,6 +65,8 @@ def _cell(row, key):
     v = row.get(key, "")
     if isinstance(v, bool):
         return "Oui" if v else "Non"
+    if isinstance(v, float):
+        return f"{round(v, 2)}"
     return "" if v is None else str(v)
 
 

@@ -2,6 +2,14 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [1.8.0] — 2026-06 — Rapports + Alerte ANPR enrichie + Poll réseau périodique
+### Ajouté
+- **Module Rapports** (`/reports`, role technician+) : génération CSV / Excel (openpyxl) / PDF (reportlab) pour 4 jeux — plaques ANPR, événements IA, alertes, équipements réseau. Filtres plage de dates + site (cloisonnés). Endpoints `GET /api/reports/types` et `GET /api/reports/{type}?format=&site_id=&date_from=&date_to=`.
+- **Alerte « liste noire » enrichie** : les notifications Discord (embed avec **photo véhicule** + champ lien) et Telegram (sendPhoto + caption avec **lien caméra**) incluent désormais l'image et un lien profond `/recordings?camera=<id>`. `send_notification(subject, body, image_url, link_url)`. La page Recordings présélectionne la caméra depuis `?camera=`.
+- **Poll réseau périodique côté serveur** : `network_poll_broadcaster` (intervalle `NETWORK_POLL_INTERVAL`, défaut 30s) sonde l'inventaire (simulé), met à jour statut+latence et **lève des alertes de transition** diffusées en temps réel (WebSocket). La page `/network` se rafraîchit automatiquement toutes les 30s.
+### Tests
+- Backend 25/25 (test_reports_sprint.py : 3 formats × 4 types, filtres, 403 viewer, alerte blacklist enrichie sans erreur), frontend 100% (nav role-gating, téléchargements, deep-link caméra). Itération 9.
+
 ## [1.7.0] — 2026-06 — Export de séquence vidéo (timeline → ZIP/MP4)
 ### Ajouté — Sandbox
 - **Export de séquence** depuis la timeline (`/recordings`) : sélection de plage par **glisser sur la timeline** (surbrillance) + champs début/fin + choix de format. **ZIP réel téléchargeable** (manifeste JSON + README + vignettes des segments de la plage). **MP4 mis en file**, marqué « généré en production (FFmpeg) ». Liste des **exports récents** avec statut (Prêt/En file) et téléchargement.
