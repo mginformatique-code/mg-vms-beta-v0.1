@@ -15,6 +15,7 @@ const router = createRouter({
         { path: 'live', name: 'live', component: () => import('../views/LiveView.vue') },
         { path: 'recordings', name: 'recordings', component: () => import('../views/RecordingsView.vue') },
         { path: 'events', name: 'events', component: () => import('../views/EventsView.vue') },
+        { path: 'anpr', name: 'anpr', component: () => import('../views/AnprView.vue'), meta: { permission: 'read_anpr' } },
         { path: 'users', name: 'users', component: () => import('../views/UsersView.vue'), meta: { adminOnly: true } },
         { path: 'settings', name: 'settings', component: () => import('../views/SettingsView.vue'), meta: { adminOnly: true } },
       ],
@@ -27,6 +28,7 @@ router.beforeEach(async (to) => {
   if (!auth.checked) await auth.fetchMe()
   if (to.meta.requiresAuth && !auth.user) return { name: 'login' }
   if (to.meta.adminOnly && !auth.isAdmin) return { name: 'dashboard' }
+  if (to.meta.permission && !auth.can(to.meta.permission as string)) return { name: 'dashboard' }
   if (to.name === 'login' && auth.user) return { name: 'dashboard' }
 })
 

@@ -27,6 +27,9 @@ async function logout() {
         <router-link v-for="l in links" :key="l.to" :to="l.to" class="nav-link" :data-testid="`nav-${l.label}`">
           <span class="icon">{{ l.icon }}</span>{{ l.label }}
         </router-link>
+        <router-link v-if="auth.can('read_anpr')" to="/anpr" class="nav-link" data-testid="nav-anpr">
+          <span class="icon">▤</span>Recherche LAPI
+        </router-link>
         <template v-if="auth.isAdmin">
           <div class="nav-section">Administration</div>
           <router-link to="/users" class="nav-link" data-testid="nav-users"><span class="icon">◉</span>Utilisateurs</router-link>
