@@ -7,7 +7,7 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 - **Permissions granulaires** par utilisateur (en plus des rôles), **gérées uniquement par l'admin** : `view_live`, `view_recordings`, `read_plates`, `stream_hd`, `ptz_control`, `export_files`. Admin = bypass (toutes accordées). Défauts par rôle + overrides par utilisateur (`effective_permissions`).
 - Backend : `require_permission(perm)` (auth.py) appliqué sur snapshot/stream (view_live), qualité **HD/SD** (`GET /api/cameras/{id}/stream`, stream_hd), recordings timeline+playback (view_recordings), `/plates`+`/anpr/detect` (read_plates), PTZ (ptz_control), recordings/plates export (export_files). `permissions` exposé dans `/auth/me` et `/users`.
 - Gestion utilisateur réservée admin (déjà le cas) : création/édition incluent un éditeur de **permissions** (UserCreate/UserUpdate + `_clean_permissions`).
-- Frontend : `hasPerm()` (AppContext), **dialog de permissions** par utilisateur dans `/users` (6 bascules), masquage de la navigation (Enregistrements/ANPR/Véhicules) selon les permissions.
+- Frontend : `hasPerm()` (AppContext), **dialog de permissions** par utilisateur dans `/users` (6 bascules), masquage de la navigation (Live/Enregistrements/ANPR/Véhicules) selon les permissions. **Live View** : contrôles PTZ masqués sans `ptz_control`, badge **HD/SD** selon `stream_hd` ; **panneau d'export** masqué sans `export_files`.
 ### Tests
 - Backend 22/22 (test_permissions.py), frontend 100% (gating nav, éditeur de perms, persistance, bypass admin). Itération 11.
 

@@ -9,10 +9,11 @@ const FEEDS = [
   "https://images.unsplash.com/photo-1693541684739-e714db2637e2?w=600&q=70",
 ];
 
-function Feed({ cam, idx }) {
+function Feed({ cam, idx, canPtz, hd }) {
   const [hover, setHover] = useState(false);
   const online = cam?.status === "online";
   const img = FEEDS[idx % FEEDS.length];
+  const ptz = async (command) => { try { await api.post(`/cameras/${cam.id}/ptz?command=${command}`); } catch (e) {} };
   return (
     <div className="relative bg-black overflow-hidden group" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} data-testid="video-feed">
       {online ? (
@@ -24,17 +25,20 @@ function Feed({ cam, idx }) {
       )}
       <div className="absolute top-0 inset-x-0 flex items-center justify-between px-2 py-1 bg-gradient-to-b from-black/70 to-transparent">
         <span className="text-[10px] mono text-white truncate">{cam?.name || `CAM-${idx + 1}`}</span>
-        {online && <span className="flex items-center gap-1 text-[9px] mono text-[#FF3333]"><Circle size={6} className="fill-[#FF3333] rec-dot" /> REC</span>}
+        <div className="flex items-center gap-1.5">
+          {online && <span data-testid="feed-quality" className="text-[8px] mono px-1 font-bold" style={{ color: hd ? "#00E676" : "#FFB800" }}>{hd ? "HD" : "SD"}</span>}
+          {online && <span className="flex items-center gap-1 text-[9px] mono text-[#FF3333]"><Circle size={6} className="fill-[#FF3333] rec-dot" /> REC</span>}
+        </div>
       </div>
       <div className="absolute bottom-0 inset-x-0 px-2 py-1 bg-gradient-to-t from-black/70 to-transparent flex justify-between">
         <span className="text-[9px] mono text-white/70">{cam?.site_name || ""}</span>
         <span className="text-[9px] mono text-white/70">{new Date().toLocaleTimeString()}</span>
       </div>
-      {hover && online && cam?.ptz_enabled && (
-        <div className="absolute inset-0 flex items-center justify-center gap-1 bg-black/30">
+      {hover && online && cam?.ptz_enabled && canPtz && (
+        <div className="absolute inset-0 flex items-center justify-center gap-1 bg-black/30" data-testid="ptz-controls">
           <div className="grid grid-cols-3 gap-0.5">
-            {[ZoomIn, Move, ZoomOut].map((Ic, i) => (
-              <button key={i} className="w-7 h-7 bg-black/60 hover:bg-[#0044FF] flex items-center justify-center text-white"><Ic size={14} /></button>
+            {[[ZoomIn, "zoom_in"], [Move, "home"], [ZoomOut, "zoom_out"]].map(([Ic, cmd], i) => (
+              <button key={i} onClick={() => ptz(cmd)} className="w-7 h-7 bg-black/60 hover:bg-[#0044FF] flex items-center justify-center text-white"><Ic size={14} /></button>
             ))}
           </div>
         </div>
@@ -44,10 +48,12 @@ function Feed({ cam, idx }) {
 }
 
 export default function LiveView() {
-  const { t } = useApp();
+  const { t, hasPerm } = useApp();
   const [cams, setCams] = useState([]);
   const [layout, setLayout] = useState(9);
   const ref = useRef(null);
+  const canPtz = hasPerm("ptz_control");
+  const hd = hasPerm("stream_hd");
 
   useEffect(() => { api.get("/cameras").then((r) => setCams(r.data)).catch(() => {}); }, []);
 
@@ -68,7 +74,7 @@ export default function LiveView() {
         </div>
       </div>
       <div ref={ref} className="flex-1 grid gap-1 bg-background" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))`, gridAutoRows: "1fr" }}>
-        {slots.map((_, i) => <Feed key={i} cam={cams[i % (cams.length || 1)]} idx={i} />)}
+        {slots.map((_, i) => <Feed key={i} cam={cams[i % (cams.length || 1)]} idx={i} canPtz={canPtz} hd={hd} />)}
       </div>
     </div>
   );

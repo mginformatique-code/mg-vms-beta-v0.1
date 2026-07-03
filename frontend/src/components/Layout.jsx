@@ -10,7 +10,7 @@ import {
 const NAV = [
   { group: "nav.operations", items: [
     { to: "/", icon: LayoutDashboard, key: "nav.dashboard", end: true },
-    { to: "/live", icon: Grid3x3, key: "nav.live" },
+    { to: "/live", icon: Grid3x3, key: "nav.live", perm: "view_live" },
     { to: "/recordings", icon: Film, key: "nav.recordings", perm: "view_recordings" },
     { to: "/cameras", icon: Cctv, key: "nav.cameras" },
     { to: "/network", icon: Network, key: "nav.network", role: "client" },

@@ -38,7 +38,7 @@ function Stat({ icon: Icon, label, value }) {
 }
 
 export default function Recordings() {
-  const { t } = useApp();
+  const { t, hasPerm } = useApp();
   const [searchParams] = useSearchParams();
   const [cams, setCams] = useState([]);
   const [cameraId, setCameraId] = useState("");
@@ -261,6 +261,7 @@ export default function Recordings() {
                 </div>
 
                 {/* Export controls */}
+                {hasPerm("export_files") && (<>
                 <div className="mt-4 pt-3 border-t border-border" data-testid="rec-export-panel">
                   <div className="flex items-center gap-2 mb-2">
                     <Scissors size={14} className="text-[#0044FF]" />
@@ -328,6 +329,7 @@ export default function Recordings() {
                     ))}
                   </div>
                 )}
+                </>)}
               </div>
             </div>
 
