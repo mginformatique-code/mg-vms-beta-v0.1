@@ -73,3 +73,4 @@ Demande utilisateur : (1) architecture propre complète dans /deploy, (2) fronte
 - Enrichir le frontend Vue (recherche LAPI, timeline enregistrements, cartes/plans)
 - Optimisation auto ressources matérielles Phase 2 (sandbox)
 - ✅ Frontend Vue /deploy : vue « Recherche LAPI » ajoutée (filtres plaque/site/liste/dates, photos, badges liste noire/blanche, garde route+nav via permission read_anpr). Build + vue-tsc OK.
+- ✅ Frontend Vue /deploy : timeline 24h des enregistrements dans RecordingsView (sélecteur caméra + date, segments positionnés, hover détail, clic → URL de lecture signée). Build + vue-tsc OK.
