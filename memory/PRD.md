@@ -57,3 +57,18 @@ React + FastAPI + MongoDB (Kubernetes single backend/frontend). Note: the reques
 ## Next tasks
 - Wire real video ingestion pipeline (separate worker/ffmpeg service in production compose)
 - Add alert notification channels + reports module
+
+## Session 2026-06 (fork) — Stack de production /deploy complétée
+Demande utilisateur : (1) architecture propre complète dans /deploy, (2) frontend Vue 3 + Vite + TS pour /deploy, sans toucher au code sandbox, suppression des références "emergent".
+- ✅ /deploy/api/ : API FastAPI complète — SQLAlchemy 2.0 async (psycopg3) + Alembic (migrations auto au boot) + PostgreSQL + Redis + Celery (worker+beat). 17 modules : auth (JWT httpOnly + refresh + brute-force + reset), users (matrice permissions), organizations, sites, cameras (ONVIF/PTZ délégués au service ffmpeg), streams (WebRTC/HLS go2rtc, dégradation SD si !stream_hd), recordings (timeline), playback (URLs signées S3/MinIO), events (WS temps réel via Redis pub/sub), ai (règles + recherche plaques + analytics), notifications, maps, storage, monitoring (stats + métriques Prometheus), audit, settings, health. Versions verrouillées testées en venv propre (50 routes importées OK).
+- ✅ /deploy/notification/ : service consommant la file Redis mgvms:notifications → Email SMTP / Discord / Telegram / Webhook.
+- ✅ /deploy/frontend/ : Vue 3.5 + Vite 6 + TypeScript + Pinia + vue-router. 8 vues (Login, Dashboard temps réel WS, Caméras CRUD, Direct+PTZ+badge SD, Enregistrements+export, Événements+ack, Utilisateurs avec matrice de permissions, Paramètres/canaux notif). Build + vue-tsc : 0 erreur. Dockerfile multi-étapes Node20→Nginx.
+- ✅ Zéro référence "emergent" dans /deploy et /deploy-app (EMERGENT_LLM_KEY supprimée). NB : dans /deploy-app, l'analyse LLM ANPR de la démo ne fonctionnera pas sans clé (feature mock).
+- ✅ Nettoyage : /deploy/db/ supprimé (doublon) — source de vérité = api/app/models.py + api/alembic. Compose corrigé (commande celery app.tasks.celery_app, plus de schema.sql initdb). README /deploy réécrit (Windows/WSL2 + Linux, choix techniques justifiés).
+- ✅ Sandbox intacte (env pip restauré après incident d'auto-install, backend+frontend vérifiés OK).
+- NB sandbox : le code démo (/app/backend, /app/frontend) utilise toujours la clé LLM pour l'ANPR mock — inchangé volontairement.
+
+## Prochaines étapes proposées
+- Tester la stack /deploy chez l'utilisateur (docker compose up) et corriger les retours
+- Enrichir le frontend Vue (recherche LAPI, timeline enregistrements, cartes/plans)
+- Optimisation auto ressources matérielles Phase 2 (sandbox)

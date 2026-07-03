@@ -51,7 +51,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - "pg_data:/var/lib/postgresql/data"
-      - "./db/schema.sql:/docker-entrypoint-initdb.d/00-schema.sql:ro"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 10s
@@ -109,7 +108,7 @@ services:
   worker:
     build: { context: ./api }
     <<: *restart
-    command: ["celery", "-A", "tasks.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+    command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
     env_file: [.env]
     depends_on: [redis, postgres]
     networks: [mgvms]
@@ -117,7 +116,7 @@ services:
   scheduler:
     build: { context: ./api }
     <<: *restart
-    command: ["celery", "-A", "tasks.celery_app", "beat", "--loglevel=info"]
+    command: ["celery", "-A", "app.tasks.celery_app", "beat", "--loglevel=info"]
     env_file: [.env]
     depends_on: [redis]
     networks: [mgvms]

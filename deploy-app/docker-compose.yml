@@ -21,7 +21,6 @@ services:
       JWT_SECRET: ${JWT_SECRET:-please_change_this_secret}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@mg-vms.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@2026}
-      EMERGENT_LLM_KEY: ${EMERGENT_LLM_KEY:-}
     depends_on:
       - mongo
     ports:
