@@ -74,3 +74,4 @@ Demande utilisateur : (1) architecture propre complète dans /deploy, (2) fronte
 - Optimisation auto ressources matérielles Phase 2 (sandbox)
 - ✅ Frontend Vue /deploy : vue « Recherche LAPI » ajoutée (filtres plaque/site/liste/dates, photos, badges liste noire/blanche, garde route+nav via permission read_anpr). Build + vue-tsc OK.
 - ✅ Frontend Vue /deploy : timeline 24h des enregistrements dans RecordingsView (sélecteur caméra + date, segments positionnés, hover détail, clic → URL de lecture signée). Build + vue-tsc OK.
+- ✅ Bugfix VPS utilisateur (erreur ajv au build Docker frontend) : cause = ancienne copie du repo avec Dockerfile npm. Dockerfile actuel (Yarn + yarn.lock) durci avec --frozen-lockfile ; build à froid reproduit et validé par testing_agent (iteration_12, 100%). Section Dépannage ajoutée à deploy-app/README.md.
