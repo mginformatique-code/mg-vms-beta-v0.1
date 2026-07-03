@@ -45,3 +45,24 @@ docker compose down -v             # arrêt + suppression des données Mongo
   et mettez `CORS_ORIGINS=https://app.mondomaine.fr` côté backend.
 - L'IA / ANPR vidéo réel et l'accélération GPU ne font **pas** partie de ce test
   (voir `../deploy/`). Ici l'ANPR fonctionne en mode simulation.
+
+## Dépannage
+
+### Erreur `Cannot find module 'ajv/dist/compile/codegen'` au build frontend
+Cette erreur signifie que le build a utilisé **npm** au lieu de **Yarn + yarn.lock**
+(conflit ajv v8 / ajv-keywords recalculé par npm). Le Dockerfile actuel du dépôt
+utilise `yarn install --frozen-lockfile` : vérifiez que vous buildez bien depuis
+une **copie à jour du dépôt** :
+
+```bash
+cd /home/docker
+rm -rf mg-vms                      # supprimer l'ancienne copie obsolète
+git clone https://github.com/<votre-compte>/mg-vms.git
+cd mg-vms/deploy-app
+cp .env.example .env
+docker compose build --no-cache && docker compose up -d
+```
+
+⚠️ Attention à ne pas cloner le dépôt *à l'intérieur* d'une ancienne copie puis
+builder depuis l'ancienne : `docker compose` utilise les fichiers du dossier courant
+(`../frontend`, `../backend` relatifs au compose).
