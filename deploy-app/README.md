@@ -66,3 +66,15 @@ docker compose build --no-cache && docker compose up -d
 ⚠️ Attention à ne pas cloner le dépôt *à l'intérieur* d'une ancienne copie puis
 builder depuis l'ancienne : `docker compose` utilise les fichiers du dossier courant
 (`../frontend`, `../backend` relatifs au compose).
+
+## Vidéo réelle (go2rtc)
+Depuis la version « réelle », la vue live n'est plus simulée :
+- Le service **go2rtc** ingère les flux **RTSP réels** de vos caméras et les transcode.
+- Ajoutez une caméra avec son URL RTSP (ou via **Découverte ONVIF**) : le flux
+  apparaît en direct dans « Mur vidéo », le test de connexion utilise **ffprobe**
+  (résolution/fps/codec réels), l'instantané est une **vraie frame** du flux.
+- Une **caméra de démonstration** (mire H.264 générée localement) valide le
+  pipeline sans caméra physique.
+- Sur Linux, pour la découverte ONVIF (multicast) et un accès LAN direct,
+  décommentez `network_mode: host` sur le service `go2rtc` et mettez
+  `GO2RTC_URL=http://localhost:1984` dans `.env`.

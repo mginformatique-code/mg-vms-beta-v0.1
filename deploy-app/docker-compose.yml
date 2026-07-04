@@ -10,6 +10,16 @@ services:
       - mongo_data:/data/db
     networks: [mgvms]
 
+  go2rtc:
+    image: alexxit/go2rtc:1.9.8
+    restart: unless-stopped
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml
+      - ../media:/app/media:ro
+    # Conseillé sur Linux pour l'accès direct aux caméras du LAN + découverte ONVIF :
+    # network_mode: host   (et mettre GO2RTC_URL=http://localhost:1984 côté backend)
+    networks: [mgvms]
+
   backend:
     build:
       context: ../backend
@@ -21,8 +31,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:-please_change_this_secret}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@mg-vms.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@2026}
+      GO2RTC_URL: ${GO2RTC_URL:-http://go2rtc:1984}
     depends_on:
       - mongo
+      - go2rtc
     ports:
       - "8001:8001"
     networks: [mgvms]

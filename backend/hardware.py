@@ -1,12 +1,11 @@
 """MG-VMS — Gestion intelligente des ressources matérielles (CPU/GPU) — Phase 1.
 
 Sandbox : CPU/RAM détectés réellement (psutil). GPU détectés si présents
-(nvidia-smi), sinon **inventaire simulé** clairement étiqueté pour piloter l'UI.
+sans GPU physique, l'inventaire GPU est vide.
 La détection/accélération matérielle réelle (CUDA/NVENC/OpenVINO/Coral) vit
 dans /deploy. Persiste la configuration (assignations, profil, priorités, pools).
 """
 import os
-import random
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -114,18 +113,8 @@ def _detect_gpus() -> tuple[list, bool]:
                 return gpus, False
         except Exception:
             pass
-    # Inventaire simulé (sandbox)
-    sim = [
-        {"id": "gpu0", "index": 0, "name": "NVIDIA GeForce RTX 4070", "vendor": "NVIDIA",
-         "vram_mb": 12288, "features": ["CUDA", "NVENC", "NVDEC", "TensorRT", "Vulkan", "OpenCL"]},
-        {"id": "gpu1", "index": 1, "name": "NVIDIA RTX A2000", "vendor": "NVIDIA",
-         "vram_mb": 6144, "features": ["CUDA", "NVENC", "NVDEC", "TensorRT"]},
-        {"id": "igpu", "index": 2, "name": "Intel UHD Graphics 770", "vendor": "Intel",
-         "vram_mb": 2048, "features": ["QuickSync", "OpenVINO", "OpenCL", "DirectML"]},
-        {"id": "coral", "index": 3, "name": "Google Coral Edge TPU", "vendor": "Google",
-         "vram_mb": 0, "features": ["EdgeTPU"]},
-    ]
-    return sim, True
+    # Aucun GPU détecté : inventaire vide (réel)
+    return [], False
 
 
 def _accelerators(gpus: list) -> list:
@@ -169,20 +158,38 @@ async def _load() -> dict:
     return doc
 
 
-# ---------- Monitoring temps réel ----------
+# ---------- Monitoring temps réel (100 % réel) ----------
 def _gpu_monitor(gpus: list) -> list:
-    res = []
-    for g in gpus:
-        coral = g["vendor"] == "Google"
-        util = random.randint(5, 40) if coral else random.randint(20, 92)
-        vram_used = 0 if g["vram_mb"] == 0 else round(g["vram_mb"] * random.uniform(0.25, 0.85))
-        res.append({
-            "id": g["id"], "name": g["name"], "vendor": g["vendor"],
-            "util_pct": util, "vram_mb": g["vram_mb"], "vram_used_mb": vram_used,
-            "temp_c": random.randint(38, 78), "power_w": 0 if coral else random.randint(40, 220),
-            "fan_pct": 0 if coral else random.randint(20, 75),
-        })
-    return res
+    """Métriques GPU réelles via nvidia-smi (vide si aucun GPU)."""
+    if not gpus or not shutil.which("nvidia-smi"):
+        return []
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,memory.total,memory.used,temperature.gpu,utilization.gpu,power.draw,fan.speed",
+             "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=5)
+        res = []
+        for i, line in enumerate(out.stdout.strip().splitlines()):
+            name, vram, vram_used, temp, util, power, fan = [x.strip() for x in line.split(",")]
+            res.append({"id": f"gpu{i}", "name": name, "vendor": "NVIDIA",
+                        "util_pct": int(float(util)), "vram_mb": int(float(vram)),
+                        "vram_used_mb": int(float(vram_used)), "temp_c": int(float(temp)),
+                        "power_w": int(float(power)) if power not in ("N/A", "[N/A]") else 0,
+                        "fan_pct": int(float(fan)) if fan not in ("N/A", "[N/A]") else 0})
+        return res
+    except Exception:
+        return []
+
+
+def _process_cpu(names: tuple[str, ...]) -> float:
+    """Charge CPU réelle cumulée des processus dont le nom correspond."""
+    total = 0.0
+    for p in psutil.process_iter(["name", "cpu_percent"]):
+        try:
+            if (p.info["name"] or "").lower().startswith(names):
+                total += p.info["cpu_percent"] or 0.0
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return round(min(total, 100.0), 1)
 
 
 async def _monitor_snapshot() -> dict:
@@ -193,13 +200,13 @@ async def _monitor_snapshot() -> dict:
     gpus = _gpu_monitor(doc.get("gpus", []))
     return {
         "cpu_pct": sys["cpu"], "ram_pct": sys["ram"],
-        "cpu_temp_c": sys.get("temperature", 0) or random.randint(40, 70),
+        "cpu_temp_c": sys.get("temperature") or None,
         "bandwidth_mbps": sys.get("bandwidth_mbps", 0),
         "streams": streams,
-        "fps": streams * random.randint(20, 30),
-        "ai_load_pct": random.randint(10, 80),
-        "ffmpeg_load_pct": random.randint(10, 70),
-        "power_total_w": sum(g["power_w"] for g in gpus) + random.randint(40, 120),
+        "fps": None,
+        "ai_load_pct": _process_cpu(("python",)),
+        "ffmpeg_load_pct": _process_cpu(("ffmpeg", "ffprobe", "go2rtc")),
+        "power_total_w": sum(g["power_w"] for g in gpus) or None,
         "gpus": gpus,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

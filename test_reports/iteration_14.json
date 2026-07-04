@@ -1,0 +1,28 @@
+{
+  "summary": "Iteration 14: Vehicle color filter case-insensitivity + 13-color palette + AI scenario alerts (7 scenarios) engine and UI. Backend pytest 9/9 passed (color case-insensitive filter, GET/PUT /api/ai/alert-rules with 7 scenarios, PUT clean of unknown keys, enfant_route alert exists with thumbnail/severity/camera/timestamp, intrusion_nocturne triggered within 90s when night window is widened, no _id leak). Frontend Playwright verified: /vehicles page exposes all 13 colors including Jaune/Orange/Violet/Rose/Marron/Beige, auto-search debounced fires GET /api/plates?color=Gris on change (no button click required), /alerts page has data-testid=ai-rules-btn opening a dialog listing all 7 rule toggles (ai-rule-intrusion_nocturne, rodeur, attroupement, vive_allure, collision, enfant_route, vol_vehicule) with ai-rules-save-btn. Real enfant_route + intrusion_nocturne alerts render with data-testid=alert-thumbnail, CRITICAL badge, camera name (Caméra Démo Trafic), timestamp.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "VehicleSearch (and other pages using <select><option>{c}</option></select>)", "issues": ["Pre-existing React hydration warning: '<span> cannot be a child of <option>' from build-time instrumentation wrapping option children. Non-blocking, same as iteration 13."]},
+      {"screen": "AI Rules Dialog", "issues": ["Missing aria-describedby on DialogContent (Radix warning). Non-blocking accessibility hint."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter14_alerts.py", "/app/test_reports/pytest/iter14_alerts.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routers.py:294 uses re.escape + case-insensitive regex on vehicle_color — correct approach for the reported bug.",
+    "VehicleSearch.jsx:18 debounced useEffect on filter object triggers auto-search 300ms after any change — matches PRD.",
+    "PUT /api/ai/alert-rules correctly filters payload against DEFAULT_SCENARIOS keys (rejects unknown scenario names) — good defense.",
+    "Alerts.jsx renders scenario alerts with thumbnail (data URI) + severity badge + camera + timestamp as expected."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter14_alerts.py (new)"],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% for the reviewed flows"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (works)",
+  "seed_data_creation": "None — real system triggered intrusion_nocturne organically once the night window was widened to 0-23; restored to 22-6 afterwards.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All items from user's iteration-14 review are verified. Backend regression file: /app/backend/tests/test_iter14_alerts.py (uses admin login, tolerates empty vehicle color results). Note: scenario cooldown is 180s per (camera, scenario) — if retriggering intrusion_nocturne back-to-back, allow >3 min or use another scenario.",
+  "rca of the issue": "Not applicable — verification of already-implemented fixes."
+}

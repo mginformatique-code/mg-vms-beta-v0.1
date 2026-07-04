@@ -1,40 +1,45 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
-import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Volume2 } from "lucide-react";
+import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle } from "lucide-react";
 
 const LAYOUTS = [1, 4, 9, 16, 25, 36, 49, 64];
-const FEEDS = [
-  "https://images.unsplash.com/photo-1707829248830-578d2b0cbe65?w=600&q=70",
-  "https://images.unsplash.com/photo-1693541684739-e714db2637e2?w=600&q=70",
-];
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+function streamUrl(camId) {
+  const token = localStorage.getItem("mg_token");
+  return `${API}/stream/${camId}/live.mjpeg?token=${encodeURIComponent(token || "")}`;
+}
 
 function Feed({ cam, idx, canPtz, hd }) {
   const [hover, setHover] = useState(false);
+  const [failed, setFailed] = useState(false);
   const online = cam?.status === "online";
-  const img = FEEDS[idx % FEEDS.length];
+  const showStream = online && !failed;
+  useEffect(() => { setFailed(false); }, [cam?.id]);
   const ptz = async (command) => { try { await api.post(`/cameras/${cam.id}/ptz?command=${command}`); } catch (e) {} };
   return (
     <div className="relative bg-black overflow-hidden group" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} data-testid="video-feed">
-      {online ? (
-        <img src={img} alt="" className="w-full h-full object-cover opacity-90" />
+      {showStream ? (
+        <img src={streamUrl(cam.id)} alt="" className="w-full h-full object-cover"
+          onError={() => setFailed(true)} data-testid="live-stream" />
       ) : (
         <div className="w-full h-full flex items-center justify-center bg-[#0a0a0a]">
-          <div className="text-center"><CamIcon size={24} className="mx-auto text-[#FF3333] mb-1" /><span className="text-[10px] uppercase tracking-wider text-[#FF3333]">No Signal</span></div>
+          <div className="text-center"><CamIcon size={24} className="mx-auto text-[#FF3333] mb-1" /><span className="text-[10px] uppercase tracking-wider text-[#FF3333]">{cam ? "No Signal" : "—"}</span></div>
         </div>
       )}
       <div className="absolute top-0 inset-x-0 flex items-center justify-between px-2 py-1 bg-gradient-to-b from-black/70 to-transparent">
         <span className="text-[10px] mono text-white truncate">{cam?.name || `CAM-${idx + 1}`}</span>
         <div className="flex items-center gap-1.5">
-          {online && <span data-testid="feed-quality" className="text-[8px] mono px-1 font-bold" style={{ color: hd ? "#00E676" : "#FFB800" }}>{hd ? "HD" : "SD"}</span>}
-          {online && <span className="flex items-center gap-1 text-[9px] mono text-[#FF3333]"><Circle size={6} className="fill-[#FF3333] rec-dot" /> REC</span>}
+          {showStream && <span data-testid="feed-quality" className="text-[8px] mono px-1 font-bold" style={{ color: hd ? "#00E676" : "#FFB800" }}>{hd ? "HD" : "SD"}</span>}
+          {showStream && <span className="flex items-center gap-1 text-[9px] mono text-[#00E676]"><Circle size={6} className="fill-[#00E676] rec-dot" /> LIVE</span>}
         </div>
       </div>
       <div className="absolute bottom-0 inset-x-0 px-2 py-1 bg-gradient-to-t from-black/70 to-transparent flex justify-between">
         <span className="text-[9px] mono text-white/70">{cam?.site_name || ""}</span>
         <span className="text-[9px] mono text-white/70">{new Date().toLocaleTimeString()}</span>
       </div>
-      {hover && online && cam?.ptz_enabled && canPtz && (
+      {hover && showStream && cam?.ptz_enabled && canPtz && (
         <div className="absolute inset-0 flex items-center justify-center gap-1 bg-black/30" data-testid="ptz-controls">
           <div className="grid grid-cols-3 gap-0.5">
             {[[ZoomIn, "zoom_in"], [Move, "home"], [ZoomOut, "zoom_out"]].map(([Ic, cmd], i) => (
@@ -50,12 +55,19 @@ function Feed({ cam, idx, canPtz, hd }) {
 export default function LiveView() {
   const { t, hasPerm } = useApp();
   const [cams, setCams] = useState([]);
-  const [layout, setLayout] = useState(9);
+  const [layout, setLayout] = useState(4);
   const ref = useRef(null);
   const canPtz = hasPerm("ptz_control");
   const hd = hasPerm("stream_hd");
 
-  useEffect(() => { api.get("/cameras").then((r) => setCams(r.data)).catch(() => {}); }, []);
+  useEffect(() => {
+    api.get("/cameras").then((r) => {
+      const sorted = [...r.data].sort((a, b) =>
+        (b.id === "demo-cam-001") - (a.id === "demo-cam-001") ||
+        (b.status === "online") - (a.status === "online"));
+      setCams(sorted);
+    }).catch(() => {});
+  }, []);
 
   const cols = Math.sqrt(layout);
   const slots = Array.from({ length: layout });
@@ -74,7 +86,7 @@ export default function LiveView() {
         </div>
       </div>
       <div ref={ref} className="flex-1 grid gap-1 bg-background" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))`, gridAutoRows: "1fr" }}>
-        {slots.map((_, i) => <Feed key={i} cam={cams[i % (cams.length || 1)]} idx={i} canPtz={canPtz} hd={hd} />)}
+        {slots.map((_, i) => <Feed key={cams[i]?.id || `empty-${i}`} cam={cams[i]} idx={i} canPtz={canPtz} hd={hd} />)}
       </div>
     </div>
   );

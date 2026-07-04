@@ -1,15 +1,12 @@
-"""MG-VMS — Supervision réseau (SNMP/ICMP) — sandbox MongoDB.
+"""MG-VMS — Supervision réseau RÉELLE (ICMP).
 
-⚠️ Sandbox : pas d'accès SNMP/ICMP réel → le ping/poll est SIMULÉ.
-Le poller de production réel se trouve dans /deploy/network-monitor/.
-Équipements : switches, NAS, UPS, routeurs, serveurs, NVR, génériques.
-Métriques : statut (online/offline/warning) + latence (ICMP). UPS : batterie.
-Alerte critique automatique sur passage hors-ligne ou UPS sur batterie.
+Ping ICMP réel (icmplib) des équipements déclarés : statut, latence, perte de
+paquets. Alerte critique automatique sur passage hors-ligne. La batterie UPS
+nécessite SNMP (configuration ultérieure) : aucun état n'est inventé.
 """
 import os
 import uuid
 import asyncio
-import random
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -62,23 +59,28 @@ async def _raise_equipment_alert(eq: dict, reason: str, background: Optional[Bac
     return alert
 
 
-def _simulate_ping(eq: dict, offline_prob: float = 0.12) -> dict:
-    """Simule une réponse ICMP/SNMP et renvoie les champs mis à jour."""
-    up = random.random() > offline_prob
+async def _real_ping(eq: dict) -> dict:
+    """Ping ICMP réel (icmplib). UPS : batterie via SNMP non configuré → inchangé."""
     update = {"last_seen": datetime.now(timezone.utc).isoformat()}
-    if up:
-        latency = round(random.uniform(0.4, 18.0), 1)
-        update["status"] = "warning" if latency > 12 else "online"
-        update["latency_ms"] = latency
-        update["uptime_sec"] = eq.get("uptime_sec", 0) + random.randint(30, 300)
-    else:
+    ip = (eq.get("ip") or "").strip()
+    if not ip:
         update["status"] = "offline"
         update["latency_ms"] = None
-    if eq.get("type") == "UPS":
-        on_battery = (not up) or random.random() > 0.85
-        update["on_battery"] = on_battery
-        update["battery_pct"] = random.randint(35, 100) if not on_battery else random.randint(8, 60)
-        update["autonomy_min"] = round(update["battery_pct"] * 0.9) if on_battery else None
+        return update
+    try:
+        from icmplib import async_ping
+        host = await async_ping(ip, count=2, interval=0.3, timeout=2, privileged=True)
+        if host.is_alive:
+            latency = round(host.avg_rtt, 1)
+            update["status"] = "warning" if latency > 100 else "online"
+            update["latency_ms"] = latency
+            update["packet_loss_pct"] = round(host.packet_loss * 100)
+        else:
+            update["status"] = "offline"
+            update["latency_ms"] = None
+    except Exception:
+        update["status"] = "offline"
+        update["latency_ms"] = None
     return update
 
 
@@ -189,7 +191,7 @@ async def ping_equipment(eq_id: str, background: BackgroundTasks, user: dict = D
         raise HTTPException(404, "Équipement introuvable")
     prev_status = eq.get("status")
     prev_battery = eq.get("on_battery", False)
-    update = _simulate_ping(eq)
+    update = await _real_ping(eq)
     await db.equipment.update_one({"id": eq_id}, {"$set": update})
     merged = {**eq, **update}
     if prev_status != "offline" and update.get("status") == "offline":
@@ -211,7 +213,7 @@ async def poll_all(background: BackgroundTasks, site_id: Optional[str] = None,
     for eq in equipment:
         prev_status = eq.get("status")
         prev_battery = eq.get("on_battery", False)
-        update = _simulate_ping(eq)
+        update = await _real_ping(eq)
         await db.equipment.update_one({"id": eq["id"]}, {"$set": update})
         merged = {**eq, **update}
         if prev_status != "offline" and update.get("status") == "offline":
@@ -224,67 +226,13 @@ async def poll_all(background: BackgroundTasks, site_id: Optional[str] = None,
     return {"polled": len(equipment), "alerts_raised": alerts_raised}
 
 
-# ============ Seed (idempotent) ============
-async def seed_equipment():
-    if await db.equipment.count_documents({}) > 0:
-        return
-    sites = await db.sites.find({}, {"_id": 0}).to_list(50)
-    if not sites:
-        return
-    VENDORS = {"Switch": ["Cisco", "Aruba", "Netgear"], "Routeur": ["MikroTik", "Cisco", "Ubiquiti"],
-               "NAS": ["Synology", "QNAP"], "UPS": ["APC", "Eaton"], "Serveur": ["Dell", "HPE"],
-               "NVR": ["Hikvision", "Dahua"]}
-    now = datetime.now(timezone.utc).isoformat()
-    docs = []
-
-    def mk(name, typ, site, parent_id, idx):
-        up = random.random() > 0.18
-        st = "offline" if not up else ("warning" if random.random() > 0.8 else "online")
-        d = {
-            "id": str(uuid.uuid4()), "name": name, "type": typ,
-            "site_id": site["id"], "site_name": site["name"],
-            "ip": f"10.{idx}.{random.randint(1, 20)}.{random.randint(2, 254)}",
-            "model": f"{random.choice(VENDORS.get(typ, ['Generic']))} {random.randint(100, 9999)}",
-            "vendor": random.choice(VENDORS.get(typ, ["Generic"])),
-            "parent_id": parent_id,
-            "status": st,
-            "latency_ms": None if st == "offline" else round(random.uniform(0.4, 16.0), 1),
-            "uptime_sec": 0 if st == "offline" else random.randint(3600, 8_000_000),
-            "on_battery": False, "battery_pct": None, "autonomy_min": None,
-            "last_seen": now, "created_at": now,
-        }
-        if typ == "UPS":
-            on_bat = random.random() > 0.8
-            d["on_battery"] = on_bat
-            d["battery_pct"] = random.randint(15, 60) if on_bat else random.randint(70, 100)
-            d["autonomy_min"] = round(d["battery_pct"] * 0.9) if on_bat else None
-            d["status"] = "warning" if on_bat else d["status"]
-        return d
-
-    for si, site in enumerate(sites):
-        router = mk(f"GW-{site['type'][:3].upper()}", "Routeur", site, None, si + 30)
-        docs.append(router)
-        ups = mk(f"UPS-{site['type'][:3].upper()}", "UPS", site, router["id"], si + 30)
-        docs.append(ups)
-        sw1 = mk(f"SW-{site['type'][:3].upper()}-01", "Switch", site, router["id"], si + 30)
-        docs.append(sw1)
-        if random.random() > 0.5:
-            sw2 = mk(f"SW-{site['type'][:3].upper()}-02", "Switch", site, sw1["id"], si + 30)
-            docs.append(sw2)
-        docs.append(mk(f"NAS-{site['type'][:3].upper()}", "NAS", site, sw1["id"], si + 30))
-        docs.append(mk(f"NVR-{site['type'][:3].upper()}", "NVR", site, sw1["id"], si + 30))
-        docs.append(mk(f"SRV-{site['type'][:3].upper()}", "Serveur", site, sw1["id"], si + 30))
-
-    await db.equipment.insert_many([dict(d) for d in docs])
-
-
 # ============ Poll périodique côté serveur ============
 async def _periodic_poll():
     equipment = await db.equipment.find({}, {"_id": 0}).to_list(2000)
     for eq in equipment:
         prev_status = eq.get("status")
         prev_battery = eq.get("on_battery", False)
-        update = _simulate_ping(eq, offline_prob=0.05)  # plus doux pour limiter le flapping
+        update = await _real_ping(eq)
         await db.equipment.update_one({"id": eq["id"]}, {"$set": update})
         merged = {**eq, **update}
         if prev_status != "offline" and update.get("status") == "offline":
@@ -294,7 +242,7 @@ async def _periodic_poll():
 
 
 async def network_poll_broadcaster():
-    """Sonde l'inventaire réseau périodiquement (simulé) et lève les alertes de transition."""
+    """Sonde l'inventaire réseau périodiquement (ICMP réel) et lève les alertes de transition."""
     interval = int(os.environ.get("NETWORK_POLL_INTERVAL", "30"))
     while True:
         await asyncio.sleep(interval)

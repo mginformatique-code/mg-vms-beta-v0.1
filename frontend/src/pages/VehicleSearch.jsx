@@ -3,7 +3,7 @@ import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import { Search, RotateCcw, Car } from "lucide-react";
 
-const COLORS = ["Blanc", "Noir", "Gris", "Bleu", "Rouge", "Vert", "Argent"];
+const COLORS = ["Blanc", "Noir", "Gris", "Bleu", "Rouge", "Vert", "Jaune", "Orange", "Violet", "Rose", "Marron", "Beige", "Argent"];
 const MAKES = ["Renault", "Peugeot", "Citroën", "Volkswagen", "BMW", "Mercedes", "Toyota", "Audi"];
 const VTYPES = ["Voiture", "Camion", "Moto", "Bus", "Utilitaire"];
 const DIRS = ["Nord", "Sud", "Est", "Ouest", "Entrée", "Sortie"];
@@ -14,7 +14,8 @@ export default function VehicleSearch() {
   const [results, setResults] = useState([]);
   const [f, setF] = useState({ plate: "", color: "", make: "", vtype: "", site_id: "", direction: "", date_from: "", date_to: "" });
 
-  useEffect(() => { api.get("/sites").then((r) => setSites(r.data)); search(); }, []);
+  useEffect(() => { api.get("/sites").then((r) => setSites(r.data)); }, []);
+  useEffect(() => { const id = setTimeout(search, 300); return () => clearTimeout(id); }, [f]); // recherche auto à chaque filtre
 
   const search = () => {
     const params = new URLSearchParams();

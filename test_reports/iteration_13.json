@@ -1,0 +1,26 @@
+{
+  "summary": "Iteration 13 review of MG-VMS AI Events / motion / segment correlation. Backend: 7/7 pytest passed against /api/events, /api/recordings/timeline, /api/plates, /api/cameras, /api/dashboard/stats. Frontend: /events page renders 32 real event cards with data-URI thumbnails, types (Personne/Vélo/Voiture/Mouvement), confidence %, camera name, timestamps (fr-FR); Voiture cards show vehicle_color (e.g. 'Gris'), Mouvement cards show motion_pct (e.g. 3.09%, 5.19%, 5.96%). Type filter 'Personne' correctly filters to 15 cards all typed Personne. /recordings with demo-cam-002 selected: Événements stat=25, 29 segments listed with mode labels 'CONTINU' and 'DÉTECTION IA', timeline shows green (AI) colored bars, clicking a segment loads /api/recordings/<id>.mp4 into <video data-testid=rec-video>. Regression: /live, /anpr, dashboard OK.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Recordings (and any page using the shadcn Select with dynamic <option> children)", "issues": ["React hydration warning persists: '<span> cannot be a child of <option>' from <select data-testid=rec-camera-select>. Non-blocking, pre-existing from iteration 12."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter13_events.py", "/app/test_reports/pytest/iter13_events.xml"],
+  "action_items": ["(Optional) Remove <span> wrapper inside <option> in Recordings.jsx (line ~167) to eliminate hydration warning. Non-blocking."],
+  "critical_code_review_comments": [
+    "Events.jsx correctly handles empty state, filters, thumbnail data URI, and vehicle_color/motion_pct optional display. Auto-refresh every 15s is reasonable.",
+    "Recordings timeline color legend (continu/mouvement/detection IA/événement détecté) is clear and matches backend mode values.",
+    "No _id leaks observed in /api/events, /api/recordings/timeline, /api/plates payloads."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter13_events.py (new)"],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% for the reported flow"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (works)",
+  "seed_data_creation": "None (used organic events accumulated by real YOLO on demo-cam-002)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All bug-report items from user are now resolved and verified: events page shows thumbnails+type+confidence+color+timestamp; motion detection produces 'Mouvement' events with motion_pct; vehicle color estimation writes 'Gris' etc. on Voiture events; timeline segment correlation attaches mode='ai'/'motion' with has_event/event_type/event_count, visible as colored bars and 'DÉTECTION IA' labels in the segment list. Backend pytest file: /app/backend/tests/test_iter13_events.py.",
+  "rca of the issue": "Original bug: alerts showed detections but no color/plate/timestamp were persisted, and recordings timeline had no motion/AI events. Fix landed in /app/backend/ai_engine.py (added _detect_motion, _dominant_color_fr, plate enrichment with vehicle_type/vehicle_color) and /app/backend/recorder.py (_event_flags + _refresh_recent_flags). Frontend added /events page (Events.jsx) and Recordings.jsx MODE_COLORS. Verified end-to-end."
+}

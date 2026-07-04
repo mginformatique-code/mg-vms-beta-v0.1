@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import {
-  LayoutDashboard, Grid3x3, Cctv, Building2, ScanLine, Car, Bell, Map,
+  LayoutDashboard, Grid3x3, Cctv, Building2, ScanLine, Car, Bell, Map, Zap,
   ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, ShieldCheck, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server,
 } from "lucide-react";
 
@@ -19,6 +19,7 @@ const NAV = [
     { to: "/map", icon: Map, key: "nav.map" },
   ]},
   { group: "nav.intelligence", items: [
+    { to: "/events", icon: Zap, key: "nav.events" },
     { to: "/anpr", icon: ScanLine, key: "nav.anpr", perm: "read_plates" },
     { to: "/vehicles", icon: Car, key: "nav.vehicles", perm: "read_plates" },
     { to: "/alerts", icon: Bell, key: "nav.alerts" },

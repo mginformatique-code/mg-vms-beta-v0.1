@@ -1,13 +1,13 @@
 import os
 import uuid
-import random
+import asyncio
 import io
 import csv
 import base64
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks, Response, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -49,18 +49,28 @@ async def dashboard_stats(user: dict = Depends(get_current_user)):
 
 @api_router.get("/dashboard/timeseries")
 async def dashboard_timeseries(user: dict = Depends(get_current_user)):
+    """Séries horaires réelles (agrégation Mongo des dernières 24 h)."""
     now = datetime.now(timezone.utc)
+    since = (now - timedelta(hours=24)).isoformat()
+
+    async def hourly_counts(coll) -> dict:
+        pipeline = [
+            {"$match": {"timestamp": {"$gte": since}}},
+            {"$group": {"_id": {"$substr": ["$timestamp", 0, 13]}, "count": {"$sum": 1}}},
+        ]
+        return {row["_id"]: row["count"] async for row in coll.aggregate(pipeline)}
+
+    ev, pl, al = await hourly_counts(db.events), await hourly_counts(db.plates), await hourly_counts(db.alerts)
     points = []
     for i in range(24):
         t = now - timedelta(hours=23 - i)
-        rnd = random.Random(int(t.timestamp() / 3600))
+        key = t.strftime("%Y-%m-%dT%H")
         points.append({
             "time": t.strftime("%H:00"),
-            "events": rnd.randint(2, 28),
-            "plates": rnd.randint(1, 18),
-            "alerts": rnd.randint(0, 6),
+            "events": ev.get(key, 0),
+            "plates": pl.get(key, 0),
+            "alerts": al.get(key, 0),
         })
-    # detection breakdown
     breakdown = []
     cursor = db.events.aggregate([{"$group": {"_id": "$type", "count": {"$sum": 1}}}])
     async for row in cursor:
@@ -126,6 +136,8 @@ class CameraInput(BaseModel):
     username: str = ""
     password: str = ""
     ptz_enabled: bool = False
+    record_enabled: bool = True
+    detect_enabled: bool = False
     lat: Optional[float] = None
     lng: Optional[float] = None
 
@@ -165,6 +177,8 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
     }
     await db.cameras.insert_one(dict(doc))
     await log_audit(user, "camera_created", data.name, f"Site: {site['name']}")
+    from streaming import register_camera_stream
+    await register_camera_stream(doc)
     doc.pop("_id", None); doc.pop("password", None)
     return doc
 
@@ -175,13 +189,19 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
     if res.matched_count == 0:
         raise HTTPException(404, "Caméra introuvable")
     await log_audit(user, "camera_updated", data.name)
-    return await db.cameras.find_one({"id": camera_id}, {"_id": 0, "password": 0})
+    updated = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
+    from streaming import register_camera_stream
+    await register_camera_stream(updated)
+    updated.pop("password", None)
+    return updated
 
 
 @api_router.delete("/cameras/{camera_id}")
 async def delete_camera(camera_id: str, user: dict = Depends(require_role("technician"))):
     cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
     await db.cameras.delete_one({"id": camera_id})
+    from streaming import unregister_camera_stream
+    await unregister_camera_stream(camera_id)
     await log_audit(user, "camera_deleted", cam["name"] if cam else camera_id)
     return {"ok": True}
 
@@ -191,20 +211,12 @@ async def test_camera(camera_id: str, user: dict = Depends(get_current_user)):
     cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
     if not cam:
         raise HTTPException(404, "Caméra introuvable")
-    # Simulated connection test
-    success = random.random() > 0.15
-    status = "online" if success else "offline"
-    await db.cameras.update_one({"id": camera_id}, {"$set": {"status": status, "last_seen": datetime.now(timezone.utc).isoformat()}})
-    await log_audit(user, "camera_tested", cam["name"], f"Résultat: {status}")
-    await broadcast_camera_status({**cam, "status": status})
-    return {
-        "success": success,
-        "status": status,
-        "latency_ms": random.randint(8, 120) if success else None,
-        "resolution": "1920x1080" if success else None,
-        "fps": random.choice([15, 25, 30]) if success else None,
-        "message": "Connexion établie" if success else "Délai dépassé - vérifiez l'URL/RTSP",
-    }
+    from streaming import probe_camera
+    result = await probe_camera(cam)
+    await db.cameras.update_one({"id": camera_id}, {"$set": {"status": result["status"], "last_seen": datetime.now(timezone.utc).isoformat()}})
+    await log_audit(user, "camera_tested", cam["name"], f"Résultat: {result['status']}")
+    await broadcast_camera_status({**cam, "status": result["status"]})
+    return result
 
 
 @api_router.post("/cameras/{camera_id}/snapshot")
@@ -213,11 +225,8 @@ async def snapshot_camera(camera_id: str, user: dict = Depends(require_permissio
     if not cam:
         raise HTTPException(404, "Caméra introuvable")
     await log_audit(user, "snapshot_captured", cam["name"])
-    imgs = [
-        "https://images.unsplash.com/photo-1707829248830-578d2b0cbe65?w=800&q=80",
-        "https://images.unsplash.com/photo-1693541684739-e714db2637e2?w=800&q=80",
-    ]
-    return {"snapshot_url": random.choice(imgs), "captured_at": datetime.now(timezone.utc).isoformat()}
+    # Image réelle extraite du flux via le proxy authentifié (le frontend ajoute le token)
+    return {"snapshot_url": f"/stream/{camera_id}/frame.jpeg", "captured_at": datetime.now(timezone.utc).isoformat()}
 
 
 @api_router.post("/cameras/{camera_id}/ptz")
@@ -243,9 +252,10 @@ async def camera_stream(camera_id: str, user: dict = Depends(require_permission(
     return {
         "camera_id": cam["id"], "name": cam["name"],
         "quality": "HD" if hd else "SD",
-        "resolution": "1920x1080" if hd else "640x480",
-        "stream_url": None,  # flux simulé en sandbox ; WebRTC/HLS via go2rtc en production
-        "simulated": True,
+        "stream_url": f"/stream/{cam['id']}/live.mjpeg",
+        "frame_url": f"/stream/{cam['id']}/frame.jpeg",
+        "engine": "go2rtc",
+        "simulated": False,
     }
 
 
@@ -280,7 +290,8 @@ async def search_plates(response: Response, plate: Optional[str] = None, color: 
     if plate:
         q["plate"] = {"$regex": plate.upper().replace(" ", ""), "$options": "i"}
     if color:
-        q["vehicle_color"] = color
+        import re as _re
+        q["vehicle_color"] = {"$regex": f"^{_re.escape(color)}$", "$options": "i"}
     if make:
         q["vehicle_make"] = make
     if vtype:
@@ -410,6 +421,22 @@ async def delete_watchlist(wid: str, user: dict = Depends(require_role("technici
 
 
 # ============ ALERTS ============
+@api_router.get("/ai/alert-rules")
+async def get_ai_alert_rules(user: dict = Depends(require_role("technician"))):
+    from ai_engine import _get_scenario_rules
+    return await _get_scenario_rules()
+
+
+@api_router.put("/ai/alert-rules")
+async def update_ai_alert_rules(rules: Dict[str, dict], user: dict = Depends(require_role("admin"))):
+    from ai_engine import DEFAULT_SCENARIOS
+    clean = {k: v for k, v in rules.items() if k in DEFAULT_SCENARIOS and isinstance(v, dict)}
+    await db.settings.update_one({"key": "ai_alert_rules"}, {"$set": {"key": "ai_alert_rules", "value": clean}}, upsert=True)
+    await log_audit(user, "ai_rules_updated", details=str(list(clean.keys())))
+    from ai_engine import _get_scenario_rules
+    return await _get_scenario_rules()
+
+
 @api_router.get("/alerts")
 async def list_alerts(response: Response, acknowledged: Optional[bool] = None, limit: int = 100, offset: int = 0, user: dict = Depends(get_current_user)):
     q = {}
@@ -510,14 +537,34 @@ async def recordings_playback(recording_id: str, user: dict = Depends(require_pe
     if allowed is not None and rec.get("site_id") not in allowed:
         raise HTTPException(403, "Accès refusé")
     await log_audit(user, "recording_playback", rec["camera_name"], rec["start"])
-    # Sandbox : pas de fichier réel. En production -> URL présignée MinIO/S3 (cf. recording-service).
+    has_file = bool(rec.get("file_path")) and os.path.exists(rec.get("file_path", ""))
     return {
         "recording": rec,
-        "poster": rec.get("thumbnail"),
-        "stream_url": None,
-        "simulated": True,
-        "message": "Lecture simulée (sandbox). En production : flux MP4 via recording-service / MinIO.",
+        "poster": None,
+        "stream_url": f"/recordings/{recording_id}/media" if has_file else None,
+        "simulated": False,
+        "message": None if has_file else "Fichier introuvable sur le disque.",
     }
+
+
+@api_router.get("/recordings/{recording_id}/media")
+async def recordings_media(recording_id: str, request: Request):
+    """Fichier MP4 réel (lecture <video> — token accepté en query)."""
+    from streaming import stream_user
+    from fastapi.responses import FileResponse
+    user = await stream_user(request, request.query_params.get("token"))
+    if not has_permission(user, "view_recordings"):
+        raise HTTPException(403, "Permission requise : view_recordings")
+    rec = await db.recordings.find_one({"id": recording_id}, {"_id": 0})
+    if not rec:
+        raise HTTPException(404, "Enregistrement introuvable")
+    allowed = allowed_sites(user)
+    if allowed is not None and rec.get("site_id") not in allowed:
+        raise HTTPException(403, "Accès refusé")
+    path = rec.get("file_path")
+    if not path or not os.path.exists(path):
+        raise HTTPException(404, "Fichier vidéo introuvable")
+    return FileResponse(path, media_type="video/mp4", filename=os.path.basename(path))
 
 
 # ============ EXPORT DE SÉQUENCE ============
@@ -561,12 +608,28 @@ async def create_export(data: ExportRequest, user: dict = Depends(require_permis
     }
     if fmt == "zip":
         doc["status"] = "ready"
-        doc["simulated"] = False
-        doc["message"] = "Archive ZIP prête (manifeste + vignettes des segments)."
-    else:  # mp4
-        doc["status"] = "queued"
-        doc["simulated"] = True
-        doc["message"] = "Job MP4 mis en file — assemblé en production via FFmpeg (recording-service / MinIO)."
+        doc["message"] = "Archive ZIP prête (clips MP4 réels + manifeste)."
+    else:  # mp4 : concaténation réelle FFmpeg (sans réencodage)
+        files = [s.get("file_path") for s in segs if s.get("file_path") and os.path.exists(s.get("file_path", ""))]
+        if not files:
+            raise HTTPException(400, "Aucun segment vidéo sur disque dans cette plage")
+        export_dir = os.path.join(os.environ.get("RECORDINGS_DIR", "/app/recordings"), "exports")
+        os.makedirs(export_dir, exist_ok=True)
+        out_path = os.path.join(export_dir, f"{doc['id']}.mp4")
+        list_path = os.path.join(export_dir, f"{doc['id']}.txt")
+        with open(list_path, "w") as lf:
+            lf.write("\n".join(f"file '{f}'" for f in files))
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
+            "-i", list_path, "-c", "copy", out_path)
+        await proc.wait()
+        os.unlink(list_path)
+        if proc.returncode != 0 or not os.path.exists(out_path):
+            raise HTTPException(500, "Échec de l'assemblage FFmpeg")
+        doc["status"] = "ready"
+        doc["file_path"] = out_path
+        doc["size_mb"] = round(os.path.getsize(out_path) / 1e6, 1)
+        doc["message"] = "Clip MP4 assemblé (FFmpeg, copie sans réencodage)."
     await db.exports.insert_one(dict(doc))
     doc.pop("_id", None)
     await log_audit(user, "recording_export", cam["name"], f"{fmt} · {len(segs)} segments")
@@ -583,40 +646,36 @@ async def download_export(export_id: str, user: dict = Depends(require_permissio
     exp = await db.exports.find_one({"id": export_id, "user_id": user["id"]}, {"_id": 0})
     if not exp:
         raise HTTPException(404, "Export introuvable")
-    if exp["format"] != "zip" or exp["status"] != "ready":
-        raise HTTPException(400, "Export non téléchargeable dans le sandbox (MP4 généré en production)")
+    if exp["status"] != "ready":
+        raise HTTPException(400, "Export non prêt")
+    await log_audit(user, "export_downloaded", exp["camera_name"], exp["id"])
+    if exp["format"] == "mp4":
+        from fastapi.responses import FileResponse
+        path = exp.get("file_path")
+        if not path or not os.path.exists(path):
+            raise HTTPException(404, "Fichier d'export introuvable")
+        fname = f"mgvms_export_{exp['camera_name']}_{exp['id'][:8]}.mp4".replace(" ", "_")
+        return FileResponse(path, media_type="video/mp4", filename=fname)
+    # ZIP : clips MP4 réels + manifeste
     import zipfile
-    import urllib.request
     segs = await db.recordings.find({"id": {"$in": exp.get("segment_ids", [])}}, {"_id": 0}).sort("start", 1).to_list(500)
     manifest = {
         "camera": exp["camera_name"], "site": exp["site_name"],
         "range": {"start": exp["start"], "end": exp["end"]},
         "duration_sec": exp["duration_sec"], "segment_count": len(segs),
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "note": "Export sandbox : manifeste + vignettes. En production, ce ZIP contient les clips MP4 concaténés (FFmpeg).",
-        "segments": [{"start": s["start"], "end": s["end"], "mode": s["mode"],
-                      "size_mb": s["size_mb"], "has_event": s.get("has_event", False)} for s in segs],
+        "segments": [{"start": s["start"], "end": s["end"], "mode": s.get("mode"),
+                      "size_mb": s.get("size_mb"), "file": os.path.basename(s.get("file_path") or "")} for s in segs],
     }
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("manifest.json", __import__("json").dumps(manifest, ensure_ascii=False, indent=2))
-        readme = (f"MG-VMS — Export de séquence\nCaméra : {exp['camera_name']}\n"
-                  f"Plage : {exp['start']} -> {exp['end']}\nSegments : {len(segs)}\n\n"
-                  "Sandbox : vignettes incluses. En production, les clips MP4 sont assemblés "
-                  "par le recording-service (FFmpeg) puis stockés sur MinIO/S3.\n")
-        zf.writestr("README.txt", readme)
         for i, s in enumerate(segs):
-            thumb = s.get("thumbnail")
-            if not thumb:
-                continue
-            try:
-                with urllib.request.urlopen(thumb, timeout=5) as r:
-                    zf.writestr(f"thumbnails/seg_{i+1:03d}.jpg", r.read())
-            except Exception:
-                continue
+            path = s.get("file_path")
+            if path and os.path.exists(path):
+                zf.write(path, arcname=f"clips/{i+1:03d}_{os.path.basename(path)}")
     buf.seek(0)
     fname = f"mgvms_export_{exp['camera_name']}_{exp['id'][:8]}.zip".replace(" ", "_")
-    await log_audit(user, "export_downloaded", exp["camera_name"], exp["id"])
     return StreamingResponse(iter([buf.getvalue()]), media_type="application/zip",
                              headers={"Content-Disposition": f"attachment; filename={fname}"})
 

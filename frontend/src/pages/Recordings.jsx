@@ -193,21 +193,11 @@ export default function Recordings() {
               <div className="relative bg-black aspect-video overflow-hidden border border-border" data-testid="rec-player">
                 {selected ? (
                   <>
-                    <img src={selected.thumbnail} alt="" className="w-full h-full object-cover opacity-80" />
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="w-16 h-16 rounded-full bg-[#0044FF]/80 flex items-center justify-center">
-                        <Play size={28} className="text-white ml-1" fill="white" />
-                      </div>
-                    </div>
-                    <div className="absolute top-0 inset-x-0 flex items-center justify-between px-3 py-2 bg-gradient-to-b from-black/80 to-transparent">
+                    <video key={selected.id} controls autoPlay className="w-full h-full object-contain bg-black" data-testid="rec-video"
+                      src={`${process.env.REACT_APP_BACKEND_URL}/api/recordings/${selected.id}/media?token=${encodeURIComponent(localStorage.getItem("mg_token") || "")}`} />
+                    <div className="absolute top-0 inset-x-0 flex items-center justify-between px-3 py-2 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
                       <span className="text-xs mono text-white">{data?.camera?.name}</span>
-                      <span className="flex items-center gap-1 text-[10px] mono text-[#FF3333]">
-                        <Circle size={7} className="fill-[#FF3333] rec-dot" /> {t("rec.playing")}
-                      </span>
-                    </div>
-                    <div className="absolute bottom-0 inset-x-0 px-3 py-2 bg-gradient-to-t from-black/80 to-transparent">
-                      <div className="text-xs mono text-white">{fmtTime(selected.start)} – {fmtTime(selected.end)} · {fmtDur(selected.duration_sec)}</div>
-                      <div className="text-[10px] text-white/60 mt-0.5">{t("rec.simulated")}</div>
+                      <span className="text-xs mono text-white">{fmtTime(selected.start)} – {fmtTime(selected.end)} · {fmtDur(selected.duration_sec)}</span>
                     </div>
                   </>
                 ) : (
@@ -346,7 +336,7 @@ export default function Recordings() {
                 ) : segments.map((seg) => (
                   <button key={seg.id} data-testid={`rec-listitem-${seg.id}`} onClick={() => play(seg)}
                     className={`w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-secondary transition-colors ${selected?.id === seg.id ? "bg-secondary" : ""}`}>
-                    <img src={seg.thumbnail} alt="" className="w-14 h-9 object-cover bg-black shrink-0" />
+                    <div className="w-14 h-9 bg-black shrink-0 flex items-center justify-center"><Film size={14} className="text-white/40" /></div>
                     <div className="min-w-0 flex-1">
                       <div className="text-xs mono">{fmtTime(seg.start)} – {fmtTime(seg.end)}</div>
                       <div className="flex items-center gap-2 mt-0.5">

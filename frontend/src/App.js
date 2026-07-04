@@ -16,6 +16,7 @@ import Cameras from "@/pages/Cameras";
 import Sites from "@/pages/Sites";
 import MapView from "@/pages/MapView";
 import Anpr from "@/pages/Anpr";
+import Events from "@/pages/Events";
 import VehicleSearch from "@/pages/VehicleSearch";
 import Alerts from "@/pages/Alerts";
 import Audit from "@/pages/Audit";
@@ -46,6 +47,7 @@ function AppRoutes() {
       <Route path="/sites" element={<Protected><Sites /></Protected>} />
       <Route path="/map" element={<Protected><MapView /></Protected>} />
       <Route path="/anpr" element={<Protected><Anpr /></Protected>} />
+      <Route path="/events" element={<Protected><Events /></Protected>} />
       <Route path="/vehicles" element={<Protected><VehicleSearch /></Protected>} />
       <Route path="/alerts" element={<Protected><Alerts /></Protected>} />
       <Route path="/audit" element={<Protected><Audit /></Protected>} />

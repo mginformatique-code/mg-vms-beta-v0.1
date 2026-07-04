@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Outils de build pour certaines roues Python (psutil, reportlab, etc.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ curl && rm -rf /var/lib/apt/lists/*
+    gcc g++ curl ffmpeg && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 # emergentintegrations provient d'un index supplémentaire
