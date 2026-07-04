@@ -75,3 +75,19 @@ Demande utilisateur : (1) architecture propre complète dans /deploy, (2) fronte
 - ✅ Frontend Vue /deploy : vue « Recherche LAPI » ajoutée (filtres plaque/site/liste/dates, photos, badges liste noire/blanche, garde route+nav via permission read_anpr). Build + vue-tsc OK.
 - ✅ Frontend Vue /deploy : timeline 24h des enregistrements dans RecordingsView (sélecteur caméra + date, segments positionnés, hover détail, clic → URL de lecture signée). Build + vue-tsc OK.
 - ✅ Bugfix VPS utilisateur (erreur ajv au build Docker frontend) : cause = ancienne copie du repo avec Dockerfile npm. Dockerfile actuel (Yarn + yarn.lock) durci avec --frozen-lockfile ; build à froid reproduit et validé par testing_agent (iteration_12, 100%). Section Dépannage ajoutée à deploy-app/README.md.
+
+## Session 2026-07 — Passage au 100% RÉEL (plus aucune donnée factice)
+- ✅ Vidéo live réelle : go2rtc (binaire persistant /app/go2rtc/go2rtc, supervisor) + proxys authentifiés /api/stream/{id}/live.mjpeg & frame.jpeg (?token=). 2 caméras démo à flux H.264 réels (mire + scène de rue). Test caméra = frame réelle + ffprobe (résolution/fps/codec). Découverte ONVIF réelle (WS-Discovery + onvif-zeep) + UI dans Caméras.
+- ✅ Purge de toutes les données factices (seed.py: flag purged_fake_data_v1). Équipements réseau: ping ICMP réel (icmplib). Matériel: psutil réel, GPU réels uniquement (nvidia-smi). Dashboard timeseries: agrégations Mongo réelles.
+- ✅ Enregistrement réel : recorder.py (FFmpeg segments 120s → /data/recordings, RECORDINGS_DIR env), indexation Mongo, rétention 7j, garde-fou espace disque (2 Go min), relecture <video> réelle (/api/recordings/{id}/media?token=), export ZIP (vrais MP4) + MP4 (concat FFmpeg).
+- ✅ IA réelle : ai_engine.py — YOLO yolo11n CPU (événements Personne/Voiture/... avec vignettes base64, couleur réelle des véhicules par analyse HSV), détection de mouvement réelle (diff d'images, motion_pct), LAPI locale fast-alpr (modèle plaques européennes) avec vehicle_type/color associés, alertes liste noire.
+- ✅ Scénarios d'alertes IA (7, configurables via GET/PUT /api/ai/alert-rules + dialog 'Règles IA' page Alertes) : intrusion_nocturne, vol_vehicule, rodeur, attroupement, vive_allure, collision (accident), enfant_route. Alertes réelles avec vignette + WebSocket + notification.
+- ✅ Nouvelle page 'Événements IA' (/events) : cartes avec vignette/type/confiance/couleur/horodatage + filtres. Corrélation segments ↔ événements (mode ai/motion/continuous dans la timeline de relecture).
+- ✅ Recherche véhicule : recherche auto (debounce), 13 couleurs, filtre insensible à la casse.
+- ✅ deploy-app mis à jour : service go2rtc + ffmpeg dans l'image backend + vidéo démo montée.
+- Incidents résolus : disque /app plein (stockage déplacé /data), ffmpeg/go2rtc effacés par reset d'env (binaires statiques persistants dans /app/bin et /app/go2rtc + PATH dans server.py), ffmpeg héritant du socket uvicorn 8001 (close_fds/start_new_session).
+- Tests : iteration_13 (système réel, 13/14) et iteration_14 (couleurs + scénarios IA, 100%).
+
+## Backlog P1/P2
+- P1 : plaques make/model (modèle dédié), WebRTC faible latence dans l'UI (actuellement MJPEG), page plans de sites (frontend Vue /deploy), PTZ ONVIF réel (relais continuous move)
+- P2 : SNMP UPS réel, optimisation auto CPU/GPU, refactoring routers.py en modules
