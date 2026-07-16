@@ -13,22 +13,73 @@ const SEV = {
 
 function AiRulesDialog({ open, onClose }) {
   const [rules, setRules] = useState(null);
+  const [arming, setArming] = useState(null);
   const [saving, setSaving] = useState(false);
+  const DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 
-  useEffect(() => { if (open) api.get("/ai/alert-rules").then((r) => setRules(r.data)).catch(() => {}); }, [open]);
+  useEffect(() => {
+    if (open) {
+      api.get("/ai/alert-rules").then((r) => setRules(r.data)).catch(() => {});
+      api.get("/ai/arming").then((r) => setArming(r.data)).catch(() => {});
+    }
+  }, [open]);
 
   const save = async () => {
     setSaving(true);
-    try { await api.put("/ai/alert-rules", rules); toast.success("Règles IA enregistrées"); onClose(); }
+    try {
+      await api.put("/ai/alert-rules", rules);
+      await api.put("/ai/arming", arming);
+      toast.success("Règles IA et armement enregistrés");
+      onClose();
+    }
     catch (e) { toast.error("Erreur d'enregistrement"); } finally { setSaving(false); }
+  };
+
+  const toggleDay = (d) => {
+    const days = arming.days.includes(d) ? arming.days.filter((x) => x !== d) : [...arming.days, d];
+    setArming({ ...arming, days });
   };
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="rounded-none border-border max-w-lg">
+      <DialogContent className="rounded-none border-border max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader><DialogTitle className="font-head flex items-center gap-2"><BrainCircuit size={18} /> Règles d'alertes IA</DialogTitle></DialogHeader>
-        {!rules ? <div className="text-sm text-muted-foreground py-6">Chargement...</div> : (
+        {!rules || !arming ? <div className="text-sm text-muted-foreground py-6">Chargement...</div> : (
           <div className="space-y-2">
+            <div className="border border-border p-3 space-y-2" data-testid="arming-section">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">Armement du système</span>
+                <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 border ${arming.armed_now ? "border-[#00E676] text-[#00E676]" : "border-[#FF3333] text-[#FF3333]"}`} data-testid="armed-status">
+                  {arming.armed_now ? "Armé" : "Désarmé"}
+                </span>
+              </div>
+              <select value={arming.mode} data-testid="arming-mode-select"
+                onChange={(e) => setArming({ ...arming, mode: e.target.value })}
+                className="w-full px-2 py-1.5 bg-card border border-input text-sm">
+                <option value="always">Toujours armé</option>
+                <option value="schedule">Selon planning</option>
+                <option value="off">Désarmé (scénarios suspendus)</option>
+              </select>
+              {arming.mode === "schedule" && (
+                <>
+                  <div className="flex gap-1 flex-wrap">
+                    {DAYS.map((lbl, d) => (
+                      <button key={d} onClick={() => toggleDay(d)} data-testid={`arming-day-${d}`}
+                        className={`px-2 py-1 text-xs border ${arming.days.includes(d) ? "bg-[#0044FF] text-white border-[#0044FF]" : "border-border text-muted-foreground"}`}>{lbl}</button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">De</span>
+                    <input type="number" min="0" max="23" value={arming.start_h} data-testid="arming-start"
+                      onChange={(e) => setArming({ ...arming, start_h: +e.target.value })} className="w-16 px-2 py-1 bg-card border border-input text-sm" />
+                    <span className="text-xs text-muted-foreground">h à</span>
+                    <input type="number" min="0" max="24" value={arming.end_h} data-testid="arming-end"
+                      onChange={(e) => setArming({ ...arming, end_h: +e.target.value })} className="w-16 px-2 py-1 bg-card border border-input text-sm" />
+                    <span className="text-xs text-muted-foreground">h (UTC)</span>
+                  </div>
+                </>
+              )}
+            </div>
             {Object.entries(rules).map(([key, r]) => (
               <div key={key} className="flex items-center justify-between border border-border px-3 py-2" data-testid={`ai-rule-${key}`}>
                 <div className="min-w-0 mr-3">

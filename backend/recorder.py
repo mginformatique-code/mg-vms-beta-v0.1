@@ -44,8 +44,8 @@ async def _start_ffmpeg(camera_id: str) -> None:
         str(out),
     ]
     proc = await asyncio.create_subprocess_exec(
-        *cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        close_fds=True, start_new_session=True)  # ne pas hériter du socket uvicorn
+        *cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        close_fds=True, start_new_session=True)  # ne pas hériter du socket uvicorn (passé en stdin par le reloader)
     _processes[camera_id] = proc
     logger.info("Enregistrement démarré : caméra %s (pid %s)", camera_id, proc.pid)
 

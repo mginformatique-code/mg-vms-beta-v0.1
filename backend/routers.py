@@ -421,6 +421,28 @@ async def delete_watchlist(wid: str, user: dict = Depends(require_role("technici
 
 
 # ============ ALERTS ============
+@api_router.get("/ai/arming")
+async def get_arming(user: dict = Depends(require_role("technician"))):
+    from ai_engine import get_arming_config, _is_armed
+    cfg = await get_arming_config()
+    cfg["armed_now"] = await _is_armed(datetime.now(timezone.utc))
+    return cfg
+
+
+@api_router.put("/ai/arming")
+async def update_arming(cfg: dict, user: dict = Depends(require_role("admin"))):
+    from ai_engine import DEFAULT_ARMING, get_arming_config, _is_armed
+    clean = {k: cfg[k] for k in DEFAULT_ARMING if k in cfg}
+    if clean.get("mode") not in ("always", "schedule", "off"):
+        clean.pop("mode", None)
+    await db.settings.update_one({"key": "arming_schedule"},
+                                 {"$set": {"key": "arming_schedule", "value": clean}}, upsert=True)
+    await log_audit(user, "arming_updated", details=str(clean))
+    out = await get_arming_config()
+    out["armed_now"] = await _is_armed(datetime.now(timezone.utc))
+    return out
+
+
 @api_router.get("/ai/alert-rules")
 async def get_ai_alert_rules(user: dict = Depends(require_role("technician"))):
     from ai_engine import _get_scenario_rules

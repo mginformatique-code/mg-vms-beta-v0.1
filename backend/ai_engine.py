@@ -291,7 +291,30 @@ async def _raise_scenario_alert(cam: dict, scenario: str, rule: dict, message: s
             pass
 
 
+# ============ Armement planifié (les scénarios ne sonnent que si le système est armé) ============
+DEFAULT_ARMING = {"mode": "always", "days": [0, 1, 2, 3, 4, 5, 6], "start_h": 0, "end_h": 24}
+
+
+async def get_arming_config() -> dict:
+    doc = await db.settings.find_one({"key": "arming_schedule"}, {"_id": 0})
+    return {**DEFAULT_ARMING, **((doc or {}).get("value") or {})}
+
+
+async def _is_armed(now: datetime) -> bool:
+    cfg = await get_arming_config()
+    if cfg["mode"] == "off":
+        return False
+    if cfg["mode"] == "always":
+        return True
+    if now.weekday() not in (cfg.get("days") or []):
+        return False
+    h, s, e = now.hour, int(cfg["start_h"]), int(cfg["end_h"])
+    return s <= h < e if s < e else (h >= s or h < e)
+
+
 async def _evaluate_scenarios(cam: dict, result: dict, now: datetime) -> None:
+    if not await _is_armed(now):
+        return
     rules = await _get_scenario_rules()
     dets = result["detections"]
     persons = [d for d in dets if d["class"] == "person" and d.get("_bbox")]
