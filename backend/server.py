@@ -22,7 +22,7 @@ from reports import reports_router
 from hardware import hardware_router, seed_hardware
 from security import SecurityMiddleware
 from streaming import stream_router, sync_all_streams, camera_status_loop
-from recorder import recorder_loop, stop_all_recorders
+from recorder import recorder_loop, stop_all_recorders, sweep_orphan_recorders
 from ai_engine import ai_loop
 from seed import seed
 
@@ -59,6 +59,7 @@ async def on_startup():
     await seed()
     await seed_hardware()
     await seed_plugins()
+    await sweep_orphan_recorders()
     asyncio.create_task(metrics_broadcaster())
     asyncio.create_task(network_poll_broadcaster())
     asyncio.create_task(sync_all_streams())

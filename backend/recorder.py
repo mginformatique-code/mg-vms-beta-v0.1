@@ -148,6 +148,46 @@ async def stop_all_recorders() -> None:
         _processes.pop(cam_id, None)
 
 
+async def sweep_orphan_recorders() -> None:
+    """Au démarrage : tue les ffmpeg orphelins (PPID=1) qui enregistrent
+    encore une caméra ; évite l'accumulation après un redémarrage brutal."""
+    try:
+        out = await asyncio.create_subprocess_exec(
+            "pgrep", "-af", "ffmpeg.*cam_",
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        stdout, _ = await out.communicate()
+    except FileNotFoundError:
+        return
+    known_ids = {c["id"] for c in await db.cameras.find({}, {"_id": 0, "id": 1}).to_list(2000)}
+    for line in stdout.decode(errors="ignore").splitlines():
+        try:
+            pid_str, cmd = line.split(" ", 1)
+            pid = int(pid_str)
+        except ValueError:
+            continue
+        # ne tue que les processus dont le camera_id n'existe plus, ou tous ceux
+        # sans parent (adoptés par init) — ils sont forcément des orphelins d'un ancien uvicorn.
+        try:
+            with open(f"/proc/{pid}/status") as f:
+                ppid = next((int(l.split()[1]) for l in f if l.startswith("PPid:")), None)
+        except OSError:
+            continue
+        if ppid != 1:
+            continue  # rattaché à uvicorn actuel : laissé intact
+        import re as _re
+        match = _re.search(r"cam_([0-9a-f-]{36})", cmd)
+        cam_id = match.group(1) if match else None
+        if cam_id and cam_id in known_ids:
+            # orphelin mais pour une caméra encore active : le recorder_loop va relancer un nouveau ffmpeg,
+            # on tue quand même l'ancien pour éviter le double-enregistrement
+            pass
+        try:
+            os.kill(pid, 9)
+            logger.info("ffmpeg orphelin tué (pid=%s, cam=%s)", pid, cam_id)
+        except OSError:
+            pass
+
+
 async def recorder_loop() -> None:
     """Boucle superviseur : démarre/répare les enregistreurs et indexe les segments."""
     RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
