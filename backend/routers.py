@@ -128,7 +128,9 @@ class CameraInput(BaseModel):
     name: str
     site_id: str
     ip: str = ""
-    port: int = 554
+    rtsp_port: int = 554
+    onvif_port: int = 80
+    port: int = 554  # rétro-compatibilité
     protocol: str = "RTSP"
     codec: str = "H264"
     model: str = ""
@@ -178,7 +180,11 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
     await db.cameras.insert_one(dict(doc))
     await log_audit(user, "camera_created", data.name, f"Site: {site['name']}")
     from streaming import register_camera_stream
-    await register_camera_stream(doc)
+    registered = await register_camera_stream(doc)
+    if not registered:
+        # Nettoyage : ne pas laisser une caméra "morte" en base
+        await db.cameras.delete_one({"id": doc["id"]})
+        raise HTTPException(400, "Impossible d'enregistrer le flux dans go2rtc (URL RTSP invalide ou service indisponible)")
     doc.pop("_id", None); doc.pop("password", None)
     return doc
 
@@ -191,7 +197,9 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
     await log_audit(user, "camera_updated", data.name)
     updated = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
     from streaming import register_camera_stream
-    await register_camera_stream(updated)
+    registered = await register_camera_stream(updated)
+    if not registered and camera_id not in {"demo-cam-001", "demo-cam-002"}:
+        raise HTTPException(400, "Impossible de mettre à jour le flux dans go2rtc")
     updated.pop("password", None)
     return updated
 

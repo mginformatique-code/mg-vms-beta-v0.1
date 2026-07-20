@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import socket
 import subprocess
 import time
 from typing import Optional
@@ -45,18 +46,42 @@ def _stream_name(camera_id: str) -> str:
     return f"cam_{camera_id}"
 
 
+def _build_rtsp_url(cam: dict) -> str:
+    """Construit l'URL RTSP en injectant identifiants + port si nécessaire."""
+    url = (cam.get("rtsp_url") or "").strip()
+    if not url:
+        return ""
+    user = (cam.get("username") or "").strip()
+    pwd = cam.get("password") or ""
+    if user and "@" not in url and url.lower().startswith("rtsp://"):
+        url = url.replace("rtsp://", f"rtsp://{user}:{pwd}@", 1)
+    return url
+
+
+async def _stream_registered(name: str) -> bool:
+    """Vérifie que le flux est bien présent côté go2rtc."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{GO2RTC_URL}/api/streams")
+            r.raise_for_status()
+            return name in (r.json() or {})
+    except httpx.HTTPError:
+        return False
+
+
 async def register_camera_stream(cam: dict) -> bool:
     """Déclare (ou met à jour) le flux d'une caméra dans go2rtc."""
     if cam.get("id") in DEMO_IDS:
         return True  # flux de démonstration défini statiquement dans go2rtc.yaml
-    rtsp_url = (cam.get("rtsp_url") or "").strip()
+    rtsp_url = _build_rtsp_url(cam)
     if not rtsp_url.lower().startswith(("rtsp://", "rtmp://", "http://", "https://")):
         return False
     name = _stream_name(cam["id"])
-    if cam.get("username") and "@" not in rtsp_url:
-        rtsp_url = rtsp_url.replace("rtsp://", f"rtsp://{cam['username']}:{cam.get('password', '')}@", 1)
     try:
         async with httpx.AsyncClient(timeout=10) as client:
+            # Supprime l'ancien enregistrement pour repartir propre (évite les producteurs en doublon)
+            await client.delete(f"{GO2RTC_URL}/api/streams", params={"src": name})
+            await client.delete(f"{GO2RTC_URL}/api/streams", params={"src": f"{name}_sd"})
             r = await client.put(f"{GO2RTC_URL}/api/streams",
                                  params=[("name", name), ("src", rtsp_url),
                                          ("src", f"ffmpeg:{name}#video=mjpeg")])
@@ -65,6 +90,10 @@ async def register_camera_stream(cam: dict) -> bool:
                                   params=[("name", f"{name}_sd"),
                                           ("src", f"ffmpeg:{name}#video=mjpeg#width=640")])
             r2.raise_for_status()
+        # Vérifie que go2rtc a bien enregistré le flux
+        if not await _stream_registered(name):
+            logger.warning("go2rtc: flux %s introuvable après enregistrement", name)
+            return False
         return True
     except httpx.HTTPError as e:
         logger.warning("go2rtc: échec enregistrement %s : %s", name, e)
@@ -117,6 +146,15 @@ async def _ensure_demo_camera() -> None:
 
 
 # ============ Test / sonde réels ============
+def _tcp_check(host: str, port: int, timeout: float = 3.0) -> bool:
+    """TCP connect réel : renvoie True si le port est atteignable."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def _ffprobe(rtsp_url: str) -> Optional[dict]:
     """Sonde ffprobe réelle (résolution, fps, codec)."""
     try:
@@ -145,17 +183,22 @@ async def probe_camera(cam: dict) -> dict:
     """Test de connexion réel : frame via go2rtc + ffprobe sur l'URL RTSP."""
     await register_camera_stream(cam)
     name = _stream_name(cam["id"])
+    # Laisse à go2rtc/ffmpeg quelques secondes pour ouvrir le flux
     start = time.monotonic()
     success = False
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": name})
-            success = r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff"
-    except httpx.HTTPError:
-        success = False
+    for _ in range(6):
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": name})
+            if r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff":
+                success = True
+                break
+        except httpx.HTTPError:
+            pass
+        await asyncio.sleep(1)
     latency_ms = int((time.monotonic() - start) * 1000)
     details = None
-    rtsp = (cam.get("rtsp_url") or "").strip()
+    rtsp = _build_rtsp_url(cam)
     if success and rtsp.lower().startswith("rtsp://"):
         details = await asyncio.to_thread(_ffprobe, rtsp)
     return {
@@ -168,6 +211,86 @@ async def probe_camera(cam: dict) -> dict:
         "message": "Connexion établie (flux vérifié)" if success
                    else "Flux injoignable — vérifiez l'URL RTSP / identifiants / réseau",
     }
+
+
+class ConnectivityTestInput(BaseModel):
+    ip: str
+    rtsp_port: int = 554
+    onvif_port: int = 80
+    rtsp_url: str = ""
+    username: str = ""
+    password: str = ""
+
+
+async def test_connectivity(data: ConnectivityTestInput) -> dict:
+    """Test de connectivité RÉEL avant sauvegarde d'une caméra :
+       1) IP joignable (TCP sur port RTSP)  2) service ONVIF (TCP sur port ONVIF)  3) flux RTSP accessible."""
+    ip = (data.ip or "").strip()
+    ip_ok = False
+    onvif_ok = False
+    rtsp_ok = False
+    rtsp_details = None
+    if ip:
+        ip_ok = await asyncio.to_thread(_tcp_check, ip, data.rtsp_port, 3.0)
+        onvif_ok = await asyncio.to_thread(_tcp_check, ip, data.onvif_port, 3.0)
+    rtsp_url = _build_rtsp_url({
+        "rtsp_url": data.rtsp_url, "username": data.username, "password": data.password})
+    if rtsp_url.lower().startswith("rtsp://"):
+        rtsp_details = await asyncio.to_thread(_ffprobe, rtsp_url)
+        rtsp_ok = rtsp_details is not None
+    success = ip_ok and rtsp_ok  # ONVIF signalé mais non bloquant (certaines caméras désactivent ONVIF)
+    return {
+        "success": success,
+        "ip_reachable": ip_ok,
+        "onvif_reachable": onvif_ok,
+        "rtsp_reachable": rtsp_ok,
+        "resolution": (rtsp_details or {}).get("resolution"),
+        "fps": (rtsp_details or {}).get("fps"),
+        "codec": (rtsp_details or {}).get("codec"),
+        "message": (
+            "Tous les tests réussis" if success else
+            "IP injoignable sur le port RTSP" if not ip_ok else
+            "Flux RTSP inaccessible — vérifiez l'URL / identifiants"
+        ),
+    }
+
+
+# ============ Sonde périodique du statut des caméras (online/offline réel) ============
+async def _probe_status_once(cam: dict) -> str:
+    """Extrait une image depuis go2rtc pour vérifier que le flux est réellement lisible."""
+    if cam.get("id") in DEMO_IDS:
+        name = _stream_name(cam["id"])
+    else:
+        if not await register_camera_stream(cam):
+            return "offline"
+        name = _stream_name(cam["id"])
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": name})
+        if r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff":
+            return "online"
+    except httpx.HTTPError:
+        pass
+    return "offline"
+
+
+async def camera_status_loop() -> None:
+    """Sonde périodiquement chaque caméra ; met à jour le statut réel en base."""
+    from datetime import datetime, timezone
+    await asyncio.sleep(15)  # laisser go2rtc / seeding démarrer
+    while True:
+        try:
+            cams = await db.cameras.find({}, {"_id": 0}).to_list(1000)
+            for cam in cams:
+                status = await _probe_status_once(cam)
+                now = datetime.now(timezone.utc).isoformat()
+                changes = {"status": status}
+                if status == "online":
+                    changes["last_seen"] = now
+                await db.cameras.update_one({"id": cam["id"]}, {"$set": changes})
+        except Exception:
+            logger.exception("camera_status_loop : erreur, reprise dans 30s")
+        await asyncio.sleep(30)
 
 
 # ============ Auth des flux (token en query pour <img>/<video>) ============
@@ -252,6 +375,12 @@ async def frame_jpeg(camera_id: str, user: dict = Depends(stream_user)):
 
 
 # ============ Découverte ONVIF réelle ============
+@stream_router.post("/cameras/test-connectivity")
+async def cameras_test_connectivity(body: ConnectivityTestInput, user: dict = Depends(require_role("technician"))):
+    """Test réel de connectivité AVANT sauvegarde d'une caméra (IP, ONVIF, RTSP)."""
+    return await test_connectivity(body)
+
+
 def _ws_discovery(timeout: int = 4) -> list[dict]:
     """WS-Discovery multicast (bloquant, exécuté dans un thread)."""
     from wsdiscovery.discovery import ThreadedWSDiscovery

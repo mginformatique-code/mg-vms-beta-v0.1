@@ -21,8 +21,8 @@ from network import network_router, network_poll_broadcaster
 from reports import reports_router
 from hardware import hardware_router, seed_hardware
 from security import SecurityMiddleware
-from streaming import stream_router, sync_all_streams
-from recorder import recorder_loop
+from streaming import stream_router, sync_all_streams, camera_status_loop
+from recorder import recorder_loop, stop_all_recorders
 from ai_engine import ai_loop
 from seed import seed
 
@@ -62,9 +62,16 @@ async def on_startup():
     asyncio.create_task(metrics_broadcaster())
     asyncio.create_task(network_poll_broadcaster())
     asyncio.create_task(sync_all_streams())
+    asyncio.create_task(camera_status_loop())
     asyncio.create_task(recorder_loop())
     asyncio.create_task(ai_loop())
     logger.info("MG-VMS API démarré - données initialisées + broadcaster temps réel actif")
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await stop_all_recorders()
+    logger.info("MG-VMS API arrêté — enregistreurs ffmpeg terminés")
 
 
 @app.get("/api/")

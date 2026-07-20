@@ -8,8 +8,8 @@ import { toast } from "sonner";
 export default function Login() {
   const { login, t, theme, toggleTheme, lang, toggleLang, user } = useApp();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("admin@mg-vms.com");
-  const [password, setPassword] = useState("Admin@2026");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [totp, setTotp] = useState("");
   const [need2fa, setNeed2fa] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -103,10 +103,10 @@ export default function Login() {
             {!need2fa ? (
               <>
                 <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">{t("common.email")}</label>
-                <input data-testid="login-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required
+                <input data-testid="login-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="off"
                   className="w-full mb-4 px-3 py-2.5 bg-card border border-input focus:border-[#0044FF] outline-none text-sm" />
                 <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">{t("common.password")}</label>
-                <input data-testid="login-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required
+                <input data-testid="login-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="new-password"
                   className="w-full mb-2 px-3 py-2.5 bg-card border border-input focus:border-[#0044FF] outline-none text-sm" />
                 <button type="button" onClick={() => { setForgotMode(true); setForgotEmail(email); setError(""); }} data-testid="forgot-link"
                   className="text-[11px] text-[#0044FF] hover:underline mb-2">{t("auth.forgot_title")} ?</button>
@@ -125,12 +125,6 @@ export default function Login() {
               className="w-full mt-3 py-2.5 bg-[#0044FF] text-white font-medium text-sm hover:bg-[#0033cc] transition-colors flex items-center justify-center gap-2 disabled:opacity-60">
               {loading && <Loader2 size={16} className="animate-spin" />} {t("login.signin")}
             </button>
-
-            <div className="mt-8 text-[11px] text-muted-foreground border-t border-border pt-4 mono leading-relaxed">
-              admin@mg-vms.com / Admin@2026<br />
-              tech@mg-vms.com / Tech@2026<br />
-              viewer@mg-vms.com / Viewer@2026
-            </div>
           </form>
           )}
         </div>

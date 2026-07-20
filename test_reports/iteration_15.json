@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 15 — Vérification complète du pipeline caméra réel MG-VMS. Backend pytest 9/9 (BASE_URL=REACT_APP_BACKEND_URL) : test-connectivity OK sur loopback (success=true, ip/rtsp_reachable=true, resolution 1280x720, codec H264, fps 15), test-connectivity échec propre sur IP injoignable (10.99.99.99), POST /api/cameras avec rtsp_url invalide renvoie 400 et ne persiste rien, création réelle sur loopback → GET /api/cameras/{id} contient rtsp_port=8554 et onvif_port=1984, go2rtc /api/streams expose cam_<id> ET cam_<id>_sd, GET /api/stream/{id}/frame.jpeg (token JWT) renvoie JPEG valide (magic FFD8FF, >5 KB), GET /api/stream/{id}/live.mjpeg renvoie multipart mjpeg avec flux qui coule, statut caméra passe 'online' en <75 s via camera_status_loop, recorder démarre ffmpeg + crée /data/recordings/<id>/ pour la nouvelle caméra, caméras de démo ont bien des segments .mp4 réels sur disque. Frontend Playwright : /login titre = 'MG-VMS', email + password vides à l'ouverture, bloc identifiants démo supprimé, meta description mentionne 'MG-VMS — Plateforme de vidéosurveillance', aucune trace 'Emergent | Fullstack App'. Sur /cameras : bouton Ajouter → dialog avec inputs cam-form-rtsp-port + cam-form-onvif-port, conn-test-btn déclenche le test réel et conn-test-result affiche 'Tous les tests réussis (1280x720 @ 15fps H264)' ; cam-form-submit ferme le dialog après enregistrement, la nouvelle caméra apparaît immédiatement dans la liste, toast 'Caméra ajoutée (flux vérifié)'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "recorder.stop_all_recorders", "issue": "Sur redémarrage brutal du backend (SIGKILL / arrêt non-gracieux), les processus ffmpeg d'enregistrement lancés avec start_new_session=True survivent et deviennent orphelins (PPID=1) — j'ai constaté 2 ffmpeg orphelins liés à des caméras déjà supprimées. Ils sont ré-adoptés par init et continuent à écrire des segments dans /data/recordings/<id>/ pour un camera_id qui n'existe plus. Nettoyés manuellement pendant les tests."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Cameras (site filter <select>)", "issues": ["Warning React hydration existant : '<span> cannot be a child of <option>' émis par l'instrumentation de build (x-source-*) — non-bloquant, déjà signalé en itération 13/14."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter15_camera_pipeline.py", "/app/test_reports/pytest/iter15.xml"],
+  "action_items": [
+    "Optionnel : au démarrage du backend, killer les ffmpeg orphelins (ppid=1) dont l'argument -i contient 'cam_<uuid>' pour des camera_id qui n'existent plus en base (évite l'accumulation de processus fantômes qui remplissent /data/recordings)."
+  ],
+  "critical_code_review_comments": [
+    "streaming.register_camera_stream fait DELETE puis PUT + vérifie la présence via /api/streams — bonne défense contre les producteurs en doublon.",
+    "routers.create_camera + update_camera renvoient 400 et supprimen la ligne DB si go2rtc refuse — parfait rollback.",
+    "streaming.test_connectivity considère ONVIF comme informatif (bloc final : success = ip_ok AND rtsp_ok) — cohérent avec la note E1/T1.",
+    "recorder._start_ffmpeg lance ffmpeg avec start_new_session=True pour éviter d'hériter du socket uvicorn — bien. Contrepartie : orphelins possibles sur SIGKILL (voir minor issue)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter15_camera_pipeline.py (nouveau)"],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% des flux ciblés"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (fonctionne)",
+  "seed_data_creation": "Caméras créées puis supprimées après tests : plusieurs TEST_UI_iter15* / TEST_loopback_iter15 (nettoyage OK, la ligne demo reste intacte).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Fichier de régression : /app/backend/tests/test_iter15_camera_pipeline.py. Lancer avec `export $(grep REACT_APP_BACKEND_URL /app/frontend/.env) && pytest -o addopts= backend/tests/test_iter15_camera_pipeline.py` (le pytest.ini du repo force xdist qu'il faut désactiver pour les fixtures module-scope). Le test test_ffmpeg_recorder_and_directory prend ~90-150 s car recorder_loop tick=30 s + startup=10 s. Petit leak potentiel : ffmpeg orphelins après crash backend (à surveiller si /data/recordings gonfle).",
+  "rca of the issue": "N/A — validation d'une implémentation déjà correcte."
+}

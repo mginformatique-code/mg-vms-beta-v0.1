@@ -2,11 +2,12 @@ import React, { useEffect, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Wifi, WifiOff, Camera as CamIcon, Trash2, Activity, Loader2, X, Radar } from "lucide-react";
+import { Plus, Wifi, WifiOff, Camera as CamIcon, Trash2, Activity, Loader2, X, Radar, CheckCircle2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 const PROTOCOLS = ["RTSP", "ONVIF", "HTTP", "HTTPS"];
 const CODECS = ["H264", "H265", "MJPEG"];
+const EMPTY_FORM = { name: "", site_id: "", ip: "", rtsp_port: 554, onvif_port: 80, protocol: "RTSP", codec: "H264", model: "", rtsp_url: "", username: "", password: "", ptz_enabled: false, record_enabled: true, detect_enabled: false };
 
 export default function Cameras() {
   const { t, can } = useApp();
@@ -18,7 +19,9 @@ export default function Cameras() {
   const [testing, setTesting] = useState(null);
   const [snap, setSnap] = useState(null);
   const [discOpen, setDiscOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", site_id: "", ip: "", protocol: "RTSP", codec: "H264", model: "", rtsp_url: "", username: "", password: "", ptz_enabled: false, record_enabled: true, detect_enabled: false });
+  const [connCheck, setConnCheck] = useState(null); // {ip_reachable, onvif_reachable, rtsp_reachable, success, message}
+  const [checking, setChecking] = useState(false);
+  const [form, setForm] = useState(EMPTY_FORM);
 
   const load = () => {
     const q = filterSite ? `?site_id=${filterSite}` : "";
@@ -26,15 +29,36 @@ export default function Cameras() {
   };
   useEffect(() => { api.get("/sites").then((r) => setSites(r.data)); }, []);
   useEffect(load, [filterSite]);
+  // Rafraîchit le statut périodiquement (le backend sonde en continu)
+  useEffect(() => { const iv = setInterval(load, 15000); return () => clearInterval(iv); }, [filterSite]);
+
+  const runConnectivity = async () => {
+    if (!form.rtsp_url && !form.ip) { toast.error("Renseignez IP et URL RTSP"); return null; }
+    setChecking(true); setConnCheck(null);
+    try {
+      const { data } = await api.post("/cameras/test-connectivity", {
+        ip: form.ip, rtsp_port: Number(form.rtsp_port) || 554, onvif_port: Number(form.onvif_port) || 80,
+        rtsp_url: form.rtsp_url, username: form.username, password: form.password,
+      });
+      setConnCheck(data);
+      return data;
+    } catch (e) { toast.error("Test de connectivité échoué"); return null; }
+    finally { setChecking(false); }
+  };
 
   const submit = async () => {
     if (!form.name || !form.site_id) return toast.error("Nom et site requis");
     setSaving(true);
     try {
+      const check = await runConnectivity();
+      if (!check || !check.success) {
+        toast.error(check?.message || "Connectivité invalide — caméra non sauvegardée");
+        setSaving(false); return;
+      }
       await api.post("/cameras", form);
-      toast.success("Caméra ajoutée"); setOpen(false); load();
-      setForm({ name: "", site_id: "", ip: "", protocol: "RTSP", codec: "H264", model: "", rtsp_url: "", username: "", password: "", ptz_enabled: false, record_enabled: true, detect_enabled: false });
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); } finally { setSaving(false); }
+      toast.success("Caméra ajoutée (flux vérifié)"); setOpen(false); setConnCheck(null);
+      setForm(EMPTY_FORM); load();
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); } finally { setSaving(false); }
   };
 
   const test = async (c) => {
@@ -109,7 +133,7 @@ export default function Cameras() {
         </table>
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setConnCheck(null); setForm(EMPTY_FORM); } }}>
         <DialogContent className="rounded-none border-border max-w-lg">
           <DialogHeader><DialogTitle className="font-head">{t("cam.add")}</DialogTitle></DialogHeader>
           <div className="grid grid-cols-2 gap-3">
@@ -121,9 +145,11 @@ export default function Cameras() {
             </Field>
             <Field label={t("cam.ip")}><input data-testid="cam-form-ip" value={form.ip} onChange={(e) => setForm({ ...form, ip: e.target.value })} className="inp" placeholder="192.168.1.10" /></Field>
             <Field label={t("cam.model")}><input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} className="inp" /></Field>
+            <Field label="Port RTSP"><input data-testid="cam-form-rtsp-port" type="number" min="1" max="65535" value={form.rtsp_port} onChange={(e) => setForm({ ...form, rtsp_port: e.target.value })} className="inp mono" /></Field>
+            <Field label="Port ONVIF"><input data-testid="cam-form-onvif-port" type="number" min="1" max="65535" value={form.onvif_port} onChange={(e) => setForm({ ...form, onvif_port: e.target.value })} className="inp mono" /></Field>
             <Field label={t("cam.protocol")}><select value={form.protocol} onChange={(e) => setForm({ ...form, protocol: e.target.value })} className="inp">{PROTOCOLS.map((p) => <option key={p}>{p}</option>)}</select></Field>
             <Field label={t("cam.codec")}><select value={form.codec} onChange={(e) => setForm({ ...form, codec: e.target.value })} className="inp">{CODECS.map((p) => <option key={p}>{p}</option>)}</select></Field>
-            <div className="col-span-2"><Field label="RTSP URL"><input value={form.rtsp_url} onChange={(e) => setForm({ ...form, rtsp_url: e.target.value })} className="inp mono text-xs" placeholder="rtsp://..." /></Field></div>
+            <div className="col-span-2"><Field label="RTSP URL"><input data-testid="cam-form-rtsp-url" value={form.rtsp_url} onChange={(e) => setForm({ ...form, rtsp_url: e.target.value })} className="inp mono text-xs" placeholder="rtsp://..." /></Field></div>
             <Field label="Login"><input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} className="inp" /></Field>
             <Field label={t("common.password")}><input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="inp" /></Field>
             <div className="col-span-2 flex items-center gap-5">
@@ -131,9 +157,29 @@ export default function Cameras() {
               <label className="flex items-center gap-2 text-sm" data-testid="record-toggle"><input type="checkbox" checked={form.record_enabled} onChange={(e) => setForm({ ...form, record_enabled: e.target.checked })} /> Enregistrement continu</label>
               <label className="flex items-center gap-2 text-sm" data-testid="detect-toggle"><input type="checkbox" checked={form.detect_enabled} onChange={(e) => setForm({ ...form, detect_enabled: e.target.checked })} /> Détection IA (YOLO + LAPI)</label>
             </div>
+            <div className="col-span-2 border border-border p-2.5 text-xs" data-testid="conn-test-block">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="uppercase tracking-wider text-muted-foreground">Test de connectivité (obligatoire)</span>
+                <button type="button" onClick={runConnectivity} disabled={checking} data-testid="conn-test-btn" className="px-2 py-1 border border-border hover:bg-secondary flex items-center gap-1">
+                  {checking && <Loader2 size={12} className="animate-spin" />} Tester
+                </button>
+              </div>
+              {!connCheck && <p className="text-muted-foreground text-[11px]">Renseignez IP + URL RTSP puis cliquez sur « Tester ». La caméra ne sera sauvegardée que si le test passe.</p>}
+              {connCheck && (
+                <div className="grid grid-cols-3 gap-1 mono" data-testid="conn-test-result">
+                  <Result ok={connCheck.ip_reachable} label={`IP:${form.rtsp_port}`} />
+                  <Result ok={connCheck.onvif_reachable} label={`ONVIF:${form.onvif_port}`} soft />
+                  <Result ok={connCheck.rtsp_reachable} label="RTSP" />
+                  <div className="col-span-3 mt-1 text-[11px]" style={{ color: connCheck.success ? "#00E676" : "#FF3333" }}>
+                    {connCheck.message}
+                    {connCheck.resolution && <span className="text-muted-foreground ml-2">({connCheck.resolution}{connCheck.fps ? ` @ ${connCheck.fps}fps` : ""} {connCheck.codec || ""})</span>}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
           <DialogFooter>
-            <button onClick={() => setOpen(false)} className="px-4 py-2 border border-border text-sm hover:bg-secondary">{t("common.cancel")}</button>
+            <button onClick={() => { setOpen(false); setConnCheck(null); }} className="px-4 py-2 border border-border text-sm hover:bg-secondary">{t("common.cancel")}</button>
             <button onClick={submit} disabled={saving} data-testid="cam-form-submit" className="px-4 py-2 bg-[#0044FF] text-white text-sm flex items-center gap-2">{saving && <Loader2 size={15} className="animate-spin" />}{t("common.save")}</button>
           </DialogFooter>
         </DialogContent>
@@ -158,6 +204,16 @@ export default function Cameras() {
 
 function Field({ label, children }) {
   return <div><label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{label}</label>{children}</div>;
+}
+
+function Result({ ok, label, soft }) {
+  const color = ok ? "#00E676" : (soft ? "#FFB800" : "#FF3333");
+  const Ic = ok ? CheckCircle2 : XCircle;
+  return (
+    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 border border-border text-[11px]" style={{ color }}>
+      <Ic size={12} /> {label}
+    </span>
+  );
 }
 
 function OnvifDiscovery({ open, onClose, onPrefill }) {
@@ -218,7 +274,7 @@ function OnvifDiscovery({ open, onClose, onPrefill }) {
                 <div key={p.token} className="flex items-center justify-between text-xs">
                   <span className="mono truncate mr-2">{p.name} — {p.resolution || "?"} {p.codec || ""} — {p.rtsp_url || "URI indisponible"}</span>
                   {p.rtsp_url && (
-                    <button onClick={() => onPrefill({ name: `${probeResult.model} (${probeResult.ip})`, ip: probeResult.ip, model: probeResult.model, rtsp_url: p.rtsp_url, protocol: "RTSP", codec: (p.codec || "H264").toUpperCase().replace("VIDEO", "").trim() || "H264", ptz_enabled: probeResult.ptz_supported, ...creds })}
+                    <button onClick={() => onPrefill({ name: `${probeResult.model} (${probeResult.ip})`, ip: probeResult.ip, model: probeResult.model, rtsp_url: p.rtsp_url, protocol: "RTSP", codec: (p.codec || "H264").toUpperCase().replace("VIDEO", "").trim() || "H264", ptz_enabled: probeResult.ptz_supported, onvif_port: probeResult.onvif_port || 80, rtsp_port: probeResult.rtsp_port || 554, ...creds })}
                       className="px-2 py-1 bg-[#0044FF] text-white shrink-0">Pré-remplir</button>
                   )}
                 </div>

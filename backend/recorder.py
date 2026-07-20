@@ -133,6 +133,21 @@ async def _apply_retention() -> None:
     await db.recordings.delete_many({"start": {"$lt": cutoff}})
 
 
+async def stop_all_recorders() -> None:
+    """Termine proprement tous les ffmpeg enregistreurs (utilisé au shutdown)."""
+    for cam_id, proc in list(_processes.items()):
+        try:
+            if proc.returncode is None:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=3)
+                except asyncio.TimeoutError:
+                    proc.kill()
+        except ProcessLookupError:
+            pass
+        _processes.pop(cam_id, None)
+
+
 async def recorder_loop() -> None:
     """Boucle superviseur : démarre/répare les enregistreurs et indexe les segments."""
     RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
