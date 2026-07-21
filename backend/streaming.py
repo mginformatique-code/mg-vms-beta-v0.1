@@ -76,7 +76,10 @@ async def _stream_registered(name: str) -> bool:
 
 
 async def register_camera_stream(cam: dict) -> bool:
-    """Déclare (ou met à jour) le flux d'une caméra dans go2rtc."""
+    """Déclare (ou met à jour) le flux d'une caméra dans go2rtc.
+    IMPORTANT : ne pas appeler dans une boucle périodique — la re-registration
+    déconnecte tous les consommateurs (live/recorder/IA). Uniquement sur
+    create / update / réparation ciblée."""
     if cam.get("id") in DEMO_IDS:
         return True  # flux de démonstration défini statiquement dans go2rtc.yaml
     rtsp_url = _build_rtsp_url(cam)
@@ -88,15 +91,16 @@ async def register_camera_stream(cam: dict) -> bool:
             # Supprime l'ancien enregistrement pour repartir propre (évite les producteurs en doublon)
             await client.delete(f"{GO2RTC_URL}/api/streams", params={"src": name})
             await client.delete(f"{GO2RTC_URL}/api/streams", params={"src": f"{name}_sd"})
+            # UNE seule source RTSP → un seul décodage. Les consommateurs MJPEG
+            # obtiennent la conversion à la demande via /api/stream.mjpeg (go2rtc pipeline).
             r = await client.put(f"{GO2RTC_URL}/api/streams",
-                                 params=[("name", name), ("src", rtsp_url),
-                                         ("src", f"ffmpeg:{name}#video=mjpeg")])
+                                 params=[("name", name), ("src", rtsp_url)])
             r.raise_for_status()
+            # Variante SD : produite à la demande, uniquement quand un client la consomme
             r2 = await client.put(f"{GO2RTC_URL}/api/streams",
                                   params=[("name", f"{name}_sd"),
                                           ("src", f"ffmpeg:{name}#video=mjpeg#width=640")])
             r2.raise_for_status()
-        # Vérifie que go2rtc a bien enregistré le flux
         if not await _stream_registered(name):
             logger.warning("go2rtc: flux %s introuvable après enregistrement", name)
             return False
@@ -119,14 +123,35 @@ async def unregister_camera_stream(camera_id: str) -> None:
 
 
 async def sync_all_streams() -> None:
-    """Au démarrage : (ré)enregistre toutes les caméras + garantit la caméra de démo."""
+    """Synchronise TOUS les flux caméra + supprime les flux temporaires (`probe_*`).
+    Idempotent : appelé au démarrage."""
+    # 1) Nettoyage des flux temporaires orphelins (test-connectivity ayant survécu à un restart)
+    try:
+        async with httpx.AsyncClient(timeout=6) as client:
+            r = await client.get(f"{GO2RTC_URL}/api/streams")
+            if r.status_code == 200:
+                for name in (r.json() or {}):
+                    if name.startswith("probe_"):
+                        try:
+                            await client.delete(f"{GO2RTC_URL}/api/streams", params={"src": name})
+                            logger.info("go2rtc: flux temporaire nettoyé — %s", name)
+                        except httpx.HTTPError:
+                            pass
+    except httpx.HTTPError:
+        pass
+    # 2) Garantir la caméra de démonstration
     await _ensure_demo_camera()
+    # 3) (Re)-enregistrement des caméras réelles
     cams = await db.cameras.find({}, {"_id": 0}).to_list(1000)
-    count = 0
+    n = 0
     for cam in cams:
+        if cam.get("id") in DEMO_IDS:
+            continue
+        if await _stream_registered(_stream_name(cam["id"])):
+            continue  # déjà présent — ne PAS re-registrer (éviterait le churn)
         if await register_camera_stream(cam):
-            count += 1
-    logger.info("go2rtc: %s flux caméra enregistrés", count)
+            n += 1
+    logger.info("go2rtc: %d flux caméra (ré)enregistrés au démarrage", n)
 
 
 async def _ensure_demo_camera() -> None:
@@ -419,13 +444,14 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
 
 # ============ Sonde périodique du statut des caméras (online/offline réel) ============
 async def _probe_status_once(cam: dict) -> str:
-    """Extrait une image depuis go2rtc pour vérifier que le flux est réellement lisible."""
-    if cam.get("id") in DEMO_IDS:
-        name = _stream_name(cam["id"])
-    else:
+    """Extrait une image depuis go2rtc pour vérifier que le flux est réellement lisible.
+    NE JAMAIS re-enregistrer ici (déconnecterait les consommateurs live/recorder/IA)."""
+    name = _stream_name(cam["id"])
+    if cam.get("id") not in DEMO_IDS and not await _stream_registered(name):
+        # Le flux n'existe pas côté go2rtc (probablement effacé par un restart go2rtc) :
+        # une SEULE ré-inscription ciblée, pas de churn.
         if not await register_camera_stream(cam):
             return "offline"
-        name = _stream_name(cam["id"])
     try:
         async with httpx.AsyncClient(timeout=8) as client:
             r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": name})

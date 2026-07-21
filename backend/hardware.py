@@ -97,7 +97,7 @@ def _detect_ram() -> dict:
 
 
 def _detect_gpus() -> tuple[list, bool]:
-    """Tente nvidia-smi ; sinon renvoie un inventaire simulé (sandbox)."""
+    """Détection GPU via nvidia-smi. Renvoie une liste vide si aucun GPU présent (aucune donnée inventée)."""
     if shutil.which("nvidia-smi"):
         try:
             out = subprocess.run(

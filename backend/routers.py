@@ -479,35 +479,6 @@ async def maybe_blacklist_alert(plate_doc: dict, background: BackgroundTasks):
     return alert
 
 
-class AnprDetect(BaseModel):
-    plate: str
-    camera_id: str = ""
-
-
-@api_router.post("/anpr/detect")
-async def anpr_detect(data: AnprDetect, background: BackgroundTasks, user: dict = Depends(require_permission("read_plates"))):
-    if not await is_enabled("anpr"):
-        raise HTTPException(400, "Module ANPR désactivé")
-    plate = data.plate.upper().strip()
-    cam = await db.cameras.find_one({"id": data.camera_id}, {"_id": 0}) if data.camera_id else await db.cameras.find_one({}, {"_id": 0})
-    wl = await db.watchlist.find_one({"plate": plate}, {"_id": 0})
-    rec = {
-        "id": str(uuid.uuid4()), "plate": plate,
-        "camera_id": cam["id"] if cam else "", "camera_name": cam["name"] if cam else "—",
-        "site_id": cam["site_id"] if cam else "", "site_name": cam["site_name"] if cam else "—",
-        "confidence": 0.95, "vehicle_color": "", "vehicle_make": "", "vehicle_model": "",
-        "vehicle_type": "Inconnu", "country": "France", "direction": "Entrée",
-        "lat": cam["lat"] if cam else 0, "lng": cam["lng"] if cam else 0,
-        "list_status": wl["list_type"] if wl else "none",
-        "vehicle_crop": "", "plate_crop": "", "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.plates.insert_one(dict(rec))
-    rec.pop("_id", None)
-    await log_audit(user, "anpr_detection", plate, rec["list_status"])
-    alert = await maybe_blacklist_alert(rec, background)
-    return {"detection": rec, "blacklist_alert": bool(alert), "list_status": rec["list_status"]}
-
-
 @api_router.get("/watchlist")
 async def list_watchlist(user: dict = Depends(get_current_user)):
     return await db.watchlist.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
@@ -634,7 +605,7 @@ async def create_alert(data: AlertCreate, background: BackgroundTasks, user: dic
 @api_router.get("/recordings/timeline")
 async def recordings_timeline(camera_id: str, date: Optional[str] = None, user: dict = Depends(require_permission("view_recordings"))):
     """Segments enregistrés d'une caméra pour une journée (date ISO AAAA-MM-JJ).
-    Sandbox : flux/lecture simulés. En production, sert le service `recording-service`."""
+    Lit les vraies vidéos MP4 (recorder ffmpeg → /data/recordings/<camera_id>/...)."""
     cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "password": 0})
     if not cam:
         raise HTTPException(404, "Caméra introuvable")

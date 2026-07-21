@@ -88,7 +88,7 @@ export default function Hardware() {
           <button key={k} onClick={() => setTab(k)} data-testid={`hw-tab-${k}`}
             className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${tab === k ? "border-[#0044FF] text-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{lbl}</button>
         ))}
-        {info?.simulated_gpu && <span className="ml-auto text-[10px] uppercase tracking-wider text-[#FFB800]">{t("hw.simulated")}</span>}
+        {info?.gpus?.length === 0 && <span className="ml-auto text-[10px] uppercase tracking-wider text-muted-foreground">Aucun GPU détecté</span>}
       </div>
 
       {/* MATÉRIEL */}

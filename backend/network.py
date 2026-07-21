@@ -183,7 +183,7 @@ async def delete_equipment(eq_id: str, user: dict = Depends(require_role("techni
     return {"ok": True}
 
 
-# ============ ICMP/SNMP (simulé) ============
+# ============ ICMP réel (icmplib) ============
 @network_router.post("/equipment/{eq_id}/ping")
 async def ping_equipment(eq_id: str, background: BackgroundTasks, user: dict = Depends(get_current_user)):
     eq = await db.equipment.find_one({"id": eq_id}, {"_id": 0})

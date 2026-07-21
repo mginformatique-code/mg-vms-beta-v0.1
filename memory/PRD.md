@@ -1,5 +1,19 @@
 # MG-VMS — Product Requirements Document
 
+## Implemented (2026-07)
+- ✅ **SPRINT P0 — Stabilisation caméra & audit sandbox (2.4.0 — 2026-07-21)**
+  - **Root cause du ping-pong Connect/Disconnect identifiée et fixée** : `_probe_status_once` appelait `register_camera_stream` toutes les 30 s → DELETE + PUT sur le flux go2rtc → tous les consommateurs (browser MJPEG, recorder ffmpeg, IA) étaient déconnectés en boucle. Corrigé : la sonde périodique vérifie désormais `/api/streams` (READ-ONLY) et ne (ré-)enregistre que si le flux a réellement disparu.
+  - **Un seul décodage par caméra** : suppression du producteur redondant `ffmpeg:<name>#video=mjpeg` dans le flux principal (`register_camera_stream` + `go2rtc.yaml` démos). Chaque flux a désormais un **producteur unique** ; les consommateurs MJPEG (Live, snapshot, IA) utilisent la conversion à la demande de go2rtc → pipeline partagé Live/Recording/IA/ALPR.
+  - **Nettoyage automatique des flux temporaires** `probe_*` au démarrage du backend (résidus des tests de connectivité qui étaient persistés dans `go2rtc.yaml`).
+  - **Audit sandbox #11** — suppression de tous les éléments de démonstration/fake :
+    - `POST /api/anpr/detect` (endpoint qui injectait des plaques fictives) → supprimé
+    - Bouton « Simuler une détection » (ANPR) → retiré de l'UI
+    - Bouton « Simuler une alerte critique » (Alerts) → retiré (générait un alert `Intrusion détectée — zone périmètre` fictif)
+    - Badges UI trompeurs `hw.simulated` (Hardware) et `net.simulated` (Network) → remplacés par état réel (« Aucun GPU détecté » quand la liste est vide) ou retirés
+    - Commentaires backend « Sandbox : flux/lecture simulés » sur `/recordings/timeline` corrigés — les enregistrements sont 100 % réels (MP4 sur disque)
+  - Vérifié via `ps -ef` + `/api/streams` : 1 seul ffmpeg par flux, 0 producer doublon, aucun churn pendant 65 s d'observation.
+
+
 ## Original problem statement
 Plateforme professionnelle de vidéosurveillance (concurrent de Milestone, Genetec, Nx Witness, UniFi Protect). Cible: collectivités, mairies, entreprises, industries, sites sensibles, parkings. 100% web, responsive, multi-sites, IA (YOLO/ANPR), tracking, alertes, RBAC, monitoring, etc.
 

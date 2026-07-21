@@ -200,7 +200,6 @@ export default function Network() {
           <button key={k} onClick={() => setTab(k)} data-testid={`net-tab-${k}`}
             className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${tab === k ? "border-[#0044FF] text-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{lbl}</button>
         ))}
-        <span className="ml-auto text-[10px] uppercase tracking-wider text-muted-foreground">{t("net.simulated")}</span>
       </div>
 
       {nodes.length === 0 ? (

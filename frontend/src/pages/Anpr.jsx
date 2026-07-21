@@ -52,17 +52,6 @@ export default function Anpr() {
   };
   const delWatch = async (id) => { await api.delete(`/watchlist/${id}`); loadWatch(); load(true); };
 
-  const [simPlate, setSimPlate] = useState("");
-  const simulate = async () => {
-    if (!simPlate.trim()) return toast.error("Plaque requise");
-    try {
-      const { data } = await api.post("/anpr/detect", { plate: simPlate });
-      if (data.blacklist_alert) toast.error(t("anpr.sim_black"));
-      else toast.success(t("anpr.sim_ok"));
-      setSimPlate(""); load(true);
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
-  };
-
   const analyze = async () => {
     if (!file) return toast.error("Sélectionnez une image");
     setAiLoading(true); setAiResult(null);
@@ -126,14 +115,6 @@ export default function Anpr() {
         </TabsContent>
 
         <TabsContent value="watch" className="mt-3">
-          {can("client") && (
-            <div className="flex items-center gap-2 mb-3 bg-card border border-border p-3">
-              <span className="text-xs uppercase tracking-wider text-muted-foreground">{t("anpr.simulate")}</span>
-              <input value={simPlate} onChange={(e) => setSimPlate(e.target.value.toUpperCase())} placeholder={t("anpr.simulate_hint")}
-                data-testid="anpr-sim-input" className="px-3 py-1.5 bg-background border border-input outline-none mono uppercase text-sm focus:border-[#0044FF]" />
-              <button onClick={simulate} data-testid="anpr-sim-btn" className="px-3 py-1.5 bg-[#0044FF] text-white text-sm">{t("anpr.simulate")}</button>
-            </div>
-          )}
           {can("technician") && <button onClick={() => setWlOpen(true)} data-testid="add-watch-btn" className="flex items-center gap-2 px-3 py-2 bg-[#0044FF] text-white text-sm mb-3"><Plus size={16} /> {t("common.add")}</button>}
           <div className="border border-border bg-card divide-y divide-border">
             {watch.map((w) => (
