@@ -7,10 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ curl ffmpeg && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-# emergentintegrations provient d'un index supplémentaire
-RUN pip install --no-cache-dir \
-    --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ \
-    -r requirements.txt
+# Installation des dépendances Python — plus AUCUN index privé requis
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 

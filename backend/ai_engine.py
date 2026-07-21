@@ -179,6 +179,50 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
             "frame_thumb": _jpeg_data_uri(img)}
 
 
+def analyze_image_local(image_bytes: bytes) -> dict:
+    """Analyse LOCALE d'une image (upload manuel) : YOLO + fast-alpr.
+    Renvoie plate, country, vehicle_color, vehicle_make, vehicle_model, vehicle_type, confidence.
+    Aucune dépendance cloud."""
+    import cv2
+    import numpy as np
+    _load_models()
+    img = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        return {"plate": "", "confidence": 0.0}
+    result = {"plate": "", "country": "", "vehicle_color": "", "vehicle_make": "",
+              "vehicle_model": "", "vehicle_type": "Inconnu", "confidence": 0.0, "plate_crop": ""}
+    # Détection véhicule (YOLO) → type + couleur
+    yr = _model.predict(img, conf=AI_CONFIDENCE, verbose=False)[0]
+    best_vehicle = None
+    for box in yr.boxes:
+        cls_name = _model.names[int(box.cls)]
+        if cls_name not in VEHICLE_CLASSES:
+            continue
+        x1, y1, x2, y2 = (max(0, int(v)) for v in box.xyxy[0])
+        area = (x2 - x1) * (y2 - y1)
+        if best_vehicle is None or area > best_vehicle[1]:
+            best_vehicle = ((x1, y1, x2, y2), area, CLASS_FR.get(cls_name, "Inconnu"),
+                            _dominant_color_fr(img[y1:y2, x1:x2]))
+    if best_vehicle:
+        result["vehicle_type"] = best_vehicle[2]
+        result["vehicle_color"] = best_vehicle[3] or ""
+    # Plaque via fast-alpr
+    if _alpr:
+        try:
+            for r in _alpr.predict(img):
+                if not r.ocr or not r.ocr.text:
+                    continue
+                bb = r.detection.bounding_box
+                result["plate"] = r.ocr.text.upper()
+                result["confidence"] = round(float(r.ocr.confidence), 2)
+                crop = img[max(0, bb.y1):bb.y2, max(0, bb.x1):bb.x2]
+                result["plate_crop"] = _jpeg_data_uri(crop, 240) or ""
+                break
+        except Exception:
+            logger.exception("Erreur LAPI locale (upload)")
+    return result
+
+
 async def _fetch_frame(camera_id: str) -> bytes | None:
     try:
         async with httpx.AsyncClient(timeout=12) as client:
@@ -373,8 +417,17 @@ async def _evaluate_scenarios(cam: dict, result: dict, now: datetime) -> None:
 async def _process_camera(cam: dict) -> None:
     frame = await _fetch_frame(cam["id"])
     if frame is None:
+        logger.info("IA · %s (%s) : frame indisponible (flux offline)", cam["name"], cam["id"])
         return
     result = await asyncio.to_thread(_analyze_frame, cam["id"], frame)
+    dets = result.get("detections", [])
+    plates = result.get("plates", [])
+    logger.info(
+        "IA · %s (%s) : %d détection(s) [%s] · mouvement=%.1f%% · %d plaque(s)",
+        cam["name"], cam["id"], len(dets),
+        ",".join(f"{d['label']}:{d['confidence']}" for d in dets) or "aucune",
+        result.get("motion_pct", 0.0), len(plates),
+    )
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
     base = {
@@ -442,6 +495,9 @@ async def ai_loop() -> None:
     while True:
         try:
             cams = await db.cameras.find({"detect_enabled": True, "status": "online"}, {"_id": 0}).to_list(200)
+            if cams:
+                logger.info("IA · cycle : %d caméra(s) réelle(s) à analyser %s",
+                            len(cams), [c["name"] for c in cams])
             for cam in cams:
                 await _process_camera(cam)
         except Exception:

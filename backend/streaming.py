@@ -214,6 +214,7 @@ async def probe_camera(cam: dict) -> dict:
 
 
 class ConnectivityTestInput(BaseModel):
+    mode: str = "rtsp"  # 'rtsp' ou 'onvif'
     ip: str
     rtsp_port: int = 554
     onvif_port: int = 80
@@ -223,33 +224,70 @@ class ConnectivityTestInput(BaseModel):
 
 
 async def test_connectivity(data: ConnectivityTestInput) -> dict:
-    """Test de connectivité RÉEL avant sauvegarde d'une caméra :
-       1) IP joignable (TCP sur port RTSP)  2) service ONVIF (TCP sur port ONVIF)  3) flux RTSP accessible."""
+    """Test de connectivité RÉEL, mode-aware :
+       - mode='rtsp'  : ping IP + accès flux RTSP (ffprobe). ONVIF ignoré.
+       - mode='onvif' : ping IP + interrogation ONVIF (récupère profils/URI RTSP). RTSP non requis."""
     ip = (data.ip or "").strip()
-    ip_ok = False
+    ping_ok = False
     onvif_ok = False
     rtsp_ok = False
     rtsp_details = None
-    if ip:
-        ip_ok = await asyncio.to_thread(_tcp_check, ip, data.rtsp_port, 3.0)
-        onvif_ok = await asyncio.to_thread(_tcp_check, ip, data.onvif_port, 3.0)
+    onvif_info = None
+    if not ip:
+        return {"success": False, "message": "Adresse IP obligatoire",
+                "ip_reachable": False, "onvif_reachable": False, "rtsp_reachable": False}
+
+    if data.mode == "onvif":
+        ping_ok = await asyncio.to_thread(_tcp_check, ip, int(data.onvif_port), 3.0)
+        if ping_ok:
+            try:
+                onvif_info = await asyncio.wait_for(
+                    asyncio.to_thread(_onvif_probe, ip, int(data.onvif_port), data.username, data.password),
+                    timeout=12,
+                )
+                onvif_ok = True
+                # Récupère l'URL RTSP découverte pour affichage
+                first_rtsp = next((p["rtsp_url"] for p in onvif_info.get("profiles", []) if p.get("rtsp_url")), None)
+                if first_rtsp:
+                    rtsp_details = await asyncio.to_thread(_ffprobe, first_rtsp)
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.info("test_connectivity ONVIF échec : %s", type(e).__name__)
+        success = ping_ok and onvif_ok
+        return {
+            "success": success, "mode": "onvif",
+            "ip_reachable": ping_ok, "onvif_reachable": onvif_ok, "rtsp_reachable": bool(rtsp_details),
+            "manufacturer": (onvif_info or {}).get("manufacturer"),
+            "model": (onvif_info or {}).get("model"),
+            "ptz_supported": (onvif_info or {}).get("ptz_supported"),
+            "profiles_count": len((onvif_info or {}).get("profiles", [])),
+            "discovered_rtsp": next((p["rtsp_url"] for p in (onvif_info or {}).get("profiles", []) if p.get("rtsp_url")), None),
+            "resolution": (rtsp_details or {}).get("resolution"),
+            "fps": (rtsp_details or {}).get("fps"),
+            "codec": (rtsp_details or {}).get("codec"),
+            "message": (
+                "ONVIF OK — profils découverts" if success else
+                "Port ONVIF injoignable" if not ping_ok else
+                "Service ONVIF injoignable — vérifiez identifiants"
+            ),
+        }
+
+    # Mode RTSP pur
+    ping_ok = await asyncio.to_thread(_tcp_check, ip, int(data.rtsp_port), 3.0)
     rtsp_url = _build_rtsp_url({
         "rtsp_url": data.rtsp_url, "username": data.username, "password": data.password})
     if rtsp_url.lower().startswith("rtsp://"):
         rtsp_details = await asyncio.to_thread(_ffprobe, rtsp_url)
         rtsp_ok = rtsp_details is not None
-    success = ip_ok and rtsp_ok  # ONVIF signalé mais non bloquant (certaines caméras désactivent ONVIF)
+    success = ping_ok and rtsp_ok
     return {
-        "success": success,
-        "ip_reachable": ip_ok,
-        "onvif_reachable": onvif_ok,
-        "rtsp_reachable": rtsp_ok,
+        "success": success, "mode": "rtsp",
+        "ip_reachable": ping_ok, "onvif_reachable": None, "rtsp_reachable": rtsp_ok,
         "resolution": (rtsp_details or {}).get("resolution"),
         "fps": (rtsp_details or {}).get("fps"),
         "codec": (rtsp_details or {}).get("codec"),
         "message": (
-            "Tous les tests réussis" if success else
-            "IP injoignable sur le port RTSP" if not ip_ok else
+            "RTSP OK — flux vérifié" if success else
+            "IP injoignable sur le port RTSP" if not ping_ok else
             "Flux RTSP inaccessible — vérifiez l'URL / identifiants"
         ),
     }

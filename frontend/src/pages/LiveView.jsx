@@ -13,16 +13,25 @@ function streamUrl(camId) {
 
 function Feed({ cam, idx, canPtz, hd }) {
   const [hover, setHover] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const retryTimer = useRef(null);
   const online = cam?.status === "online";
-  const showStream = online && !failed;
-  useEffect(() => { setFailed(false); }, [cam?.id]);
+  useEffect(() => { setReloadKey(0); }, [cam?.id]);
+  useEffect(() => () => { if (retryTimer.current) clearTimeout(retryTimer.current); }, []);
+  const handleError = () => {
+    // Reconnexion automatique en cas de coupure du MJPEG go2rtc
+    if (retryTimer.current) clearTimeout(retryTimer.current);
+    retryTimer.current = setTimeout(() => setReloadKey((k) => k + 1), 2500);
+  };
   const ptz = async (command) => { try { await api.post(`/cameras/${cam.id}/ptz?command=${command}`); } catch (e) {} };
   return (
     <div className="relative bg-black overflow-hidden group" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} data-testid="video-feed">
-      {showStream ? (
-        <img src={streamUrl(cam.id)} alt="" className="w-full h-full object-cover"
-          onError={() => setFailed(true)} data-testid="live-stream" />
+      {online ? (
+        <img
+          src={`${streamUrl(cam.id)}&r=${reloadKey}`}
+          alt="" className="w-full h-full object-cover"
+          onError={handleError} data-testid="live-stream"
+        />
       ) : (
         <div className="w-full h-full flex items-center justify-center bg-[#0a0a0a]">
           <div className="text-center"><CamIcon size={24} className="mx-auto text-[#FF3333] mb-1" /><span className="text-[10px] uppercase tracking-wider text-[#FF3333]">{cam ? "No Signal" : "—"}</span></div>
@@ -31,15 +40,15 @@ function Feed({ cam, idx, canPtz, hd }) {
       <div className="absolute top-0 inset-x-0 flex items-center justify-between px-2 py-1 bg-gradient-to-b from-black/70 to-transparent">
         <span className="text-[10px] mono text-white truncate">{cam?.name || `CAM-${idx + 1}`}</span>
         <div className="flex items-center gap-1.5">
-          {showStream && <span data-testid="feed-quality" className="text-[8px] mono px-1 font-bold" style={{ color: hd ? "#00E676" : "#FFB800" }}>{hd ? "HD" : "SD"}</span>}
-          {showStream && <span className="flex items-center gap-1 text-[9px] mono text-[#00E676]"><Circle size={6} className="fill-[#00E676] rec-dot" /> LIVE</span>}
+          {online && <span data-testid="feed-quality" className="text-[8px] mono px-1 font-bold" style={{ color: hd ? "#00E676" : "#FFB800" }}>{hd ? "HD" : "SD"}</span>}
+          {online && <span className="flex items-center gap-1 text-[9px] mono text-[#00E676]"><Circle size={6} className="fill-[#00E676] rec-dot" /> LIVE</span>}
         </div>
       </div>
       <div className="absolute bottom-0 inset-x-0 px-2 py-1 bg-gradient-to-t from-black/70 to-transparent flex justify-between">
         <span className="text-[9px] mono text-white/70">{cam?.site_name || ""}</span>
         <span className="text-[9px] mono text-white/70">{new Date().toLocaleTimeString()}</span>
       </div>
-      {hover && showStream && cam?.ptz_enabled && canPtz && (
+      {hover && online && cam?.ptz_enabled && canPtz && (
         <div className="absolute inset-0 flex items-center justify-center gap-1 bg-black/30" data-testid="ptz-controls">
           <div className="grid grid-cols-3 gap-0.5">
             {[[ZoomIn, "zoom_in"], [Move, "home"], [ZoomOut, "zoom_out"]].map(([Ic, cmd], i) => (

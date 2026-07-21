@@ -22,6 +22,18 @@ React + FastAPI + MongoDB (Kubernetes single backend/frontend). Note: the reques
 7. Alertes + Audit + Carte OSM
 8. Bilingue FR/EN, thème clair/sombre
 
+## Implemented (2026-07)
+- ✅ **PRODUCTION READINESS #2 — Modes RTSP/ONVIF séparés (2.2.0 — 2026-07-21)**
+  - **CameraInput** gagne un champ `mode` (`rtsp` | `onvif`). Frontend : toggle « Mode RTSP » / « Mode ONVIF » en haut du dialog, avec bascule des champs affichés.
+  - **Mode RTSP** : valide seulement Port RTSP + URL RTSP (ffprobe).
+  - **Mode ONVIF** : valide seulement Port ONVIF + identifiants ONVIF. L'URL RTSP est **auto-découverte** via `GetStreamUri` sur le premier profil, puis registrée dans go2rtc. Aucune saisie RTSP requise.
+  - `POST /api/cameras/test-connectivity` désormais mode-aware.
+  - `POST /api/cameras` et `PUT /api/cameras/{id}` supportent les deux modes ; TCP pré-check ONVIF (fail-fast 3 s) pour éviter les timeouts SOAP sur hôtes injoignables.
+  - **Édition de caméra** : bouton crayon dans la liste, dialog partagé qui accepte modification de nom, IP, protocole, ports, credentials, URL RTSP, enregistrement, IA. `PUT` recharge automatiquement la config go2rtc.
+  - **Live vidéo stable** : `<img>` MJPEG (via go2rtc) avec reconnexion automatique (backoff 2.5 s) au lieu de tomber sur « No Signal ». Le RTSP brut n'est JAMAIS exposé au frontend — seulement `live.mjpeg`/`frame.jpeg` du backend proxy.
+  - **IA logs clairs** : chaque cycle et chaque caméra loggue `IA · <name> (<id>) : N détection(s) [Personne:0.53, ...] · mouvement=X% · N plaque(s)` dans `backend.err.log`.
+  - **Dépendances propres** : `litellm` (URL customer-assets) et `emergentintegrations` retirés de `requirements.txt`. Endpoint `/api/ai/analyze-plate` réécrit avec le pipeline **local** (`fast-alpr` + YOLO) — zéro cloud, zéro clé LLM. Dockerfile backend nettoyé (plus de `--extra-index-url`). `docker compose up --build` fonctionne depuis un clone propre.
+
 ## Implemented (2026-06)
 - ✅ **PIPELINE CAMÉRA RÉEL / PRODUCTION (2.1.0 — 2026-07-20)** : (1) enregistrement auto dans go2rtc après POST/PUT `/api/cameras` + vérification `/api/streams` avant retour succès ; rollback DB (HTTP 400) si go2rtc refuse. (2) `CameraInput` ajoute `rtsp_port` (554) et `onvif_port` (80) configurables. (3) `POST /api/cameras/test-connectivity` : TCP ping IP:rtsp_port + IP:onvif_port + ffprobe RTSP (résolution/fps/codec). Sauvegarde bloquée côté UI si test KO. (4) `camera_status_loop` (30 s) : statut Online/Offline reflète l'état RÉEL du flux (frame JPEG lisible). (5) recorder : `stop_all_recorders()` au shutdown + `sweep_orphan_recorders()` au démarrage. (6) Login : plus de pré-remplissage ni bloc identifiants démo. (7) Branding Emergent supprimé (title = `MG-VMS`, meta description, script emergent-main.js retiré). Backend pytest 9/9 + frontend Playwright 100% (itération 15).
 - ✅ PERMISSIONS GRANULAIRES (2.0.0) : par-utilisateur, gérées **uniquement par admin** — view_live, view_recordings, read_plates, stream_hd (HD/SD), ptz_control, export_files. `require_permission` appliqué sur les endpoints concernés ; éditeur de permissions dans `/users` + masquage nav. Tests 22/22 backend + frontend 100% (itération 11).

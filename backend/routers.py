@@ -127,6 +127,7 @@ async def delete_site(site_id: str, user: dict = Depends(require_role("admin")))
 class CameraInput(BaseModel):
     name: str
     site_id: str
+    mode: str = "rtsp"  # 'rtsp' ou 'onvif'
     ip: str = ""
     rtsp_port: int = 554
     onvif_port: int = 80
@@ -169,20 +170,51 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
     site = await db.sites.find_one({"id": data.site_id}, {"_id": 0})
     if not site:
         raise HTTPException(400, "Site invalide")
+
+    payload = data.model_dump()
+    # Mode ONVIF : découverte automatique de l'URL RTSP via le service ONVIF
+    if data.mode == "onvif":
+        if not data.ip:
+            raise HTTPException(400, "Mode ONVIF : l'adresse IP est obligatoire")
+        from streaming import _onvif_probe, _tcp_check
+        # Pré-check TCP rapide (3s) — évite d'attendre le timeout SOAP complet sur un hôte injoignable
+        if not await asyncio.to_thread(_tcp_check, data.ip, int(data.onvif_port), 3.0):
+            raise HTTPException(400, f"Port ONVIF {data.onvif_port} injoignable sur {data.ip}")
+        try:
+            info = await asyncio.wait_for(
+                asyncio.to_thread(_onvif_probe, data.ip, int(data.onvif_port), data.username, data.password),
+                timeout=15,
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(504, "Appareil ONVIF injoignable (délai dépassé)")
+        except Exception as e:
+            raise HTTPException(400, f"ONVIF injoignable : {type(e).__name__} — vérifiez IP/port/identifiants")
+        # Prend le premier profil disposant d'une URI RTSP réelle
+        rtsp = next((p["rtsp_url"] for p in info.get("profiles", []) if p.get("rtsp_url")), None)
+        if not rtsp:
+            raise HTTPException(400, "Aucun profil ONVIF n'a renvoyé d'URL RTSP")
+        payload["rtsp_url"] = rtsp
+        payload["protocol"] = "ONVIF"
+        if info.get("model"):
+            payload["model"] = payload.get("model") or f"{info.get('manufacturer','')} {info['model']}".strip()
+        payload["ptz_enabled"] = bool(info.get("ptz_supported"))
+    else:  # mode RTSP pur
+        if not (payload.get("rtsp_url") or "").lower().startswith("rtsp://"):
+            raise HTTPException(400, "Mode RTSP : l'URL RTSP est obligatoire (rtsp://…)")
+
     now = datetime.now(timezone.utc).isoformat()
     doc = {
         "id": str(uuid.uuid4()), "status": "offline", "last_seen": now, "created_at": now,
         "site_name": site["name"],
         "lat": data.lat if data.lat is not None else site["lat"],
         "lng": data.lng if data.lng is not None else site["lng"],
-        **data.model_dump(),
+        **payload,
     }
     await db.cameras.insert_one(dict(doc))
-    await log_audit(user, "camera_created", data.name, f"Site: {site['name']}")
+    await log_audit(user, "camera_created", data.name, f"Site: {site['name']} · Mode: {data.mode}")
     from streaming import register_camera_stream
     registered = await register_camera_stream(doc)
     if not registered:
-        # Nettoyage : ne pas laisser une caméra "morte" en base
         await db.cameras.delete_one({"id": doc["id"]})
         raise HTTPException(400, "Impossible d'enregistrer le flux dans go2rtc (URL RTSP invalide ou service indisponible)")
     doc.pop("_id", None); doc.pop("password", None)
@@ -191,10 +223,50 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
 
 @api_router.put("/cameras/{camera_id}")
 async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(require_role("technician"))):
-    res = await db.cameras.update_one({"id": camera_id}, {"$set": data.model_dump()})
-    if res.matched_count == 0:
+    existing = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
+    if not existing:
         raise HTTPException(404, "Caméra introuvable")
-    await log_audit(user, "camera_updated", data.name)
+
+    payload = data.model_dump()
+    # Mode ONVIF : redécouverte automatique de l'URL RTSP si IP/port/identifiants changent
+    if data.mode == "onvif":
+        if not data.ip:
+            raise HTTPException(400, "Mode ONVIF : l'adresse IP est obligatoire")
+        credentials_changed = (
+            existing.get("ip") != data.ip or
+            existing.get("onvif_port") != data.onvif_port or
+            existing.get("username") != data.username or
+            existing.get("password") != data.password or
+            not (existing.get("rtsp_url") or "").lower().startswith("rtsp://")
+        )
+        if credentials_changed:
+            from streaming import _onvif_probe, _tcp_check
+            if not await asyncio.to_thread(_tcp_check, data.ip, int(data.onvif_port), 3.0):
+                raise HTTPException(400, f"Port ONVIF {data.onvif_port} injoignable sur {data.ip}")
+            try:
+                info = await asyncio.wait_for(
+                    asyncio.to_thread(_onvif_probe, data.ip, int(data.onvif_port), data.username, data.password),
+                    timeout=15,
+                )
+                rtsp = next((p["rtsp_url"] for p in info.get("profiles", []) if p.get("rtsp_url")), None)
+                if not rtsp:
+                    raise HTTPException(400, "Aucun profil ONVIF n'a renvoyé d'URL RTSP")
+                payload["rtsp_url"] = rtsp
+                payload["ptz_enabled"] = bool(info.get("ptz_supported"))
+            except HTTPException:
+                raise
+            except asyncio.TimeoutError:
+                raise HTTPException(504, "Appareil ONVIF injoignable (délai dépassé)")
+            except Exception as e:
+                raise HTTPException(400, f"ONVIF injoignable : {type(e).__name__} — vérifiez IP/port/identifiants")
+        else:
+            payload["rtsp_url"] = existing.get("rtsp_url", "")
+    else:
+        if not (payload.get("rtsp_url") or "").lower().startswith("rtsp://"):
+            raise HTTPException(400, "Mode RTSP : l'URL RTSP est obligatoire (rtsp://…)")
+
+    await db.cameras.update_one({"id": camera_id}, {"$set": payload})
+    await log_audit(user, "camera_updated", data.name, f"Mode: {data.mode}")
     updated = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
     from streaming import register_camera_stream
     registered = await register_camera_stream(updated)
@@ -790,7 +862,7 @@ async def delete_user(user_id: str, user: dict = Depends(require_role("admin")))
     return {"ok": True}
 
 
-# ============ AI IMAGE ANALYSIS (ANPR) ============
+# ============ AI IMAGE ANALYSIS (ANPR) — LOCAL (fast-alpr), aucune dépendance cloud ============
 @api_router.post("/ai/analyze-plate")
 async def analyze_plate(background: BackgroundTasks, file: UploadFile = File(...), user: dict = Depends(require_role("client"))):
     content = await file.read()
@@ -798,31 +870,12 @@ async def analyze_plate(background: BackgroundTasks, file: UploadFile = File(...
         raise HTTPException(400, "Image trop volumineuse (max 8MB)")
     b64 = base64.b64encode(content).decode("utf-8")
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
-        chat = LlmChat(
-            api_key=os.environ["EMERGENT_LLM_KEY"],
-            session_id=f"anpr-{uuid.uuid4()}",
-            system_message=(
-                "Tu es un moteur ANPR (lecture automatique de plaques) et d'analyse de véhicule. "
-                "Analyse l'image et réponds UNIQUEMENT en JSON valide avec les clés: "
-                "plate (string, plaque lue ou ''), country (string), vehicle_color (string en français), "
-                "vehicle_make (string), vehicle_model (string), vehicle_type (Voiture/Camion/Moto/Bus/Utilitaire/Inconnu), "
-                "confidence (nombre 0-1). Aucun texte hors JSON."
-            ),
-        ).with_model("openai", "gpt-5.4")
-        msg = UserMessage(text="Analyse cette image et extrais la plaque et les attributs du véhicule.",
-                          file_contents=[ImageContent(image_base64=b64)])
-        result = await chat.send_message(msg)
-        import json, re
-        text = result if isinstance(result, str) else str(result)
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        data = json.loads(match.group(0)) if match else {}
+        from ai_engine import analyze_image_local
+        data = await asyncio.to_thread(analyze_image_local, content)
     except Exception as e:
-        raise HTTPException(500, f"Erreur analyse IA: {str(e)}")
+        raise HTTPException(500, f"Erreur analyse IA (fast-alpr) : {str(e)}")
 
     await log_audit(user, "ai_plate_analysis", data.get("plate", ""))
-
-    # Persist as a plate record
     if data.get("plate"):
         cam = await db.cameras.find_one({}, {"_id": 0})
         wl = await db.watchlist.find_one({"plate": data["plate"].upper()}, {"_id": 0})
@@ -837,7 +890,7 @@ async def analyze_plate(background: BackgroundTasks, file: UploadFile = File(...
             "lat": cam["lat"] if cam else 0, "lng": cam["lng"] if cam else 0,
             "list_status": wl["list_type"] if wl else "none",
             "vehicle_crop": f"data:{file.content_type};base64,{b64}",
-            "plate_crop": "", "timestamp": datetime.now(timezone.utc).isoformat(),
+            "plate_crop": data.get("plate_crop", ""), "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         await db.plates.insert_one(dict(rec))
         rec.pop("_id", None)
