@@ -24,11 +24,50 @@ from realtime import broadcast_alert
 logger = logging.getLogger("ai-engine")
 
 GO2RTC_URL = os.environ.get("GO2RTC_URL", "http://localhost:1984")
-AI_INTERVAL = float(os.environ.get("AI_INTERVAL_SECONDS", "6"))
+AI_INTERVAL = float(os.environ.get("AI_INTERVAL_SECONDS", "2"))
 AI_CONFIDENCE = float(os.environ.get("AI_CONFIDENCE", "0.45"))
+AI_MIN_PLATE_PX = int(os.environ.get("AI_MIN_PLATE_PX", "24"))  # côté min. plaque acceptée
+AI_PLATE_CACHE_SECONDS = int(os.environ.get("AI_PLATE_CACHE_SECONDS", "8"))
+AI_DEVICE = os.environ.get("AI_DEVICE", "auto")  # 'cpu' | 'cuda' | 'auto'
 EVENT_COOLDOWN = int(os.environ.get("AI_EVENT_COOLDOWN_SECONDS", "60"))
 MOTION_THRESHOLD_PCT = float(os.environ.get("MOTION_THRESHOLD_PCT", "1.5"))
 MOTION_COOLDOWN = int(os.environ.get("MOTION_COOLDOWN_SECONDS", "60"))
+
+# Réglages RUNTIME (surchargent les variables d'env quand présents en base)
+_runtime_config: dict = {}
+
+
+def _cfg(key: str, default):
+    """Lit la config IA runtime (surchargée dynamiquement via /api/ai/config)."""
+    return _runtime_config.get(key, default)
+
+
+async def load_runtime_config():
+    doc = await db.settings.find_one({"key": "ai_config"}, {"_id": 0})
+    if doc and isinstance(doc.get("value"), dict):
+        _runtime_config.update(doc["value"])
+    logger.info("Config IA runtime chargée : %s", _runtime_config or "(défauts env)")
+
+
+async def update_runtime_config(patch: dict) -> dict:
+    _runtime_config.update({k: v for k, v in patch.items() if v is not None})
+    await db.settings.update_one(
+        {"key": "ai_config"},
+        {"$set": {"key": "ai_config", "value": _runtime_config}},
+        upsert=True,
+    )
+    return dict(_runtime_config)
+
+
+def get_runtime_config() -> dict:
+    return {
+        "interval_seconds": _cfg("interval_seconds", AI_INTERVAL),
+        "confidence": _cfg("confidence", AI_CONFIDENCE),
+        "min_plate_px": _cfg("min_plate_px", AI_MIN_PLATE_PX),
+        "plate_cache_seconds": _cfg("plate_cache_seconds", AI_PLATE_CACHE_SECONDS),
+        "device": _cfg("device", AI_DEVICE),
+        "device_effective": _detected_device(),
+    }
 
 CLASS_FR = {
     "person": "Personne", "car": "Voiture", "truck": "Camion", "bus": "Bus",
@@ -40,21 +79,43 @@ _model = None
 _alpr = None
 _cooldowns: dict[str, datetime] = {}
 _prev_gray: dict[str, "object"] = {}
+# Cache LAPI : {(camera_id, plate) -> expiry_datetime}
+_plate_cache: dict[tuple[str, str], datetime] = {}
+_last_debug: dict[str, dict] = {}  # per-camera debug snapshot (mode #4)
+
+
+def _detected_device() -> str:
+    """Détecte la meilleure cible d'inférence : cuda si dispo, sinon cpu."""
+    pref = _cfg("device", AI_DEVICE)
+    if pref == "cpu":
+        return "cpu"
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda:0"
+    except Exception:
+        pass
+    return "cpu"
 
 
 def _load_models():
-    """Chargement paresseux (YOLO + ALPR) dans un thread."""
+    """Chargement paresseux (YOLO + ALPR) dans un thread — cible GPU si dispo."""
     global _model, _alpr
+    device = _detected_device()
     if _model is None:
         from ultralytics import YOLO
         _model = YOLO(os.environ.get("AI_MODEL", "yolo11n.pt"))
-        logger.info("Modèle YOLO chargé : %s", os.environ.get("AI_MODEL", "yolo11n.pt"))
+        try:
+            _model.to(device)
+        except Exception:
+            device = "cpu"
+        logger.info("Modèle YOLO chargé (device=%s) : %s", device, os.environ.get("AI_MODEL", "yolo11n.pt"))
     if _alpr is None:
         try:
             from fast_alpr import ALPR
             _alpr = ALPR(detector_model="yolo-v9-t-384-license-plate-end2end",
                          ocr_model="european-plates-mobile-vit-v2-model")
-            logger.info("LAPI locale chargée (fast-alpr)")
+            logger.info("LAPI locale chargée (fast-alpr, CPU-ONNX)")
         except Exception:
             logger.exception("fast-alpr indisponible — LAPI désactivée")
             _alpr = False
@@ -119,17 +180,28 @@ def _detect_motion(camera_id: str, img) -> float:
 
 
 def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
-    """Mouvement + YOLO + LAPI sur une frame (bloquant → thread)."""
+    """Mouvement + YOLO d'abord (rapide), puis ALPR uniquement si véhicule détecté et hors-cache.
+    Retourne aussi les timings ms par étape et un snapshot pour le mode debug."""
     import cv2
     import numpy as np
+    import time
     _load_models()
+    t0 = time.monotonic()
     img = cv2.imdecode(np.frombuffer(frame_bytes, np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         return {"detections": [], "plates": [], "motion_pct": 0.0}
+    h, w = img.shape[:2]
 
+    t_dec = (time.monotonic() - t0) * 1000
+    t1 = time.monotonic()
     motion_pct = _detect_motion(camera_id, img)
+    t_motion = (time.monotonic() - t1) * 1000
 
-    results = _model.predict(img, conf=AI_CONFIDENCE, verbose=False)[0]
+    # ---------- ÉTAPE 1 : YOLO (rapide) ----------
+    t2 = time.monotonic()
+    results = _model.predict(img, conf=_cfg("confidence", AI_CONFIDENCE),
+                             device=_detected_device(), verbose=False)[0]
+    t_yolo = (time.monotonic() - t2) * 1000
     detections, vehicles = [], []
     for box in results.boxes:
         cls_name = _model.names[int(box.cls)]
@@ -149,34 +221,81 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
         if is_vehicle:
             vehicles.append(det)
 
+    # ---------- ÉTAPE 2 : ALPR uniquement si véhicule + hors cache ----------
     plates = []
+    t_alpr = 0.0
+    plate_debug = []
     if vehicles and _alpr:
+        now = datetime.now(timezone.utc)
+        # Purge cache expiré
+        for k, exp in list(_plate_cache.items()):
+            if exp <= now:
+                _plate_cache.pop(k, None)
+        cache_ttl = int(_cfg("plate_cache_seconds", AI_PLATE_CACHE_SECONDS))
+        min_side = int(_cfg("min_plate_px", AI_MIN_PLATE_PX))
+        t3 = time.monotonic()
         try:
             for r in _alpr.predict(img):
                 if not r.ocr or not r.ocr.text:
                     continue
                 bb = r.detection.bounding_box
+                pw, ph = bb.x2 - bb.x1, bb.y2 - bb.y1
+                if pw < min_side or ph < min_side:
+                    plate_debug.append({"plate": r.ocr.text.upper(), "skipped": "trop petit",
+                                         "size": f"{pw}x{ph}"})
+                    continue
+                plate_text = r.ocr.text.upper().strip()
+                if not plate_text:
+                    continue
+                if (camera_id, plate_text) in _plate_cache:
+                    plate_debug.append({"plate": plate_text, "skipped": "cache",
+                                         "expires_in": int((_plate_cache[(camera_id, plate_text)] - now).total_seconds())})
+                    continue
+                _plate_cache[(camera_id, plate_text)] = now + timedelta(seconds=cache_ttl)
                 px, py = (bb.x1 + bb.x2) / 2, (bb.y1 + bb.y2) / 2
-                # véhicule englobant la plaque (sinon le plus grand)
                 owner = next((v for v in vehicles
                               if v["bbox"][0] <= px <= v["bbox"][2] and v["bbox"][1] <= py <= v["bbox"][3]),
                              max(vehicles, key=lambda v: (v["bbox"][2]-v["bbox"][0])*(v["bbox"][3]-v["bbox"][1])))
                 vx1, vy1, vx2, vy2 = owner["bbox"]
                 plate_crop = img[max(0, bb.y1):bb.y2, max(0, bb.x1):bb.x2]
                 plates.append({
-                    "plate": r.ocr.text.upper(),
+                    "plate": plate_text,
                     "confidence": round(float(r.ocr.confidence), 2),
                     "plate_crop": _jpeg_data_uri(plate_crop, 240),
                     "vehicle_crop": _jpeg_data_uri(img[vy1:vy2, vx1:vx2]),
                     "vehicle_type": owner["label"],
                     "vehicle_color": owner["vehicle_color"],
                 })
+                plate_debug.append({"plate": plate_text, "confidence": round(float(r.ocr.confidence), 2),
+                                     "size": f"{pw}x{ph}", "kept": True})
         except Exception:
             logger.exception("Erreur LAPI")
+        t_alpr = (time.monotonic() - t3) * 1000
     for d in detections:
         d["_bbox"] = d.pop("bbox", None)
+    timings = {"decode_ms": round(t_dec, 1), "motion_ms": round(t_motion, 1),
+               "yolo_ms": round(t_yolo, 1), "alpr_ms": round(t_alpr, 1),
+               "total_ms": round((time.monotonic() - t0) * 1000, 1)}
+    # Snapshot debug (mode #4)
+    _last_debug[camera_id] = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "resolution": f"{w}x{h}",
+        "device": _detected_device(),
+        "timings": timings,
+        "vehicles": [{"label": v["label"], "confidence": v["confidence"], "bbox": v["_bbox"] if "_bbox" in v else v.get("bbox"),
+                      "vehicle_color": v.get("vehicle_color")} for v in vehicles],
+        "plate_attempts": plate_debug,
+        "plates_ocr": [{"plate": p["plate"], "confidence": p["confidence"]} for p in plates],
+        "motion_pct": motion_pct,
+        "frame_preview": _jpeg_data_uri(img, 640),
+    }
     return {"detections": detections, "plates": plates, "motion_pct": motion_pct,
-            "frame_thumb": _jpeg_data_uri(img)}
+            "frame_thumb": _jpeg_data_uri(img), "timings": timings}
+
+
+def get_debug_snapshot(camera_id: str) -> dict:
+    """Retourne le dernier snapshot debug (mode #4) pour une caméra donnée."""
+    return _last_debug.get(camera_id, {})
 
 
 def analyze_image_local(image_bytes: bytes) -> dict:
@@ -422,11 +541,13 @@ async def _process_camera(cam: dict) -> None:
     result = await asyncio.to_thread(_analyze_frame, cam["id"], frame)
     dets = result.get("detections", [])
     plates = result.get("plates", [])
+    tim = result.get("timings", {})
     logger.info(
-        "IA · %s (%s) : %d détection(s) [%s] · mouvement=%.1f%% · %d plaque(s)",
+        "IA · %s (%s) : %d détection(s) [%s] · mouvement=%.1f%% · %d plaque(s) · yolo=%.0fms alpr=%.0fms",
         cam["name"], cam["id"], len(dets),
         ",".join(f"{d['label']}:{d['confidence']}" for d in dets) or "aucune",
         result.get("motion_pct", 0.0), len(plates),
+        tim.get("yolo_ms", 0), tim.get("alpr_ms", 0),
     )
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
@@ -484,22 +605,25 @@ async def _process_camera(cam: dict) -> None:
 
 
 async def ai_loop() -> None:
-    """Boucle IA : analyse les caméras `detect_enabled` à intervalle régulier."""
+    """Boucle IA : analyse en parallèle chaque caméra `detect_enabled`.
+    Chaque caméra devient un worker indépendant → une caméra lente ne bloque plus les autres."""
     await asyncio.sleep(15)  # laisse les flux démarrer
     try:
         await asyncio.to_thread(_load_models)
     except Exception:
         logger.exception("Chargement des modèles IA impossible — boucle IA désactivée")
         return
-    logger.info("Moteur IA démarré (YOLO + mouvement + scénarios + LAPI, intervalle %ss)", AI_INTERVAL)
+    await load_runtime_config()
+    logger.info("Moteur IA démarré (YOLO+ALPR/caméra en parallèle · device=%s · intervalle=%.1fs)",
+                _detected_device(), _cfg("interval_seconds", AI_INTERVAL))
     while True:
         try:
             cams = await db.cameras.find({"detect_enabled": True, "status": "online"}, {"_id": 0}).to_list(200)
             if cams:
-                logger.info("IA · cycle : %d caméra(s) réelle(s) à analyser %s",
+                logger.info("IA · cycle : %d caméra(s) réelle(s) en parallèle %s",
                             len(cams), [c["name"] for c in cams])
-            for cam in cams:
-                await _process_camera(cam)
+                # Workers indépendants : une caméra lente ne bloque pas les autres
+                await asyncio.gather(*[_process_camera(cam) for cam in cams], return_exceptions=True)
         except Exception:
             logger.exception("ai_loop : erreur, reprise")
-        await asyncio.sleep(AI_INTERVAL)
+        await asyncio.sleep(float(_cfg("interval_seconds", AI_INTERVAL)))

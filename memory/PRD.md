@@ -1,6 +1,20 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **SPRINT P1 — Optimisation IA & workers indépendants (2.5.0 — 2026-07-21)**
+  - **Workers IA indépendants** : la boucle `ai_loop` traite désormais les caméras en parallèle via `asyncio.gather`. Une caméra lente ne bloque plus les autres.
+  - **YOLO / ALPR séparés** : YOLO est exécuté d'abord (~50 ms/frame en CPU ARM64). ALPR n'est appelé QUE si un véhicule est détecté → gain énorme quand la scène est vide (`alpr=0ms` observé).
+  - **Cache plaques (TTL configurable, défaut 8 s)** : `(camera_id, plate)` → expiry. Évite l'OCR répété sur la même voiture qui traverse la scène.
+  - **Filtre taille minimale de plaque** (`min_plate_px`, défaut 24 px) : les crops trop petits sont rejetés avant OCR → évite les faux positifs et l'OCR inutile.
+  - **Config IA runtime** : `GET /api/ai/config` + `PUT /api/ai/config` (admin) — `interval_seconds` (0.2-60 s), `confidence` (0.1-0.95), `min_plate_px` (8-200), `plate_cache_seconds` (0-300), `device` (cpu / cuda / auto). Persistance MongoDB, appliqué à chaud sans redémarrage.
+  - **GPU-ready** : détection automatique `torch.cuda.is_available()` avec fallback CPU. YOLO utilise `device=cuda:0` si disponible. `device_effective` exposé dans `/ai/config`.
+  - **Timings détaillés par étape** : chaque analyse retourne `decode_ms / motion_ms / yolo_ms / alpr_ms / total_ms` — visibles dans les logs et le mode debug.
+  - **Mode Debug ALPR (#4)** :
+    - Backend : `GET /api/ai/debug/{camera_id}` retourne le dernier snapshot d'analyse (image analysée base64, résolution, device, timings, véhicules détectés avec bbox/couleur, tentatives OCR avec statut kept/skipped/cache + taille, motion_pct).
+    - Frontend : bouton `Debug IA` (cerveau bleu) sur chaque caméra `detect_enabled=true` → dialog complet.
+  - Log IA amélioré : `IA · <cam> : N détection(s) [X] · mouvement=Y% · N plaque(s) · yolo=Xms alpr=Yms` à chaque cycle.
+
+## Implemented (2026-07)
 - ✅ **SPRINT P0 — Stabilisation caméra & audit sandbox (2.4.0 — 2026-07-21)**
   - **Root cause du ping-pong Connect/Disconnect identifiée et fixée** : `_probe_status_once` appelait `register_camera_stream` toutes les 30 s → DELETE + PUT sur le flux go2rtc → tous les consommateurs (browser MJPEG, recorder ffmpeg, IA) étaient déconnectés en boucle. Corrigé : la sonde périodique vérifie désormais `/api/streams` (READ-ONLY) et ne (ré-)enregistre que si le flux a réellement disparu.
   - **Un seul décodage par caméra** : suppression du producteur redondant `ffmpeg:<name>#video=mjpeg` dans le flux principal (`register_camera_stream` + `go2rtc.yaml` démos). Chaque flux a désormais un **producteur unique** ; les consommateurs MJPEG (Live, snapshot, IA) utilisent la conversion à la demande de go2rtc → pipeline partagé Live/Recording/IA/ALPR.

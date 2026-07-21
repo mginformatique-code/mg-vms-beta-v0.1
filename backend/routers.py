@@ -454,6 +454,50 @@ class WatchInput(BaseModel):
     reason: str = ""
 
 
+# ============ CONFIG IA RUNTIME + DEBUG ALPR (P1) ============
+class AIConfigUpdate(BaseModel):
+    interval_seconds: Optional[float] = None
+    confidence: Optional[float] = None
+    min_plate_px: Optional[int] = None
+    plate_cache_seconds: Optional[int] = None
+    device: Optional[str] = None  # cpu | cuda | auto
+
+
+@api_router.get("/ai/config")
+async def ai_config_get(user: dict = Depends(get_current_user)):
+    from ai_engine import get_runtime_config
+    return get_runtime_config()
+
+
+@api_router.put("/ai/config")
+async def ai_config_put(data: AIConfigUpdate, user: dict = Depends(require_role("admin"))):
+    from ai_engine import update_runtime_config, get_runtime_config
+    patch = {k: v for k, v in data.model_dump().items() if v is not None}
+    if "interval_seconds" in patch:
+        patch["interval_seconds"] = max(0.2, min(60.0, float(patch["interval_seconds"])))
+    if "confidence" in patch:
+        patch["confidence"] = max(0.1, min(0.95, float(patch["confidence"])))
+    if "min_plate_px" in patch:
+        patch["min_plate_px"] = max(8, min(200, int(patch["min_plate_px"])))
+    if "plate_cache_seconds" in patch:
+        patch["plate_cache_seconds"] = max(0, min(300, int(patch["plate_cache_seconds"])))
+    if "device" in patch and patch["device"] not in {"cpu", "cuda", "auto"}:
+        raise HTTPException(400, "device doit être cpu, cuda ou auto")
+    await update_runtime_config(patch)
+    await log_audit(user, "ai_config_updated", str(patch))
+    return get_runtime_config()
+
+
+@api_router.get("/ai/debug/{camera_id}")
+async def ai_debug(camera_id: str, user: dict = Depends(require_role("technician"))):
+    """Dernier snapshot IA de la caméra : frame analysée, véhicules, plaques tentées, timings."""
+    from ai_engine import get_debug_snapshot
+    snap = get_debug_snapshot(camera_id)
+    if not snap:
+        return {"available": False, "message": "Aucune analyse récente pour cette caméra"}
+    return {"available": True, "camera_id": camera_id, **snap}
+
+
 async def maybe_blacklist_alert(plate_doc: dict, background: BackgroundTasks):
     """Crée une alerte critique + diffuse + notifie si la plaque est en liste noire."""
     if plate_doc.get("list_status") != "black":
