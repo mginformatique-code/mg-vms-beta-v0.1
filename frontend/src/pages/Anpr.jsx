@@ -5,6 +5,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Search, Download, ScanLine, Upload, Loader2, Plus, Trash2, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import { toast } from "sonner";
+import EventViewer from "@/components/EventViewer";
 
 function Plate({ value, status }) {
   const c = status === "black" ? "#FF3333" : status === "white" ? "#00E676" : null;
@@ -27,6 +28,15 @@ export default function Anpr() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState(null);
   const [file, setFile] = useState(null);
+  const [viewerIdx, setViewerIdx] = useState(null);
+
+  // Prépare les items pour la visionneuse (utilise vehicle_crop en priorité pour la plaque)
+  const viewerItems = plates.map((p) => ({
+    ...p,
+    thumbnail: p.vehicle_crop || p.plate_crop || p.thumbnail,
+    type: "Plaque détectée",
+    plugin: "ANPR (fast-alpr)",
+  }));
 
   const load = async (reset = true) => {
     const offset = reset ? 0 : plates.length;
@@ -92,8 +102,8 @@ export default function Anpr() {
                 <th className="px-3 py-2">{t("veh.color")}</th><th className="px-3 py-2">{t("common.camera")}</th><th className="px-3 py-2">{t("anpr.direction")}</th><th className="px-3 py-2">{t("common.confidence")}</th>
               </tr></thead>
               <tbody>
-                {plates.map((p) => (
-                  <tr key={p.id} className="border-b border-border hover:bg-secondary/50" data-testid="plate-row">
+                {plates.map((p, i) => (
+                  <tr key={p.id} onClick={() => setViewerIdx(i)} className="border-b border-border hover:bg-secondary/50 cursor-pointer" data-testid="plate-row">
                     <td className="px-3 py-2"><Plate value={p.plate} status={p.list_status} /></td>
                     <td className="px-3 py-2 mono text-xs text-muted-foreground">{new Date(p.timestamp).toLocaleString()}</td>
                     <td className="px-3 py-2">{p.vehicle_make} {p.vehicle_model}</td>
@@ -172,6 +182,10 @@ export default function Anpr() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {viewerIdx !== null && (
+        <EventViewer items={viewerItems} index={viewerIdx} onIndex={setViewerIdx} onClose={() => setViewerIdx(null)} kind="plate" />
+      )}
     </div>
   );
 }

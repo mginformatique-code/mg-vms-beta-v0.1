@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import { Zap, RefreshCw, Camera as CamIcon } from "lucide-react";
+import EventViewer from "@/components/EventViewer";
 
 const TYPE_COLORS = {
   "Personne": "#FF3333", "Voiture": "#0044FF", "Camion": "#0044FF", "Bus": "#0044FF",
@@ -17,6 +18,7 @@ export default function Events() {
   const [cameraId, setCameraId] = useState("");
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [viewerIdx, setViewerIdx] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -59,9 +61,9 @@ export default function Events() {
         <div className="text-muted-foreground text-sm py-20 text-center">Aucun événement détecté pour ces filtres.</div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
-          {events.map((e) => (
-            <div key={e.id} className="border border-border bg-card overflow-hidden" data-testid="event-card">
-              <div className="relative bg-black aspect-video">
+          {events.map((e, i) => (
+            <button key={e.id} onClick={() => setViewerIdx(i)} className="border border-border bg-card overflow-hidden text-left hover:border-[#0044FF] transition-colors" data-testid="event-card">
+              <div className="relative bg-black aspect-video cursor-zoom-in">
                 {e.thumbnail ? (
                   <img src={e.thumbnail} alt={e.type} className="w-full h-full object-cover" />
                 ) : (
@@ -78,9 +80,13 @@ export default function Events() {
                 </div>
                 <div className="text-[10px] mono text-muted-foreground" data-testid="event-timestamp">{new Date(e.timestamp).toLocaleString("fr-FR")}</div>
               </div>
-            </div>
+            </button>
           ))}
         </div>
+      )}
+
+      {viewerIdx !== null && (
+        <EventViewer items={events} index={viewerIdx} onIndex={setViewerIdx} onClose={() => setViewerIdx(null)} kind="event" />
       )}
     </div>
   );

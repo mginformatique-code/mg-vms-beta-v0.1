@@ -1,6 +1,19 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **SPRINT P0.1 — Événements interactifs & visionneuse professionnelle (2.6.0 — 2026-07-21)**
+  - **Composant `<EventViewer>` réutilisable** (`/app/frontend/src/components/EventViewer.jsx`) : modal plein écran overlay noir, image centrée, panneau latéral métadonnées, footer clavier.
+  - **Miniatures cliquables** dans les pages Événements IA et ANPR/Plaques → ouvrent la visionneuse.
+  - **Navigation** : boutons prev/next latéraux + flèches gauche/droite clavier, compteur `N / total`.
+  - **Zoom** : molette souris avec point pivot au curseur (jusqu'à 6x), boutons `-` / `+` / `reset`.
+  - **Pan** : glisser-déposer quand zoom > 1x (curseur `grab` / `grabbing`).
+  - **Fermeture** : bouton X, touche Échap.
+  - **Actions** : `Télécharger l'image` (a[download]), `Copier dans presse-papier` (`ClipboardItem`).
+  - **Panneau métadonnées** : caméra, site, horodatage, plugin (Détection / ANPR fast-alpr / …), type d'événement, confiance %, plaque, statut liste blanche/noire, couleur véhicule, marque/modèle/type, ByteTrack ID (si présent), motion_pct.
+  - **Bouton « Lire la vidéo autour de cet événement »** → nouvel endpoint `GET /api/events/{id}/recording` qui trouve le segment MP4 couvrant le timestamp et renvoie `offset_sec = event_ts − segment_start − 5s`. Bascule automatique image → `<video>` avec `currentTime=offset` et lecture auto. HTTP 404 clair si aucun enregistrement ne couvre l'événement.
+  - Fallback gracieux : sur plaques ANPR sans `thumbnail` explicite, utilise `vehicle_crop` puis `plate_crop`.
+
+## Implemented (2026-07)
 - ✅ **SPRINT P1 — Optimisation IA & workers indépendants (2.5.0 — 2026-07-21)**
   - **Workers IA indépendants** : la boucle `ai_loop` traite désormais les caméras en parallèle via `asyncio.gather`. Une caméra lente ne bloque plus les autres.
   - **YOLO / ALPR séparés** : YOLO est exécuté d'abord (~50 ms/frame en CPU ARM64). ALPR n'est appelé QUE si un véhicule est détecté → gain énorme quand la scène est vide (`alpr=0ms` observé).

@@ -392,6 +392,45 @@ async def list_events(response: Response, type: Optional[str] = None, site_id: O
     return events
 
 
+@api_router.get("/events/{event_id}/recording")
+async def event_recording(event_id: str, user: dict = Depends(get_current_user)):
+    """Retourne l'enregistrement vidéo qui contient l'événement + l'offset (en secondes)
+    pour se caler autour, ou 404 si aucun enregistrement ne couvre le timestamp."""
+    ev = await db.events.find_one({"id": event_id}, {"_id": 0})
+    if not ev:
+        # Peut aussi être une plaque
+        ev = await db.plates.find_one({"id": event_id}, {"_id": 0})
+    if not ev:
+        raise HTTPException(404, "Événement introuvable")
+    allowed = allowed_sites(user)
+    if allowed is not None and ev.get("site_id") not in allowed:
+        raise HTTPException(403, "Accès refusé")
+    ts = ev.get("timestamp")
+    if not ts:
+        raise HTTPException(404, "Événement sans horodatage")
+    # Cherche un enregistrement dont [start, end] couvre le timestamp de l'événement
+    rec = await db.recordings.find_one(
+        {"camera_id": ev.get("camera_id"),
+         "start": {"$lte": ts},
+         "end": {"$gte": ts}},
+        {"_id": 0},
+    )
+    if not rec:
+        raise HTTPException(404, "Aucun enregistrement ne couvre cet événement")
+    try:
+        ev_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        rec_start_dt = datetime.fromisoformat(rec["start"].replace("Z", "+00:00"))
+        offset_sec = max(0, int((ev_dt - rec_start_dt).total_seconds()) - 5)  # 5 s avant
+    except (ValueError, KeyError):
+        offset_sec = 0
+    return {
+        "recording": rec,
+        "event_timestamp": ts,
+        "offset_sec": offset_sec,
+        "stream_url": f"/recordings/{rec['id']}/media",
+    }
+
+
 # ============ ANPR / PLATES ============
 @api_router.get("/plates")
 async def search_plates(response: Response, plate: Optional[str] = None, color: Optional[str] = None,
