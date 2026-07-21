@@ -24,3 +24,5 @@ streams:
     - ffmpeg:cam_demo-cam-002#video=mjpeg
   cam_demo-cam-002_sd:
     - ffmpeg:cam_demo-cam-002#video=mjpeg#width=640
+  probe_1784641415167:
+    - rtsp://127.0.0.1:8554/cam_demo-cam-001

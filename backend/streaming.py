@@ -13,7 +13,9 @@ import re
 import socket
 import subprocess
 import time
+from pathlib import Path
 from typing import Optional
+from urllib.parse import quote as urlquote
 
 import httpx
 import jwt as pyjwt
@@ -47,14 +49,18 @@ def _stream_name(camera_id: str) -> str:
 
 
 def _build_rtsp_url(cam: dict) -> str:
-    """Construit l'URL RTSP en injectant identifiants + port si nécessaire."""
+    """Construit l'URL RTSP finale en injectant les identifiants **encodés**.
+    Encode automatiquement `# @ + : espace /` afin que les mots de passe complexes fonctionnent."""
     url = (cam.get("rtsp_url") or "").strip()
     if not url:
         return ""
     user = (cam.get("username") or "").strip()
     pwd = cam.get("password") or ""
     if user and "@" not in url and url.lower().startswith("rtsp://"):
-        url = url.replace("rtsp://", f"rtsp://{user}:{pwd}@", 1)
+        # RFC 3986 : n'autoriser dans user:pass que caractères non réservés
+        u_enc = urlquote(user, safe="")
+        p_enc = urlquote(pwd, safe="")
+        url = url.replace("rtsp://", f"rtsp://{u_enc}:{p_enc}@", 1)
     return url
 
 
@@ -145,6 +151,41 @@ async def _ensure_demo_camera() -> None:
         logger.info("Caméra de démonstration créée : %s", demo["name"])
 
 
+# ============ Bibliothèque de fabricants (chargée depuis JSON) ============
+BRAND_LIB_PATH = Path(os.environ.get("CAMERA_PROFILES_PATH",
+                                     str(Path(__file__).parent / "camera_profiles.json")))
+
+
+def _load_brand_lib() -> dict:
+    try:
+        return json.loads(BRAND_LIB_PATH.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("camera_profiles.json illisible : %s", e)
+        return {"brands": []}
+
+
+def _resolve_rtsp_template(brand_id: str, model_idx: int, stream_key: str) -> Optional[str]:
+    lib = _load_brand_lib()
+    for b in lib.get("brands", []):
+        if b.get("id") == brand_id:
+            models = b.get("models", [])
+            if not (0 <= model_idx < len(models)):
+                return None
+            return models[model_idx].get("streams", {}).get(stream_key)
+    return None
+
+
+def _format_rtsp_from_template(template: str, ip: str, port: int,
+                                username: str, password: str, channel: int = 1) -> str:
+    """Remplit un template RTSP en encodant les identifiants."""
+    return template.format(
+        user=urlquote(username or "", safe=""),
+        pass_=urlquote(password or "", safe=""),
+        **{"pass": urlquote(password or "", safe="")},
+        ip=ip, port=port, channel=channel,
+    )
+
+
 # ============ Test / sonde réels ============
 def _tcp_check(host: str, port: int, timeout: float = 3.0) -> bool:
     """TCP connect réel : renvoie True si le port est atteignable."""
@@ -224,71 +265,154 @@ class ConnectivityTestInput(BaseModel):
 
 
 async def test_connectivity(data: ConnectivityTestInput) -> dict:
-    """Test de connectivité RÉEL, mode-aware :
-       - mode='rtsp'  : ping IP + accès flux RTSP (ffprobe). ONVIF ignoré.
-       - mode='onvif' : ping IP + interrogation ONVIF (récupère profils/URI RTSP). RTSP non requis."""
+    """Test de connexion RÉEL, mode-aware, retourne un tableau `steps[]` de statuts détaillés.
+       Chaque étape a: {name, status: 'ok'|'warn'|'error'|'skip', message}."""
     ip = (data.ip or "").strip()
-    ping_ok = False
-    onvif_ok = False
-    rtsp_ok = False
-    rtsp_details = None
+    steps: list[dict] = []
     onvif_info = None
+    rtsp_details = None
+    rtsp_final_url = ""
+
+    def add(name: str, status: str, message: str, **extra):
+        steps.append({"name": name, "status": status, "message": message, **extra})
+
     if not ip:
-        return {"success": False, "message": "Adresse IP obligatoire",
-                "ip_reachable": False, "onvif_reachable": False, "rtsp_reachable": False}
+        add("ip", "error", "Adresse IP obligatoire")
+        return {"success": False, "mode": data.mode, "steps": steps, "message": "Adresse IP obligatoire"}
+
+    # 1) Ping ICMP ou fallback TCP sur port cible (rapide)
+    tgt_port = int(data.onvif_port if data.mode == "onvif" else data.rtsp_port)
+    ping_ok = await asyncio.to_thread(_tcp_check, ip, tgt_port, 3.0)
+    add("ping", "ok" if ping_ok else "error",
+        f"IP {ip} joignable sur port {tgt_port}" if ping_ok else f"IP {ip} injoignable (port {tgt_port} fermé)")
 
     if data.mode == "onvif":
-        ping_ok = await asyncio.to_thread(_tcp_check, ip, int(data.onvif_port), 3.0)
+        # 2) Port ONVIF (déjà testé au ping si mode=onvif, on garde une étape claire)
+        add("onvif_port", "ok" if ping_ok else "error",
+            f"Port ONVIF {data.onvif_port} ouvert" if ping_ok else "Port ONVIF fermé — vérifiez le port")
+
+        # 3) Authentification ONVIF
         if ping_ok:
             try:
                 onvif_info = await asyncio.wait_for(
                     asyncio.to_thread(_onvif_probe, ip, int(data.onvif_port), data.username, data.password),
                     timeout=12,
                 )
-                onvif_ok = True
-                # Récupère l'URL RTSP découverte pour affichage
-                first_rtsp = next((p["rtsp_url"] for p in onvif_info.get("profiles", []) if p.get("rtsp_url")), None)
-                if first_rtsp:
-                    rtsp_details = await asyncio.to_thread(_ffprobe, first_rtsp)
-            except (asyncio.TimeoutError, Exception) as e:
-                logger.info("test_connectivity ONVIF échec : %s", type(e).__name__)
-        success = ping_ok and onvif_ok
-        return {
-            "success": success, "mode": "onvif",
-            "ip_reachable": ping_ok, "onvif_reachable": onvif_ok, "rtsp_reachable": bool(rtsp_details),
-            "manufacturer": (onvif_info or {}).get("manufacturer"),
-            "model": (onvif_info or {}).get("model"),
-            "ptz_supported": (onvif_info or {}).get("ptz_supported"),
-            "profiles_count": len((onvif_info or {}).get("profiles", [])),
-            "discovered_rtsp": next((p["rtsp_url"] for p in (onvif_info or {}).get("profiles", []) if p.get("rtsp_url")), None),
-            "resolution": (rtsp_details or {}).get("resolution"),
-            "fps": (rtsp_details or {}).get("fps"),
-            "codec": (rtsp_details or {}).get("codec"),
-            "message": (
-                "ONVIF OK — profils découverts" if success else
-                "Port ONVIF injoignable" if not ping_ok else
-                "Service ONVIF injoignable — vérifiez identifiants"
-            ),
-        }
+                n_prof = len(onvif_info.get("profiles", []))
+                add("onvif_auth", "ok",
+                    f"{onvif_info.get('manufacturer','?')} {onvif_info.get('model','?')} · {n_prof} profil(s)",
+                    manufacturer=onvif_info.get("manufacturer"),
+                    model=onvif_info.get("model"),
+                    firmware=onvif_info.get("firmware"),
+                    ptz_supported=onvif_info.get("ptz_supported"),
+                    profiles=onvif_info.get("profiles", []))
+            except asyncio.TimeoutError:
+                add("onvif_auth", "error", "Service ONVIF ne répond pas (délai dépassé)")
+            except Exception as e:
+                add("onvif_auth", "error", f"Auth ONVIF refusée — {type(e).__name__}")
+        else:
+            add("onvif_auth", "skip", "Ignoré (port ONVIF fermé)")
 
-    # Mode RTSP pur
-    ping_ok = await asyncio.to_thread(_tcp_check, ip, int(data.rtsp_port), 3.0)
-    rtsp_url = _build_rtsp_url({
-        "rtsp_url": data.rtsp_url, "username": data.username, "password": data.password})
-    if rtsp_url.lower().startswith("rtsp://"):
-        rtsp_details = await asyncio.to_thread(_ffprobe, rtsp_url)
-        rtsp_ok = rtsp_details is not None
-    success = ping_ok and rtsp_ok
+        # 4) Port RTSP (déduction de l'URI RTSP découverte)
+        discovered_rtsp = next((p.get("rtsp_url") for p in (onvif_info or {}).get("profiles", []) if p.get("rtsp_url")), None)
+        if discovered_rtsp:
+            m = re.match(r"rtsp://[^/]*?([\d.]+)(?::(\d+))?", discovered_rtsp)
+            rtsp_host = m.group(1) if m else ip
+            rtsp_port = int(m.group(2)) if m and m.group(2) else 554
+            rtsp_port_ok = await asyncio.to_thread(_tcp_check, rtsp_host, rtsp_port, 3.0)
+            add("rtsp_port", "ok" if rtsp_port_ok else "error",
+                f"Port RTSP {rtsp_port} ouvert" if rtsp_port_ok else f"Port RTSP {rtsp_port} fermé")
+            # 5) Ouverture RTSP (ffprobe)
+            rtsp_final_url = _build_rtsp_url({
+                "rtsp_url": discovered_rtsp, "username": data.username, "password": data.password})
+            rtsp_details = await asyncio.to_thread(_ffprobe, rtsp_final_url)
+            if rtsp_details:
+                add("rtsp_open", "ok",
+                    f"Flux RTSP OK · {rtsp_details.get('resolution')} @ {rtsp_details.get('fps','?')}fps {rtsp_details.get('codec','')}",
+                    **rtsp_details, rtsp_url=discovered_rtsp)
+            else:
+                add("rtsp_open", "error", "Ouverture RTSP impossible (ffprobe)")
+        else:
+            add("rtsp_port", "skip", "Ignoré (aucune URI RTSP découverte)")
+            add("rtsp_open", "skip", "Ignoré")
+    else:
+        # Mode RTSP pur
+        add("onvif_port", "skip", "Ignoré (mode RTSP)")
+        add("onvif_auth", "skip", "Ignoré (mode RTSP)")
+        add("rtsp_port", "ok" if ping_ok else "error",
+            f"Port RTSP {data.rtsp_port} ouvert" if ping_ok else "Port RTSP fermé")
+        rtsp_final_url = _build_rtsp_url({
+            "rtsp_url": data.rtsp_url, "username": data.username, "password": data.password})
+        if rtsp_final_url.lower().startswith("rtsp://") and ping_ok:
+            rtsp_details = await asyncio.to_thread(_ffprobe, rtsp_final_url)
+            if rtsp_details:
+                add("rtsp_open", "ok",
+                    f"Flux RTSP OK · {rtsp_details.get('resolution')} @ {rtsp_details.get('fps','?')}fps {rtsp_details.get('codec','')}",
+                    **rtsp_details, rtsp_url=data.rtsp_url)
+            else:
+                add("rtsp_open", "error", "Ouverture RTSP impossible — URL/identifiants ?")
+        else:
+            add("rtsp_open", "skip", "Ignoré (URL RTSP invalide ou port fermé)")
+
+    # 6) Test go2rtc : enregistre temporairement le flux et récupère une frame
+    go2rtc_ok = False
+    preview_url = None
+    if rtsp_final_url.lower().startswith("rtsp://") and any(s["name"] == "rtsp_open" and s["status"] == "ok" for s in steps):
+        tmp_name = f"probe_{int(time.time()*1000)}"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.put(f"{GO2RTC_URL}/api/streams",
+                                     params=[("name", tmp_name), ("src", rtsp_final_url)])
+                r.raise_for_status()
+                # Attend jusqu'à 6 s qu'une frame soit produite
+                for _ in range(6):
+                    fr = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": tmp_name})
+                    if fr.status_code == 200 and fr.content[:3] == b"\xff\xd8\xff":
+                        go2rtc_ok = True
+                        preview_url = f"/api/stream/preview.jpeg?name={tmp_name}"
+                        break
+                    await asyncio.sleep(1)
+        except httpx.HTTPError:
+            pass
+        finally:
+            # nettoie l'enregistrement de test après quelques secondes
+            async def _cleanup(n: str) -> None:
+                await asyncio.sleep(30)
+                try:
+                    async with httpx.AsyncClient(timeout=5) as c:
+                        await c.delete(f"{GO2RTC_URL}/api/streams", params={"src": n})
+                except httpx.HTTPError:
+                    pass
+            asyncio.create_task(_cleanup(tmp_name))
+        add("go2rtc", "ok" if go2rtc_ok else "warn",
+            "go2rtc ouvre le flux et fournit une image" if go2rtc_ok
+            else "go2rtc n'a pas réussi à décoder — mais l'URL RTSP est valide",
+            preview_url=preview_url, temp_stream=tmp_name)
+    else:
+        add("go2rtc", "skip", "Ignoré (aucun flux RTSP valide)")
+
+    # 7) Aperçu vidéo (identique à go2rtc.preview_url si dispo)
+    add("preview", "ok" if preview_url else "skip",
+        "Aperçu vidéo disponible" if preview_url else "Aperçu indisponible",
+        preview_url=preview_url)
+
+    critical_ok = all(s["status"] in ("ok", "skip") for s in steps
+                      if s["name"] in ("ping", "onvif_auth" if data.mode == "onvif" else "rtsp_open"))
+    success = critical_ok
+
     return {
-        "success": success, "mode": "rtsp",
-        "ip_reachable": ping_ok, "onvif_reachable": None, "rtsp_reachable": rtsp_ok,
+        "success": success, "mode": data.mode, "steps": steps,
+        "manufacturer": (onvif_info or {}).get("manufacturer") if onvif_info else None,
+        "model": (onvif_info or {}).get("model") if onvif_info else None,
+        "firmware": (onvif_info or {}).get("firmware") if onvif_info else None,
+        "profiles": (onvif_info or {}).get("profiles", []) if onvif_info else [],
+        "ptz_supported": (onvif_info or {}).get("ptz_supported") if onvif_info else None,
         "resolution": (rtsp_details or {}).get("resolution"),
         "fps": (rtsp_details or {}).get("fps"),
         "codec": (rtsp_details or {}).get("codec"),
         "message": (
-            "RTSP OK — flux vérifié" if success else
-            "IP injoignable sur le port RTSP" if not ping_ok else
-            "Flux RTSP inaccessible — vérifiez l'URL / identifiants"
+            f"Tous les tests {data.mode.upper()} sont passés" if success else
+            "Un ou plusieurs tests ont échoué — voir détails"
         ),
     }
 
@@ -410,6 +534,101 @@ async def frame_jpeg(camera_id: str, user: dict = Depends(stream_user)):
         raise HTTPException(502, "Flux indisponible")
     return Response(content=r.content, media_type="image/jpeg",
                     headers={"Cache-Control": "no-store"})
+
+
+# ============ Bibliothèque de fabricants — endpoints ============
+@stream_router.get("/cameras/brands")
+async def cameras_brands(user: dict = Depends(require_role("technician"))):
+    """Renvoie la bibliothèque de fabricants + modèles (JSON extensible côté serveur)."""
+    lib = _load_brand_lib()
+    return {"brands": [
+        {"id": b["id"], "name": b["name"], "default_port": b.get("default_port", 554),
+         "models": [{"name": m["name"], "streams": list(m.get("streams", {}).keys()),
+                     "help": m.get("help")} for m in b.get("models", [])]}
+        for b in lib.get("brands", [])
+    ]}
+
+
+class GenerateRtspInput(BaseModel):
+    brand: str
+    model_idx: int = 0
+    stream: str = "main"  # clé dans models[].streams
+    ip: str
+    port: int = 554
+    channel: int = 1
+    username: str = ""
+    password: str = ""
+
+
+@stream_router.post("/cameras/generate-rtsp-url")
+async def cameras_generate_rtsp(body: GenerateRtspInput, user: dict = Depends(require_role("technician"))):
+    """Génère une URL RTSP à partir d'un fabricant + modèle + type de flux.
+       Les identifiants sont automatiquement URL-encodés."""
+    tpl = _resolve_rtsp_template(body.brand, body.model_idx, body.stream)
+    if not tpl:
+        raise HTTPException(400, "Fabricant / modèle / flux inconnu")
+    try:
+        url = _format_rtsp_from_template(tpl, body.ip, int(body.port),
+                                          body.username, body.password, int(body.channel))
+    except (KeyError, IndexError, ValueError) as e:
+        raise HTTPException(400, f"Template invalide : {e}")
+    return {"rtsp_url": url, "template": tpl}
+
+
+# ============ Détection automatique (ONVIF + probe en une seule opération) ============
+class AutoDetectInput(BaseModel):
+    ip: str
+    onvif_port: int = 80
+    username: str = ""
+    password: str = ""
+
+
+@stream_router.post("/cameras/auto-detect")
+async def cameras_auto_detect(body: AutoDetectInput, user: dict = Depends(require_role("technician"))):
+    """Détection AUTOMATIQUE d'une caméra à partir de son IP :
+       - Ouvre ONVIF, récupère fabricant / modèle / firmware / profils / URI RTSP.
+       - Renvoie tout ce qu'il faut pour pré-remplir le formulaire (aucune saisie manuelle)."""
+    ip = (body.ip or "").strip()
+    if not ip:
+        raise HTTPException(400, "IP requise")
+    if not await asyncio.to_thread(_tcp_check, ip, int(body.onvif_port), 3.0):
+        raise HTTPException(400, f"Port ONVIF {body.onvif_port} injoignable sur {ip}")
+    try:
+        info = await asyncio.wait_for(
+            asyncio.to_thread(_onvif_probe, ip, int(body.onvif_port), body.username, body.password),
+            timeout=15,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "Appareil ONVIF injoignable (délai dépassé)")
+    except Exception as e:
+        raise HTTPException(400, f"ONVIF injoignable : {type(e).__name__} — vérifiez identifiants")
+    # ffprobe le premier flux pour enrichir la résolution effective
+    profiles = info.get("profiles", [])
+    if profiles and profiles[0].get("rtsp_url"):
+        details = await asyncio.to_thread(_ffprobe, _build_rtsp_url(
+            {"rtsp_url": profiles[0]["rtsp_url"], "username": body.username, "password": body.password}))
+        if details:
+            info["live_resolution"] = details.get("resolution")
+            info["live_fps"] = details.get("fps")
+            info["live_codec"] = details.get("codec")
+    await log_audit(user, "onvif_auto_detect", target=ip)
+    return {"ip": ip, "onvif_port": body.onvif_port, **info}
+
+
+# ============ Aperçu vidéo depuis un flux temporaire (utilisé par Test Connexion) ============
+@stream_router.get("/stream/preview.jpeg")
+async def stream_preview(name: str = Query(...), user: dict = Depends(require_role("technician"))):
+    """Récupère une image d'un flux temporaire enregistré via l'endpoint test-connectivity."""
+    if not re.match(r"^probe_[0-9a-z_-]+$", name):
+        raise HTTPException(400, "Nom de flux temporaire invalide")
+    try:
+        async with httpx.AsyncClient(timeout=6) as client:
+            r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": name})
+    except httpx.HTTPError:
+        raise HTTPException(502, "Aperçu indisponible")
+    if r.status_code != 200:
+        raise HTTPException(502, "Aperçu indisponible")
+    return Response(content=r.content, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 # ============ Découverte ONVIF réelle ============

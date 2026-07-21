@@ -32,6 +32,7 @@ logger = logging.getLogger("mg-vms")
 app = FastAPI(title="MG-VMS API", version="1.0.0", description="MG-VMS - Plateforme de vidéosurveillance professionnelle")
 
 app.include_router(auth_router)
+app.include_router(stream_router)
 app.include_router(api_router)
 app.include_router(notif_router)
 app.include_router(realtime_router)
@@ -39,7 +40,6 @@ app.include_router(plugins_router)
 app.include_router(network_router)
 app.include_router(reports_router)
 app.include_router(hardware_router)
-app.include_router(stream_router)
 
 app.add_middleware(SecurityMiddleware)
 

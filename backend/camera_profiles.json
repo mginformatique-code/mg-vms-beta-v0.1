@@ -1,0 +1,379 @@
+{
+  "_schema": "MG-VMS brand library v1 · placeholders: {user} {pass} {ip} {port} {channel}",
+  "_notes": "Ajoutez librement de nouveaux fabricants ou modèles. Le fichier est rechargé sans redémarrage backend.",
+  "brands": [
+    {
+      "id": "reolink",
+      "name": "Reolink",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "Modèles récents (H.264 & H.265)",
+          "streams": {
+            "main_h264": "rtsp://{user}:{pass}@{ip}:{port}/h264Preview_{channel:02d}_main",
+            "sub_h264":  "rtsp://{user}:{pass}@{ip}:{port}/h264Preview_{channel:02d}_sub",
+            "main_h265": "rtsp://{user}:{pass}@{ip}:{port}/h265Preview_{channel:02d}_main",
+            "sub_h265":  "rtsp://{user}:{pass}@{ip}:{port}/h265Preview_{channel:02d}_sub"
+          }
+        },
+        {
+          "name": "RLC / anciennes séries",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/live/av0",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/live/av1"
+          }
+        }
+      ]
+    },
+    {
+      "id": "hikvision",
+      "name": "Hikvision",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "Générique (IP Camera / NVR)",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/Streaming/Channels/{channel}01",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/Streaming/Channels/{channel}02"
+          }
+        },
+        {
+          "name": "Anciens firmwares (< v5.3)",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/h264/ch{channel}/main/av_stream",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/h264/ch{channel}/sub/av_stream"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dahua",
+      "name": "Dahua",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "Générique (IPC / NVR)",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/cam/realmonitor?channel={channel}&subtype=0",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/cam/realmonitor?channel={channel}&subtype=1"
+          }
+        }
+      ]
+    },
+    {
+      "id": "axis",
+      "name": "Axis",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "Générique (Communications AXIS)",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/axis-media/media.amp?videocodec=h264&resolution=1920x1080",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/axis-media/media.amp?videocodec=h264&resolution=640x360",
+            "main_h265": "rtsp://{user}:{pass}@{ip}:{port}/axis-media/media.amp?videocodec=h265&resolution=1920x1080"
+          }
+        }
+      ]
+    },
+    {
+      "id": "hanwha",
+      "name": "Hanwha / Samsung Wisenet",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "Wisenet X/P series",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/profile1/media.smp",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/profile2/media.smp"
+          }
+        },
+        {
+          "name": "Séries Samsung SNB/SNH",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/onvif/profile1/media.smp",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/onvif/profile2/media.smp"
+          }
+        }
+      ]
+    },
+    {
+      "id": "uniview",
+      "name": "Uniview",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "IPC / NVR (canal 1)",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/media/video1",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/media/video2",
+            "third": "rtsp://{user}:{pass}@{ip}:{port}/media/video3"
+          }
+        }
+      ]
+    },
+    {
+      "id": "bosch",
+      "name": "Bosch",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "DINION / FLEXIDOME (H.264)",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/rtsp_tunnel?h26x=4&line={channel}&inst=1",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/rtsp_tunnel?h26x=4&line={channel}&inst=2"
+          }
+        }
+      ]
+    },
+    {
+      "id": "vivotek",
+      "name": "Vivotek",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "Générique (H.264)",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/live.sdp",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/live2.sdp"
+          }
+        }
+      ]
+    },
+    {
+      "id": "tplink-vigi",
+      "name": "TP-Link VIGI",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "VIGI IPC / NVR",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/stream1",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/stream2"
+          }
+        }
+      ]
+    },
+    {
+      "id": "unifi",
+      "name": "Ubiquiti UniFi Protect",
+      "default_port": 7447,
+      "models": [
+        {
+          "name": "G3/G4/G5 (via UniFi Protect NVR)",
+          "streams": {
+            "main": "rtsp://{ip}:{port}/{channel}"
+          },
+          "help": "Le port est celui du serveur UniFi Protect (7447). Le placeholder {channel} correspond au token RTSPS généré par UniFi (ex: nS1xxxxxxxxxxxxx)."
+        }
+      ]
+    },
+    {
+      "id": "milesight",
+      "name": "Milesight",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "MS-C / MS-N",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/main",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/sub"
+          }
+        }
+      ]
+    },
+    {
+      "id": "provision-isr",
+      "name": "Provision ISR",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "Générique",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/ch{channel}/0",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/ch{channel}/1"
+          }
+        }
+      ]
+    },
+    {
+      "id": "avigilon",
+      "name": "Avigilon",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "H4 / H5A",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/defaultPrimary?streamType=u",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/defaultSecondary?streamType=u"
+          }
+        }
+      ]
+    },
+    {
+      "id": "tiandy",
+      "name": "Tiandy",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "Générique (Type Hikvision OEM)",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/Streaming/Channels/{channel}01",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/Streaming/Channels/{channel}02"
+          }
+        }
+      ]
+    },
+    {
+      "id": "hik-oem",
+      "name": "Hikvision OEM (LTS, Ezviz OEM, Kedacom…)",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "Compatible Hikvision",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/Streaming/Channels/{channel}01",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/Streaming/Channels/{channel}02"
+          }
+        }
+      ]
+    },
+    {
+      "id": "annke",
+      "name": "Annke",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "IPC / NVR Annke (Hikvision OEM)",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/Streaming/Channels/{channel}01",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/Streaming/Channels/{channel}02"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ezviz",
+      "name": "Ezviz",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "Générique (Hikvision-based)",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/Streaming/Channels/101",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/Streaming/Channels/102"
+          }
+        }
+      ]
+    },
+    {
+      "id": "amcrest",
+      "name": "Amcrest",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "Dahua OEM",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/cam/realmonitor?channel={channel}&subtype=0",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/cam/realmonitor?channel={channel}&subtype=1"
+          }
+        }
+      ]
+    },
+    {
+      "id": "foscam",
+      "name": "Foscam",
+      "default_port": 88,
+      "models": [
+        {
+          "name": "R-series / FI-series",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/videoMain",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/videoSub"
+          }
+        }
+      ]
+    },
+    {
+      "id": "acti",
+      "name": "ACTi",
+      "default_port": 7070,
+      "models": [
+        {
+          "name": "Séries E / KCM",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/track1"
+          }
+        }
+      ]
+    },
+    {
+      "id": "geovision",
+      "name": "GeoVision",
+      "default_port": 8554,
+      "models": [
+        {
+          "name": "GV-IPCam",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/CH001.sdp",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/CH002.sdp"
+          }
+        }
+      ]
+    },
+    {
+      "id": "panasonic",
+      "name": "Panasonic i-PRO",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "WV / séries pro",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/MediaInput/h264/stream_1",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/MediaInput/h264/stream_2"
+          }
+        }
+      ]
+    },
+    {
+      "id": "sony",
+      "name": "Sony IPELA",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "Générique (SNC)",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/video1",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/video2"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pelco",
+      "name": "Pelco",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "Sarix",
+          "streams": {
+            "main": "rtsp://{user}:{pass}@{ip}:{port}/stream1",
+            "sub":  "rtsp://{user}:{pass}@{ip}:{port}/stream2"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generic",
+      "name": "Autre / URL RTSP personnalisée",
+      "default_port": 554,
+      "models": [
+        {
+          "name": "Saisie manuelle",
+          "streams": {
+            "custom": "rtsp://{user}:{pass}@{ip}:{port}/"
+          }
+        }
+      ]
+    }
+  ]
+}

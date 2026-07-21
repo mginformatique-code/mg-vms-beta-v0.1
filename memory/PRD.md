@@ -23,6 +23,18 @@ React + FastAPI + MongoDB (Kubernetes single backend/frontend). Note: the reques
 8. Bilingue FR/EN, thème clair/sombre
 
 ## Implemented (2026-07)
+- ✅ **CAMERA MANAGEMENT PRO (2.3.0 — 2026-07-21)**
+  - **Mode ONVIF** : plus jamais d'URL RTSP demandée manuellement. Workflow complet : IP + port + user + pass → `GetProfiles` → `GetStreamUri` → **choix de profil (Main / Sub / 3ᵉ)** → enregistrement auto go2rtc → caméra créée. RTSP totalement transparent.
+  - **Mode RTSP manuel avec Assistant** : 25 fabricants supportés (Reolink, Hikvision, Dahua, Axis, Hanwha, Uniview, Bosch, Vivotek, TP-Link VIGI, UniFi Protect, Milesight, Provision-ISR, Avigilon, Tiandy, Hik-OEM, Annke, Ezviz, Amcrest, Foscam, ACTi, GeoVision, Panasonic, Sony, Pelco, Générique). Choix fabricant → modèle → flux (main/sub/main_h264/sub_h265/…) → canal → **URL générée automatiquement**. Champ RTSP toujours modifiable manuellement.
+  - **Bibliothèque extensible** `/app/backend/camera_profiles.json` : ajouter un nouveau fabricant ne nécessite aucune modification de code (recharge à chaque requête `GET /api/cameras/brands`).
+  - **Encodage automatique des credentials** : `# @ + : espace /` sont automatiquement URL-encodés (RFC 3986) à la fois par `_build_rtsp_url` (côté serveur) et par `POST /api/cameras/generate-rtsp-url`. L'utilisateur peut coller n'importe quel mot de passe.
+  - **Bouton « Détecter automatiquement »** (`POST /api/cameras/auto-detect`) : un clic → fabricant, modèle, firmware, PTZ, profils, URI RTSP, résolution effective (ffprobe). TCP pré-check 3 s pour fail-fast.
+  - **Test de connexion 7 étapes** avec statut ✅/⚠️/❌ par étape : `ping` · `onvif_port` · `onvif_auth` · `rtsp_port` · `rtsp_open` · `go2rtc` · `preview` + **aperçu vidéo JPEG** live dans le dialog.
+  - **Édition complète** : modif de nom, IP, protocole, ports, credentials, profil vidéo, URL RTSP, résolution, fps, bitrate, paramètres IA, paramètres d'enregistrement. `PUT /api/cameras/{id}` recharge automatiquement go2rtc sans supprimer la caméra. Password laissé vide = conserve l'ancien.
+  - **Priorité** : ONVIF auto → RTSP généré via assistant → saisie manuelle en dernier recours (comme demandé).
+  - Ordre d'inclusion des routers corrigé (`stream_router` avant `api_router`) pour que `/api/cameras/brands`, `/generate-rtsp-url`, `/auto-detect` ne soient plus interceptés par `/api/cameras/{id}`.
+
+## Implemented (2026-07)
 - ✅ **PRODUCTION READINESS #2 — Modes RTSP/ONVIF séparés (2.2.0 — 2026-07-21)**
   - **CameraInput** gagne un champ `mode` (`rtsp` | `onvif`). Frontend : toggle « Mode RTSP » / « Mode ONVIF » en haut du dialog, avec bascule des champs affichés.
   - **Mode RTSP** : valide seulement Port RTSP + URL RTSP (ffprobe).

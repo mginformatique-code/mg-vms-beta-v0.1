@@ -135,9 +135,19 @@ class CameraInput(BaseModel):
     protocol: str = "RTSP"
     codec: str = "H264"
     model: str = ""
+    manufacturer: str = ""
+    firmware: str = ""
     rtsp_url: str = ""
     username: str = ""
     password: str = ""
+    # Champs profil (mode ONVIF)
+    profile_token: str = ""
+    profile_name: str = ""
+    # Métadonnées vidéo effectives (informationnelles, mises à jour au probe)
+    resolution: str = ""
+    fps: Optional[int] = None
+    bitrate: Optional[int] = None
+    # PTZ / enregistrement / IA
     ptz_enabled: bool = False
     record_enabled: bool = True
     detect_enabled: bool = False
@@ -177,7 +187,6 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
         if not data.ip:
             raise HTTPException(400, "Mode ONVIF : l'adresse IP est obligatoire")
         from streaming import _onvif_probe, _tcp_check
-        # Pré-check TCP rapide (3s) — évite d'attendre le timeout SOAP complet sur un hôte injoignable
         if not await asyncio.to_thread(_tcp_check, data.ip, int(data.onvif_port), 3.0):
             raise HTTPException(400, f"Port ONVIF {data.onvif_port} injoignable sur {data.ip}")
         try:
@@ -189,15 +198,26 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
             raise HTTPException(504, "Appareil ONVIF injoignable (délai dépassé)")
         except Exception as e:
             raise HTTPException(400, f"ONVIF injoignable : {type(e).__name__} — vérifiez IP/port/identifiants")
-        # Prend le premier profil disposant d'une URI RTSP réelle
-        rtsp = next((p["rtsp_url"] for p in info.get("profiles", []) if p.get("rtsp_url")), None)
-        if not rtsp:
+        profiles = info.get("profiles", [])
+        # Sélection du profil : utilise `profile_token` si fourni, sinon premier profil avec URI RTSP
+        selected = None
+        if data.profile_token:
+            selected = next((p for p in profiles if p.get("token") == data.profile_token), None)
+        if not selected:
+            selected = next((p for p in profiles if p.get("rtsp_url")), None)
+        if not selected or not selected.get("rtsp_url"):
             raise HTTPException(400, "Aucun profil ONVIF n'a renvoyé d'URL RTSP")
-        payload["rtsp_url"] = rtsp
+        payload["rtsp_url"] = selected["rtsp_url"]
+        payload["profile_token"] = selected.get("token", "")
+        payload["profile_name"] = str(selected.get("name", ""))
         payload["protocol"] = "ONVIF"
+        payload["resolution"] = selected.get("resolution") or payload.get("resolution", "")
+        payload["codec"] = (selected.get("codec") or payload.get("codec", "H264")).upper().replace("VIDEO", "").strip() or "H264"
         if info.get("model"):
             payload["model"] = payload.get("model") or f"{info.get('manufacturer','')} {info['model']}".strip()
-        payload["ptz_enabled"] = bool(info.get("ptz_supported"))
+        payload["manufacturer"] = payload.get("manufacturer") or str(info.get("manufacturer") or "")
+        payload["firmware"] = payload.get("firmware") or str(info.get("firmware") or "")
+        payload["ptz_enabled"] = bool(info.get("ptz_supported")) or payload.get("ptz_enabled", False)
     else:  # mode RTSP pur
         if not (payload.get("rtsp_url") or "").lower().startswith("rtsp://"):
             raise HTTPException(400, "Mode RTSP : l'URL RTSP est obligatoire (rtsp://…)")
@@ -228,6 +248,9 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
         raise HTTPException(404, "Caméra introuvable")
 
     payload = data.model_dump()
+    # Si le mot de passe est vide lors d'un PUT, conserver l'ancien (pratique en édition)
+    if not payload.get("password"):
+        payload["password"] = existing.get("password", "")
     # Mode ONVIF : redécouverte automatique de l'URL RTSP si IP/port/identifiants changent
     if data.mode == "onvif":
         if not data.ip:
@@ -236,7 +259,8 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
             existing.get("ip") != data.ip or
             existing.get("onvif_port") != data.onvif_port or
             existing.get("username") != data.username or
-            existing.get("password") != data.password or
+            (data.password and existing.get("password") != data.password) or
+            (data.profile_token and existing.get("profile_token") != data.profile_token) or
             not (existing.get("rtsp_url") or "").lower().startswith("rtsp://")
         )
         if credentials_changed:
@@ -245,14 +269,24 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
                 raise HTTPException(400, f"Port ONVIF {data.onvif_port} injoignable sur {data.ip}")
             try:
                 info = await asyncio.wait_for(
-                    asyncio.to_thread(_onvif_probe, data.ip, int(data.onvif_port), data.username, data.password),
+                    asyncio.to_thread(_onvif_probe, data.ip, int(data.onvif_port),
+                                      data.username, data.password or existing.get("password", "")),
                     timeout=15,
                 )
-                rtsp = next((p["rtsp_url"] for p in info.get("profiles", []) if p.get("rtsp_url")), None)
-                if not rtsp:
+                profiles = info.get("profiles", [])
+                selected = None
+                if data.profile_token:
+                    selected = next((p for p in profiles if p.get("token") == data.profile_token), None)
+                if not selected:
+                    selected = next((p for p in profiles if p.get("rtsp_url")), None)
+                if not selected or not selected.get("rtsp_url"):
                     raise HTTPException(400, "Aucun profil ONVIF n'a renvoyé d'URL RTSP")
-                payload["rtsp_url"] = rtsp
-                payload["ptz_enabled"] = bool(info.get("ptz_supported"))
+                payload["rtsp_url"] = selected["rtsp_url"]
+                payload["profile_token"] = selected.get("token", "")
+                payload["profile_name"] = str(selected.get("name", ""))
+                payload["resolution"] = selected.get("resolution") or payload.get("resolution", "")
+                payload["codec"] = (selected.get("codec") or payload.get("codec", "H264")).upper().replace("VIDEO", "").strip() or "H264"
+                payload["ptz_enabled"] = bool(info.get("ptz_supported")) or payload.get("ptz_enabled", False)
             except HTTPException:
                 raise
             except asyncio.TimeoutError:
