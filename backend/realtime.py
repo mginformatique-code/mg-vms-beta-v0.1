@@ -96,6 +96,13 @@ async def broadcast_camera_status(camera: dict):
     }}, predicate=lambda u: _can_see(u, camera.get("site_id", "")))
 
 
+async def broadcast_ai_detections(camera_id: str, site_id: str, payload: dict):
+    """Diffuse aux clients autorisés les détections IA d'une caméra (overlay Live)."""
+    await manager.broadcast({"type": "ai_detections", "data": {
+        "camera_id": camera_id, "site_id": site_id, **payload,
+    }}, predicate=lambda u: _can_see(u, site_id or ""))
+
+
 async def _auth_ws(token: str):
     if not token:
         return None

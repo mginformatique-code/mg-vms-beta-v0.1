@@ -1,6 +1,17 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **SPRINT P0.2 — Overlay IA temps réel en Live View (2.6.1 — 2026-07-21)**
+  - **Backend** : à chaque cycle IA, les détections sont diffusées via WebSocket (`broadcast_ai_detections` dans `realtime.py`) avec le message `{type: "ai_detections", data: {camera_id, site_id, timestamp, boxes: [{cls, label, confidence, vehicle_color, bbox_norm}], counts: {Personne: 2, Voiture: 1}, motion_pct}}`. Les bboxes sont **normalisées 0-1** côté serveur pour que le client puisse les scaler à sa taille d'affichage sans connaître la résolution IA.
+  - **Frontend** : `AppContext` maintient `aiDetections` (par `camera_id`) alimenté par le WebSocket. `LiveView.jsx` dessine un `<canvas>` transparent en overlay au-dessus de chaque `<img>` MJPEG.
+  - **Palette IA** : couleur distincte par classe — Personne=vert, Voiture=bleu, Camion/Bus=orange, Moto=rose, Vélo=cyan, Animal/Chien/Chat=violet, inconnu=rouge.
+  - **Labels** : `<classe> <confiance%> · <couleur véhicule>` (préparé pour ByteTrack ID `#N`).
+  - **Compteur d'objets** par caméra en haut à droite : ex. `2 Personne · 1 Voiture`.
+  - **Toggle Overlay IA** dans le bandeau Live (persisté en `localStorage`, `Eye` / `EyeOff`).
+  - N'affiche l'overlay que si `cam.detect_enabled === true`.
+  - Latence : bboxes rafraîchies à la même cadence que le cycle IA (par défaut 2 s, réglable via `PUT /api/ai/config`).
+
+## Implemented (2026-07)
 - ✅ **SPRINT P0.1 — Événements interactifs & visionneuse professionnelle (2.6.0 — 2026-07-21)**
   - **Composant `<EventViewer>` réutilisable** (`/app/frontend/src/components/EventViewer.jsx`) : modal plein écran overlay noir, image centrée, panneau latéral métadonnées, footer clavier.
   - **Miniatures cliquables** dans les pages Événements IA et ANPR/Plaques → ouvrent la visionneuse.

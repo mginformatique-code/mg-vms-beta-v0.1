@@ -289,8 +289,24 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
         "motion_pct": motion_pct,
         "frame_preview": _jpeg_data_uri(img, 640),
     }
+    # Overlay LIVE (P0.2) : bboxes normalisées 0-1 pour scaling côté client
+    overlay_boxes = []
+    for d in detections:
+        bx = d.get("_bbox") or d.get("bbox")
+        if not bx:
+            continue
+        x1, y1, x2, y2 = bx
+        overlay_boxes.append({
+            "cls": d["class"], "label": d["label"], "confidence": d["confidence"],
+            "vehicle_color": d.get("vehicle_color"),
+            "bbox_norm": [round(x1 / w, 4), round(y1 / h, 4), round(x2 / w, 4), round(y2 / h, 4)],
+        })
+    counts: dict = {}
+    for d in detections:
+        counts[d["label"]] = counts.get(d["label"], 0) + 1
     return {"detections": detections, "plates": plates, "motion_pct": motion_pct,
-            "frame_thumb": _jpeg_data_uri(img), "timings": timings}
+            "frame_thumb": _jpeg_data_uri(img), "timings": timings,
+            "overlay_boxes": overlay_boxes, "counts": counts}
 
 
 def get_debug_snapshot(camera_id: str) -> dict:
@@ -549,6 +565,17 @@ async def _process_camera(cam: dict) -> None:
         result.get("motion_pct", 0.0), len(plates),
         tim.get("yolo_ms", 0), tim.get("alpr_ms", 0),
     )
+    # Diffuse l'overlay au frontend (Live View)
+    try:
+        from realtime import broadcast_ai_detections
+        await broadcast_ai_detections(cam["id"], cam.get("site_id", ""), {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "boxes": result.get("overlay_boxes", []),
+            "counts": result.get("counts", {}),
+            "motion_pct": result.get("motion_pct", 0.0),
+        })
+    except Exception:
+        logger.exception("broadcast_ai_detections error")
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
     base = {

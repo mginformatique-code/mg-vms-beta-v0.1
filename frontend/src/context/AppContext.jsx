@@ -13,6 +13,7 @@ export function AppProvider({ children }) {
   const [liveMetrics, setLiveMetrics] = useState(null);
   const [liveAlert, setLiveAlert] = useState(null);
   const [alertPing, setAlertPing] = useState(0);
+  const [aiDetections, setAiDetections] = useState({}); // { camera_id -> {boxes, counts, ts, motion_pct} }
 
   const t = useCallback((key) => translations[lang]?.[key] ?? translations.fr[key] ?? key, [lang]);
 
@@ -78,6 +79,17 @@ export function AppProvider({ children }) {
           let msg;
           try { msg = JSON.parse(e.data); } catch { return; }
           if (msg.type === "metrics") setLiveMetrics(msg.data);
+          else if (msg.type === "ai_detections") {
+            setAiDetections((prev) => ({
+              ...prev,
+              [msg.data.camera_id]: {
+                boxes: msg.data.boxes || [],
+                counts: msg.data.counts || {},
+                ts: msg.data.timestamp,
+                motion_pct: msg.data.motion_pct,
+              },
+            }));
+          }
           else if (msg.type === "alert") {
             setLiveAlert(msg.data);
             setAlertPing((p) => p + 1);
@@ -97,7 +109,7 @@ export function AppProvider({ children }) {
   }, [user]);
 
   return (
-    <AppContext.Provider value={{ user, setUser, login, logout, lang, setLang, toggleLang, theme, setTheme, toggleTheme, t, can, hasPerm, liveMetrics, liveAlert, alertPing }}>
+    <AppContext.Provider value={{ user, setUser, login, logout, lang, setLang, toggleLang, theme, setTheme, toggleTheme, t, can, hasPerm, liveMetrics, liveAlert, alertPing, aiDetections }}>
       {children}
     </AppContext.Provider>
   );
