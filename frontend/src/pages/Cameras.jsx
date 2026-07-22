@@ -164,13 +164,12 @@ export default function Cameras() {
       const onvifOk = check?.steps?.find((s) => s.name === "onvif_auth")?.status === "ok";
       const rtspOk = check?.steps?.find((s) => s.name === "rtsp_open")?.status === "ok";
       if (!allow_rtsp_override) {
-        if (!check || !check.success) {
+        if (!check || !check.success || !check.rtsp_url_validated) {
           if (form.mode === "onvif" && onvifOk && !rtspOk) {
-            // ONVIF OK, RTSP KO : ne pas bloquer — proposer bouton "Créer malgré tout"
             toast.warning("Test RTSP échoué. ONVIF fonctionne — utilisez « Créer malgré le test RTSP » pour continuer.");
             setSaving(false); return;
           }
-          toast.error(check?.message || "Connectivité invalide — caméra non sauvegardée");
+          toast.error(check?.message || "URL RTSP non validée — impossible de créer la caméra");
           setSaving(false); return;
         }
       } else if (!onvifOk) {
@@ -481,6 +480,33 @@ export default function Cameras() {
                 <div className="space-y-1" data-testid="conn-test-result">
                   {connCheck.steps.map((s, i) => <StepRow key={i} step={s} />)}
                   <div className="text-[11px] mt-1" style={{ color: connCheck.success ? "#00E676" : "#FF3333" }}>{connCheck.message}</div>
+                  {/* Debug RTSP : URLs testées avec password masqué (P0 finalisation) */}
+                  {connCheck.debug_attempts && connCheck.debug_attempts.length > 0 && (
+                    <details className="mt-2 border border-border bg-background/40 p-2" open={!connCheck.rtsp_url_validated} data-testid="rtsp-debug-panel">
+                      <summary className="text-[10px] uppercase tracking-wider text-muted-foreground cursor-pointer">
+                        Debug RTSP — {connCheck.debug_attempts.length} tentative(s)
+                        {connCheck.rtsp_url_validated && (
+                          <span className="ml-2 text-[#00E676]">✓ URL validée</span>
+                        )}
+                      </summary>
+                      <ol className="mt-1.5 space-y-0.5 text-[10px] mono">
+                        {connCheck.debug_attempts.map((a, i) => (
+                          <li key={i} className={"flex items-center gap-1 " + (a.ok ? "text-[#00E676]" : "text-muted-foreground")}>
+                            <span className="text-[9px]">{a.ok ? "✓" : "✗"}</span>
+                            <span className="text-[9px] px-1 border border-border">{a.transport}</span>
+                            <span className="truncate flex-1" title={a.url_masked}>{a.url_masked}</span>
+                            {a.ok && a.codec && <span className="text-[9px]">{a.codec} {a.resolution}</span>}
+                          </li>
+                        ))}
+                      </ol>
+                      {connCheck.validated_url && (
+                        <div className="mt-2 text-[10px] mono text-[#00E676] border-t border-border pt-1.5" data-testid="validated-url">
+                          <span className="text-muted-foreground">URL retenue : </span>{connCheck.validated_url}
+                          {connCheck.validated_transport && <span className="text-muted-foreground"> · {connCheck.validated_transport.toUpperCase()}</span>}
+                        </div>
+                      )}
+                    </details>
+                  )}
                   {connCheck.steps.find((s) => s.preview_url) && (
                     <div className="mt-2">
                       <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Aperçu vidéo</div>

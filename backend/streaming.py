@@ -49,24 +49,37 @@ def _stream_name(camera_id: str) -> str:
 
 
 def _build_rtsp_url(cam: dict) -> str:
-    """Construit l'URL RTSP finale en injectant les identifiants **encodés**.
-    Encode automatiquement `# @ + : espace /` afin que les mots de passe complexes fonctionnent.
-    Applique le transport RTSP (TCP/UDP) demandé via `#transport=tcp|udp` en query fragment go2rtc."""
+    """Construit l'URL RTSP finale en injectant les identifiants **encodés une seule fois** (RFC 3986).
+
+    - Si l'URL déclare déjà `user:pass@` : ne réencode pas (on considère que l'appelant a déjà encodé).
+    - Sinon : encode `username` et `password` avec `urllib.parse.quote(str, safe="")`.
+      Exemple : `Rlwt29#+jpf` → `Rlwt29%23%2Bjpf` (jamais `%2523%252B…`).
+    - Applique le transport RTSP demandé via `#transport=tcp|udp`.
+    """
     url = (cam.get("rtsp_url") or "").strip()
     if not url:
         return ""
     user = (cam.get("username") or "").strip()
     pwd = cam.get("password") or ""
-    if user and "@" not in url and url.lower().startswith("rtsp://"):
-        # RFC 3986 : n'autoriser dans user:pass que caractères non réservés
-        u_enc = urlquote(user, safe="")
-        p_enc = urlquote(pwd, safe="")
-        url = url.replace("rtsp://", f"rtsp://{u_enc}:{p_enc}@", 1)
-    # Transport RTSP explicite (TCP recommandé par défaut si non spécifié)
+    if user and url.lower().startswith("rtsp://"):
+        # Détection stricte de la présence de credentials dans l'URL (avant le premier /)
+        after_scheme = url[7:]
+        host_part = after_scheme.split("/", 1)[0]
+        if "@" not in host_part:
+            u_enc = urlquote(str(user), safe="")
+            p_enc = urlquote(str(pwd), safe="")
+            url = url.replace("rtsp://", f"rtsp://{u_enc}:{p_enc}@", 1)
     transport = (cam.get("rtsp_transport") or "tcp").lower()
     if transport in ("tcp", "udp") and "#transport=" not in url:
         url = f"{url}#transport={transport}"
     return url
+
+
+def _mask_url_password(url: str) -> str:
+    """Masque le mot de passe dans une URL rtsp:// pour affichage sûr côté frontend."""
+    if not url:
+        return ""
+    return re.sub(r"(rtsp://[^:@/]+):([^@/]+)@", lambda m: f"{m.group(1)}:******@", url, count=1, flags=re.IGNORECASE)
 
 
 async def _stream_registered(name: str) -> bool:
@@ -322,21 +335,72 @@ def _rtsp_variants(base_url: str, preferred_codec: str = "auto") -> list:
 
 def _try_ffprobe_variants(base_url: str, preferred_codec: str, transport: str,
                           username: str = "", password: str = "") -> tuple:
-    """Teste base_url puis ses variantes. Retourne (url_qui_marche, ffprobe_details) ou (base_url, None)."""
-    for variant in _rtsp_variants(base_url, preferred_codec):
-        full = _build_rtsp_url({"rtsp_url": variant, "username": username, "password": password,
-                                 "rtsp_transport": transport})
-        details = _ffprobe(full, transport=transport)
-        if details:
-            # Filtre codec forcé
-            codec = (details.get("codec") or "").upper()
-            if preferred_codec == "h264" and codec not in ("H264", "AVC"):
-                continue
-            if preferred_codec == "h265" and codec not in ("H265", "HEVC"):
-                continue
-            details["rtsp_url_used"] = variant  # sans credentials
-            return variant, details
-    return base_url, None
+    """Teste chaque URL possible avec l'ordre demandé par l'utilisateur :
+       1) H.264 TCP   2) H.265 TCP   3) H.264 UDP   4) H.265 UDP
+    (Si `preferred_codec` est forcé h264 ou h265, on ne teste que ce codec sur les 2 transports.)
+
+    Retourne un tuple `(working_url, ffprobe_details, debug_attempts)` :
+      - `working_url` : URL brute (sans credentials) qui a répondu, ou base_url si aucune ne marche.
+      - `ffprobe_details` : dict {resolution, fps, codec, bitrate, transport} ou None.
+      - `debug_attempts` : list de dicts pour affichage debug UI (`{url_masked, transport, ok, codec}`).
+    """
+    pref = (preferred_codec or "auto").lower()
+    variants = _rtsp_variants(base_url, pref)
+
+    def _variant_codec(u: str) -> str:
+        low = u.lower()
+        if "h265preview" in low or "hevc" in low:
+            return "h265"
+        if "h264preview" in low or "avc" in low:
+            return "h264"
+        return "unknown"
+
+    # Ordre demandé : H264 TCP → H265 TCP → H264 UDP → H265 UDP
+    if pref == "h264":
+        codecs_seq = ["h264"]
+    elif pref == "h265":
+        codecs_seq = ["h265"]
+    else:
+        codecs_seq = ["h264", "h265"]
+    # Si le transport user est UDP, on inverse la préférence (UDP en premier)
+    tr_seq = ["tcp", "udp"] if (transport or "tcp").lower() != "udp" else ["udp", "tcp"]
+
+    attempts: list = []
+    ordered_pairs = []  # (variant_url, transport)
+    for tr in tr_seq:
+        for cd in codecs_seq:
+            # Priorité aux variantes qui correspondent au codec attendu (par nom URL), puis autres
+            for v in variants:
+                vc = _variant_codec(v)
+                if vc == cd or (vc == "unknown" and cd == "h264"):
+                    pair = (v, tr)
+                    if pair not in ordered_pairs:
+                        ordered_pairs.append(pair)
+
+    for variant_url, tr in ordered_pairs:
+        full = _build_rtsp_url({"rtsp_url": variant_url, "username": username,
+                                 "password": password, "rtsp_transport": tr})
+        masked = _mask_url_password(full)
+        details = _ffprobe(full, transport=tr)
+        attempt = {"url_masked": masked, "transport": tr.upper(),
+                    "ok": bool(details),
+                    "codec": (details or {}).get("codec"),
+                    "resolution": (details or {}).get("resolution"),
+                    "fps": (details or {}).get("fps")}
+        attempts.append(attempt)
+        if not details:
+            continue
+        codec_up = (details.get("codec") or "").upper()
+        # Filtre codec forcé
+        if pref == "h264" and codec_up not in ("H264", "AVC"):
+            continue
+        if pref == "h265" and codec_up not in ("H265", "HEVC"):
+            continue
+        details["rtsp_url_used"] = variant_url
+        details["transport_used"] = tr
+        return variant_url, details, attempts
+
+    return base_url, None, attempts
 
 
 async def probe_camera(cam: dict) -> dict:
@@ -396,6 +460,10 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
     onvif_info = None
     rtsp_details = None
     rtsp_final_url = ""
+    rtsp_url_validated = False
+    validated_url_masked = ""
+    validated_transport = ""
+    debug_attempts: list = []
 
     def add(name: str, status: str, message: str, **extra):
         steps.append({"name": name, "status": status, "message": message, **extra})
@@ -449,23 +517,33 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
             # 5) Ouverture RTSP — TESTE variantes multiples (fallback constructeur si ONVIF ment)
             transport = (data.rtsp_transport or "tcp").lower()
             pref = (data.preferred_codec or "auto").lower()
-            working_url, rtsp_details = await asyncio.to_thread(
+            working_url, rtsp_details, attempts = await asyncio.to_thread(
                 _try_ffprobe_variants, discovered_rtsp, pref, transport, data.username, data.password
             )
             if rtsp_details:
                 rtsp_final_url = _build_rtsp_url({
                     "rtsp_url": working_url, "username": data.username,
-                    "password": data.password, "rtsp_transport": transport})
+                    "password": data.password,
+                    "rtsp_transport": rtsp_details.get("transport_used") or transport})
                 add("rtsp_open", "ok",
-                    f"Flux RTSP OK · {rtsp_details.get('resolution')} @ {rtsp_details.get('fps','?')}fps {rtsp_details.get('codec','')} (transport {transport.upper()})",
-                    **rtsp_details, rtsp_url=working_url, rtsp_url_used=working_url)
+                    f"Flux RTSP OK · {rtsp_details.get('resolution')} @ {rtsp_details.get('fps','?')}fps {rtsp_details.get('codec','')} (transport {(rtsp_details.get('transport_used') or transport).upper()})",
+                    **{k: v for k, v in rtsp_details.items() if k != "transport_used"},
+                    rtsp_url=working_url, rtsp_url_used=working_url,
+                    validated_url_masked=_mask_url_password(rtsp_final_url),
+                    transport_used=rtsp_details.get("transport_used"),
+                    attempts=attempts)
+                rtsp_url_validated = True
+                validated_url_masked = _mask_url_password(rtsp_final_url)
+                validated_transport = rtsp_details.get("transport_used") or transport
+                debug_attempts = attempts
             else:
-                # Ajoute le contexte : quelles variantes ont été essayées
-                tried = _rtsp_variants(discovered_rtsp, pref)
+                # Ajoute le contexte : quelles variantes ont été essayées (mode debug)
                 add("rtsp_open", "error",
-                    f"Ouverture RTSP impossible (ffprobe) — {len(tried)} variante(s) testée(s). "
-                    f"Vérifiez les identifiants ou essayez UDP.",
-                    rtsp_url=discovered_rtsp, tried_variants=tried, allow_override=True)
+                    f"Ouverture RTSP impossible (ffprobe) — {len(attempts)} tentative(s). "
+                    f"Vérifiez identifiants ou essayez UDP/l'autre codec.",
+                    rtsp_url=discovered_rtsp, attempts=attempts, allow_override=True)
+                rtsp_url_validated = False
+                debug_attempts = attempts
         else:
             add("rtsp_port", "skip", "Ignoré (aucune URI RTSP découverte)")
             add("rtsp_open", "skip", "Ignoré")
@@ -478,22 +556,32 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
         transport = (data.rtsp_transport or "tcp").lower()
         pref = (data.preferred_codec or "auto").lower()
         if (data.rtsp_url or "").lower().startswith("rtsp://") and ping_ok:
-            working_url, rtsp_details = await asyncio.to_thread(
+            working_url, rtsp_details, attempts = await asyncio.to_thread(
                 _try_ffprobe_variants, data.rtsp_url, pref, transport, data.username, data.password
             )
             rtsp_final_url = _build_rtsp_url({
                 "rtsp_url": working_url, "username": data.username,
-                "password": data.password, "rtsp_transport": transport})
+                "password": data.password,
+                "rtsp_transport": (rtsp_details or {}).get("transport_used") or transport})
             if rtsp_details:
                 add("rtsp_open", "ok",
-                    f"Flux RTSP OK · {rtsp_details.get('resolution')} @ {rtsp_details.get('fps','?')}fps {rtsp_details.get('codec','')} (transport {transport.upper()})",
-                    **rtsp_details, rtsp_url=working_url, rtsp_url_used=working_url)
+                    f"Flux RTSP OK · {rtsp_details.get('resolution')} @ {rtsp_details.get('fps','?')}fps {rtsp_details.get('codec','')} (transport {(rtsp_details.get('transport_used') or transport).upper()})",
+                    **{k: v for k, v in rtsp_details.items() if k != "transport_used"},
+                    rtsp_url=working_url, rtsp_url_used=working_url,
+                    validated_url_masked=_mask_url_password(rtsp_final_url),
+                    transport_used=rtsp_details.get("transport_used"),
+                    attempts=attempts)
+                rtsp_url_validated = True
+                validated_url_masked = _mask_url_password(rtsp_final_url)
+                validated_transport = rtsp_details.get("transport_used") or transport
+                debug_attempts = attempts
             else:
-                tried = _rtsp_variants(data.rtsp_url, pref)
                 add("rtsp_open", "error",
-                    f"Ouverture RTSP impossible — {len(tried)} variante(s) testée(s). "
+                    f"Ouverture RTSP impossible — {len(attempts)} tentative(s). "
                     f"Vérifiez URL/identifiants ou essayez UDP.",
-                    rtsp_url=data.rtsp_url, tried_variants=tried, allow_override=True)
+                    rtsp_url=data.rtsp_url, attempts=attempts, allow_override=True)
+                rtsp_url_validated = False
+                debug_attempts = attempts
         else:
             add("rtsp_open", "skip", "Ignoré (URL RTSP invalide ou port fermé)")
 
@@ -553,6 +641,10 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
         "resolution": (rtsp_details or {}).get("resolution"),
         "fps": (rtsp_details or {}).get("fps"),
         "codec": (rtsp_details or {}).get("codec"),
+        "rtsp_url_validated": rtsp_url_validated,
+        "validated_url": validated_url_masked,
+        "validated_transport": validated_transport,
+        "debug_attempts": debug_attempts,
         "message": (
             f"Tous les tests {data.mode.upper()} sont passés" if success else
             "Un ou plusieurs tests ont échoué — voir détails"

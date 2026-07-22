@@ -1,0 +1,50 @@
+{
+  "summary": "Iteration 20 — Validation bug fix RTSP debug/mask/validation. Backend pytest 14/15 (1 échec CRITIQUE : POST /api/cameras accepte une caméra mode='rtsp' avec URL non validée, alors que la spec exige un 400). Détails : (1) _build_rtsp_url encode une seule fois `Rlwt29#+jpf` → `Rlwt29%23%2Bjpf` (aucun %25) ✓ ; préserve URL déjà avec creds ✓ ; applique #transport=udp ✓. (2) _mask_url_password remplace bien user:pass@ par user:******@ ✓, préserve URLs sans creds ✓, masque aussi le password déjà URL-encodé ✓. (3) _try_ffprobe_variants retourne 3-tuple (working_url, details, attempts) ✓ ; attempts est une liste de dicts {url_masked, transport, ok, codec, resolution, fps} ✓ ; le password brut ET le password encodé n'apparaissent JAMAIS dans url_masked ✓ ; ordre respecté : TCP d'abord (h264 puis h265), UDP en dernier ✓. (4) POST /api/cameras/test-connectivity retourne rtsp_url_validated=false, validated_url='', validated_transport='', debug_attempts=[] pour IP injoignable ; le password brut et encodé n'apparaissent JAMAIS dans la réponse HTTP ✓. (5) GET /diagnostic retourne rtsp_url_masked ✓. (6) REGRESSION live.mjpeg demo-cam-001 > 10 kB en 3s avec multipart/x-mixed-replace boundary ✓. Frontend : les 4 testids clés existent (cam-form-submit, rtsp-transport, preferred-codec, cam-form-rtsp-url en mode RTSP) ; le bloc rtsp-debug-panel est bien dans le code JSX (Cameras.jsx L484-509) mais n'est rendu que si connCheck.debug_attempts.length>0 — n'a pas pu être testé end-to-end car IP RFC5737 192.0.2.99 avec port 554 fermé → ping échoue → rtsp_open est skip → debug_attempts=[] (comportement correct). La logique client submit refuse bien la création si !rtsp_url_validated (Cameras.jsx L167-174).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/cameras (mode='rtsp')",
+        "issue": "Le backend accepte (200) la création d'une caméra en mode RTSP avec une URL invalide (rtsp://192.0.2.99:554/nowhere) sans validation ffprobe. La spec exige un 400 quand rtsp_url_validated=false et allow_rtsp_override=false. routers.py::create_camera ne réalise AUCUN test _try_ffprobe_variants en mode 'rtsp' — il ne fait que register_camera_stream() qui appelle PUT go2rtc /api/streams (accepte n'importe quelle URL syntaxiquement valide, donc renvoie True sans vérifier que le flux est réellement décodable). Reproduction : POST /api/cameras {mode:'rtsp', rtsp_url:'rtsp://192.0.2.99:554/nowhere', ...} → renvoie 200 + doc créé.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Panel debug RTSP (rtsp-debug-panel)",
+        "issue": "Le bloc rtsp-debug-panel n'est jamais rendu quand le port RTSP est fermé (ping fail → rtsp_open skip → debug_attempts=[]). Comportement conforme au code mais rend l'E2E impossible sans une IP réelle qui accepte TCP:554 mais refuse le flux RTSP. Point à confirmer manuellement avec une vraie caméra Reolink.",
+        "affected_selectors": ["[data-testid=rtsp-debug-panel]"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter20_rtsp_debug.py",
+    "/app/test_reports/pytest/iter20.xml"
+  ],
+  "action_items": [
+    "CRITIQUE — Dans routers.py::create_camera, ajouter un appel _try_ffprobe_variants pour le mode RTSP (comme déjà fait pour mode ONVIF L217). Si ffprobe_details est None ET allow_rtsp_override=false, raise HTTPException(400, 'URL RTSP non validée par ffprobe — impossible de créer la caméra'). Sans ce fix, la contrainte 'IMPOSSIBLE de créer une caméra si rtsp_url_validated=false' n'est PAS respectée côté backend (le frontend la respecte, mais un client API direct contourne la protection)."
+  ],
+  "critical_code_review_comments": [
+    "routers.py L239-241 : la branche mode='rtsp' ne fait qu'un check startswith('rtsp://'). Il faut ajouter un _try_ffprobe_variants + refus 400 si !details && !allow_rtsp_override. La branche ONVIF L217 fait déjà ce test — le mode RTSP doit avoir le même comportement.",
+    "streaming.py::test_connectivity — logique correcte, retourne bien rtsp_url_validated=true UNIQUEMENT si ffprobe a réussi. debug_attempts propagé correctement. Le password brut n'apparaît JAMAIS dans la réponse (vérifié en test).",
+    "streaming.py::_mask_url_password regex `[^:@/]+` sur le user est correcte (pas de faux positif sur les IPv6-like) ; le count=1 empêche de masquer des URLs multiples si concaténées. OK.",
+    "Cameras.jsx L167-174 — logique de refus côté client cohérente : bloque si !rtsp_url_validated sauf si mode='onvif' + onvifOk + !rtspOk → propose le bouton override. Bon UX."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter20_rtsp_debug.py (nouveau — 15 tests)"
+  ],
+  "success_rate": {
+    "backend": "93% (14/15) — 1 échec CRITIQUE : POST /api/cameras mode RTSP sans validation",
+    "frontend": "partial — testids présents, logique client correcte, E2E panel debug non testable avec IP injoignable"
+  },
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (OK)",
+  "seed_data_creation": "1 caméra TEST_iter20_reject créée (bug backend) puis supprimée en post-cleanup",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Le test test_reject_creation_without_rtsp_validation POST une URL RTSP invalide et attend un 400 — actuellement reçoit 200. Après le fix dans routers.py::create_camera (ajout _try_ffprobe_variants pour mode RTSP), relancer `pytest backend/tests/test_iter20_rtsp_debug.py -v` doit donner 15/15. Le E2E panel debug frontend nécessiterait une vraie caméra IP dont le port TCP:554 accepte les connexions mais dont le flux RTSP est mal configuré (comme une Reolink avec ONVIF qui annonce h264 mais encode en h265).",
+  "rca of the issue": "routers.py::create_camera (L239-241) : en mode 'rtsp', le backend ne fait qu'un check syntaxique `startswith('rtsp://')` puis appelle register_camera_stream() (PUT sur go2rtc /api/streams qui n'échoue que si la requête HTTP échoue, pas si le flux est décodable). Le mode 'onvif' fait déjà un _try_ffprobe_variants (L217) — il faut appliquer la même logique au mode 'rtsp'. Fix proposé : if data.mode == 'rtsp': working_url, details, _ = await asyncio.to_thread(_try_ffprobe_variants, data.rtsp_url, data.preferred_codec, data.rtsp_transport, data.username, data.password) ; if not details and not data.allow_rtsp_override: raise HTTPException(400, 'URL RTSP non validée par ffprobe...') ; else if details: payload update codec/resolution/fps/rtsp_transport comme pour ONVIF."
+}

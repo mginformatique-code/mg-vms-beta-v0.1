@@ -214,7 +214,7 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
             raise HTTPException(400, "Aucun profil ONVIF n'a renvoyé d'URL RTSP")
         # Auto-résolution : teste l'URL ONVIF puis ses variantes constructeur (Reolink h264/h265, Hik, Dahua)
         from streaming import _try_ffprobe_variants
-        working_url, ffprobe_details = await asyncio.to_thread(
+        working_url, ffprobe_details, _attempts = await asyncio.to_thread(
             _try_ffprobe_variants, selected["rtsp_url"],
             data.preferred_codec, data.rtsp_transport, data.username, data.password,
         )
@@ -223,6 +223,7 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
             payload["resolution"] = ffprobe_details.get("resolution", selected.get("resolution", ""))
             payload["fps"] = ffprobe_details.get("fps")
             payload["codec"] = (ffprobe_details.get("codec") or "H264").upper()
+            payload["rtsp_transport"] = ffprobe_details.get("transport_used") or data.rtsp_transport
         else:
             payload["rtsp_url"] = selected["rtsp_url"]
             payload["resolution"] = selected.get("resolution") or payload.get("resolution", "")
