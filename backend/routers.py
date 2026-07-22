@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 import asyncio
 import io
@@ -154,6 +155,7 @@ class CameraInput(BaseModel):
     # Transport RTSP + codec préféré (P0 finalisation)
     rtsp_transport: str = "tcp"  # tcp | udp
     preferred_codec: str = "auto"  # auto | h264 | h265
+    allow_rtsp_override: bool = False  # créer même si le test RTSP échoue (mode ONVIF)
     lat: Optional[float] = None
     lng: Optional[float] = None
 
@@ -210,12 +212,24 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
             selected = next((p for p in profiles if p.get("rtsp_url")), None)
         if not selected or not selected.get("rtsp_url"):
             raise HTTPException(400, "Aucun profil ONVIF n'a renvoyé d'URL RTSP")
-        payload["rtsp_url"] = selected["rtsp_url"]
+        # Auto-résolution : teste l'URL ONVIF puis ses variantes constructeur (Reolink h264/h265, Hik, Dahua)
+        from streaming import _try_ffprobe_variants
+        working_url, ffprobe_details = await asyncio.to_thread(
+            _try_ffprobe_variants, selected["rtsp_url"],
+            data.preferred_codec, data.rtsp_transport, data.username, data.password,
+        )
+        if ffprobe_details:
+            payload["rtsp_url"] = working_url
+            payload["resolution"] = ffprobe_details.get("resolution", selected.get("resolution", ""))
+            payload["fps"] = ffprobe_details.get("fps")
+            payload["codec"] = (ffprobe_details.get("codec") or "H264").upper()
+        else:
+            payload["rtsp_url"] = selected["rtsp_url"]
+            payload["resolution"] = selected.get("resolution") or payload.get("resolution", "")
+            payload["codec"] = (selected.get("codec") or payload.get("codec", "H264")).upper().replace("VIDEO", "").strip() or "H264"
         payload["profile_token"] = selected.get("token", "")
         payload["profile_name"] = str(selected.get("name", ""))
         payload["protocol"] = "ONVIF"
-        payload["resolution"] = selected.get("resolution") or payload.get("resolution", "")
-        payload["codec"] = (selected.get("codec") or payload.get("codec", "H264")).upper().replace("VIDEO", "").strip() or "H264"
         if info.get("model"):
             payload["model"] = payload.get("model") or f"{info.get('manufacturer','')} {info['model']}".strip()
         payload["manufacturer"] = payload.get("manufacturer") or str(info.get("manufacturer") or "")
@@ -238,8 +252,16 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
     from streaming import register_camera_stream
     registered = await register_camera_stream(doc)
     if not registered:
-        await db.cameras.delete_one({"id": doc["id"]})
-        raise HTTPException(400, "Impossible d'enregistrer le flux dans go2rtc (URL RTSP invalide ou service indisponible)")
+        # Si ONVIF a réussi mais go2rtc n'arrive pas à ouvrir le flux, autoriser la création si demandé
+        if data.mode == "onvif" and data.allow_rtsp_override:
+            await db.cameras.update_one({"id": doc["id"]}, {"$set": {"status": "offline"}})
+            await log_audit(user, "camera_created_no_rtsp", data.name,
+                            "ONVIF OK, RTSP échoué — création forcée par l'utilisateur")
+        else:
+            await db.cameras.delete_one({"id": doc["id"]})
+            raise HTTPException(400, "Impossible d'enregistrer le flux dans go2rtc "
+                                     "(URL RTSP invalide ou service indisponible). "
+                                     "Cochez « Créer malgré le test RTSP » pour forcer la création.")
     doc.pop("_id", None); doc.pop("password", None)
     return doc
 
@@ -551,6 +573,13 @@ async def ai_debug(camera_id: str, user: dict = Depends(require_role("technician
     return {"available": True, "camera_id": camera_id, **snap}
 
 
+def _mask_rtsp(url: str) -> str:
+    """Masque les identifiants dans une URL RTSP pour affichage."""
+    if not url:
+        return ""
+    return re.sub(r"(rtsp://)([^:@]+):([^@]+)@", r"\1\2:****@", url, flags=re.IGNORECASE)
+
+
 @api_router.get("/cameras/{camera_id}/diagnostic")
 async def camera_diagnostic(camera_id: str, user: dict = Depends(require_permission("view_live"))):
     """Diagnostic complet caméra : flux + IA + dernières détections.
@@ -582,6 +611,8 @@ async def camera_diagnostic(camera_id: str, user: dict = Depends(require_permiss
             "rtsp_transport": cam.get("rtsp_transport") or "tcp",
             "preferred_codec": cam.get("preferred_codec") or "auto",
             "profile_token": cam.get("profile_token"),
+            "profile_name": cam.get("profile_name"),
+            "rtsp_url_masked": _mask_rtsp(cam.get("rtsp_url")),
             "record_enabled": cam.get("record_enabled", True),
             "record_mode": cam.get("record_mode", "continuous"),
             "detect_enabled": cam.get("detect_enabled", False),

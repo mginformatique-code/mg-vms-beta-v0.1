@@ -93,6 +93,8 @@ export default function Cameras() {
         rtsp_port: Number(form.rtsp_port) || 554, onvif_port: Number(form.onvif_port) || 80,
         rtsp_url: form.mode === "rtsp" ? form.rtsp_url : "",
         username: form.username, password: form.password,
+        rtsp_transport: form.rtsp_transport || "tcp",
+        preferred_codec: form.preferred_codec || "auto",
       });
       setConnCheck(data);
       if (data.profiles && data.profiles.length) {
@@ -151,20 +153,33 @@ export default function Cameras() {
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Génération impossible"); }
   };
 
-  const submit = async () => {
+  const submit = async ({ allow_rtsp_override = false } = {}) => {
     if (!form.name || !form.site_id) return toast.error("Nom et site requis");
     if (!form.ip) return toast.error("Adresse IP requise");
     if (form.mode === "rtsp" && !form.rtsp_url) return toast.error("URL RTSP requise (mode RTSP)");
 
     setSaving(true);
     try {
-      const check = connCheck?.success ? connCheck : await runConnectivity();
-      if (!check || !check.success) {
-        toast.error(check?.message || "Connectivité invalide — caméra non sauvegardée");
+      const check = connCheck?.success ? connCheck : (allow_rtsp_override && connCheck ? connCheck : await runConnectivity());
+      const onvifOk = check?.steps?.find((s) => s.name === "onvif_auth")?.status === "ok";
+      const rtspOk = check?.steps?.find((s) => s.name === "rtsp_open")?.status === "ok";
+      if (!allow_rtsp_override) {
+        if (!check || !check.success) {
+          if (form.mode === "onvif" && onvifOk && !rtspOk) {
+            // ONVIF OK, RTSP KO : ne pas bloquer — proposer bouton "Créer malgré tout"
+            toast.warning("Test RTSP échoué. ONVIF fonctionne — utilisez « Créer malgré le test RTSP » pour continuer.");
+            setSaving(false); return;
+          }
+          toast.error(check?.message || "Connectivité invalide — caméra non sauvegardée");
+          setSaving(false); return;
+        }
+      } else if (!onvifOk) {
+        toast.error("Impossible de forcer : ONVIF n'a pas répondu correctement");
         setSaving(false); return;
       }
       const { wiz_brand, wiz_model_idx, wiz_stream, wiz_channel, record_mode, storage_pool_id, storage_max_size_gb, ...payload } = form;
       if (form.mode === "onvif") payload.rtsp_url = ""; // backend re-découvre via profile_token
+      payload.allow_rtsp_override = allow_rtsp_override;
       let camId = editingId;
       if (editingId) {
         await api.put(`/cameras/${editingId}`, payload);
@@ -480,7 +495,19 @@ export default function Cameras() {
 
           <DialogFooter>
             <button onClick={closeDialog} className="px-4 py-2 border border-border text-sm hover:bg-secondary">Annuler</button>
-            <button onClick={submit} disabled={saving} data-testid="cam-form-submit" className="px-4 py-2 bg-[#0044FF] text-white text-sm flex items-center gap-2">{saving && <Loader2 size={15} className="animate-spin" />}{editingId ? "Enregistrer les modifications" : "Créer la caméra"}</button>
+            {(() => {
+              const onvifOk = connCheck?.steps?.find((s) => s.name === "onvif_auth")?.status === "ok";
+              const rtspOk = connCheck?.steps?.find((s) => s.name === "rtsp_open")?.status === "ok";
+              const canOverride = form.mode === "onvif" && !editingId && connCheck && onvifOk && !rtspOk;
+              return canOverride ? (
+                <button onClick={() => submit({ allow_rtsp_override: true })} disabled={saving}
+                        data-testid="cam-form-override" title="ONVIF est validé mais le test RTSP a échoué — la caméra sera enregistrée hors ligne, corrigez le RTSP manuellement ensuite."
+                        className="px-4 py-2 border border-[#FFB800] text-[#FFB800] hover:bg-[#FFB800]/10 text-sm flex items-center gap-2">
+                  {saving && <Loader2 size={15} className="animate-spin" />} Créer malgré le test RTSP
+                </button>
+              ) : null;
+            })()}
+            <button onClick={() => submit()} disabled={saving} data-testid="cam-form-submit" className="px-4 py-2 bg-[#0044FF] text-white text-sm flex items-center gap-2">{saving && <Loader2 size={15} className="animate-spin" />}{editingId ? "Enregistrer les modifications" : "Créer la caméra"}</button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -561,9 +588,12 @@ function DiagnosticDialog({ state, onClose, onRefresh }) {
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2">{ok(flux?.camera_online)} <span className="text-xs">Caméra {camera?.status?.toUpperCase()}</span></div>
                 <div className="flex items-center gap-2">{ok(flux?.go2rtc_registered)} <span className="text-xs">go2rtc — flux enregistré</span></div>
+                <div className="text-xs text-muted-foreground mono">Fabricant : <b className="text-foreground">{camera?.manufacturer || "—"}</b> · Modèle : <b className="text-foreground">{camera?.model || "—"}</b></div>
+                <div className="text-xs text-muted-foreground mono">Profil : <b className="text-foreground">{camera?.profile_token || "—"}</b></div>
                 <div className="text-xs text-muted-foreground mono">Transport : <b>{(flux?.rtsp_transport_used || "tcp").toUpperCase()}</b> · Codec : <b>{(camera?.codec || "auto").toUpperCase()}</b></div>
                 <div className="text-xs text-muted-foreground mono">Résolution : {camera?.resolution || "—"}{camera?.fps ? ` @ ${camera.fps} FPS` : ""}</div>
                 <div className="text-xs text-muted-foreground mono">Codec préféré (config) : {(camera?.preferred_codec || "auto").toUpperCase()}</div>
+                {camera?.rtsp_url_masked && <div className="text-[10px] text-muted-foreground mono truncate" title={camera.rtsp_url_masked}>URL : {camera.rtsp_url_masked}</div>}
               </div>
             </section>
             <section className="border border-border p-3">

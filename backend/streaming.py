@@ -226,13 +226,15 @@ def _tcp_check(host: str, port: int, timeout: float = 3.0) -> bool:
         return False
 
 
-def _ffprobe(rtsp_url: str) -> Optional[dict]:
-    """Sonde ffprobe réelle (résolution, fps, codec)."""
+def _ffprobe(rtsp_url: str, transport: str = "tcp") -> Optional[dict]:
+    """Sonde ffprobe réelle (résolution, fps, codec, bitrate).
+    Applique le transport RTSP demandé (TCP par défaut) pour respecter la config caméra."""
+    tr = "tcp" if (transport or "tcp").lower() != "udp" else "udp"
     try:
         out = subprocess.run(
-            ["ffprobe", "-v", "error", "-rtsp_transport", "tcp",
+            ["ffprobe", "-v", "error", "-rtsp_transport", tr,
              "-select_streams", "v:0",
-             "-show_entries", "stream=width,height,avg_frame_rate,codec_name",
+             "-show_entries", "stream=width,height,avg_frame_rate,codec_name,bit_rate",
              "-of", "json", rtsp_url],
             capture_output=True, timeout=12,
         )
@@ -244,10 +246,97 @@ def _ffprobe(rtsp_url: str) -> Optional[dict]:
         if s.get("avg_frame_rate") and s["avg_frame_rate"] != "0/0":
             num, _, den = s["avg_frame_rate"].partition("/")
             fps = round(int(num) / int(den or 1))
+        br = None
+        try:
+            br = int(s.get("bit_rate")) if s.get("bit_rate") else None
+        except (ValueError, TypeError):
+            br = None
         return {"resolution": f"{s.get('width')}x{s.get('height')}",
-                "fps": fps, "codec": (s.get("codec_name") or "").upper()}
+                "fps": fps, "codec": (s.get("codec_name") or "").upper(),
+                "bitrate": br, "transport": tr}
     except Exception:
         return None
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Fallback RTSP — variantes constructeurs (Reolink, Hikvision, Dahua…)
+# ═══════════════════════════════════════════════════════════════════
+def _rtsp_variants(base_url: str, preferred_codec: str = "auto") -> list:
+    """Génère les variantes RTSP à tester selon le codec préféré.
+    Priorité 1 : URL d'origine · Priorité 2 : variantes du même flux avec codec préféré ·
+    Priorité 3 : autres codecs/streams. Utile quand ONVIF ment (retourne h264Preview
+    alors que la caméra encode réellement en H.265)."""
+    if not base_url or not base_url.lower().startswith("rtsp://"):
+        return [base_url] if base_url else []
+    variants = [base_url]  # priorité 1 : URL déclarée par ONVIF
+
+    # Extrait hôte/port (identifiants gérés séparément par _build_rtsp_url)
+    m = re.match(r"^(rtsp://)([^/?#]+)(/.*)?$", base_url, re.IGNORECASE)
+    if not m:
+        return variants
+    scheme, host_port, path = m.group(1), m.group(2), m.group(3) or "/"
+
+    # Détecte le pattern Reolink (h264Preview / h265Preview)
+    reolink = re.search(r"h26[45]Preview_\d+_(main|sub)", path or "", re.IGNORECASE)
+    if reolink:
+        # Génère toutes les combinaisons attendues
+        combos = [
+            "/h264Preview_01_main", "/h265Preview_01_main",
+            "/h264Preview_01_sub",  "/h265Preview_01_sub",
+            "/h264Preview_02_main", "/h265Preview_02_main",
+        ]
+        # Ordonne selon codec préféré
+        if preferred_codec == "h264":
+            combos.sort(key=lambda p: (0 if "h264" in p else 1, 0 if "main" in p else 1))
+        elif preferred_codec == "h265":
+            combos.sort(key=lambda p: (0 if "h265" in p else 1, 0 if "main" in p else 1))
+        else:
+            # Auto : main d'abord (H.264 préféré pour compatibilité live/IA)
+            combos.sort(key=lambda p: (0 if "main" in p else 1, 0 if "h264" in p else 1))
+        for c in combos:
+            u = f"{scheme}{host_port}{c}"
+            if u not in variants:
+                variants.append(u)
+        return variants
+
+    # Hikvision : /Streaming/Channels/101 (main) / 102 (sub)
+    hik = re.search(r"/Streaming/Channels/(\d+)", path or "", re.IGNORECASE)
+    if hik:
+        for ch in ("101", "102", "201", "202"):
+            u = f"{scheme}{host_port}/Streaming/Channels/{ch}"
+            if u not in variants:
+                variants.append(u)
+        return variants
+
+    # Dahua : /cam/realmonitor?channel=1&subtype=0 (main) / subtype=1 (sub)
+    if "realmonitor" in (path or "").lower():
+        for ch in (1, 2):
+            for st in (0, 1):
+                u = f"{scheme}{host_port}/cam/realmonitor?channel={ch}&subtype={st}"
+                if u not in variants:
+                    variants.append(u)
+        return variants
+
+    return variants
+
+
+def _try_ffprobe_variants(base_url: str, preferred_codec: str, transport: str,
+                          username: str = "", password: str = "") -> tuple:
+    """Teste base_url puis ses variantes. Retourne (url_qui_marche, ffprobe_details) ou (base_url, None)."""
+    for variant in _rtsp_variants(base_url, preferred_codec):
+        full = _build_rtsp_url({"rtsp_url": variant, "username": username, "password": password,
+                                 "rtsp_transport": transport})
+        details = _ffprobe(full, transport=transport)
+        if details:
+            # Filtre codec forcé
+            codec = (details.get("codec") or "").upper()
+            if preferred_codec == "h264" and codec not in ("H264", "AVC"):
+                continue
+            if preferred_codec == "h265" and codec not in ("H265", "HEVC"):
+                continue
+            details["rtsp_url_used"] = variant  # sans credentials
+            return variant, details
+    return base_url, None
 
 
 async def probe_camera(cam: dict) -> dict:
@@ -271,7 +360,7 @@ async def probe_camera(cam: dict) -> dict:
     details = None
     rtsp = _build_rtsp_url(cam)
     if success and rtsp.lower().startswith("rtsp://"):
-        details = await asyncio.to_thread(_ffprobe, rtsp)
+        details = await asyncio.to_thread(_ffprobe, rtsp, cam.get("rtsp_transport") or "tcp")
     return {
         "success": success,
         "status": "online" if success else "offline",
@@ -295,6 +384,8 @@ class ConnectivityTestInput(BaseModel):
     rtsp_url: str = ""
     username: str = ""
     password: str = ""
+    rtsp_transport: str = "tcp"      # tcp | udp
+    preferred_codec: str = "auto"    # auto | h264 | h265
 
 
 async def test_connectivity(data: ConnectivityTestInput) -> dict:
@@ -355,16 +446,26 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
             rtsp_port_ok = await asyncio.to_thread(_tcp_check, rtsp_host, rtsp_port, 3.0)
             add("rtsp_port", "ok" if rtsp_port_ok else "error",
                 f"Port RTSP {rtsp_port} ouvert" if rtsp_port_ok else f"Port RTSP {rtsp_port} fermé")
-            # 5) Ouverture RTSP (ffprobe)
-            rtsp_final_url = _build_rtsp_url({
-                "rtsp_url": discovered_rtsp, "username": data.username, "password": data.password})
-            rtsp_details = await asyncio.to_thread(_ffprobe, rtsp_final_url)
+            # 5) Ouverture RTSP — TESTE variantes multiples (fallback constructeur si ONVIF ment)
+            transport = (data.rtsp_transport or "tcp").lower()
+            pref = (data.preferred_codec or "auto").lower()
+            working_url, rtsp_details = await asyncio.to_thread(
+                _try_ffprobe_variants, discovered_rtsp, pref, transport, data.username, data.password
+            )
             if rtsp_details:
+                rtsp_final_url = _build_rtsp_url({
+                    "rtsp_url": working_url, "username": data.username,
+                    "password": data.password, "rtsp_transport": transport})
                 add("rtsp_open", "ok",
-                    f"Flux RTSP OK · {rtsp_details.get('resolution')} @ {rtsp_details.get('fps','?')}fps {rtsp_details.get('codec','')}",
-                    **rtsp_details, rtsp_url=discovered_rtsp)
+                    f"Flux RTSP OK · {rtsp_details.get('resolution')} @ {rtsp_details.get('fps','?')}fps {rtsp_details.get('codec','')} (transport {transport.upper()})",
+                    **rtsp_details, rtsp_url=working_url, rtsp_url_used=working_url)
             else:
-                add("rtsp_open", "error", "Ouverture RTSP impossible (ffprobe)")
+                # Ajoute le contexte : quelles variantes ont été essayées
+                tried = _rtsp_variants(discovered_rtsp, pref)
+                add("rtsp_open", "error",
+                    f"Ouverture RTSP impossible (ffprobe) — {len(tried)} variante(s) testée(s). "
+                    f"Vérifiez les identifiants ou essayez UDP.",
+                    rtsp_url=discovered_rtsp, tried_variants=tried, allow_override=True)
         else:
             add("rtsp_port", "skip", "Ignoré (aucune URI RTSP découverte)")
             add("rtsp_open", "skip", "Ignoré")
@@ -374,16 +475,25 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
         add("onvif_auth", "skip", "Ignoré (mode RTSP)")
         add("rtsp_port", "ok" if ping_ok else "error",
             f"Port RTSP {data.rtsp_port} ouvert" if ping_ok else "Port RTSP fermé")
-        rtsp_final_url = _build_rtsp_url({
-            "rtsp_url": data.rtsp_url, "username": data.username, "password": data.password})
-        if rtsp_final_url.lower().startswith("rtsp://") and ping_ok:
-            rtsp_details = await asyncio.to_thread(_ffprobe, rtsp_final_url)
+        transport = (data.rtsp_transport or "tcp").lower()
+        pref = (data.preferred_codec or "auto").lower()
+        if (data.rtsp_url or "").lower().startswith("rtsp://") and ping_ok:
+            working_url, rtsp_details = await asyncio.to_thread(
+                _try_ffprobe_variants, data.rtsp_url, pref, transport, data.username, data.password
+            )
+            rtsp_final_url = _build_rtsp_url({
+                "rtsp_url": working_url, "username": data.username,
+                "password": data.password, "rtsp_transport": transport})
             if rtsp_details:
                 add("rtsp_open", "ok",
-                    f"Flux RTSP OK · {rtsp_details.get('resolution')} @ {rtsp_details.get('fps','?')}fps {rtsp_details.get('codec','')}",
-                    **rtsp_details, rtsp_url=data.rtsp_url)
+                    f"Flux RTSP OK · {rtsp_details.get('resolution')} @ {rtsp_details.get('fps','?')}fps {rtsp_details.get('codec','')} (transport {transport.upper()})",
+                    **rtsp_details, rtsp_url=working_url, rtsp_url_used=working_url)
             else:
-                add("rtsp_open", "error", "Ouverture RTSP impossible — URL/identifiants ?")
+                tried = _rtsp_variants(data.rtsp_url, pref)
+                add("rtsp_open", "error",
+                    f"Ouverture RTSP impossible — {len(tried)} variante(s) testée(s). "
+                    f"Vérifiez URL/identifiants ou essayez UDP.",
+                    rtsp_url=data.rtsp_url, tried_variants=tried, allow_override=True)
         else:
             add("rtsp_open", "skip", "Ignoré (URL RTSP invalide ou port fermé)")
 
