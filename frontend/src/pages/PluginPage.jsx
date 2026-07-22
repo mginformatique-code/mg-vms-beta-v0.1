@@ -244,7 +244,7 @@ function MqttSettings({ onSaved }) {
         </p>
       )}
       <p className="text-[10px] text-muted-foreground mt-3 border-l-2 border-border pl-2">
-        Note : la publication effective d'événements sur MQTT est prévue dès l'installation de <span className="mono">paho-mqtt</span> côté serveur (voir Health-check). Cette page prépare la configuration.
+        Note : la publication effective d&apos;événements sur MQTT est prévue dès l&apos;installation de <span className="mono">paho-mqtt</span> côté serveur (voir Health-check). Cette page prépare la configuration.
       </p>
       <style>{`.inp{width:100%;padding:0.5rem 0.625rem;background:hsl(var(--background));border:1px solid hsl(var(--input));font-size:0.875rem;outline:none}.inp:focus{border-color:#0044FF}`}</style>
     </div>
@@ -515,11 +515,17 @@ function FaceRecognitionSettings({ onSaved }) {
   const { can } = useApp();
   const [cfg, setCfg] = useState(null);
   const [faces, setFaces] = useState([]);
+  const [avail, setAvail] = useState(null);
   const [newName, setNewName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(null);
   const loadAll = async () => {
-    const [c, l] = await Promise.all([api.get("/plugins/face_recognition/config"), api.get("/plugins/face_recognition/faces")]);
-    setCfg(c.data); setFaces(l.data);
+    const [c, l, a] = await Promise.all([
+      api.get("/plugins/face_recognition/config"),
+      api.get("/plugins/face_recognition/faces"),
+      api.get("/plugins/face_recognition/availability"),
+    ]);
+    setCfg(c.data); setFaces(l.data); setAvail(a.data);
   };
   useEffect(() => { loadAll().catch(() => {}); }, []);
   if (!cfg) return <p className="text-muted-foreground">Chargement…</p>;
@@ -532,7 +538,7 @@ function FaceRecognitionSettings({ onSaved }) {
   };
   const addFace = async () => {
     if (!newName.trim()) return;
-    try { await api.post("/plugins/face_recognition/faces", { name: newName, watchlist: false }); setNewName(""); loadAll(); toast.success("Visage ajouté"); }
+    try { await api.post("/plugins/face_recognition/faces", { name: newName, watchlist: false }); setNewName(""); loadAll(); toast.success("Visage ajouté — cliquez sur 'Photo' pour importer une image"); }
     catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
   const delFace = async (id) => {
@@ -540,26 +546,48 @@ function FaceRecognitionSettings({ onSaved }) {
     try { await api.delete(`/plugins/face_recognition/faces/${id}`); loadAll(); toast.success("Visage supprimé"); }
     catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
+  const uploadPhoto = async (faceId, file) => {
+    if (!file) return;
+    setUploading(faceId);
+    try {
+      const fd = new FormData(); fd.append("photo", file);
+      const { data } = await api.post(`/plugins/face_recognition/faces/${faceId}/photo`, fd,
+                                        { headers: { "Content-Type": "multipart/form-data" } });
+      toast.success(`Embedding ${data.embedding_dim}D extrait (det_score=${(data.meta?.det_score || 0).toFixed(2)})`);
+      loadAll();
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Extraction échouée"); }
+    finally { setUploading(null); }
+  };
   return (
     <div className="space-y-4">
+      {/* État bibliothèque */}
+      {avail && (
+        <div className={"border p-3 text-xs " + (avail.installed ? "border-[#00E676] bg-[#00E676]/5" : "border-[#FFB800] bg-[#FFB800]/5")} data-testid="face-availability">
+          <div className="flex items-center gap-2 font-head">
+            {avail.installed ? <CheckCircle2 size={14} className="text-[#00E676]" /> : <AlertTriangle size={14} className="text-[#FFB800]" />}
+            <b>{avail.installed ? `Bibliothèque installée : ${avail.provider}` : "Bibliothèque non installée"}</b>
+          </div>
+          <p className="mt-1 text-muted-foreground leading-relaxed">{avail.notes}</p>
+        </div>
+      )}
       <div className="border border-border p-4 bg-card">
         <div className="flex items-center gap-2 mb-3"><ScanFace size={18} className="text-[#A855F7]" /><span className="font-head font-semibold">Reconnaissance faciale</span></div>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Activer">
-            <label className="flex items-center gap-2 mt-1"><input type="checkbox" checked={cfg.enabled} onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })} data-testid="face-enabled" /> Actif</label>
+            <label className="flex items-center gap-2 mt-1"><input type="checkbox" checked={cfg.enabled} onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })} data-testid="face-enabled" disabled={!avail?.installed} /> Actif</label>
           </Field>
-          <Field label="Seuil de distance" hint="Plus bas = plus strict (0.4→0.8)"><input type="number" step="0.05" min="0.3" max="0.9" value={cfg.distance_threshold} onChange={(e) => setCfg({ ...cfg, distance_threshold: e.target.value })} className="inp mono" /></Field>
-          <Field label="Modèle"><select value={cfg.model_name} onChange={(e) => setCfg({ ...cfg, model_name: e.target.value })} className="inp"><option value="hog">HOG (CPU)</option><option value="cnn">CNN (GPU requis)</option></select></Field>
+          <Field label="Seuil similarité (cosine)" hint="0.5 → 0.7 (plus haut = plus strict)"><input type="number" step="0.05" min="0.3" max="0.9" value={cfg.distance_threshold} onChange={(e) => setCfg({ ...cfg, distance_threshold: e.target.value })} className="inp mono" /></Field>
+          <Field label="Modèle"><select value={cfg.model_name} onChange={(e) => setCfg({ ...cfg, model_name: e.target.value })} className="inp"><option value="hog">buffalo_s (CPU, léger)</option><option value="cnn">buffalo_l (CPU/GPU, précis)</option></select></Field>
           <Field label="Alertes">
             <label className="flex items-center gap-2 text-sm mt-1"><input type="checkbox" checked={cfg.alert_on_watchlist} onChange={(e) => setCfg({ ...cfg, alert_on_watchlist: e.target.checked })} /> Sur liste de surveillance</label>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={cfg.alert_on_unknown} onChange={(e) => setCfg({ ...cfg, alert_on_unknown: e.target.checked })} /> Sur visage inconnu</label>
           </Field>
         </div>
-        <button onClick={save} disabled={saving || !can("admin")} className="mt-3 flex items-center gap-1.5 px-3 py-1.5 bg-[#0044FF] text-white text-sm disabled:opacity-50">
+        <button onClick={save} disabled={saving || !can("admin")} className="mt-3 flex items-center gap-1.5 px-3 py-1.5 bg-[#0044FF] text-white text-sm disabled:opacity-50" data-testid="face-cfg-save">
           {saving && <Loader2 size={12} className="animate-spin" />} <Save size={13} /> Enregistrer
         </button>
         <p className="text-[10px] text-[#FFB800] mt-2 border-l-2 border-[#FFB800] pl-2">
-          Note légale : la reconnaissance faciale n'est utilisable qu'en accord avec le RGPD / cadre local. La bibliothèque doit être installée côté serveur (voir Health-check).
+          Note légale : la reconnaissance faciale n&apos;est utilisable qu&apos;en accord avec le RGPD / cadre local.
         </p>
       </div>
       <div className="border border-border p-4 bg-card">
@@ -570,8 +598,18 @@ function FaceRecognitionSettings({ onSaved }) {
         </div>
         <ul className="divide-y divide-border">
           {faces.map((f) => (
-            <li key={f.id} className="py-2 flex items-center justify-between text-sm">
-              <div><span className="font-medium">{f.name}</span>{f.watchlist && <span className="ml-2 text-[10px] text-[#FF3333] border border-[#FF3333] px-1.5">SURVEILLANCE</span>}</div>
+            <li key={f.id} className="py-2 flex items-center gap-3 text-sm">
+              <div className="w-12 h-12 shrink-0 bg-secondary border border-border flex items-center justify-center overflow-hidden">
+                {f.thumbnail ? <img src={f.thumbnail} alt={f.name} className="w-full h-full object-cover" /> : <ScanFace size={18} className="text-muted-foreground" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2"><b className="truncate">{f.name}</b>{f.watchlist && <span className="text-[9px] text-[#FF3333] border border-[#FF3333] px-1.5">SURVEILLANCE</span>}{!f.thumbnail && <span className="text-[9px] text-[#FFB800]">SANS PHOTO</span>}</div>
+                {f.photo_meta && <div className="text-[10px] mono text-muted-foreground">det_score={(f.photo_meta.det_score || 0).toFixed(2)} · bbox=[{(f.photo_meta.bbox || []).join(",")}]</div>}
+              </div>
+              <label className="text-xs px-2 py-1 border border-border hover:bg-secondary cursor-pointer flex items-center gap-1" data-testid={`face-upload-${f.id}`}>
+                {uploading === f.id ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />} Photo
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => uploadPhoto(f.id, e.target.files?.[0])} disabled={!avail?.installed} />
+              </label>
               <button onClick={() => delFace(f.id)} className="text-[#FF3333] hover:opacity-80"><Trash2 size={14} /></button>
             </li>
           ))}

@@ -178,12 +178,19 @@ async def face_list(user: dict = Depends(get_current_user)):
     return await db.faces.find({}, {"_id": 0, "encoding": 0}).sort("created_at", -1).to_list(1000)
 
 
+@plugin_config_router.get("/face_recognition/availability")
+async def face_availability(user: dict = Depends(get_current_user)):
+    """Statut d'installation d'InsightFace + instructions d'installation."""
+    from face_recognition_engine import availability
+    return availability()
+
+
 @plugin_config_router.post("/face_recognition/faces")
 async def face_add(entry: FaceEntry, user: dict = Depends(require_role("technician"))):
     doc = {
         "id": str(uuid.uuid4()), "name": entry.name.strip(), "watchlist": entry.watchlist,
         "notes": entry.notes, "created_at": _now_iso(), "created_by": user.get("email"),
-        "encoding": None,  # renseigné à l'upload de photo (POST /faces/{id}/photo)
+        "encoding": None, "thumbnail": None, "photo_meta": None,
     }
     if not doc["name"]:
         raise HTTPException(400, "Nom requis")
@@ -191,6 +198,33 @@ async def face_add(entry: FaceEntry, user: dict = Depends(require_role("technici
     doc.pop("_id", None); doc.pop("encoding", None)
     await log_audit(user, "face_added", doc["name"])
     return doc
+
+
+@plugin_config_router.post("/face_recognition/faces/{face_id}/photo")
+async def face_upload_photo(face_id: str, photo: UploadFile = File(...),
+                             user: dict = Depends(require_role("technician"))):
+    """Upload une photo, extrait l'embedding via InsightFace et le persiste."""
+    face = await db.faces.find_one({"id": face_id}, {"_id": 0})
+    if not face:
+        raise HTTPException(404, "Visage introuvable")
+    if not (photo.content_type or "").startswith("image/"):
+        raise HTTPException(400, "Le fichier doit être une image")
+    content = await photo.read()
+    if len(content) > 8 * 1024 * 1024:
+        raise HTTPException(400, "Photo trop volumineuse (max 8 Mo)")
+    from face_recognition_engine import extract_embedding, image_to_thumbnail
+    embedding, meta = extract_embedding(content)
+    if embedding is None:
+        raise HTTPException(400, meta.get("error", "Extraction échouée"))
+    thumbnail = image_to_thumbnail(content)
+    await db.faces.update_one({"id": face_id}, {"$set": {
+        "encoding": embedding, "photo_meta": meta,
+        "thumbnail": thumbnail, "photo_uploaded_at": _now_iso(),
+    }})
+    await log_audit(user, "face_photo_uploaded", face["name"],
+                    f"det_score={meta.get('det_score', 0):.2f}")
+    return {"ok": True, "name": face["name"], "meta": meta,
+            "has_thumbnail": bool(thumbnail), "embedding_dim": len(embedding)}
 
 
 @plugin_config_router.delete("/face_recognition/faces/{face_id}")

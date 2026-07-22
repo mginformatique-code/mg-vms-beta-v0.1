@@ -1,0 +1,24 @@
+{
+  "summary": "Iteration 22 — Reconnaissance faciale (InsightFace). Testing complete backend + frontend. 11/11 backend pytest tests PASS. Frontend upload flow validated end-to-end (E2E playwright): availability card green (installed=true, provider=insightface), 'Photo' upload button per face works, thumbnail renders, det_score/bbox displayed (det_score=0.84, bbox=[4,1,84,111] for Tom Hanks sample), 'SANS PHOTO' badge disappears. Regression: /api/plugins returns >=8 plugins including anpr, tracking, parking, access_control, face_recognition — no impact on other plugins. face_recognition config was toggled during test then reset to enabled=false to avoid impacting other modules as instructed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter22_face_recognition.py",
+    "/app/test_reports/pytest/iter22.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "face_recognition_engine.py:172 — `log_audit(user, 'face_config_updated', details=data.model_name)` uses `data.model_name` which is a Pydantic V2 config field name. If it's meant to log the model_name value from FaceRecoConfig, it's OK; otherwise consider `data.model_dump()` for clarity.",
+    "face_recognition_engine.py L79 : embeddings are already L2-normalised (`normed_embedding`) so cosine == dot product — good. Threshold default 0.55 is InsightFace-standard.",
+    "plugin_config.py:198 — after `dict(doc)` insert, `doc.pop('_id', None)` is redundant since the returned dict is the original which never had _id. Cosmetic.",
+    "ai_engine.py:734 — bare `except Exception: logger.exception(...)` swallows errors. Acceptable for optional feature but consider a metric counter.",
+    "plugin_config.py:212 — `await photo.read()` reads full file into memory before size check. If a malicious 100MB upload arrives, memory spikes before rejection. Consider streaming size check with photo.file, or set FastAPI/uvicorn max_body_size."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter22_face_recognition.py"],
+  "success_rate": {"backend": "11/11 (100%)", "frontend": "100% (availability card, add face, upload photo, thumbnail render, det_score display, no-photo badge cleanup)"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (OK)",
+  "seed_data_creation": "Faces prefixed TEST_iter22_* created during test, all cleaned up by module-scope fixture. Frontend test face 'Test Person' also cleaned. face_recognition_config reset to enabled=false post-test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "InsightFace model 'buffalo_s' is cached in /root/.insightface/ after first load. Real face test image: /root/.venv/lib/python3.11/site-packages/insightface/data/images/Tom_Hanks_54745.png returns det_score≈0.84 and 512D embedding. Test file uses -o addopts='' to bypass xdist and preserve module fixture ordering (crucial: test_upload_real_face_success must run before test_config_enable_and_healthy). Do NOT enable face_recognition_config in production tests — it will slow down ai_engine._process_camera on every frame."
+}

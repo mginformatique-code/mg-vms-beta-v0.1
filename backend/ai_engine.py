@@ -686,6 +686,54 @@ async def _process_camera(cam: dict) -> None:
             "thumbnail": result.get("frame_thumb"), "vehicle_color": None,
         })
 
+    # Reconnaissance faciale (si activée + visages en base)
+    face_cfg = await db.settings.find_one({"key": "face_recognition_config"}, {"_id": 0})
+    if (face_cfg or {}).get("value", {}).get("enabled"):
+        known = await db.faces.find({"encoding": {"$ne": None, "$exists": True}},
+                                     {"_id": 0, "id": 1, "name": 1, "watchlist": 1, "encoding": 1}).to_list(2000)
+        if known:
+            try:
+                from face_recognition_engine import analyze_frame as face_analyze
+                threshold = float(face_cfg["value"].get("distance_threshold", 0.55))
+                matches = face_analyze(frame, [{"id": k["id"], "name": k["name"],
+                                                  "watchlist": k.get("watchlist", False),
+                                                  "embedding": k["encoding"]} for k in known],
+                                        threshold=threshold)
+                for m in matches:
+                    key = f"{cam['id']}:face:{m.get('face_id') or 'unknown'}"
+                    if not _cooldown_ok(key, EVENT_COOLDOWN, now):
+                        continue
+                    is_watch = m.get("watchlist")
+                    is_unknown = m.get("face_id") is None
+                    should_alert = (is_watch and face_cfg["value"].get("alert_on_watchlist", True)) or \
+                                    (is_unknown and face_cfg["value"].get("alert_on_unknown", False))
+                    if is_unknown and not face_cfg["value"].get("alert_on_unknown"):
+                        continue
+                    await db.events.insert_one({
+                        "id": str(uuid.uuid4()),
+                        "type": f"Visage · {m.get('name')}",
+                        "plugin": "face_recognition",
+                        **base,
+                        "confidence": m.get("similarity"),
+                        "thumbnail": result.get("frame_thumb"),
+                        "vehicle_color": None,
+                        "face_id": m.get("face_id"),
+                        "face_name": m.get("name"),
+                        "watchlist": is_watch,
+                    })
+                    if should_alert and is_watch:
+                        await db.alerts.insert_one({
+                            "id": str(uuid.uuid4()),
+                            "type": "face_watchlist", **base,
+                            "severity": "critical",
+                            "message": f"Visage sur liste de surveillance : {m.get('name')}",
+                            "thumbnail": result.get("frame_thumb"),
+                            "acknowledged": False,
+                            "plugin": "face_recognition",
+                        })
+            except Exception:
+                logger.exception("Face recognition : erreur d'analyse")
+
     # Détections YOLO
     for det in result["detections"]:
         if not _cooldown_ok(f"{cam['id']}:{det['class']}", EVENT_COOLDOWN, now):

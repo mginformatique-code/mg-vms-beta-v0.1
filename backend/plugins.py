@@ -140,15 +140,21 @@ async def _health_tracking() -> dict:
 
 async def _health_face_recognition() -> dict:
     checks = []
-    ok, det = _has_module("face_recognition", "deepface", "insightface")
-    checks.append({"name": "Bibliothèque de reconnaissance", "ok": ok, "detail": det if ok else "Aucune installée"})
+    from face_recognition_engine import availability
+    avail = availability()
+    checks.append({"name": "Bibliothèque insightface", "ok": avail["installed"],
+                    "detail": avail["notes"]})
     faces = await db.faces.count_documents({}) if "faces" in await db.list_collection_names() else 0
-    checks.append({"name": "Base de visages", "ok": faces > 0, "detail": f"{faces} visage(s) enregistré(s)"})
+    faces_with_photo = 0
+    if "faces" in await db.list_collection_names():
+        faces_with_photo = await db.faces.count_documents({"encoding": {"$ne": None, "$exists": True}})
+    checks.append({"name": "Visages enregistrés",
+                    "ok": faces > 0, "detail": f"{faces} total · {faces_with_photo} avec photo"})
     cfg = await db.settings.find_one({"key": "face_recognition_config"}, {"_id": 0})
-    configured = bool((cfg or {}).get("value", {}).get("enabled")) and faces > 0
-    return {"checks": checks, "loaded": ok, "configured": configured,
-            "healthy": ok and configured, "events_total": 0, "events_24h": 0,
-            "last_event_at": None}
+    configured = bool((cfg or {}).get("value", {}).get("enabled")) and faces_with_photo > 0
+    return {"checks": checks, "loaded": avail["installed"],
+            "configured": configured, "healthy": avail["installed"] and configured,
+            "events_total": 0, "events_24h": 0, "last_event_at": None}
 
 
 async def _health_parking() -> dict:
