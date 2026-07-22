@@ -1,6 +1,21 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **IMPORT/EXPORT CSV ANPR — Watchlist globale + listes locales par caméra (2.11.0 — 2026-07-22)**
+  - **Backend `plugin_config.py`** — nouveaux endpoints :
+    - `POST /api/plugins/anpr/watchlist/import` : multipart csv_file, parse tolérant (BOM UTF-8 Excel, latin-1 fallback), header optionnel `plate,list_type,reason` (ou `plate` seul + query `default_list_type`), UPSERT par plaque (insertion + update rétroactif de `list_status` sur `db.plates`), max 2 Mo, refuse si aucun enregistrement valide.
+    - `GET /api/plugins/anpr/watchlist/export` : CSV téléchargeable (`Content-Disposition: attachment`).
+    - `POST /api/plugins/anpr/cameras/{id}/lists/import?target=whitelist|blacklist` : merge (union sans doublons) dans `anpr_config.whitelist_local` / `blacklist_local`, max 512 Ko.
+    - `GET /api/plugins/anpr/cameras/{id}/lists/export?target=whitelist|blacklist` : CSV téléchargeable.
+    - Helper `_parse_csv_plates(content, default_list_type)` : normalisation plaques uppercase + suppression espaces, tolérance colonnes (`plate|plaque|immatriculation`, `list_type|type`, `reason|motif`, valeurs FR `blanche/noire` → `white/black`), retour `(rows, errors)` avec collection d'erreurs par ligne.
+  - **`auth.get_current_user`** : accepte désormais le token via query-param (`?token=…`) en fallback, pour permettre aux `<a href="…/export?token=X">` de télécharger les CSV sans header Authorization (les navigateurs ne peuvent pas injecter d'en-têtes sur un lien de téléchargement).
+  - **Frontend `PluginPage.jsx`** :
+    - Boutons `wl-export-btn` (export watchlist globale) + `wl-import-btn` (input file caché, upload multipart, toast de résultat) dans l'entête de la carte "Configuration par caméra" de `/plugins/anpr`.
+    - Nouveau composant réutilisable `LocalListImportButtons` injecté dans les champs whitelist/blacklist du `AnprCameraDialog` : boutons `local-whitelist-{import,export}` + `local-blacklist-{import,export}`.
+  - **Tests testing_agent iteration_23 : 20/20 backend pytest + Playwright OK. 0 issue, retest_needed=False.**
+
+
+## Implemented (2026-07)
 - ✅ **RECONNAISSANCE FACIALE — InsightFace + Upload photo + Analyse temps réel (2.10.0 — 2026-07-22)**
   - **Backend `face_recognition_engine.py`** : nouveau module 100% local basé sur `insightface` (ONNX buffalo_s, CPU). Fonctions clefs :
     - `availability()` : détecte si insightface est installé + retourne les notes d'installation pour l'UI.
