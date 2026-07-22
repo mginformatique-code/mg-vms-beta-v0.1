@@ -1,6 +1,22 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **BUG FIX ONVIF — Le profil choisi (main/sub) est désormais persisté exactement (2.12.0 — 2026-07-22)**
+  - **Cause racine** : `POST /api/cameras` (mode ONVIF) appelait `_try_ffprobe_variants(selected["rtsp_url"], …)` qui générait des variantes RTSP (main + sub, h264 + h265) et retenait la **première qui répondait** — potentiellement le sub-stream, même si l'utilisateur avait explicitement coché le profil main dans le dialog. Résultat : la debug page affichait bien `h264Preview_02_main` (2304x1296), mais après sauvegarde, go2rtc/live preview utilisait le sub-stream basse résolution.
+  - **Fix backend** :
+    - Nouveau helper `_ffprobe_validate_exact(base_url, transport, user, pass)` dans `streaming.py` — valide **EXACTEMENT** l'URL fournie (aucune substitution de variante). Fallback autorisé uniquement entre TCP et UDP (le transport peut varier, l'URL jamais).
+    - `POST /api/cameras` (mode=onvif) : remplace `_try_ffprobe_variants` par `_ffprobe_validate_exact`. L'URL du profil choisi est **la seule** testée et persistée. En cas d'échec + `allow_rtsp_override=false` → HTTP 400 explicite : « URL RTSP du profil "X" injoignable — choisissez un autre profil ou cochez "Créer malgré le test RTSP" ».
+    - `PUT /api/cameras/{id}` (mode=onvif) : idem. La `resolution`/`codec` est rafraîchie depuis le ffprobe réel (précis), mais `rtsp_url` reste = URL du profil sélectionné.
+    - `POST /api/cameras/test-connectivity` : nouveau champ `profile_token` (optionnel). Si fourni → pick le profil correspondant + `_ffprobe_validate_exact` (aucune substitution). Sinon → comportement historique (variants pour découverte). Le step `rtsp_open` expose désormais `profile_token` + `profile_name` + label « profil « Main » » dans le message.
+  - **Fix frontend `Cameras.jsx`** :
+    - `runConnectivity` envoie désormais `profile_token` au backend (respect du choix explicite lors du re-test).
+    - Auto-sélection par **résolution maximale** (produit largeur×hauteur) à la place du premier profil de la liste — Reolink/Hik renvoient souvent le sub en premier, l'utilisateur voulait le main par défaut.
+    - Nouveau badge visuel `MAIN` (bleu) / `SUB` (gris) devant chaque profil, détecté par regex sur le nom + l'URL.
+    - Bordure `#00E5FF` autour du profil actuellement sélectionné (radio checked).
+    - Note UX : « Aucune substitution de flux — l'URL exacte du profil coché est persistée et utilisée par go2rtc. Cliquez sur "Tester la connexion" après avoir changé de profil pour re-valider. »
+    - Changer le profil radio réinitialise `connCheck` pour forcer le re-test.
+  - **Tests** : `tests/test_iter26_onvif_profile_exact.py` (4 tests unitaires — retourne exact URL, fallback tcp→udp sans changer l'URL, jamais de substitution main↔sub, échec propre si les 2 transports échouent). testing_agent iteration_26 : 22/22 pytest (18 iter25 + 4 iter26), 100% backend, 0 issue, retest_needed=False.
+
 - ✅ **BUG FIX FINAL — Suppression totale du fragment `#transport=…` dans les URLs RTSP (2.11.2 — 2026-07-22)**
   - **Cause racine** : go2rtc échoue à décoder les flux RTSP lorsque l'URL contient `#transport=udp` (ou `#transport=tcp`). Symptômes constatés par l'utilisateur : "Aperçu indisponible", `frame.jpeg` KO, faux échec dans le workflow d'édition caméra. Validé manuellement par l'utilisateur : URL sans fragment → tout fonctionne (frame JPEG 35 KB, live OK, décodage OK).
   - **Fix appliqué dans `_build_rtsp_url`** :
