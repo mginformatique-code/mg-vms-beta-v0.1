@@ -1,6 +1,22 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **SPRINT P1.a — Uniformisation `<EventViewer>` (2.8.1 — 2026-07-22)**
+  - Backend : nouveau `GET /api/recording-context?camera_id=X&at=ISO_TS` (helper factorisé `_lookup_recording_for`). `GET /api/events/{id}/recording` accepte désormais un `alert_id` en plus d'un event_id/plate_id (fallback dans l'ordre `events → plates → alerts`).
+  - Frontend `EventViewer.jsx` : `playAround` détecte automatiquement le type d'item (via `id`) et bascule sur `/recording-context` si l'item ne provient pas de `db.events/plates` mais possède `camera_id + timestamp` (cas des alertes IA scénarios).
+  - `Alerts.jsx` : chaque alerte devient interactive — le thumbnail est un bouton (`alert-thumb-btn`) + bouton œil (`alert-view-btn`) qui ouvrent l'EventViewer HD avec navigation ← → dans toutes les alertes.
+  - `Dashboard.jsx` : la card "Alertes récentes" (6 dernières) est désormais cliquable — chaque `dash-alert-row` est un bouton qui ouvre l'EventViewer.
+  - Résultat : les 4 surfaces d'événements (Events / ANPR / Alerts / Dashboard) partagent la même visionneuse HD + vidéo -5/+5s.
+
+- ✅ **SPRINT P1.b — Audit zéro-sandbox (2.8.1 — 2026-07-22)**
+  - Suppression des 3 clés i18n obsolètes `hw.simulated` / `rec.simulated` / `net.simulated` (FR + EN) qui n'étaient plus référencées.
+  - `hardware.py` : docstring "Sandbox : CPU/RAM détectés réellement…" remplacée par "Détection RÉELLE : CPU/RAM via `psutil`, GPU via nvidia-smi/rocm-smi/OpenVINO. Aucun placeholder." Suppression du flag `simulated_gpu` de la réponse `/api/hardware/info` (toujours False).
+  - `routers.py` : suppression des champs `"simulated": False` dans `/api/cameras/{id}/stream` et `/api/recordings/{id}/playback`.
+  - `plugins.py` : suppression du duplicate `_health_access_control` (ancienne version "roadmap P2") — le health check remonte désormais l'état réel (nombre de contrôleurs déclarés).
+  - Tests iteration_17 : **10/10 backend + Playwright OK, zéro issue.**
+
+
+## Implemented (2026-07)
 - ✅ **SPRINT P0 FINAL — Mise en production des plugins avec configuration (2.8.0 — 2026-07-22)**
   - **Nouveau module `plugin_config.py`** (backend) — endpoints CRUD par plugin :
     - **ANPR** : `GET/PUT /api/plugins/anpr/config` (pays, min/max plate px, ocr_confidence, cache, alertes) + `GET/PUT /api/plugins/anpr/cameras/{id}` (ROI polygone normalisé 0-1, min ≥3 pts, whitelist/blacklist locales, min_confidence, country_override) + `GET /api/plugins/anpr/cameras` (liste avec compteurs). ROI appliquée **temps réel** dans `ai_engine.py` (test point-in-polygon sur centre plaque).
