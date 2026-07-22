@@ -1,6 +1,40 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **SPRINT P0 FINAL — Mise en production des plugins avec configuration (2.8.0 — 2026-07-22)**
+  - **Nouveau module `plugin_config.py`** (backend) — endpoints CRUD par plugin :
+    - **ANPR** : `GET/PUT /api/plugins/anpr/config` (pays, min/max plate px, ocr_confidence, cache, alertes) + `GET/PUT /api/plugins/anpr/cameras/{id}` (ROI polygone normalisé 0-1, min ≥3 pts, whitelist/blacklist locales, min_confidence, country_override) + `GET /api/plugins/anpr/cameras` (liste avec compteurs). ROI appliquée **temps réel** dans `ai_engine.py` (test point-in-polygon sur centre plaque).
+    - **ByteTrack** : `GET/PUT /api/plugins/tracking/config` (track_thresh 0.1-0.9, match_thresh 0.5-0.95, track_buffer, min_box_area, id_persist_seconds). Intégration réelle via `supervision.ByteTrack` — un tracker par caméra, IDs persistants attachés à chaque événement + overlay Live.
+    - **Face Recognition** : config (seuil, modèle, alertes) + CRUD `db.faces` (nom, watchlist, notes). Health check honnête (avertissement légal RGPD).
+    - **Parking** : CRUD `db.parking_zones` (polygone dessiné sur snapshot de la caméra, capacité, camera_id enrichi).
+    - **Access Control** : CRUD contrôleurs (gate/door/barrier/reader, IP:port, protocol http/wiegand/osdp/mqtt) + `POST /controllers/{id}/test` (ping TCP réel).
+    - **Thermal / Radar / Drone** : CRUD manuel de capteurs matériels (aucune fabrication de données — l'admin déclare l'équipement).
+    - Route helper `GET /api/plugins/_helpers/camera-snapshot/{id}` → JPEG frame live pour servir de fond aux éditeurs de polygone.
+  - **Nouveau module `storage.py`** (backend) — gestion multi-disques :
+    - `GET /api/storage/overview` → détection auto des partitions physiques (`psutil.disk_partitions`, filtre les fs virtuels), pools déclarés avec usage réel (`shutil.disk_usage` + comptage segments par pool).
+    - CRUD pools : `POST/PUT/DELETE /api/storage/pools` — validation chemins interdits (/etc, /boot…), création `mkdir`, refus si non-accessible, blocage suppression si caméra assignée.
+    - Assignation par caméra : `GET/PUT /api/storage/cameras/{id}/assignment` → `record_mode` (continuous/motion/ai/off) + `storage_pool_id` + `max_size_gb` + `profile_token` ONVIF.
+  - **`recorder.py`** — enregistrement multi-cible : `_cam_target_dir(cam)` route vers pool assigné (fallback dossier principal), `_cam_all_dirs` indexe tous les répertoires (transition sans perte). `record_mode=motion` supprime les segments sans événement, `record_mode=ai` supprime les segments non IA. Purge propre.
+  - **Nouveau composant `PolygonEditor.jsx`** — éditeur canvas réutilisable, coordonnées **normalisées 0-1** (indépendant résolution), clic pour ajouter un sommet, drag pour déplacer, annuler dernier, tout effacer, minimum configurable (défaut 3).
+  - **`PluginPage.jsx`** entièrement enrichi — 7 composants de config production :
+    - `AnprSettings` + `AnprCameraDialog` (config globale + dialog par caméra avec bouton "Dessiner la ROI" ouvrant PolygonEditor sur snapshot live)
+    - `TrackingSettings` (formulaire ByteTrack complet avec bornes)
+    - `FaceRecognitionSettings` (config + CRUD visages + avertissement RGPD)
+    - `ParkingSettings` + `ParkingZoneDialog` (création de zone dessinée sur snapshot caméra)
+    - `AccessControlSettings` + `AcDialog` (CRUD contrôleurs + test TCP)
+    - `SensorSettings` + `SensorDialog` réutilisable (thermal/radar/drone)
+  - **`Settings.jsx`** — nouvelle carte **Stockage multi-disques** (admin only) : liste des 9+ partitions détectées avec barre d'usage colorée (vert/orange/rouge), bouton "Utiliser" qui pré-remplit le formulaire, table des pools déclarés avec toggle activer/désactiver + quota édité inline + volume enregistrements réel, zone d'ajout manuel (nom + chemin + quota).
+  - **`Cameras.jsx`** — dialog de création/édition étend le formulaire avec un bloc **"Configuration d'enregistrement"** : select Mode (continuous/motion/ai/off), select Canal ONVIF (peuplé après test connectivité), select Disque cible (pools actifs avec Go libres visibles), champ Quota max. À la sauvegarde, appel additionnel `PUT /api/storage/cameras/{id}/assignment`.
+  - **`plugins.py`** — health checks refondus (aucune donnée fictive) :
+    - `_health_tracking` : vérifie `supervision`/`ultralytics` installés + config ByteTrack en base + événements tracés sur 24 h.
+    - `_health_anpr_v2` : ajoute checks config globale + nb caméras avec ROI.
+    - `_health_parking` : `configured` si zones>0.
+    - `_health_access_control` : `configured` si contrôleurs>0.
+    - `_health_hardware_sensor` : `configured` si l'admin a déclaré au moins un capteur (thermal/radar/drone).
+  - **Tests testing agent (iteration_16) : 25/25 backend pytest + Playwright frontend intégral OK. 0 issue.**
+
+
+## Implemented (2026-07)
 - ✅ **SPRINT P2.a — Rétention & stockage vidéo (2.7.0 — 2026-07-22)**
   - **Backend** : `_apply_retention()` réécrit avec **2 passes** — (1) purge par âge (segments > N jours), puis (2) purge par quota disque (tant que `free_gb < min_free_gb` **OU** `used_pct > max_disk_pct`, supprimer le plus ancien segment). Rapport détaillé retourné : `{deleted_by_age, deleted_by_quota, freed_gb}`.
   - Config runtime persistée dans `settings.retention` : `retention_days` (1-365) · `min_free_gb` (0.5-10000) · `max_disk_pct` (10-99). Chargée à chaque cycle du recorder — édition à chaud sans redémarrage.
