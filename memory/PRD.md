@@ -1,6 +1,31 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **RECONNAISSANCE FACIALE — InsightFace + Upload photo + Analyse temps réel (2.10.0 — 2026-07-22)**
+  - **Backend `face_recognition_engine.py`** : nouveau module 100% local basé sur `insightface` (ONNX buffalo_s, CPU). Fonctions clefs :
+    - `availability()` : détecte si insightface est installé + retourne les notes d'installation pour l'UI.
+    - `extract_embedding(image_bytes)` : ouvre l'image, détecte le/les visage(s), retourne l'embedding 512D + méta (bbox, det_score, gender, age). Refuse si 0 ou >1 visage.
+    - `analyze_frame(bgr_frame, known, threshold)` : compare tous les visages détectés dans une frame BGR à la base de visages (cosine similarity).
+    - `image_to_thumbnail(bytes, 120)` : produit un data-URL JPEG pour affichage UI (~10 kB).
+  - **Endpoints** :
+    - `GET /api/plugins/face_recognition/availability` : état lib + notes.
+    - `POST /api/plugins/face_recognition/faces/{id}/photo` : upload multipart, appelle extract_embedding, persiste `encoding` + `thumbnail` + `photo_meta` + `photo_uploaded_at` dans `db.faces`. Validation : image only, max 8 Mo, exactement 1 visage détecté.
+    - Le `GET /faces` ne retourne JAMAIS le champ `encoding` (perf + surface d'attaque réduite).
+  - **Intégration `ai_engine._process_camera`** : si `settings.face_recognition_config.enabled=true` ET ≥1 visage avec encoding, la frame BGR est passée à `analyze_frame`. Les matches génèrent :
+    - un événement `Visage · <name>` avec `face_id`, `face_name`, `watchlist`, `confidence` (similarité cosinus).
+    - une alerte `critical` "Visage sur liste de surveillance" si `watchlist=True` et `alert_on_watchlist=True`.
+    - Cooldown propre par (caméra, face_id).
+  - **Frontend `FaceRecognitionSettings`** :
+    - Nouvelle carte `face-availability` (verte/orange) qui expose l'état d'installation avec notes.
+    - Bouton `face-upload-{id}` par visage → input file → POST photo → thumbnail rendu + affichage det_score + bbox.
+    - Badge "SANS PHOTO" tant qu'aucun embedding n'existe.
+    - Toggle `enabled` désactivé si la lib est absente.
+  - **Modèle buffalo_s (~50 Mo)** téléchargé automatiquement au 1er upload de photo depuis les serveurs officiels InsightFace.
+  - **requirements.txt** mis à jour via `pip freeze` : `insightface==1.0.1`, `onnxruntime==1.27.0`, `onnx==1.22.0`.
+  - **Tests testing_agent iteration_22 : 11/11 backend pytest + Playwright E2E OK (upload Tom Hanks → embedding 512D, det_score=0.84). 0 issue.**
+
+
+## Implemented (2026-07)
 - ✅ **BUG FIX RTSP DEBUG — Debug + Validation obligatoire + Encodage RFC3986 (2.9.2 — 2026-07-22)**
   - **Debug RTSP en clair** : `POST /api/cameras/test-connectivity` renvoie désormais `rtsp_url_validated: bool`, `validated_url: URL_masquée`, `validated_transport`, et `debug_attempts: [{url_masked, transport, ok, codec, resolution, fps}]`. Chaque tentative montre l'URL EXACTE testée avec le password masqué (`admin:******@…`).
   - **Encodage RFC3986 UNE seule fois** : `_build_rtsp_url` détecte la présence de credentials via `host_part.split("/", 1)[0]` (au lieu de chercher `@` n'importe où dans l'URL) → ne réencode jamais. `Rlwt29#+jpf` → `Rlwt29%23%2Bjpf`, jamais `%2523%252Bjpf`. Vérifié : URL déjà avec creds encodés est préservée.
