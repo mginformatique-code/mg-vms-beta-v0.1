@@ -54,7 +54,11 @@ def _build_rtsp_url(cam: dict) -> str:
     - Si l'URL déclare déjà `user:pass@` : ne réencode pas (on considère que l'appelant a déjà encodé).
     - Sinon : encode `username` et `password` avec `urllib.parse.quote(str, safe="")`.
       Exemple : `Rlwt29#+jpf` → `Rlwt29%23%2Bjpf` (jamais `%2523%252B…`).
-    - Applique le transport RTSP demandé via `#transport=tcp|udp`.
+
+    NOTE : le fragment `#transport=tcp|udp` a été retiré (retour utilisateur : go2rtc échoue à
+    décoder les flux avec ce suffixe). Le transport est désormais géré :
+    - côté ffprobe : via l'option CLI `-rtsp_transport tcp|udp` dans `_ffprobe`
+    - côté go2rtc : négociation automatique (TCP par défaut pour la plupart des caméras IP)
     """
     url = (cam.get("rtsp_url") or "").strip()
     if not url:
@@ -69,9 +73,11 @@ def _build_rtsp_url(cam: dict) -> str:
             u_enc = urlquote(str(user), safe="")
             p_enc = urlquote(str(pwd), safe="")
             url = url.replace("rtsp://", f"rtsp://{u_enc}:{p_enc}@", 1)
-    transport = (cam.get("rtsp_transport") or "tcp").lower()
-    if transport in ("tcp", "udp") and "#transport=" not in url:
-        url = f"{url}#transport={transport}"
+    # Nettoyage : retire tout fragment `#transport=…` déjà présent (au cas où l'URL viendrait
+    # avec cette syntaxe historique)
+    if "#transport=" in url:
+        idx = url.find("#transport=")
+        url = url[:idx]
     return url
 
 

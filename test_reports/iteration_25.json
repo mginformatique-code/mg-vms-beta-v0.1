@@ -1,0 +1,25 @@
+{
+  "summary": "Iteration 25 — Bug fix RTSP _build_rtsp_url plus jamais de #transport= VALIDÉ. 18/18 pytest PASS. Confirmé : (a) _build_rtsp_url({rtsp_transport:'udp'|'tcp'}) ne produit AUCUN fragment #transport=... ; (b) le fragment historique déjà stocké en base (rtsp://x/foo#transport=tcp) est nettoyé à la génération ; (c) POST /api/cameras/test-connectivity avec rtsp://127.0.0.1:8554/cam_demo-cam-001 + rtsp_transport=udp retourne rtsp_url_validated=true (idem tcp) ; (d) GET /api/stream/demo-cam-001/frame.jpeg?token=<jwt> renvoie un JPEG magique FFD8FF de >30KB (mesuré ~44KB) ; (e) GET /api/stream/demo-cam-001/live.mjpeg?token=<jwt> stream >10KB en 3s avec boundary=frame ; (f) _ffprobe direct sur demo-cam-001 tcp → codec=H264, transport='tcp' (confirme que -rtsp_transport CLI est bien passé) ; (g) POST /api/cameras avec rtsp_url invalide → 400 ; avec URL demo valide + transport=udp → 200 et l'URL stockée ne contient PAS de fragment. Regression suite verte : ANPR config/cameras/watchlist_export, face_recognition config/faces.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter25_rtsp_no_fragment.py",
+    "/app/test_reports/pytest/iter25.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "streaming.py:78-80 — cleanup fragment historique via str.find('#transport='). OK, mais un url.split('#',1)[0] serait plus lisible (retire aussi tout autre fragment parasite). Le RTSP n'a pas d'usage légitime de '#' donc les deux stratégies sont sûres.",
+    "streaming.py:248-256 — _strip_go2rtc_fragments reste utilisé par _ffprobe et fait un split plus général sur le premier '#'. Il y a maintenant deux mécanismes de nettoyage (build + ffprobe) ; l'un des deux devient partiellement redondant. Consolidation possible : appeler _strip_go2rtc_fragments à la fin de _build_rtsp_url pour uniformiser.",
+    "streaming.py:562-566 — la valeur retournée à test-connectivity utilise 'rtsp_url' ET 'rtsp_url_used' avec la même URL propre. Bien confirmé sans fragment à travers l'API.",
+    "streaming.py:485 — le champ rtsp_transport (Pydantic) accepte 'tcp'/'udp' mais aucune validation d'enum stricte. Peu risqué (normalisé en interne via lower() puis fallback tcp), mais un Literal['tcp','udp'] serait plus robuste."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter25_rtsp_no_fragment.py"
+  ],
+  "success_rate": {"backend": "18/18 (100%)", "frontend": "N/A (backend-only per request)"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (OK)",
+  "seed_data_creation": "Une caméra TEST_iter25_valid créée puis supprimée pendant test_create_rtsp_valid_returns_200_no_fragment ; test_create_rtsp_invalid_returns_400 ne crée rien (400 attendu). Aucun résidu.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Lancer : `cd /app/backend && python -m pytest tests/test_iter25_rtsp_no_fragment.py -v -o addopts=''`. Le test insère /app/bin dans PATH (ffprobe y vit — pas dans /usr/bin). Les endpoints stream /api/stream/{id}/frame.jpeg|live.mjpeg utilisent stream_user() qui accepte le JWT via ?token= OU Authorization: Bearer OU cookie access_token. Il n'existe PAS de route /api/stream/{id}/token ; on réutilise l'access_token du login. POST /api/cameras exige site_id (fetched via /api/sites)."
+}
