@@ -1,6 +1,20 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **SPRINT FINAL — Correction chaîne vidéo live + RTSP + Diagnostic (2.9.0 — 2026-07-22)**
+  - **BLOCKER LIVE RÉSOLU** : go2rtc 1.9.8 ne transcode plus H.264 → MJPEG automatiquement sur `/api/stream.mjpeg` pour un producer H.264 pur (retour Content-Length: 0). Fix : `_mjpeg_stream(camera_id)` retourne **toujours** la variante `_sd` (qui contient explicitement `ffmpeg:...#video=mjpeg#width=640`). L'en-tête `content-type` (avec `boundary=frame`) est désormais transmis intact au navigateur (avant : le paramètre boundary était perdu). Résultat testé : Chrome/Firefox affichent le live des 2 caméras démo (mire + trafic).
+  - **RTSP TCP/UDP par caméra** : nouveau champ `rtsp_transport` ("tcp"|"udp", défaut "tcp"). `_build_rtsp_url` ajoute `#transport=tcp|udp` au fragment go2rtc → passage TCP/UDP réel au niveau ffmpeg upstream.
+  - **Codec préféré par caméra** : nouveau champ `preferred_codec` ("auto"|"h264"|"h265", défaut "auto") — visible dans le diagnostic + persisté en base.
+  - **Nouveau endpoint diagnostic** : `GET /api/cameras/{id}/diagnostic` — agrège état go2rtc + camera_online + IA (dernière analyse, timings YOLO/ALPR, motion %, détections) + activité 24h (events + plates) + last_event + last_plate.
+  - **Frontend `Cameras.jsx`** :
+    - 2 nouveaux selects `rtsp-transport` (TCP recommandé / UDP) et `preferred-codec` (Auto / H.264 / H.265) dans le dialog de création/édition.
+    - Nouveau bouton `diagnostic-btn` (icône radar) sur chaque ligne → ouvre `DiagnosticDialog` avec 4 sections (Flux vidéo · IA · Activité 24h · Dernières détections).
+  - **Frontend `streaming.py` `frame_jpeg`** : essai HD → fallback SD si le stream HD ne délivre pas de JPEG (fiabilise les snapshots).
+  - **Audit localhost côté frontend : 0 occurrence** (déjà propre — toutes les URLs passent par `process.env.REACT_APP_BACKEND_URL`).
+  - **Tests testing agent (iteration_18) : 11/11 backend + Playwright OK, 0 issue.**
+
+
+## Implemented (2026-07)
 - ✅ **SPRINT P1.a — Uniformisation `<EventViewer>` (2.8.1 — 2026-07-22)**
   - Backend : nouveau `GET /api/recording-context?camera_id=X&at=ISO_TS` (helper factorisé `_lookup_recording_for`). `GET /api/events/{id}/recording` accepte désormais un `alert_id` en plus d'un event_id/plate_id (fallback dans l'ordre `events → plates → alerts`).
   - Frontend `EventViewer.jsx` : `playAround` détecte automatiquement le type d'item (via `id`) et bascule sur `/recording-context` si l'item ne provient pas de `db.events/plates` mais possède `camera_id + timestamp` (cas des alertes IA scénarios).
