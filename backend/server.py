@@ -17,6 +17,8 @@ from routers import api_router
 from notifications import notif_router
 from realtime import realtime_router, metrics_broadcaster
 from plugins import plugins_router, seed_plugins
+from plugin_config import plugin_config_router
+from storage import storage_router
 from network import network_router, network_poll_broadcaster
 from reports import reports_router
 from hardware import hardware_router, seed_hardware
@@ -37,6 +39,8 @@ app.include_router(api_router)
 app.include_router(notif_router)
 app.include_router(realtime_router)
 app.include_router(plugins_router)
+app.include_router(plugin_config_router)
+app.include_router(storage_router)
 app.include_router(network_router)
 app.include_router(reports_router)
 app.include_router(hardware_router)

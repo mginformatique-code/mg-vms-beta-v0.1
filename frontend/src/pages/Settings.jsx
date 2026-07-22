@@ -82,6 +82,7 @@ export default function SettingsPage() {
       </Card>
 
       {user?.role === "admin" && <RetentionCard />}
+      {user?.role === "admin" && <StorageCard />}
     </div>
   );
 }
@@ -190,6 +191,119 @@ function StatBox({ label, value, color, small }) {
     <div className="border border-border p-2 text-center">
       <div className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className={small ? "mono text-xs mt-0.5" : "mono text-lg font-bold mt-0.5"} style={color ? { color } : undefined}>{value}</div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Multi-disques : détection auto + ajout manuel + assignation caméras
+// ═══════════════════════════════════════════════════════════════════
+function StorageCard() {
+  const [state, setState] = useState(null);
+  const [newPool, setNewPool] = useState({ name: "", path: "", enabled: true, max_size_gb: 0, priority: 0 });
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    try { const { data } = await api.get("/storage/overview"); setState(data); }
+    catch (e) { /* ignore */ }
+  };
+  useEffect(() => { load(); const iv = setInterval(load, 60000); return () => clearInterval(iv); }, []);
+
+  const addPool = async () => {
+    if (!newPool.path.trim()) return toast.error("Chemin requis");
+    setSaving(true);
+    try {
+      await api.post("/storage/pools", {
+        ...newPool, max_size_gb: Number(newPool.max_size_gb) || 0, priority: Number(newPool.priority) || 0,
+      });
+      toast.success("Pool ajouté"); setNewPool({ name: "", path: "", enabled: true, max_size_gb: 0, priority: 0 }); load();
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+    finally { setSaving(false); }
+  };
+
+  const updatePool = async (pool, patch) => {
+    try { await api.put(`/storage/pools/${pool.id}`, { ...pool, ...patch }); load(); toast.success("Pool mis à jour"); }
+    catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
+
+  const delPool = async (id) => {
+    if (!window.confirm("Supprimer ce pool ? (les fichiers ne sont pas effacés)")) return;
+    try { await api.delete(`/storage/pools/${id}`); load(); toast.success("Pool supprimé"); }
+    catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
+
+  if (!state) return null;
+
+  return (
+    <div className="bg-card border border-border p-5 mb-3">
+      <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-4"><HardDrive size={15} /> Stockage multi-disques</div>
+
+      <div className="text-[11px] mono text-muted-foreground mb-2">Dossier d'enregistrement principal : {state.primary_recordings_dir}</div>
+
+      {/* Partitions détectées */}
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Partitions physiques détectées ({state.partitions.length})</div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4">
+        {state.partitions.map((p, i) => (
+          <div key={i} className="border border-border p-2 text-xs">
+            <div className="flex items-center justify-between">
+              <div><span className="mono text-[#0044FF]">{p.mountpoint}</span> <span className="text-muted-foreground">({p.fstype})</span></div>
+              <button onClick={() => setNewPool({ ...newPool, path: p.mountpoint, name: newPool.name || p.mountpoint })}
+                      className="text-[10px] px-2 py-0.5 border border-[#0044FF] text-[#0044FF] hover:bg-[#0044FF]/10"
+                      data-testid={`use-partition-${i}`}>
+                Utiliser
+              </button>
+            </div>
+            <div className="mono text-[10px] text-muted-foreground mt-1">{p.device} · {p.total_gb} Go · libre {p.free_gb} Go ({100 - Math.round(p.used_pct)}%)</div>
+            <div className="h-1 bg-secondary mt-1"><div className="h-full" style={{ width: `${p.used_pct}%`, backgroundColor: p.used_pct > 85 ? "#FF3333" : p.used_pct > 70 ? "#FFB800" : "#00E676" }} /></div>
+          </div>
+        ))}
+      </div>
+
+      {/* Pools de stockage déclarés */}
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Pools de stockage ({state.pools.length})</div>
+      {state.pools.length === 0 && <p className="text-xs text-muted-foreground mb-2">Aucun pool déclaré. Les enregistrements vont dans le dossier principal.</p>}
+      <div className="space-y-2 mb-3">
+        {state.pools.map((pool) => (
+          <div key={pool.id} className="border border-border p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <span className="font-medium">{pool.name}</span>
+                <span className="mono text-[10px] text-muted-foreground ml-2">{pool.path}</span>
+                {!pool.enabled && <span className="ml-2 text-[10px] text-[#FFB800]">DÉSACTIVÉ</span>}
+              </div>
+              <div className="flex gap-1">
+                <button onClick={() => updatePool(pool, { enabled: !pool.enabled })} className="text-[10px] px-2 py-0.5 border border-border hover:bg-secondary" data-testid={`pool-toggle-${pool.id}`}>{pool.enabled ? "Désactiver" : "Activer"}</button>
+                <button onClick={() => delPool(pool.id)} className="text-[10px] px-2 py-0.5 border border-[#FF3333] text-[#FF3333] hover:bg-[#FF3333]/10"><Trash2 size={10} /></button>
+              </div>
+            </div>
+            <div className="grid grid-cols-4 gap-2 text-[10px]">
+              <div><div className="text-muted-foreground uppercase">Disque total</div><div className="mono">{pool.usage?.total_gb} Go</div></div>
+              <div><div className="text-muted-foreground uppercase">Libre</div><div className="mono">{pool.usage?.free_gb} Go</div></div>
+              <div><div className="text-muted-foreground uppercase">Enregistrements</div><div className="mono">{pool.recordings_count} · {pool.recordings_size_gb} Go</div></div>
+              <div>
+                <div className="text-muted-foreground uppercase">Quota (Go)</div>
+                <input type="number" min="0" defaultValue={pool.max_size_gb}
+                       onBlur={(e) => updatePool(pool, { max_size_gb: Number(e.target.value) })}
+                       className="w-full px-1.5 py-0.5 bg-background border border-input outline-none mono text-[10px]"
+                       title="0 = illimité" />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Ajout manuel */}
+      <div className="border border-dashed border-border p-3">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Ajouter un pool manuellement</div>
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+          <input placeholder="Nom" value={newPool.name} onChange={(e) => setNewPool({ ...newPool, name: e.target.value })} className="px-2 py-1.5 bg-background border border-input outline-none text-xs" data-testid="pool-new-name" />
+          <input placeholder="/mnt/nas/videos" value={newPool.path} onChange={(e) => setNewPool({ ...newPool, path: e.target.value })} className="px-2 py-1.5 bg-background border border-input outline-none text-xs mono md:col-span-2" data-testid="pool-new-path" />
+          <input type="number" min="0" placeholder="Quota Go (0=illim)" value={newPool.max_size_gb} onChange={(e) => setNewPool({ ...newPool, max_size_gb: e.target.value })} className="px-2 py-1.5 bg-background border border-input outline-none text-xs mono" />
+          <button onClick={addPool} disabled={saving} className="flex items-center justify-center gap-1 px-3 py-1.5 bg-[#0044FF] text-white text-xs" data-testid="pool-add">
+            {saving && <Loader2 size={11} className="animate-spin" />}<Save size={11} /> Ajouter
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

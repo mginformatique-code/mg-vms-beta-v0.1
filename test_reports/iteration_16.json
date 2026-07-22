@@ -1,0 +1,58 @@
+{
+  "summary": "Iteration 16 — Validation complète de la configuration production des plugins MG-VMS (backend + frontend). Backend pytest 25/25 (test_iter16_plugin_config.py) : ANPR global GET/PUT (admin only, defaults fr/24/400), ANPR par-caméra (ROI polygone <3 pts et coords hors [0-1] rejetés en 400, normalisation whitelist/blacklist en majuscule sans espace, DELETE plaques vides), liste caméras avec anpr_enabled/roi_points/wl_count/bl_count, ByteTrack clampé (thresh 0.1-0.9, match 0.5-0.95, buffer 5-300, persist 5-600) et admin only, Face Recognition config + CRUD faces (nom vide → 400, viewer 403), Parking zones CRUD (polygone <3 → 400, camera_id invalide → 400, camera_name enrichi), Access Control CRUD + POST /test TCP (online/offline), Sensors thermal/radar/drone CRUD, /api/plugins/_helpers/camera-snapshot/{id} exige auth (401 sans token) et renvoie 200 JPEG ou 404, /api/storage/overview (partitions+pools+primary_recordings_dir), Pools CRUD admin-only, assignement caméra avec record_mode contrôlé + validation pool_id existant + refus de suppression tant qu'assigné, /api/plugins liste les 8 plugins attendus. Frontend Playwright OK : les 9 pages (7 plugins + settings + cameras) rendent correctement avec les data-testid attendus (anpr-country/min-px/cfg-save, bt-enabled/save, face-*, parking-new, ac-new, pool-add + pool-new-name + pool-new-path + 9 use-partition-*, record-cfg/mode/pool/profile/quota dans dialog caméras), le dialog ANPR par caméra ouvre le PolygonEditor (polygon-editor + canvas + save + clear), 4 clics sur canvas + Enregistrer sauvent le polygone.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/storage/pools",
+        "issue": "SECURITY: Path forbidden check bug in storage.py L133 — le code fait `path.startswith(p + '/')` où `p` finit déjà par '/' (ex: '/etc/'), donc le prefix testé est '/etc//' qui ne correspond jamais. Résultat : `POST /api/storage/pools {\"path\":\"/etc/evilXXX\"}` accepte le chemin et crée `/etc/evilXXX` (répertoire créé sous /etc/ avec droits root). Reproduit et confirmé — un dossier `/etc/evil` a été créé pendant les tests puis nettoyé manuellement.",
+        "priority": "CRITICAL"
+      },
+      {
+        "endpoint": "GET /api/plugins/anpr/cameras/{camera_id}",
+        "issue": "Bug logique : pour une caméra existante mais sans anpr_config, la projection Mongo `{_id:0, anpr_config:1}` renvoie `{}` (dict vide). `if not cam: raise 404` déclenche 404 alors que la caméra existe. Reproduction : créer une nouvelle caméra puis GET /api/plugins/anpr/cameras/{id} → 404 au lieu du config par défaut. Correction : remplacer `if not cam` par `if cam is None` (find_one retourne None si absent, dict vide {} sinon). Impact UX : la page de config ANPR par caméra plante pour toute caméra jamais configurée.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/storage/pools",
+        "issue": "Le chemin `/etc` (sans slash final) est bien bloqué (dans le set forbidden), mais `/etc/` (avec slash) et `/etcXXX/foo` échappent aux deux checks. À normaliser en `path.startswith(p)` (sans concaténer '/') après avoir strippé le slash final de `p`."
+      },
+      {
+        "endpoint": "GET /api/plugins/anpr/cameras/{camera_id}",
+        "issue": "La projection ne renvoie pas `_id`, mais renvoie néanmoins un doc vide si la caméra n'a pas d'anpr_config → même bug que ci-dessus."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter16_plugin_config.py",
+    "/app/test_reports/pytest/iter16.xml"
+  ],
+  "action_items": [
+    "URGENT: Corriger storage._forbidden check dans /app/backend/storage.py L133 — remplacer `any(path.startswith(p + '/') for p in ('/etc/', ...))` par `any(path == p.rstrip('/') or path.startswith(p) for p in ('/etc/', '/boot/', '/proc/', '/sys/', '/dev/', '/root/'))`. Sinon un admin peut créer un pool d'enregistrement dans /etc/ ou /boot/ et remplir le disque système.",
+    "Corriger anpr_camera_get + anpr_camera_put dans /app/backend/plugin_config.py — remplacer `if not cam:` par `if cam is None:` (ligne 70 GET et ligne 80 PUT). Sans cela la config par caméra retourne 404 pour toute caméra non encore configurée.",
+    "Optionnel : au démarrage backend, refuser via startup check tout pool existant pointant vers /etc/, /boot/, /proc/, /sys/, /dev/ (nettoyer les erreurs passées)."
+  ],
+  "critical_code_review_comments": [
+    "plugin_config.py : bonne séparation ANPR global vs par-caméra, validation polygone claire, log_audit sur toutes les mutations. La normalisation upper+no-space des plaques est correcte.",
+    "storage.py : la protection des chemins système est bugguée (voir issue critique). Le refus de DELETE tant qu'une caméra référence le pool est bien implémenté (count_documents + 400).",
+    "storage.py L120 `_dir_size_bytes` est bloquant (os.walk synchrone) dans un endpoint async — potentiel blocage de l'event loop sur des gros dossiers (à envelopper dans run_in_threadpool si /storage/overview devient lent).",
+    "plugin_config.py L349 `_sensors_router` : ferme sur `kind`/`coll_name` mais l'injection user n'expose pas `kind` via signature Depends — OK car FastAPI utilise `inspect.signature`. À noter : `sensor.kind` du body est ignoré (surchargé par le kind du path), c'est intentionnel.",
+    "Validation polygone parking : accepte n'importe quelle coord (pas de check 0-1 comme ANPR). À aligner pour cohérence (les polygones parking sont aussi censés être normalisés)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter16_plugin_config.py (nouveau — 25 tests d'intégration plugins/storage)"
+  ],
+  "success_rate": {"backend": "100% (25/25)", "frontend": "100% des 9 pages ciblées + polygon editor + dialog cameras"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (fonctionne)",
+  "seed_data_creation": "Tests créent + suppriment TEST_face_iter16, TEST_zone_iter16, TEST_ctrl_iter16, TEST_{thermal|radar|drone}_iter16, TEST_pool_iter16. Nettoyage OK après passe complète. Un polygone [[0.1,0.1],[0.9,0.1],[0.9,0.9],[0.1,0.9]] + whitelist AB123CD/XY456 + blacklist BA-999-ZZ + country_override=de est actuellement persisté sur demo-cam-001 (reste des tests, non-bloquant pour la démo).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Fichier de régression : /app/backend/tests/test_iter16_plugin_config.py. Lancer avec `export $(grep REACT_APP_BACKEND_URL /app/frontend/.env) && pytest -o addopts= backend/tests/test_iter16_plugin_config.py` (pytest.ini du repo force xdist, à désactiver pour les fixtures module-scope). TestStorage crée un pool dans /tmp/mgvms_test_pool_iter16 — si un run précédent a échoué mi-test, penser à supprimer manuellement le pool via l'API (GET /api/storage/overview puis DELETE /api/storage/pools/{id}) ET le dossier /tmp. Bugs à retester après fix main agent : 1) POST /storage/pools {path:'/etc/foo'} doit renvoyer 400 ; 2) GET /plugins/anpr/cameras/{id} sur une caméra fraîche doit renvoyer 200 avec les défauts.",
+  "rca of the issue": "Bug storage forbidden path : concaténation `p + '/'` alors que les entrées du tuple finissent déjà par '/', donnant '/etc//'. Bug ANPR camera GET : `if not cam` évalue faux pour un dict vide `{}` renvoyé par Mongo quand la projection ne trouve aucun champ visible sur le doc — Motor find_one retourne `{}` (pas None) si le doc existe mais ne contient aucun des champs projetés."
+}

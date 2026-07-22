@@ -16,6 +16,7 @@ const EMPTY_FORM = {
   profile_token: "", profile_name: "",
   resolution: "", fps: null, bitrate: null,
   ptz_enabled: false, record_enabled: true, detect_enabled: false,
+  record_mode: "continuous", storage_pool_id: "", storage_max_size_gb: 0,
   // Assistant RTSP
   wiz_brand: "", wiz_model_idx: 0, wiz_stream: "main", wiz_channel: 1,
 };
@@ -38,6 +39,8 @@ export default function Cameras() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [brands, setBrands] = useState([]);
   const [profiles, setProfiles] = useState([]); // profils ONVIF découverts
+  const [pools, setPools] = useState([]);
+  useEffect(() => { api.get("/storage/overview").then((r) => setPools(r.data.pools || [])).catch(() => {}); }, [open]);
 
   const load = () => {
     const q = filterSite ? `?site_id=${filterSite}` : "";
@@ -63,8 +66,17 @@ export default function Cameras() {
       profile_token: c.profile_token || "", profile_name: c.profile_name || "",
       resolution: c.resolution || "", fps: c.fps || null, bitrate: c.bitrate || null,
       ptz_enabled: !!c.ptz_enabled, record_enabled: c.record_enabled !== false, detect_enabled: !!c.detect_enabled,
+      record_mode: c.record_mode || "continuous",
+      storage_pool_id: c.storage_pool_id || "",
+      storage_max_size_gb: c.storage_max_size_gb || 0,
     });
     setConnCheck(null); setProfiles([]); setOpen(true);
+    // Charge assignation de stockage existante
+    api.get(`/storage/cameras/${c.id}/assignment`).then((r) => {
+      setForm((f) => ({ ...f, record_mode: r.data.record_mode || "continuous",
+                        storage_pool_id: r.data.storage_pool_id || "",
+                        storage_max_size_gb: r.data.max_size_gb || 0 }));
+    }).catch(() => {});
   };
 
   const runConnectivity = async () => {
@@ -147,15 +159,26 @@ export default function Cameras() {
         toast.error(check?.message || "Connectivité invalide — caméra non sauvegardée");
         setSaving(false); return;
       }
-      const { wiz_brand, wiz_model_idx, wiz_stream, wiz_channel, ...payload } = form;
+      const { wiz_brand, wiz_model_idx, wiz_stream, wiz_channel, record_mode, storage_pool_id, storage_max_size_gb, ...payload } = form;
       if (form.mode === "onvif") payload.rtsp_url = ""; // backend re-découvre via profile_token
+      let camId = editingId;
       if (editingId) {
         await api.put(`/cameras/${editingId}`, payload);
         toast.success("Caméra mise à jour (go2rtc rechargé)");
       } else {
-        await api.post("/cameras", payload);
+        const { data: created } = await api.post("/cameras", payload);
+        camId = created.id;
         toast.success("Caméra ajoutée (flux vérifié)");
       }
+      // Sauvegarde l'assignation stockage / mode enregistrement
+      try {
+        await api.put(`/storage/cameras/${camId}/assignment`, {
+          storage_pool_id: storage_pool_id || "",
+          max_size_gb: Number(storage_max_size_gb) || 0,
+          record_mode: record_mode || "continuous",
+          profile_token: form.profile_token || "",
+        });
+      } catch (e) { /* ignoré : la caméra a été créée */ }
       closeDialog(); load();
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec de la sauvegarde"); }
     finally { setSaving(false); }
@@ -348,9 +371,51 @@ export default function Cameras() {
             {/* Options avancées enregistrement / IA */}
             <div className="col-span-2 flex items-center gap-5 flex-wrap">
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.ptz_enabled} onChange={(e) => setForm({ ...form, ptz_enabled: e.target.checked })} /> PTZ</label>
-              <label className="flex items-center gap-2 text-sm" data-testid="record-toggle"><input type="checkbox" checked={form.record_enabled} onChange={(e) => setForm({ ...form, record_enabled: e.target.checked })} /> Enregistrement continu</label>
+              <label className="flex items-center gap-2 text-sm" data-testid="record-toggle"><input type="checkbox" checked={form.record_enabled} onChange={(e) => setForm({ ...form, record_enabled: e.target.checked })} /> Enregistrement activé</label>
               <label className="flex items-center gap-2 text-sm" data-testid="detect-toggle"><input type="checkbox" checked={form.detect_enabled} onChange={(e) => setForm({ ...form, detect_enabled: e.target.checked })} /> Détection IA (YOLO + LAPI)</label>
             </div>
+
+            {/* Config enregistrement avancée : mode + canal ONVIF + disque cible */}
+            {form.record_enabled && (
+              <div className="col-span-2 border border-border p-3 space-y-3 bg-secondary/30" data-testid="record-cfg">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Configuration d'enregistrement</div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Mode</label>
+                    <select value={form.record_mode} onChange={(e) => setForm({ ...form, record_mode: e.target.value })} className="inp" data-testid="record-mode">
+                      <option value="continuous">Continu (24/7)</option>
+                      <option value="motion">Sur mouvement</option>
+                      <option value="ai">Sur événement IA</option>
+                      <option value="off">Désactivé</option>
+                    </select>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">Mouvement/IA : les segments sans détection sont supprimés à l'indexation.</p>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Canal ONVIF (profil)</label>
+                    <select value={form.profile_token} onChange={(e) => setForm({ ...form, profile_token: e.target.value })} className="inp" disabled={profiles.length === 0} data-testid="record-profile">
+                      <option value="">— Défaut (Main stream) —</option>
+                      {profiles.map((p) => (
+                        <option key={p.token} value={p.token}>{p.name} {p.resolution ? `· ${p.resolution}` : ""}</option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">{profiles.length === 0 ? "Lancez le test ONVIF pour lister les canaux." : `${profiles.length} profil(s) découverts`}</p>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Disque cible</label>
+                    <select value={form.storage_pool_id} onChange={(e) => setForm({ ...form, storage_pool_id: e.target.value })} className="inp" data-testid="record-pool">
+                      <option value="">— Défaut ({pools.length} pool(s) déclaré(s)) —</option>
+                      {pools.filter((p) => p.enabled).map((p) => (
+                        <option key={p.id} value={p.id}>{p.name} — {p.usage?.free_gb ?? "?"} Go libres</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Quota max. (Go)</label>
+                    <input type="number" min="0" value={form.storage_max_size_gb} onChange={(e) => setForm({ ...form, storage_max_size_gb: e.target.value })} className="inp mono" placeholder="0 = illimité" data-testid="record-quota" />
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Test de connexion multi-étapes */}
             <div className="col-span-2 border border-border p-3 space-y-2" data-testid="conn-test-block">

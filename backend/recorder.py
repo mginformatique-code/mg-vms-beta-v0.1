@@ -25,6 +25,28 @@ RETENTION_DAYS = int(os.environ.get("RECORD_RETENTION_DAYS", "7"))
 MIN_FREE_GB = float(os.environ.get("RECORD_MIN_FREE_GB", "2"))
 
 _processes: dict[str, asyncio.subprocess.Process] = {}
+_pools_cache: dict = {}  # id -> {path, max_size_gb, enabled, ...}
+
+
+async def _load_pools() -> None:
+    """Charge la liste des pools de stockage depuis les settings."""
+    doc = await db.settings.find_one({"key": "storage_pools"}, {"_id": 0})
+    pools = list((doc or {}).get("value", []) or [])
+    _pools_cache.clear()
+    for p in pools:
+        _pools_cache[p["id"]] = p
+
+
+def _cam_target_dir(cam: dict) -> Path:
+    """Détermine le dossier cible : pool désigné par la caméra, sinon RECORDINGS_DIR."""
+    pool_id = cam.get("storage_pool_id") or ""
+    pool = _pools_cache.get(pool_id) if pool_id else None
+    if pool and pool.get("enabled") and Path(pool["path"]).exists():
+        d = Path(pool["path"]) / cam["id"]
+    else:
+        d = RECORDINGS_DIR / cam["id"]
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def _cam_dir(camera_id: str) -> Path:
@@ -33,8 +55,21 @@ def _cam_dir(camera_id: str) -> Path:
     return d
 
 
-async def _start_ffmpeg(camera_id: str) -> None:
-    out = _cam_dir(camera_id) / "%Y%m%d_%H%M%S.mp4"
+async def _cam_all_dirs(camera_id: str) -> list[Path]:
+    """Retourne tous les dossiers susceptibles de contenir des segments d'une caméra
+    (pool actif + fallback RECORDINGS_DIR)."""
+    dirs = [RECORDINGS_DIR / camera_id]
+    for p in _pools_cache.values():
+        candidate = Path(p["path"]) / camera_id
+        if candidate.exists():
+            dirs.append(candidate)
+    return dirs
+
+
+async def _start_ffmpeg(cam: dict) -> None:
+    camera_id = cam["id"]
+    out_dir = _cam_target_dir(cam)
+    out = out_dir / "%Y%m%d_%H%M%S.mp4"
     cmd = [
         "ffmpeg", "-nostdin", "-loglevel", "error",
         "-rtsp_transport", "tcp", "-i", f"{GO2RTC_RTSP}/cam_{camera_id}",
@@ -45,9 +80,9 @@ async def _start_ffmpeg(camera_id: str) -> None:
     ]
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        close_fds=True, start_new_session=True)  # ne pas hériter du socket uvicorn (passé en stdin par le reloader)
+        close_fds=True, start_new_session=True)
     _processes[camera_id] = proc
-    logger.info("Enregistrement démarré : caméra %s (pid %s)", camera_id, proc.pid)
+    logger.info("Enregistrement démarré : caméra %s (pid %s) → %s", camera_id, proc.pid, out_dir)
 
 
 def _probe_duration(path: Path) -> float:
@@ -78,13 +113,16 @@ async def _event_flags(camera_id: str, start_iso: str, end_iso: str) -> dict:
 
 
 async def _index_segments(cam: dict) -> None:
-    """Indexe en base les segments MP4 clos (fichiers réels sur disque)."""
-    cam_dir = _cam_dir(cam["id"])
-    files = sorted(cam_dir.glob("*.mp4"))
-    if not files:
+    """Indexe en base les segments MP4 clos (fichiers réels sur disque).
+    Cherche dans tous les répertoires connus pour cette caméra (pool actif + fallback)."""
+    all_files: list[Path] = []
+    for d in await _cam_all_dirs(cam["id"]):
+        all_files.extend(sorted(d.glob("*.mp4")))
+    if not all_files:
         return
-    newest = files[-1]
-    for f in files:
+    all_files.sort(key=lambda p: p.name)
+    newest = all_files[-1]
+    for f in all_files:
         if f == newest and _processes.get(cam["id"]) and _processes[cam["id"]].returncode is None:
             continue  # segment en cours d'écriture
         if await db.recordings.find_one({"file_path": str(f)}):
@@ -98,6 +136,16 @@ async def _index_segments(cam: dict) -> None:
             continue
         end = start + timedelta(seconds=duration)
         flags = await _event_flags(cam["id"], start.isoformat(), end.isoformat())
+        # Filtrage par mode d'enregistrement (motion/ai) : purge immédiate si aucun événement
+        mode = cam.get("record_mode", "continuous")
+        if mode == "motion" and not flags["has_event"]:
+            try: f.unlink(missing_ok=True)
+            except OSError: pass
+            continue
+        if mode == "ai" and flags["mode"] != "ai":
+            try: f.unlink(missing_ok=True)
+            except OSError: pass
+            continue
         size_mb = round(f.stat().st_size / 1e6, 1)
         await db.recordings.insert_one({
             "id": str(uuid.uuid4()),
@@ -109,6 +157,7 @@ async def _index_segments(cam: dict) -> None:
             "size_mb": size_mb,
             "file_path": str(f),
             "thumbnail": None,
+            "storage_pool_id": cam.get("storage_pool_id", ""),
             **flags,
         })
 
@@ -306,12 +355,15 @@ async def recorder_loop() -> None:
                 await asyncio.sleep(60)
                 continue
             cams = await db.cameras.find({"record_enabled": True}, {"_id": 0}).to_list(500)
+            # Filtre `record_mode = off` (l'utilisateur peut désactiver via mode sans toucher record_enabled)
+            cams = [c for c in cams if c.get("record_mode", "continuous") != "off"]
+            await _load_pools()  # rafraîchit les pools de stockage à chaque cycle
             active_ids = set()
             for cam in cams:
                 active_ids.add(cam["id"])
                 proc = _processes.get(cam["id"])
                 if proc is None or proc.returncode is not None:
-                    await _start_ffmpeg(cam["id"])
+                    await _start_ffmpeg(cam)
                 await _index_segments(cam)
             # stoppe les enregistreurs des caméras désactivées/supprimées
             for cam_id, proc in list(_processes.items()):

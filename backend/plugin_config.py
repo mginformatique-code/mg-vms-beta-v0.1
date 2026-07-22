@@ -1,0 +1,401 @@
+"""MG-VMS — Configuration RÉELLE des plugins (production).
+
+Endpoints CRUD et paramétrage pour chaque plugin :
+- ANPR : config globale (pays, taille plaque, cache) + config par caméra (ROI polygone, listes)
+- Tracking (ByteTrack) : thresholds + persistance des IDs
+- Face Recognition : base de visages + seuils
+- Parking : zones polygonales + capacité par zone
+- Access Control : contrôleurs (nom, IP, protocole)
+- Thermal / Radar / Drone : ajout manuel d'un capteur matériel
+
+Aucune donnée fictive : ce que l'admin saisit est le seul contenu réel.
+"""
+import uuid
+from datetime import datetime, timezone
+from typing import Optional, List
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from pydantic import BaseModel, Field
+
+from database import db
+from auth import get_current_user, require_role, log_audit
+
+plugin_config_router = APIRouter(prefix="/api/plugins", tags=["plugin-config"])
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ANPR — Configuration globale + par caméra (ROI polygone, listes)
+# ═══════════════════════════════════════════════════════════════════
+class AnprGlobalConfig(BaseModel):
+    country: str = "fr"  # fr, de, it, es, be, nl, uk, us, eu, other
+    min_plate_px: int = 24
+    max_plate_px: int = 400
+    ocr_confidence: float = 0.55
+    cache_seconds: int = 8
+    alert_on_blacklist: bool = True
+    alert_on_unknown: bool = False  # alerter si plaque inconnue (ni whitelist ni blacklist)
+
+
+class AnprCameraConfig(BaseModel):
+    enabled: bool = True
+    roi_polygon: List[List[float]] = Field(default_factory=list)  # points normalisés [[x, y], ...] 0-1
+    country_override: str = ""  # vide = utilise la config globale
+    whitelist_local: List[str] = Field(default_factory=list)  # plaques autorisées uniquement pour cette cam
+    blacklist_local: List[str] = Field(default_factory=list)
+    min_confidence: float = 0.5
+
+
+@plugin_config_router.get("/anpr/config")
+async def anpr_config_get(user: dict = Depends(get_current_user)):
+    doc = await db.settings.find_one({"key": "anpr_config"}, {"_id": 0})
+    val = (doc or {}).get("value", {}) or {}
+    return AnprGlobalConfig(**val).model_dump()
+
+
+@plugin_config_router.put("/anpr/config")
+async def anpr_config_put(data: AnprGlobalConfig, user: dict = Depends(require_role("admin"))):
+    await db.settings.update_one({"key": "anpr_config"},
+                                 {"$set": {"key": "anpr_config", "value": data.model_dump()}}, upsert=True)
+    await log_audit(user, "anpr_config_updated", details=str(data.country))
+    return data.model_dump()
+
+
+@plugin_config_router.get("/anpr/cameras/{camera_id}")
+async def anpr_camera_get(camera_id: str, user: dict = Depends(get_current_user)):
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "anpr_config": 1})
+    if not cam:
+        raise HTTPException(404, "Caméra introuvable")
+    val = cam.get("anpr_config") or {}
+    return AnprCameraConfig(**val).model_dump()
+
+
+@plugin_config_router.put("/anpr/cameras/{camera_id}")
+async def anpr_camera_put(camera_id: str, data: AnprCameraConfig,
+                          user: dict = Depends(require_role("technician"))):
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "name": 1})
+    if not cam:
+        raise HTTPException(404, "Caméra introuvable")
+    # Validation polygone : au moins 3 points ou vide
+    if data.roi_polygon and len(data.roi_polygon) < 3:
+        raise HTTPException(400, "Un polygone ROI doit contenir au moins 3 points ou être vide")
+    for pt in data.roi_polygon:
+        if len(pt) != 2 or not all(0 <= v <= 1 for v in pt):
+            raise HTTPException(400, "Les points du polygone doivent être normalisés entre 0 et 1")
+    # Normalise les plaques (uppercase, sans espaces)
+    data.whitelist_local = [p.upper().replace(" ", "") for p in data.whitelist_local if p.strip()]
+    data.blacklist_local = [p.upper().replace(" ", "") for p in data.blacklist_local if p.strip()]
+    await db.cameras.update_one({"id": camera_id},
+                                {"$set": {"anpr_config": data.model_dump()}})
+    await log_audit(user, "anpr_camera_config_updated", cam["name"],
+                    f"ROI={len(data.roi_polygon)} pts · WL={len(data.whitelist_local)} · BL={len(data.blacklist_local)}")
+    return data.model_dump()
+
+
+@plugin_config_router.get("/anpr/cameras")
+async def anpr_cameras_list(user: dict = Depends(get_current_user)):
+    """Liste des caméras avec état ANPR (pour la page plugin)."""
+    cams = await db.cameras.find({}, {"_id": 0, "id": 1, "name": 1, "site_name": 1,
+                                       "detect_enabled": 1, "anpr_config": 1, "status": 1}).to_list(500)
+    for c in cams:
+        cfg = c.get("anpr_config") or {}
+        c["anpr_enabled"] = bool(cfg.get("enabled", True)) and bool(c.get("detect_enabled"))
+        c["roi_points"] = len(cfg.get("roi_polygon", []) or [])
+        c["wl_count"] = len(cfg.get("whitelist_local", []) or [])
+        c["bl_count"] = len(cfg.get("blacklist_local", []) or [])
+        c.pop("anpr_config", None)
+    return cams
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Tracking (ByteTrack)
+# ═══════════════════════════════════════════════════════════════════
+class ByteTrackConfig(BaseModel):
+    enabled: bool = False
+    track_thresh: float = 0.5  # 0.1-0.9
+    match_thresh: float = 0.8  # 0.5-0.95
+    track_buffer: int = 30  # frames — durée max avant de perdre un ID (30 = ~15s à 2 FPS)
+    min_box_area: int = 100  # pixels²
+    id_persist_seconds: int = 60  # combien de temps garder un ID en mémoire après disparition
+
+
+@plugin_config_router.get("/tracking/config")
+async def tracking_config_get(user: dict = Depends(get_current_user)):
+    doc = await db.settings.find_one({"key": "bytetrack_config"}, {"_id": 0})
+    val = (doc or {}).get("value", {}) or {}
+    return ByteTrackConfig(**val).model_dump()
+
+
+@plugin_config_router.put("/tracking/config")
+async def tracking_config_put(data: ByteTrackConfig, user: dict = Depends(require_role("admin"))):
+    data.track_thresh = max(0.1, min(0.9, data.track_thresh))
+    data.match_thresh = max(0.5, min(0.95, data.match_thresh))
+    data.track_buffer = max(5, min(300, data.track_buffer))
+    data.id_persist_seconds = max(5, min(600, data.id_persist_seconds))
+    await db.settings.update_one({"key": "bytetrack_config"},
+                                 {"$set": {"key": "bytetrack_config", "value": data.model_dump()}}, upsert=True)
+    await log_audit(user, "bytetrack_config_updated",
+                    f"enabled={data.enabled} thresh={data.track_thresh}")
+    return data.model_dump()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Face Recognition
+# ═══════════════════════════════════════════════════════════════════
+class FaceRecoConfig(BaseModel):
+    enabled: bool = False
+    distance_threshold: float = 0.6  # plus bas = plus strict
+    model_name: str = "hog"  # hog (CPU) ou cnn (GPU requis)
+    alert_on_unknown: bool = False
+    alert_on_watchlist: bool = True
+
+
+class FaceEntry(BaseModel):
+    name: str
+    watchlist: bool = False
+    notes: str = ""
+
+
+@plugin_config_router.get("/face_recognition/config")
+async def face_config_get(user: dict = Depends(get_current_user)):
+    doc = await db.settings.find_one({"key": "face_recognition_config"}, {"_id": 0})
+    return FaceRecoConfig(**((doc or {}).get("value", {}) or {})).model_dump()
+
+
+@plugin_config_router.put("/face_recognition/config")
+async def face_config_put(data: FaceRecoConfig, user: dict = Depends(require_role("admin"))):
+    await db.settings.update_one({"key": "face_recognition_config"},
+                                 {"$set": {"key": "face_recognition_config", "value": data.model_dump()}}, upsert=True)
+    await log_audit(user, "face_config_updated", details=data.model_name)
+    return data.model_dump()
+
+
+@plugin_config_router.get("/face_recognition/faces")
+async def face_list(user: dict = Depends(get_current_user)):
+    return await db.faces.find({}, {"_id": 0, "encoding": 0}).sort("created_at", -1).to_list(1000)
+
+
+@plugin_config_router.post("/face_recognition/faces")
+async def face_add(entry: FaceEntry, user: dict = Depends(require_role("technician"))):
+    doc = {
+        "id": str(uuid.uuid4()), "name": entry.name.strip(), "watchlist": entry.watchlist,
+        "notes": entry.notes, "created_at": _now_iso(), "created_by": user.get("email"),
+        "encoding": None,  # renseigné à l'upload de photo (POST /faces/{id}/photo)
+    }
+    if not doc["name"]:
+        raise HTTPException(400, "Nom requis")
+    await db.faces.insert_one(dict(doc))
+    doc.pop("_id", None); doc.pop("encoding", None)
+    await log_audit(user, "face_added", doc["name"])
+    return doc
+
+
+@plugin_config_router.delete("/face_recognition/faces/{face_id}")
+async def face_delete(face_id: str, user: dict = Depends(require_role("technician"))):
+    f = await db.faces.find_one({"id": face_id}, {"_id": 0, "name": 1})
+    if not f:
+        raise HTTPException(404, "Visage introuvable")
+    await db.faces.delete_one({"id": face_id})
+    await log_audit(user, "face_removed", f["name"])
+    return {"ok": True}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Parking — zones polygonales
+# ═══════════════════════════════════════════════════════════════════
+class ParkingZone(BaseModel):
+    name: str
+    camera_id: str
+    site_id: str = ""
+    polygon: List[List[float]] = Field(default_factory=list)  # normalisé 0-1
+    capacity: int = 1
+    occupied: int = 0
+
+
+@plugin_config_router.get("/parking/zones")
+async def parking_list(user: dict = Depends(get_current_user)):
+    return await db.parking_zones.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+
+@plugin_config_router.post("/parking/zones")
+async def parking_create(zone: ParkingZone, user: dict = Depends(require_role("technician"))):
+    if not zone.name.strip():
+        raise HTTPException(400, "Nom requis")
+    cam = await db.cameras.find_one({"id": zone.camera_id}, {"_id": 0, "name": 1, "site_id": 1, "site_name": 1})
+    if not cam:
+        raise HTTPException(400, "Caméra invalide")
+    if len(zone.polygon) < 3:
+        raise HTTPException(400, "Zone : au moins 3 points requis")
+    doc = {
+        "id": str(uuid.uuid4()), "created_at": _now_iso(),
+        **zone.model_dump(),
+        "site_id": cam.get("site_id", ""), "site_name": cam.get("site_name", ""),
+        "camera_name": cam["name"], "occupied": 0,
+    }
+    await db.parking_zones.insert_one(dict(doc))
+    doc.pop("_id", None)
+    await log_audit(user, "parking_zone_created", zone.name)
+    return doc
+
+
+@plugin_config_router.put("/parking/zones/{zone_id}")
+async def parking_update(zone_id: str, zone: ParkingZone, user: dict = Depends(require_role("technician"))):
+    existing = await db.parking_zones.find_one({"id": zone_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Zone introuvable")
+    if len(zone.polygon) < 3:
+        raise HTTPException(400, "Zone : au moins 3 points requis")
+    await db.parking_zones.update_one({"id": zone_id},
+                                       {"$set": {k: v for k, v in zone.model_dump().items() if k != "occupied"}})
+    updated = await db.parking_zones.find_one({"id": zone_id}, {"_id": 0})
+    await log_audit(user, "parking_zone_updated", zone.name)
+    return updated
+
+
+@plugin_config_router.delete("/parking/zones/{zone_id}")
+async def parking_delete(zone_id: str, user: dict = Depends(require_role("technician"))):
+    z = await db.parking_zones.find_one({"id": zone_id}, {"_id": 0, "name": 1})
+    if not z:
+        raise HTTPException(404, "Zone introuvable")
+    await db.parking_zones.delete_one({"id": zone_id})
+    await log_audit(user, "parking_zone_removed", z["name"])
+    return {"ok": True}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Access Control — contrôleurs (barrières, portes, lecteurs)
+# ═══════════════════════════════════════════════════════════════════
+class AccessController(BaseModel):
+    name: str
+    kind: str = "gate"  # gate | door | barrier | reader
+    ip: str = ""
+    port: int = 80
+    protocol: str = "http"  # http | wiegand | osdp | mqtt
+    site_id: str = ""
+    linked_camera_id: str = ""
+    notes: str = ""
+
+
+@plugin_config_router.get("/access_control/controllers")
+async def ac_list(user: dict = Depends(get_current_user)):
+    return await db.access_controllers.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+
+@plugin_config_router.post("/access_control/controllers")
+async def ac_add(ctrl: AccessController, user: dict = Depends(require_role("technician"))):
+    if not ctrl.name.strip():
+        raise HTTPException(400, "Nom requis")
+    doc = {"id": str(uuid.uuid4()), "created_at": _now_iso(), "status": "unknown", **ctrl.model_dump()}
+    await db.access_controllers.insert_one(dict(doc))
+    doc.pop("_id", None)
+    await log_audit(user, "access_controller_added", ctrl.name)
+    return doc
+
+
+@plugin_config_router.put("/access_control/controllers/{ctrl_id}")
+async def ac_update(ctrl_id: str, ctrl: AccessController, user: dict = Depends(require_role("technician"))):
+    if not await db.access_controllers.find_one({"id": ctrl_id}, {"_id": 1}):
+        raise HTTPException(404, "Contrôleur introuvable")
+    await db.access_controllers.update_one({"id": ctrl_id}, {"$set": ctrl.model_dump()})
+    updated = await db.access_controllers.find_one({"id": ctrl_id}, {"_id": 0})
+    await log_audit(user, "access_controller_updated", ctrl.name)
+    return updated
+
+
+@plugin_config_router.delete("/access_control/controllers/{ctrl_id}")
+async def ac_delete(ctrl_id: str, user: dict = Depends(require_role("technician"))):
+    c = await db.access_controllers.find_one({"id": ctrl_id}, {"_id": 0, "name": 1})
+    if not c:
+        raise HTTPException(404, "Contrôleur introuvable")
+    await db.access_controllers.delete_one({"id": ctrl_id})
+    await log_audit(user, "access_controller_removed", c["name"])
+    return {"ok": True}
+
+
+@plugin_config_router.post("/access_control/controllers/{ctrl_id}/test")
+async def ac_test(ctrl_id: str, user: dict = Depends(require_role("technician"))):
+    """Test TCP réel du contrôleur (ping IP:port)."""
+    c = await db.access_controllers.find_one({"id": ctrl_id}, {"_id": 0})
+    if not c:
+        raise HTTPException(404, "Contrôleur introuvable")
+    import socket
+    try:
+        with socket.create_connection((c["ip"], int(c.get("port", 80))), timeout=3):
+            status = "online"
+    except (OSError, ValueError):
+        status = "offline"
+    await db.access_controllers.update_one({"id": ctrl_id},
+                                            {"$set": {"status": status, "last_check": _now_iso()}})
+    return {"ip": c["ip"], "port": c.get("port"), "status": status}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Capteurs matériels manuels (Thermal / Radar / Drone)
+# ═══════════════════════════════════════════════════════════════════
+class SensorInput(BaseModel):
+    name: str
+    kind: str  # forcé dans l'endpoint (thermal|radar|drone)
+    ip: str = ""
+    port: int = 0
+    protocol: str = "http"
+    site_id: str = ""
+    linked_camera_id: str = ""
+    notes: str = ""
+
+
+def _sensors_router(kind: str, coll_name: str):
+    """Génère les endpoints CRUD pour un type de capteur matériel."""
+    async def _list(user: dict = Depends(get_current_user)):
+        return await db[coll_name].find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+    async def _add(sensor: SensorInput, user: dict = Depends(require_role("technician"))):
+        if not sensor.name.strip():
+            raise HTTPException(400, "Nom requis")
+        doc = {"id": str(uuid.uuid4()), "created_at": _now_iso(), "status": "unknown",
+               **sensor.model_dump(), "kind": kind}
+        await db[coll_name].insert_one(dict(doc))
+        doc.pop("_id", None)
+        await log_audit(user, f"{kind}_sensor_added", sensor.name)
+        return doc
+
+    async def _remove(sensor_id: str, user: dict = Depends(require_role("technician"))):
+        s = await db[coll_name].find_one({"id": sensor_id}, {"_id": 0, "name": 1})
+        if not s:
+            raise HTTPException(404, "Capteur introuvable")
+        await db[coll_name].delete_one({"id": sensor_id})
+        await log_audit(user, f"{kind}_sensor_removed", s["name"])
+        return {"ok": True}
+
+    plugin_config_router.get(f"/{kind}/sensors")(_list)
+    plugin_config_router.post(f"/{kind}/sensors")(_add)
+    plugin_config_router.delete(f"/{kind}/sensors/{{sensor_id}}")(_remove)
+
+
+_sensors_router("thermal", "thermal_sensors")
+_sensors_router("radar", "radar_sensors")
+_sensors_router("drone", "drones")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Snapshot d'une caméra (utilisé pour dessiner ROI / polygones dans l'UI)
+# Route publique authentifiée qui délivre une image JPEG fraîche
+# ═══════════════════════════════════════════════════════════════════
+@plugin_config_router.get("/_helpers/camera-snapshot/{camera_id}")
+async def helper_snapshot(camera_id: str, user: dict = Depends(get_current_user)):
+    """Retourne une frame JPEG live (via go2rtc) pour servir de fond au polygon editor."""
+    import httpx
+    import os
+    from fastapi.responses import Response
+    go2rtc = os.environ.get("GO2RTC_URL", "http://localhost:1984")
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(f"{go2rtc}/api/frame.jpeg", params={"src": f"cam_{camera_id}"})
+            if r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff":
+                return Response(content=r.content, media_type="image/jpeg",
+                                headers={"Cache-Control": "no-store"})
+    except httpx.HTTPError:
+        pass
+    raise HTTPException(404, "Snapshot indisponible (caméra offline)")

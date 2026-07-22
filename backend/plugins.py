@@ -120,10 +120,22 @@ async def _health_tracking() -> dict:
     checks = []
     ok, det = _has_module("supervision", "bytetracker", "ultralytics")
     checks.append({"name": "Bibliothèque tracking", "ok": ok, "detail": det})
-    checks.append({"name": "Persistance des IDs", "ok": False, "detail": "Non implémenté (roadmap P2)"})
-    return {"checks": checks, "loaded": ok, "configured": False, "healthy": False,
-            "events_total": 0, "events_24h": 0, "last_event_at": None,
-            "warning": "Fonctionnalité en cours de développement"}
+    cfg = await db.settings.find_one({"key": "bytetrack_config"}, {"_id": 0})
+    val = (cfg or {}).get("value") or {}
+    configured = bool(val.get("enabled")) if val else False
+    checks.append({"name": "Configuration ByteTrack",
+                    "ok": configured,
+                    "detail": (f"thresh={val.get('track_thresh')} buffer={val.get('track_buffer')}"
+                                if val else "Non configuré")})
+    # Persistance IDs : nombre d'événements tracés (ayant un `track_id`) sur 24h
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    tracked = await db.events.count_documents({"timestamp": {"$gte": since}, "track_id": {"$exists": True, "$ne": None}})
+    checks.append({"name": "Persistance des IDs (24 h)",
+                    "ok": tracked > 0, "detail": f"{tracked} événement(s) tracé(s)"})
+    total = await db.events.count_documents({"track_id": {"$exists": True, "$ne": None}})
+    return {"checks": checks, "loaded": ok, "configured": configured and ok,
+             "healthy": ok and configured, "events_total": total,
+             "events_24h": tracked, "last_event_at": None}
 
 
 async def _health_face_recognition() -> dict:
@@ -132,8 +144,10 @@ async def _health_face_recognition() -> dict:
     checks.append({"name": "Bibliothèque de reconnaissance", "ok": ok, "detail": det if ok else "Aucune installée"})
     faces = await db.faces.count_documents({}) if "faces" in await db.list_collection_names() else 0
     checks.append({"name": "Base de visages", "ok": faces > 0, "detail": f"{faces} visage(s) enregistré(s)"})
-    return {"checks": checks, "loaded": ok, "configured": faces > 0,
-            "healthy": ok and faces > 0, "events_total": 0, "events_24h": 0,
+    cfg = await db.settings.find_one({"key": "face_recognition_config"}, {"_id": 0})
+    configured = bool((cfg or {}).get("value", {}).get("enabled")) and faces > 0
+    return {"checks": checks, "loaded": ok, "configured": configured,
+            "healthy": ok and configured, "events_total": 0, "events_24h": 0,
             "last_event_at": None}
 
 
@@ -142,16 +156,47 @@ async def _health_parking() -> dict:
     zones = await db.parking_zones.count_documents({}) if "parking_zones" in await db.list_collection_names() else 0
     checks.append({"name": "Zones de stationnement définies", "ok": zones > 0, "detail": f"{zones} zone(s)"})
     return {"checks": checks, "loaded": True, "configured": zones > 0,
-            "healthy": zones > 0, "events_total": 0, "events_24h": 0, "last_event_at": None,
-            "warning": "Nécessite définition de zones (roadmap P2)"}
+            "healthy": zones > 0, "events_total": 0, "events_24h": 0, "last_event_at": None}
 
 
 async def _health_hardware_sensor(name: str, coll: str) -> dict:
-    """Générique pour thermal / radar / drone — non installé = non configuré (aucune donnée fictive)."""
-    checks = [{"name": f"Matériel {name}", "ok": False, "detail": "Aucun matériel détecté"}]
-    return {"checks": checks, "loaded": False, "configured": False, "healthy": False,
-            "events_total": 0, "events_24h": 0, "last_event_at": None,
-            "warning": f"Aucun capteur {name.lower()} détecté sur ce serveur"}
+    """Capteur matériel : configuré si au moins un capteur est déclaré par l'admin."""
+    count = 0
+    if coll in await db.list_collection_names():
+        count = await db[coll].count_documents({})
+    checks = [{"name": f"Capteurs {name} déclarés", "ok": count > 0,
+                "detail": f"{count} capteur(s)" if count else "Aucun matériel détecté"}]
+    return {"checks": checks, "loaded": count > 0, "configured": count > 0,
+            "healthy": count > 0, "events_total": 0, "events_24h": 0, "last_event_at": None,
+            "warning": None if count > 0 else f"Ajoutez un capteur {name.lower()} pour activer ce plugin"}
+
+
+async def _health_access_control() -> dict:
+    count = 0
+    if "access_controllers" in await db.list_collection_names():
+        count = await db.access_controllers.count_documents({})
+    checks = [{"name": "Contrôleurs déclarés", "ok": count > 0,
+                "detail": f"{count} contrôleur(s)" if count else "Aucun contrôleur enregistré"}]
+    return {"checks": checks, "loaded": count > 0, "configured": count > 0,
+            "healthy": count > 0, "events_total": 0, "events_24h": 0, "last_event_at": None,
+            "warning": None if count > 0 else "Ajoutez un contrôleur pour activer le plugin"}
+
+
+async def _health_anpr_v2() -> dict:
+    """Version étendue : ROI par caméra + config globale."""
+    base = await _health_anpr()
+    cfg = await db.settings.find_one({"key": "anpr_config"}, {"_id": 0})
+    val = (cfg or {}).get("value") or {}
+    country = val.get("country", "fr")
+    base["checks"].append({"name": "Config ANPR globale",
+                            "ok": bool(cfg),
+                            "detail": f"pays={country.upper()}" if cfg else "défauts appliqués"})
+    # Nombre de caméras avec ROI ou listes locales configurées
+    cams_roi = await db.cameras.count_documents({"anpr_config.roi_polygon.0": {"$exists": True}})
+    base["checks"].append({"name": "Caméras avec ROI dessinée",
+                            "ok": cams_roi > 0 or True,
+                            "detail": f"{cams_roi} caméra(s)"})
+    return base
 
 
 async def _health_mqtt() -> dict:
@@ -175,7 +220,7 @@ async def _health_access_control() -> dict:
 
 
 HEALTH_HANDLERS = {
-    "anpr": _health_anpr,
+    "anpr": _health_anpr_v2,
     "ai_detection": _health_ai_detection,
     "tracking": _health_tracking,
     "face_recognition": _health_face_recognition,

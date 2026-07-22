@@ -46,7 +46,40 @@ async def load_runtime_config():
     doc = await db.settings.find_one({"key": "ai_config"}, {"_id": 0})
     if doc and isinstance(doc.get("value"), dict):
         _runtime_config.update(doc["value"])
-    logger.info("Config IA runtime chargée : %s", _runtime_config or "(défauts env)")
+    # Config ByteTrack (P0 finalisation)
+    bt = await db.settings.find_one({"key": "bytetrack_config"}, {"_id": 0})
+    if bt and isinstance(bt.get("value"), dict):
+        _bytetrack_cfg.update(bt["value"])
+    logger.info("Config IA runtime chargée : %s (bytetrack=%s)",
+                _runtime_config or "(défauts env)", _bytetrack_cfg.get("enabled", False))
+
+
+async def refresh_per_camera_configs():
+    """Recharge les configs ANPR par caméra depuis la base (rafraîchi à chaque cycle IA)."""
+    cams = await db.cameras.find({"detect_enabled": True},
+                                  {"_id": 0, "id": 1, "anpr_config": 1}).to_list(500)
+    _camera_anpr_cfg.clear()
+    for c in cams:
+        cfg = c.get("anpr_config") or {}
+        if cfg:
+            _camera_anpr_cfg[c["id"]] = cfg
+
+
+def _point_in_polygon(x_norm: float, y_norm: float, poly: list) -> bool:
+    """Test point-in-polygon (algo ray casting) sur coordonnées normalisées 0-1."""
+    if not poly or len(poly) < 3:
+        return True  # pas de ROI → accepte partout
+    n = len(poly)
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = poly[i][0], poly[i][1]
+        xj, yj = poly[j][0], poly[j][1]
+        if ((yi > y_norm) != (yj > y_norm)) and \
+           (x_norm < (xj - xi) * (y_norm - yi) / ((yj - yi) or 1e-9) + xi):
+            inside = not inside
+        j = i
+    return inside
 
 
 async def update_runtime_config(patch: dict) -> dict:
@@ -82,6 +115,12 @@ _prev_gray: dict[str, "object"] = {}
 # Cache LAPI : {(camera_id, plate) -> expiry_datetime}
 _plate_cache: dict[tuple[str, str], datetime] = {}
 _last_debug: dict[str, dict] = {}  # per-camera debug snapshot (mode #4)
+
+# ByteTrack (P0 finalisation) : un tracker par caméra
+_trackers: dict[str, "object"] = {}
+_bytetrack_cfg: dict = {}
+# Config ANPR par caméra (chargée à chaud)
+_camera_anpr_cfg: dict[str, dict] = {}
 
 
 def _detected_device() -> str:
@@ -225,6 +264,8 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
     plates = []
     t_alpr = 0.0
     plate_debug = []
+    anpr_cfg = _camera_anpr_cfg.get(camera_id, {}) or {}
+    roi = anpr_cfg.get("roi_polygon") or []
     if vehicles and _alpr:
         now = datetime.now(timezone.utc)
         # Purge cache expiré
@@ -233,6 +274,8 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
                 _plate_cache.pop(k, None)
         cache_ttl = int(_cfg("plate_cache_seconds", AI_PLATE_CACHE_SECONDS))
         min_side = int(_cfg("min_plate_px", AI_MIN_PLATE_PX))
+        # Confiance minimum spécifique à cette caméra
+        min_conf = float(anpr_cfg.get("min_confidence", 0.0) or 0.0)
         t3 = time.monotonic()
         try:
             for r in _alpr.predict(img):
@@ -243,6 +286,17 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
                 if pw < min_side or ph < min_side:
                     plate_debug.append({"plate": r.ocr.text.upper(), "skipped": "trop petit",
                                          "size": f"{pw}x{ph}"})
+                    continue
+                # ROI polygonale (test sur le centre de la plaque en coords normalisées)
+                cx_norm = ((bb.x1 + bb.x2) / 2) / w
+                cy_norm = ((bb.y1 + bb.y2) / 2) / h
+                if roi and not _point_in_polygon(cx_norm, cy_norm, roi):
+                    plate_debug.append({"plate": r.ocr.text.upper(), "skipped": "hors ROI",
+                                         "size": f"{pw}x{ph}"})
+                    continue
+                if float(r.ocr.confidence) < min_conf:
+                    plate_debug.append({"plate": r.ocr.text.upper(), "skipped": "conf<seuil",
+                                         "size": f"{pw}x{ph}", "conf": round(float(r.ocr.confidence), 2)})
                     continue
                 plate_text = r.ocr.text.upper().strip()
                 if not plate_text:
@@ -304,6 +358,46 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
     counts: dict = {}
     for d in detections:
         counts[d["label"]] = counts.get(d["label"], 0) + 1
+
+    # ---------- ÉTAPE 3 : ByteTrack (tracking persistant si activé) ----------
+    tracks_map: dict = {}
+    if _bytetrack_cfg.get("enabled") and detections:
+        try:
+            import supervision as sv
+            import numpy as np
+            tracker = _trackers.get(camera_id)
+            if tracker is None:
+                tracker = sv.ByteTrack(
+                    track_activation_threshold=float(_bytetrack_cfg.get("track_thresh", 0.5)),
+                    lost_track_buffer=int(_bytetrack_cfg.get("track_buffer", 30)),
+                    minimum_matching_threshold=float(_bytetrack_cfg.get("match_thresh", 0.8)),
+                )
+                _trackers[camera_id] = tracker
+            # Construit Detections à partir des bboxes YOLO
+            xyxy = np.array([d["_bbox"] for d in detections], dtype=float)
+            confs = np.array([d["confidence"] for d in detections], dtype=float)
+            class_ids = np.array([hash(d["class"]) % 1000 for d in detections], dtype=int)
+            sv_dets = sv.Detections(xyxy=xyxy, confidence=confs, class_id=class_ids)
+            tracked = tracker.update_with_detections(sv_dets)
+            for i, tid in enumerate(tracked.tracker_id or []):
+                if tid is None:
+                    continue
+                bbox = tuple(int(v) for v in tracked.xyxy[i])
+                tracks_map[bbox] = int(tid)
+            # Attache track_id à chaque détection matchée (par bbox proche)
+            for d in detections:
+                bx = tuple(d["_bbox"])
+                d["track_id"] = tracks_map.get(bx)
+            # Overlay boxes: append track_id label
+            for i, ob in enumerate(overlay_boxes if False else []):
+                pass  # fait plus bas via reconstruction
+        except Exception:
+            logger.exception("ByteTrack : erreur (désactivation temporaire)")
+    # Attache track_id sur overlay_boxes également
+    for i, d in enumerate(detections):
+        if i < len(overlay_boxes):
+            overlay_boxes[i]["track_id"] = d.get("track_id")
+
     return {"detections": detections, "plates": plates, "motion_pct": motion_pct,
             "frame_thumb": _jpeg_data_uri(img), "timings": timings,
             "overlay_boxes": overlay_boxes, "counts": counts}
@@ -600,12 +694,16 @@ async def _process_camera(cam: dict) -> None:
             "id": str(uuid.uuid4()), "type": det["label"], **base,
             "confidence": det["confidence"], "thumbnail": det["thumbnail"],
             "vehicle_color": det.get("vehicle_color"),
+            "track_id": det.get("track_id"),
         })
 
     # Scénarios d'alertes IA (accident, rôdeur, intrusion nocturne, vive allure...)
     await _evaluate_scenarios(cam, result, now)
 
     # Plaques LAPI
+    anpr_cfg_cam = _camera_anpr_cfg.get(cam["id"], {}) or {}
+    wl_local = set(anpr_cfg_cam.get("whitelist_local", []) or [])
+    bl_local = set(anpr_cfg_cam.get("blacklist_local", []) or [])
     for p in result["plates"]:
         recent = await db.plates.find_one({
             "plate": p["plate"], "camera_id": cam["id"],
@@ -613,14 +711,22 @@ async def _process_camera(cam: dict) -> None:
         })
         if recent:
             continue
-        wl = await db.watchlist.find_one({"plate": p["plate"]}, {"_id": 0})
-        list_status = wl["list_type"] if wl else "none"
+        # Priorité liste locale caméra > liste globale watchlist
+        if p["plate"] in bl_local:
+            list_status = "black"; wl = {"reason": "Liste noire locale caméra"}
+        elif p["plate"] in wl_local:
+            list_status = "white"; wl = None
+        else:
+            wl = await db.watchlist.find_one({"plate": p["plate"]}, {"_id": 0})
+            list_status = wl["list_type"] if wl else "none"
         doc = {
             "id": str(uuid.uuid4()), "plate": p["plate"], **base,
             "confidence": p["confidence"],
             "vehicle_color": p.get("vehicle_color"), "vehicle_make": None, "vehicle_model": None,
             "vehicle_type": p.get("vehicle_type"),
-            "country": None, "direction": None,
+            "country": (anpr_cfg_cam.get("country_override")
+                         or (await _get_global_anpr_country())),
+            "direction": None,
             "lat": cam.get("lat"), "lng": cam.get("lng"),
             "list_status": list_status,
             "vehicle_crop": p.get("vehicle_crop"), "plate_crop": p.get("plate_crop"),
@@ -628,7 +734,12 @@ async def _process_camera(cam: dict) -> None:
         await db.plates.insert_one(dict(doc))
         doc.pop("_id", None)
         if list_status == "black":
-            await _raise_blacklist_alert(cam, doc, wl.get("reason", ""))
+            await _raise_blacklist_alert(cam, doc, (wl or {}).get("reason", ""))
+
+
+async def _get_global_anpr_country() -> str | None:
+    doc = await db.settings.find_one({"key": "anpr_config"}, {"_id": 0})
+    return ((doc or {}).get("value", {}) or {}).get("country")
 
 
 async def ai_loop() -> None:
@@ -645,6 +756,8 @@ async def ai_loop() -> None:
                 _detected_device(), _cfg("interval_seconds", AI_INTERVAL))
     while True:
         try:
+            await refresh_per_camera_configs()
+            await load_runtime_config()  # rafraîchit bytetrack + IA globale
             cams = await db.cameras.find({"detect_enabled": True, "status": "online"}, {"_id": 0}).to_list(200)
             if cams:
                 logger.info("IA · cycle : %d caméra(s) réelle(s) en parallèle %s",
