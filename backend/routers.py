@@ -537,7 +537,42 @@ async def ai_debug(camera_id: str, user: dict = Depends(require_role("technician
     return {"available": True, "camera_id": camera_id, **snap}
 
 
-# ============ MQTT PLUGIN CONFIG ============
+# ============ RECORDING RETENTION (P2.a) ============
+class RetentionInput(BaseModel):
+    retention_days: int = 7
+    min_free_gb: float = 5.0
+    max_disk_pct: float = 85.0
+
+
+@api_router.get("/settings/retention")
+async def retention_get(user: dict = Depends(require_role("admin"))):
+    from recorder import get_retention_status
+    return await get_retention_status()
+
+
+@api_router.put("/settings/retention")
+async def retention_put(data: RetentionInput, user: dict = Depends(require_role("admin"))):
+    data.retention_days = max(1, min(365, data.retention_days))
+    data.min_free_gb = max(0.5, min(10000, float(data.min_free_gb)))
+    data.max_disk_pct = max(10.0, min(99.0, float(data.max_disk_pct)))
+    await db.settings.update_one({"key": "retention"},
+                                 {"$set": {"key": "retention", "value": data.model_dump()}}, upsert=True)
+    await log_audit(user, "retention_config_updated",
+                    f"days={data.retention_days} free={data.min_free_gb}Go pct={data.max_disk_pct}%")
+    from recorder import get_retention_status
+    return await get_retention_status()
+
+
+@api_router.post("/settings/retention/run")
+async def retention_run(user: dict = Depends(require_role("admin"))):
+    from recorder import _apply_retention
+    report = await _apply_retention()
+    await log_audit(user, "retention_purge_manual",
+                    f"deleted_age={report['deleted_by_age']} deleted_quota={report['deleted_by_quota']} freed={report['freed_gb']}Go")
+    return report
+
+
+
 class MqttConfig(BaseModel):
     host: str = ""
     port: int = 1883

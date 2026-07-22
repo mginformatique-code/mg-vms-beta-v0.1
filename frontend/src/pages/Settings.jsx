@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
-import { Moon, Sun, Languages, ShieldCheck, Monitor, Loader2 } from "lucide-react";
+import { Moon, Sun, Languages, ShieldCheck, Monitor, Loader2, HardDrive, Save, Trash2, PlayCircle } from "lucide-react";
 import { toast } from "sonner";
 
 export default function SettingsPage() {
@@ -20,12 +20,14 @@ export default function SettingsPage() {
   };
   const disable2fa = async () => { await api.post("/auth/2fa/disable"); toast.success("2FA désactivée"); setUser({ ...user, twofa_enabled: false }); };
 
+  // eslint-disable-next-line react/no-unstable-nested-components
   const Card = ({ title, icon: Icon, children }) => (
     <div className="bg-card border border-border p-5 mb-3">
       <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-4"><Icon size={15} /> {title}</div>
       {children}
     </div>
   );
+  // eslint-disable-next-line react/no-unstable-nested-components
   const Opt = ({ active, onClick, icon: Icon, label, tid }) => (
     <button onClick={onClick} data-testid={tid} className={`flex items-center gap-2 px-4 py-2.5 border text-sm transition-colors ${active ? "border-[#0044FF] bg-[#0044FF]/10 text-[#0044FF]" : "border-border hover:bg-secondary"}`}>
       <Icon size={16} /> {label}
@@ -33,7 +35,7 @@ export default function SettingsPage() {
   );
 
   return (
-    <div className="p-4 max-w-2xl">
+    <div className="p-4 max-w-3xl">
       <h1 className="font-head font-bold text-2xl tracking-tight mb-4">{t("settings.title")}</h1>
 
       <Card title={t("settings.appearance")} icon={Monitor}>
@@ -78,6 +80,116 @@ export default function SettingsPage() {
           <span className="text-muted-foreground">{t("common.role")}</span><span className="uppercase text-[#0044FF]">{user?.role}</span>
         </div>
       </Card>
+
+      {user?.role === "admin" && <RetentionCard />}
+    </div>
+  );
+}
+
+const RetentionCard2 = ({ title, icon: Icon, children }) => (
+  <div className="bg-card border border-border p-5 mb-3">
+    <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-4"><Icon size={15} /> {title}</div>
+    {children}
+  </div>
+);
+
+function RetentionCard() {
+  const [state, setState] = useState(null);
+  const [form, setForm] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [purging, setPurging] = useState(false);
+
+  const load = async () => {
+    try { const { data } = await api.get("/settings/retention"); setState(data); setForm({ ...data.config }); }
+    catch (e) { /* ignore */ }
+  };
+  useEffect(() => { load(); const iv = setInterval(load, 30000); return () => clearInterval(iv); }, []);
+
+  if (!state || !form) return null;
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const { data } = await api.put("/settings/retention", {
+        retention_days: Number(form.retention_days),
+        min_free_gb: Number(form.min_free_gb),
+        max_disk_pct: Number(form.max_disk_pct),
+      });
+      setState(data); toast.success("Rétention mise à jour"); load();
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+    finally { setSaving(false); }
+  };
+
+  const purgeNow = async () => {
+    if (!window.confirm("Lancer la purge maintenant ? Les enregistrements dépassant les seuils seront supprimés.")) return;
+    setPurging(true);
+    try {
+      const { data } = await api.post("/settings/retention/run");
+      toast.success(`Purge terminée : ${data.deleted_by_age} par âge + ${data.deleted_by_quota} par quota, ${data.freed_gb} Go libérés`);
+      load();
+    } catch (e) { toast.error("Purge échouée"); }
+    finally { setPurging(false); }
+  };
+
+  const usedPct = state.disk.used_pct;
+  const usedColor = usedPct > form.max_disk_pct ? "#FF3333" : usedPct > form.max_disk_pct - 10 ? "#FFB800" : "#00E676";
+
+  return (
+    <RetentionCard2 title="Rétention & stockage vidéo" icon={HardDrive}>
+      {/* Statut disque + volume enregistrements */}
+      <div className="grid grid-cols-4 gap-3 mb-4">
+        <StatBox label="Disque total" value={`${state.disk.total_gb} Go`} />
+        <StatBox label="Utilisé" value={`${state.disk.used_gb} Go`} color={usedColor} />
+        <StatBox label="Libre" value={`${state.disk.free_gb} Go`} color={state.disk.free_gb < form.min_free_gb ? "#FF3333" : undefined} />
+        <StatBox label="Occupation" value={`${usedPct}%`} color={usedColor} />
+      </div>
+      <div className="h-2 bg-secondary mb-4 relative overflow-hidden">
+        <div className="h-full transition-all" style={{ width: `${Math.min(100, usedPct)}%`, backgroundColor: usedColor }} data-testid="disk-bar" />
+        <div className="absolute top-0 h-full w-px bg-white/40" style={{ left: `${form.max_disk_pct}%` }} title={`Seuil ${form.max_disk_pct}%`} />
+      </div>
+
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <StatBox label="Enregistrements" value={state.recordings.count} small />
+        <StatBox label="Volume total" value={`${state.recordings.size_gb} Go`} small />
+        <StatBox label="Plus ancien" value={state.recordings.oldest ? new Date(state.recordings.oldest).toLocaleDateString("fr-FR") : "—"} small />
+      </div>
+
+      {/* Édition des seuils */}
+      <div className="grid grid-cols-3 gap-3">
+        <div>
+          <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Conservation (jours)</label>
+          <input type="number" min="1" max="365" value={form.retention_days} onChange={(e) => setForm({ ...form, retention_days: e.target.value })} data-testid="retention-days" className="w-full px-3 py-2 bg-background border border-input outline-none mono focus:border-[#0044FF]" />
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Espace libre min. (Go)</label>
+          <input type="number" min="0.5" step="0.5" value={form.min_free_gb} onChange={(e) => setForm({ ...form, min_free_gb: e.target.value })} data-testid="retention-free" className="w-full px-3 py-2 bg-background border border-input outline-none mono focus:border-[#0044FF]" />
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Occupation max. (%)</label>
+          <input type="number" min="10" max="99" value={form.max_disk_pct} onChange={(e) => setForm({ ...form, max_disk_pct: e.target.value })} data-testid="retention-pct" className="w-full px-3 py-2 bg-background border border-input outline-none mono focus:border-[#0044FF]" />
+        </div>
+      </div>
+      <p className="text-[11px] text-muted-foreground mt-2 leading-relaxed">
+        Les vidéos plus anciennes que <b>{form.retention_days} jours</b> sont supprimées automatiquement. Si l&apos;espace libre passe sous <b>{form.min_free_gb} Go</b> <i>ou</i> si l&apos;occupation dépasse <b>{form.max_disk_pct}%</b>, les <b>plus anciens segments</b> sont supprimés en priorité.
+      </p>
+
+      <div className="mt-4 flex gap-2">
+        <button onClick={save} disabled={saving} data-testid="retention-save" className="flex items-center gap-2 px-4 py-2 bg-[#0044FF] text-white text-sm">
+          {saving && <Loader2 size={14} className="animate-spin" />}<Save size={14} /> Enregistrer les seuils
+        </button>
+        <button onClick={purgeNow} disabled={purging} data-testid="retention-purge" className="flex items-center gap-2 px-4 py-2 border border-[#FF3333] text-[#FF3333] text-sm hover:bg-[#FF3333]/10">
+          {purging ? <Loader2 size={14} className="animate-spin" /> : <PlayCircle size={14} />} Purger maintenant
+        </button>
+      </div>
+    </RetentionCard2>
+  );
+}
+
+function StatBox({ label, value, color, small }) {
+  return (
+    <div className="border border-border p-2 text-center">
+      <div className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={small ? "mono text-xs mt-0.5" : "mono text-lg font-bold mt-0.5"} style={color ? { color } : undefined}>{value}</div>
     </div>
   );
 }

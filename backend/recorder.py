@@ -122,15 +122,110 @@ async def _refresh_recent_flags() -> None:
         await db.recordings.update_one({"id": rec["id"]}, {"$set": flags})
 
 
-async def _apply_retention() -> None:
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)).isoformat()
-    old = await db.recordings.find({"start": {"$lt": cutoff}, "file_path": {"$ne": None}}, {"_id": 0}).to_list(2000)
+async def _load_retention_config() -> dict:
+    """Charge la config rétention depuis la base (surchargée par settings.retention)."""
+    doc = await db.settings.find_one({"key": "retention"}, {"_id": 0})
+    val = (doc or {}).get("value") or {}
+    return {
+        "retention_days": int(val.get("retention_days", RETENTION_DAYS)),
+        "min_free_gb": float(val.get("min_free_gb", MIN_FREE_GB)),
+        "max_disk_pct": float(val.get("max_disk_pct", 85.0)),
+    }
+
+
+async def _apply_retention() -> dict:
+    """Purge : (1) par âge, puis (2) par quota disque en supprimant les plus anciens.
+    Retourne un rapport de purge."""
+    cfg = await _load_retention_config()
+    deleted_age = 0
+    freed_bytes_age = 0
+
+    # 1) Par âge
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=cfg["retention_days"])).isoformat()
+    old = await db.recordings.find(
+        {"start": {"$lt": cutoff}, "file_path": {"$ne": None}},
+        {"_id": 0, "id": 1, "file_path": 1, "size_bytes": 1},
+    ).to_list(5000)
     for rec in old:
         try:
-            Path(rec["file_path"]).unlink(missing_ok=True)
+            p = Path(rec["file_path"])
+            if p.exists():
+                freed_bytes_age += p.stat().st_size
+                p.unlink(missing_ok=True)
+                deleted_age += 1
         except OSError:
             pass
-    await db.recordings.delete_many({"start": {"$lt": cutoff}})
+    if old:
+        await db.recordings.delete_many({"id": {"$in": [r["id"] for r in old]}})
+
+    # 2) Par quota disque : tant que free < min_free OR usage > max_pct, supprimer les plus anciens
+    deleted_quota = 0
+    freed_bytes_quota = 0
+    while True:
+        du = shutil.disk_usage(RECORDINGS_DIR)
+        free_gb = du.free / 1e9
+        used_pct = 100.0 * du.used / du.total
+        if free_gb >= cfg["min_free_gb"] and used_pct <= cfg["max_disk_pct"]:
+            break
+        oldest = await db.recordings.find_one(
+            {"file_path": {"$ne": None}},
+            {"_id": 0, "id": 1, "file_path": 1},
+            sort=[("start", 1)],
+        )
+        if not oldest:
+            break  # rien à supprimer
+        try:
+            p = Path(oldest["file_path"])
+            if p.exists():
+                freed_bytes_quota += p.stat().st_size
+                p.unlink(missing_ok=True)
+        except OSError:
+            pass
+        await db.recordings.delete_one({"id": oldest["id"]})
+        deleted_quota += 1
+        if deleted_quota > 5000:
+            logger.warning("Purge quota interrompue à 5000 segments — reprise au prochain cycle")
+            break
+
+    report = {
+        "deleted_by_age": deleted_age,
+        "deleted_by_quota": deleted_quota,
+        "freed_gb": round((freed_bytes_age + freed_bytes_quota) / 1e9, 3),
+        "retention_days": cfg["retention_days"],
+        "min_free_gb": cfg["min_free_gb"],
+        "max_disk_pct": cfg["max_disk_pct"],
+    }
+    if deleted_age or deleted_quota:
+        logger.info("Rétention : %d supprimés par âge, %d par quota, %.2f Go libérés",
+                    deleted_age, deleted_quota, report["freed_gb"])
+    return report
+
+
+async def get_retention_status() -> dict:
+    """Snapshot de l'état de la rétention pour l'UI."""
+    cfg = await _load_retention_config()
+    du = shutil.disk_usage(RECORDINGS_DIR)
+    total = await db.recordings.count_documents({})
+    oldest = await db.recordings.find_one({}, {"_id": 0, "start": 1}, sort=[("start", 1)])
+    newest = await db.recordings.find_one({}, {"_id": 0, "start": 1}, sort=[("start", -1)])
+    # Somme des tailles des enregistrements
+    agg = await db.recordings.aggregate([{"$group": {"_id": None, "total_size": {"$sum": "$size_bytes"}}}]).to_list(1)
+    total_size = (agg[0]["total_size"] if agg else 0) or 0
+    return {
+        "config": cfg,
+        "disk": {
+            "total_gb": round(du.total / 1e9, 2),
+            "used_gb": round(du.used / 1e9, 2),
+            "free_gb": round(du.free / 1e9, 2),
+            "used_pct": round(100.0 * du.used / du.total, 1),
+        },
+        "recordings": {
+            "count": total,
+            "size_gb": round(total_size / 1e9, 3),
+            "oldest": oldest.get("start") if oldest else None,
+            "newest": newest.get("start") if newest else None,
+        },
+    }
 
 
 async def stop_all_recorders() -> None:
@@ -198,8 +293,9 @@ async def recorder_loop() -> None:
     tick = 0
     while True:
         try:
+            cfg = await _load_retention_config()
             free_gb = shutil.disk_usage(RECORDINGS_DIR).free / 1e9
-            if free_gb < MIN_FREE_GB:
+            if free_gb < cfg["min_free_gb"]:
                 if _processes:
                     logger.error("Espace disque insuffisant (%.1f Go libres) — enregistrement suspendu", free_gb)
                     for cam_id, proc in list(_processes.items()):

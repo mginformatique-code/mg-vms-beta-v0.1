@@ -1,6 +1,17 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **SPRINT P2.a — Rétention & stockage vidéo (2.7.0 — 2026-07-22)**
+  - **Backend** : `_apply_retention()` réécrit avec **2 passes** — (1) purge par âge (segments > N jours), puis (2) purge par quota disque (tant que `free_gb < min_free_gb` **OU** `used_pct > max_disk_pct`, supprimer le plus ancien segment). Rapport détaillé retourné : `{deleted_by_age, deleted_by_quota, freed_gb}`.
+  - Config runtime persistée dans `settings.retention` : `retention_days` (1-365) · `min_free_gb` (0.5-10000) · `max_disk_pct` (10-99). Chargée à chaque cycle du recorder — édition à chaud sans redémarrage.
+  - Nouveaux endpoints (admin) :
+    - `GET /api/settings/retention` → snapshot complet : config + `disk` (total_gb, used_gb, free_gb, used_pct) + `recordings` (count, size_gb, oldest, newest).
+    - `PUT /api/settings/retention` → mise à jour des seuils.
+    - `POST /api/settings/retention/run` → **purge manuelle immédiate**, retourne le rapport.
+  - **Frontend** : nouvelle section "Rétention & stockage vidéo" dans `/settings` (admin uniquement) — 4 cartes chiffrées (total/utilisé/libre/occupation avec code couleur), **barre de progression** disque avec marqueur du seuil `max_disk_pct`, 3 métriques enregistrements (nombre / volume / plus ancien), 3 champs seuils éditables, bouton **Enregistrer les seuils** + bouton **Purger maintenant** (rouge, avec confirmation).
+  - Auto-refresh 30 s de l'état pour visualiser en temps réel l'impact des purges.
+
+## Implemented (2026-07)
 - ✅ **SPRINT P0.4 — Pages dédiées par plugin (2.6.3 — 2026-07-22)**
   - **Backend** — `PLUGIN_CATALOG` déclare désormais un champ `route` par plugin. `seed_plugins` met à jour les manifestes (route/description/version) sans écraser `enabled`. Nouveau endpoint `GET/PUT /api/settings/mqtt` (broker host/port/user/pass/prefix/tls).
   - **Frontend** — nouvelle page générique `/plugins/:pluginId` (composant `PluginPage.jsx`) qui affiche pour chaque plugin :
