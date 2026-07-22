@@ -1,6 +1,22 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **BUG FIX FINAL — Suppression totale du fragment `#transport=…` dans les URLs RTSP (2.11.2 — 2026-07-22)**
+  - **Cause racine** : go2rtc échoue à décoder les flux RTSP lorsque l'URL contient `#transport=udp` (ou `#transport=tcp`). Symptômes constatés par l'utilisateur : "Aperçu indisponible", `frame.jpeg` KO, faux échec dans le workflow d'édition caméra. Validé manuellement par l'utilisateur : URL sans fragment → tout fonctionne (frame JPEG 35 KB, live OK, décodage OK).
+  - **Fix appliqué dans `_build_rtsp_url`** :
+    1. **Suppression totale de l'ajout automatique du fragment `#transport=…`** (auparavant systématique).
+    2. **Nettoyage historique** : si une URL entrée contient déjà `#transport=…` (données legacy stockées avant ce fix), le fragment est retiré à la génération.
+  - **Transport RTSP toujours honoré** :
+    - **ffprobe** : utilise l'option CLI `-rtsp_transport tcp|udp` dans `_ffprobe` (déjà en place).
+    - **go2rtc** : négociation automatique (TCP par défaut pour la plupart des caméras IP).
+  - **Validation manuelle** :
+    - `_build_rtsp_url({rtsp_transport:'udp'})` → `rtsp://user:pass@host/path` (pas de fragment) ✅
+    - `GET /api/stream/demo-cam-001/frame.jpeg` → JPEG **44 KB** (avant : décodage KO) ✅
+    - `POST /api/cameras/test-connectivity` avec transport='udp' → `rtsp_url_validated=true` ✅
+  - **Tests testing_agent iteration_25 : 18/18 backend pytest PASS. 0 issue. retest_needed=False.**
+
+
+## Implemented (2026-07)
 - ✅ **BUG FIX CRITIQUE — Fragment `#transport=tcp` stripé avant ffprobe + Logs traceurs (2.11.1 — 2026-07-22)**
   - **Cause racine** : `_build_rtsp_url` ajoute `#transport=tcp` à l'URL (nécessaire pour go2rtc). Cette URL passée telle quelle à ffprobe → ffprobe interprète `#transport=tcp` comme partie du path RTSP → **404 Stream Not Found** systématique sur toutes les caméras, y compris celles qui marchent parfaitement en manuel.
   - **Fix** : nouvelle fonction `_strip_go2rtc_fragments(url)` retire tout après le premier `#`. Appliquée dans `_ffprobe` juste avant l'exécution de la commande. Le fragment reste dans l'URL retournée à go2rtc (pour l'enregistrement du stream).
