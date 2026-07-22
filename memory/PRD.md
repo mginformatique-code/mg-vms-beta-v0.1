@@ -1,6 +1,33 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **BUG FIX CRITIQUE — Fragment `#transport=tcp` stripé avant ffprobe + Logs traceurs (2.11.1 — 2026-07-22)**
+  - **Cause racine** : `_build_rtsp_url` ajoute `#transport=tcp` à l'URL (nécessaire pour go2rtc). Cette URL passée telle quelle à ffprobe → ffprobe interprète `#transport=tcp` comme partie du path RTSP → **404 Stream Not Found** systématique sur toutes les caméras, y compris celles qui marchent parfaitement en manuel.
+  - **Fix** : nouvelle fonction `_strip_go2rtc_fragments(url)` retire tout après le premier `#`. Appliquée dans `_ffprobe` juste avant l'exécution de la commande. Le fragment reste dans l'URL retournée à go2rtc (pour l'enregistrement du stream).
+  - **Bug secondaire** : conflit `rtsp_url_used` passé en double kwarg dans `add(**rtsp_details, rtsp_url_used=...)` → crash. Filtré via `if k not in ("transport_used", "rtsp_url_used")`.
+  - **Logs traceurs** ajoutés dans toute la chaîne — visibles dans `/var/log/supervisor/backend.err.log` :
+    - `TEST_CONNECTIVITY start mode=... ip=... transport=... codec_pref=...`
+    - `TEST_CONNECTIVITY ping HOST:PORT → ok/error`
+    - `TRY_VARIANTS base=... pref=... transport=... → N variante(s) : [...]`
+    - `VARIANT_TEST transport=TCP url=<masked>`
+    - `FFPROBE URL=<masked> (transport=tcp)`
+    - `FFPROBE CMD=[ffprobe, -rtsp_transport, tcp, ..., <masked>]`
+    - `FFPROBE RC=0 stderr=...` (ou TIMEOUT/crash)
+    - `FFPROBE OK → {resolution, fps, codec, ...}`
+    - `VARIANT_TEST MATCH → <masked> (transport=tcp, codec=H264)`
+    - `TEST_CONNECTIVITY end mode=... success=... rtsp_validated=... attempts=N`
+  - **Passwords toujours masqués** dans logs et réponses HTTP (via `_mask_url_password`).
+  - Test manuel confirmé : `rtsp://127.0.0.1:8554/cam_demo-cam-001` en mode='rtsp' → **validated=true, codec=H264, resolution=1280x720**.
+
+- ✅ **NETTOYAGE ARCHITECTURE — Suppression code mort (2.11.1 — 2026-07-22)**
+  - **Supprimé `/app/deploy/`** (836 KB) : ancienne architecture microservices (ai-engine, api, frontend, network-monitor, notification, recording, ffmpeg, monitoring, k8s, backup — services séparés Docker) remplacée par l'architecture actuelle à 2 services (`/app/backend` + `/app/frontend`) déployée via `/app/deploy-app/docker-compose.yml`.
+  - **Supprimé 19 tests obsolètes** dans `/app/backend/tests/` (test_iter13-test_iter21, backend_test.py, test_real_system.py, test_hardware.py, test_network.py, test_notifications.py, test_permissions.py, test_reports_sprint.py, test_security_sprint.py, test_sprint2_realtime.py, test_sprint3_plugins_blacklist.py). **Conservés** : test_iter22_face_recognition.py + test_iter23_anpr_csv.py (reflètent le code actuel).
+  - **Vérifié** : tous les modules backend (network, notifications, reports, security, realtime, hardware) sont importés par server.py, routers.py, ai_engine.py, auth.py. Aucun module orphelin.
+  - **Architecture actuelle** (single source of truth) : 1 seul `streaming.py`, 1 seul `ai_engine.py`, 1 seul `recorder.py`, 1 seul `plugins.py`, 1 seul `plugin_config.py`, 1 seul `storage.py`, 1 seul `face_recognition_engine.py`. Aucune duplication.
+  - **Tests testing_agent iteration_24 : 18/18 backend pytest PASS. 0 issue. retest_needed=False.**
+
+
+## Implemented (2026-07)
 - ✅ **IMPORT/EXPORT CSV ANPR — Watchlist globale + listes locales par caméra (2.11.0 — 2026-07-22)**
   - **Backend `plugin_config.py`** — nouveaux endpoints :
     - `POST /api/plugins/anpr/watchlist/import` : multipart csv_file, parse tolérant (BOM UTF-8 Excel, latin-1 fallback), header optionnel `plate,list_type,reason` (ou `plate` seul + query `default_list_type`), UPSERT par plaque (insertion + update rétroactif de `list_status` sur `db.plates`), max 2 Mo, refuse si aucun enregistrement valide.
