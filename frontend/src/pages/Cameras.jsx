@@ -17,6 +17,7 @@ const EMPTY_FORM = {
   resolution: "", fps: null, bitrate: null,
   ptz_enabled: false, record_enabled: true, detect_enabled: false,
   record_mode: "continuous", storage_pool_id: "", storage_max_size_gb: 0,
+  rtsp_transport: "tcp", preferred_codec: "auto",
   // Assistant RTSP
   wiz_brand: "", wiz_model_idx: 0, wiz_stream: "main", wiz_channel: 1,
 };
@@ -32,6 +33,7 @@ export default function Cameras() {
   const [testing, setTesting] = useState(null);
   const [snap, setSnap] = useState(null);
   const [debugSnap, setDebugSnap] = useState(null);
+  const [diagState, setDiagState] = useState(null);
   const [discOpen, setDiscOpen] = useState(false);
   const [connCheck, setConnCheck] = useState(null);
   const [checking, setChecking] = useState(false);
@@ -69,6 +71,8 @@ export default function Cameras() {
       record_mode: c.record_mode || "continuous",
       storage_pool_id: c.storage_pool_id || "",
       storage_max_size_gb: c.storage_max_size_gb || 0,
+      rtsp_transport: c.rtsp_transport || "tcp",
+      preferred_codec: c.preferred_codec || "auto",
     });
     setConnCheck(null); setProfiles([]); setOpen(true);
     // Charge assignation de stockage existante
@@ -207,6 +211,14 @@ export default function Cameras() {
     } catch (e) { toast.error("Debug IA indisponible"); }
   };
 
+  const openDiagnostic = async (c) => {
+    setDiagState({ loading: true, cam: c });
+    try {
+      const { data } = await api.get(`/cameras/${c.id}/diagnostic`);
+      setDiagState({ loading: false, cam: c, ...data });
+    } catch (e) { toast.error("Diagnostic indisponible"); setDiagState(null); }
+  };
+
   const currentBrand = brands.find((b) => b.id === form.wiz_brand);
   const currentModel = currentBrand?.models?.[form.wiz_model_idx];
 
@@ -244,6 +256,7 @@ export default function Cameras() {
                 <td className="px-3 py-2 text-xs">{c.ptz_enabled ? "✓" : "—"}</td>
                 <td className="px-3 py-2"><div className="flex items-center justify-end gap-1">
                   <button onClick={() => test(c)} data-testid="test-camera-btn" title="Tester" className="p-1.5 hover:bg-secondary">{testing === c.id ? <Loader2 size={15} className="animate-spin" /> : <Activity size={15} />}</button>
+                  <button onClick={() => openDiagnostic(c)} data-testid="diagnostic-btn" title="Diagnostic complet" className="p-1.5 hover:bg-secondary text-[#00E676]"><Radar size={15} /></button>
                   <button onClick={() => snapshot(c)} data-testid="snapshot-btn" title="Snapshot" className="p-1.5 hover:bg-secondary"><CamIcon size={15} /></button>
                   {c.detect_enabled && <button onClick={() => openDebug(c)} data-testid="debug-ia-btn" title="Debug IA (dernier snapshot d'analyse)" className="p-1.5 hover:bg-secondary text-[#0044FF]"><BrainCircuit size={15} /></button>}
                   {can("technician") && <button onClick={() => openEdit(c)} data-testid="edit-camera-btn" title="Modifier" className="p-1.5 hover:bg-secondary"><Pencil size={15} /></button>}
@@ -375,10 +388,32 @@ export default function Cameras() {
               <label className="flex items-center gap-2 text-sm" data-testid="detect-toggle"><input type="checkbox" checked={form.detect_enabled} onChange={(e) => setForm({ ...form, detect_enabled: e.target.checked })} /> Détection IA (YOLO + LAPI)</label>
             </div>
 
+            {/* Transport RTSP + codec préféré */}
+            <div className="col-span-2 grid grid-cols-2 md:grid-cols-3 gap-3 border border-border p-3 bg-secondary/30">
+              <div className="md:col-span-3 text-[10px] uppercase tracking-wider text-muted-foreground">Transport & codec</div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Transport RTSP</label>
+                <select value={form.rtsp_transport} onChange={(e) => setForm({ ...form, rtsp_transport: e.target.value })} className="inp" data-testid="rtsp-transport">
+                  <option value="tcp">TCP (recommandé)</option>
+                  <option value="udp">UDP</option>
+                </select>
+                <p className="text-[10px] text-muted-foreground mt-0.5">TCP = plus stable, UDP = plus faible latence</p>
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Codec préféré</label>
+                <select value={form.preferred_codec} onChange={(e) => setForm({ ...form, preferred_codec: e.target.value })} className="inp" data-testid="preferred-codec">
+                  <option value="auto">Auto (recommandé)</option>
+                  <option value="h264">H.264 (compatibilité maximale)</option>
+                  <option value="h265">H.265 (HEVC — bande passante réduite)</option>
+                </select>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Live/IA préfèrent H.264, l&apos;enregistrement peut utiliser H.265</p>
+              </div>
+            </div>
+
             {/* Config enregistrement avancée : mode + canal ONVIF + disque cible */}
             {form.record_enabled && (
               <div className="col-span-2 border border-border p-3 space-y-3 bg-secondary/30" data-testid="record-cfg">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Configuration d'enregistrement</div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Configuration d&apos;enregistrement</div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Mode</label>
@@ -388,7 +423,7 @@ export default function Cameras() {
                       <option value="ai">Sur événement IA</option>
                       <option value="off">Désactivé</option>
                     </select>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">Mouvement/IA : les segments sans détection sont supprimés à l'indexation.</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">Mouvement/IA : les segments sans détection sont supprimés à l&apos;indexation.</p>
                   </div>
                   <div>
                     <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Canal ONVIF (profil)</label>
@@ -504,7 +539,67 @@ export default function Cameras() {
 
       <OnvifDiscovery open={discOpen} onClose={() => setDiscOpen(false)}
         onPick={(dev) => { setEditingId(null); setForm({ ...EMPTY_FORM, ip: dev.ip, onvif_port: dev.port || 80, mode: "onvif", protocol: "ONVIF" }); setDiscOpen(false); setOpen(true); }} />
+      {diagState && <DiagnosticDialog state={diagState} onClose={() => setDiagState(null)} onRefresh={() => openDiagnostic(diagState.cam)} />}
       <style>{`.inp{width:100%;padding:0.5rem 0.625rem;background:hsl(var(--card));border:1px solid hsl(var(--input));font-size:0.875rem;outline:none}.inp:focus{border-color:#0044FF}`}</style>
+    </div>
+  );
+}
+
+function DiagnosticDialog({ state, onClose, onRefresh }) {
+  const { cam, loading, camera, flux, ai, stats_24h, last_event, last_plate } = state;
+  const ok = (v) => v ? <CheckCircle2 size={13} className="text-[#00E676]" /> : <XCircle size={13} className="text-[#FF3333]" />;
+  return (
+    <Dialog open={true} onOpenChange={onClose}>
+      <DialogContent className="max-w-3xl" data-testid="diagnostic-dialog">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><Radar size={16} className="text-[#00E676]" /> Diagnostic — {cam?.name}</DialogTitle>
+        </DialogHeader>
+        {loading ? <div className="py-8 text-center text-muted-foreground"><Loader2 size={20} className="animate-spin inline mr-2" /> Chargement…</div> : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <section className="border border-border p-3">
+              <div className="font-head font-semibold mb-2">Flux vidéo</div>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">{ok(flux?.camera_online)} <span className="text-xs">Caméra {camera?.status?.toUpperCase()}</span></div>
+                <div className="flex items-center gap-2">{ok(flux?.go2rtc_registered)} <span className="text-xs">go2rtc — flux enregistré</span></div>
+                <div className="text-xs text-muted-foreground mono">Transport : <b>{(flux?.rtsp_transport_used || "tcp").toUpperCase()}</b> · Codec : <b>{(camera?.codec || "auto").toUpperCase()}</b></div>
+                <div className="text-xs text-muted-foreground mono">Résolution : {camera?.resolution || "—"}{camera?.fps ? ` @ ${camera.fps} FPS` : ""}</div>
+                <div className="text-xs text-muted-foreground mono">Codec préféré (config) : {(camera?.preferred_codec || "auto").toUpperCase()}</div>
+              </div>
+            </section>
+            <section className="border border-border p-3">
+              <div className="font-head font-semibold mb-2">Intelligence artificielle</div>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">{ok(ai?.detect_enabled)} <span className="text-xs">Détection IA {ai?.detect_enabled ? "active" : "désactivée"}</span></div>
+                <div className="text-xs text-muted-foreground mono">Dernière analyse : {ai?.last_analysis_at ? new Date(ai.last_analysis_at).toLocaleTimeString() : "—"}</div>
+                <div className="text-xs text-muted-foreground mono">YOLO : {ai?.last_yolo_ms ? `${ai.last_yolo_ms} ms` : "—"} · ALPR : {ai?.last_alpr_ms ? `${ai.last_alpr_ms} ms` : "—"}</div>
+                <div className="text-xs text-muted-foreground mono">Mouvement : {ai?.motion_pct != null ? `${ai.motion_pct.toFixed(1)} %` : "—"}</div>
+                <div className="text-xs text-muted-foreground mono">Détections dernière frame : <b className="text-foreground">{ai?.last_detections_count || 0}</b></div>
+              </div>
+            </section>
+            <section className="border border-border p-3 md:col-span-2">
+              <div className="font-head font-semibold mb-2">Activité (24 h)</div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center">
+                <StatBoxD label="Événements" value={stats_24h?.events || 0} />
+                <StatBoxD label="Plaques lues" value={stats_24h?.plates || 0} />
+                <StatBoxD label="Dernier événement" value={last_event ? new Date(last_event.timestamp).toLocaleTimeString() : "—"} small />
+                <StatBoxD label="Dernière plaque" value={last_plate?.plate || "—"} small />
+              </div>
+              <div className="mt-3 flex items-center gap-2 justify-end">
+                <button onClick={onRefresh} className="text-xs px-2.5 py-1.5 border border-border hover:bg-secondary flex items-center gap-1" data-testid="diagnostic-refresh"><Loader2 size={12} /> Actualiser</button>
+              </div>
+            </section>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function StatBoxD({ label, value, small }) {
+  return (
+    <div className="border border-border p-2">
+      <div className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={small ? "mono text-xs mt-0.5" : "mono text-lg font-bold mt-0.5"}>{value}</div>
     </div>
   );
 }

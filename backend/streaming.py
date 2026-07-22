@@ -50,7 +50,8 @@ def _stream_name(camera_id: str) -> str:
 
 def _build_rtsp_url(cam: dict) -> str:
     """Construit l'URL RTSP finale en injectant les identifiants **encodés**.
-    Encode automatiquement `# @ + : espace /` afin que les mots de passe complexes fonctionnent."""
+    Encode automatiquement `# @ + : espace /` afin que les mots de passe complexes fonctionnent.
+    Applique le transport RTSP (TCP/UDP) demandé via `#transport=tcp|udp` en query fragment go2rtc."""
     url = (cam.get("rtsp_url") or "").strip()
     if not url:
         return ""
@@ -61,6 +62,10 @@ def _build_rtsp_url(cam: dict) -> str:
         u_enc = urlquote(user, safe="")
         p_enc = urlquote(pwd, safe="")
         url = url.replace("rtsp://", f"rtsp://{u_enc}:{p_enc}@", 1)
+    # Transport RTSP explicite (TCP recommandé par défaut si non spécifié)
+    transport = (cam.get("rtsp_transport") or "tcp").lower()
+    if transport in ("tcp", "udp") and "#transport=" not in url:
+        url = f"{url}#transport={transport}"
     return url
 
 
@@ -274,6 +279,9 @@ async def probe_camera(cam: dict) -> dict:
         "resolution": (details or {}).get("resolution"),
         "fps": (details or {}).get("fps"),
         "codec": (details or {}).get("codec"),
+        "rtsp_transport": cam.get("rtsp_transport") or "tcp",
+        "preferred_codec": cam.get("preferred_codec") or "auto",
+        "go2rtc_stream_registered": await _stream_registered(name),
         "message": "Connexion établie (flux vérifié)" if success
                    else "Flux injoignable — vérifiez l'URL RTSP / identifiants / réseau",
     }
@@ -517,16 +525,27 @@ async def _authorize_camera(user: dict, camera_id: str) -> dict:
 
 
 def _quality_stream(user: dict, camera_id: str) -> str:
+    """Retourne le nom de flux go2rtc à utiliser.
+
+    Note : pour MJPEG (proxy live.mjpeg), le stream `_sd` est OBLIGATOIRE car il contient le
+    transcodage ffmpeg → MJPEG (`video=mjpeg`). go2rtc 1.9.8 ne convertit plus H.264 → MJPEG
+    automatiquement sur l'endpoint /api/stream.mjpeg pour les producteurs H.264 purs.
+    """
     name = _stream_name(camera_id)
     return name if has_permission(user, "stream_hd") else f"{name}_sd"
+
+
+def _mjpeg_stream(camera_id: str) -> str:
+    """Toujours la variante `_sd` (transcodée MJPEG) — sinon le navigateur reçoit 0 byte."""
+    return f"{_stream_name(camera_id)}_sd"
 
 
 # ============ Proxys de flux authentifiés ============
 @stream_router.get("/stream/{camera_id}/live.mjpeg")
 async def live_mjpeg(camera_id: str, request: Request, user: dict = Depends(stream_user)):
-    """Flux vidéo MJPEG temps réel (transcodé par go2rtc depuis le H.264 caméra)."""
+    """Flux vidéo MJPEG temps réel (transcodé par go2rtc via le stream `_sd`)."""
     await _authorize_camera(user, camera_id)
-    src = _quality_stream(user, camera_id)
+    src = _mjpeg_stream(camera_id)
     client = httpx.AsyncClient(timeout=httpx.Timeout(15, read=None))
     req = client.build_request("GET", f"{GO2RTC_URL}/api/stream.mjpeg", params={"src": src})
     upstream = await client.send(req, stream=True)
@@ -543,23 +562,30 @@ async def live_mjpeg(camera_id: str, request: Request, user: dict = Depends(stre
             await upstream.aclose()
             await client.aclose()
 
-    return StreamingResponse(relay(), media_type=upstream.headers.get("content-type", "multipart/x-mixed-replace"))
+    # IMPORTANT : le boundary retourné par go2rtc doit être transmis intact au navigateur
+    # (sinon Chrome/Firefox refusent d'afficher le MJPEG). On retransmet donc l'en-tête complet.
+    content_type = upstream.headers.get("content-type", "multipart/x-mixed-replace;boundary=frame")
+    return StreamingResponse(relay(), media_type=content_type,
+                              headers={"Cache-Control": "no-store, no-cache"})
 
 
 @stream_router.get("/stream/{camera_id}/frame.jpeg")
 async def frame_jpeg(camera_id: str, user: dict = Depends(stream_user)):
-    """Image instantanée réelle extraite du flux."""
+    """Image instantanée réelle extraite du flux (HD si autorisé, sinon SD)."""
     await _authorize_camera(user, camera_id)
-    src = _quality_stream(user, camera_id)
+    src_hd = _quality_stream(user, camera_id)
+    src_sd = _mjpeg_stream(camera_id)
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": src})
+            # Essaie HD si l'utilisateur a le droit ; fallback SD si HD ne répond pas
+            for src in [src_hd, src_sd] if src_hd != src_sd else [src_sd]:
+                r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": src})
+                if r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff":
+                    return Response(content=r.content, media_type="image/jpeg",
+                                     headers={"Cache-Control": "no-store"})
     except httpx.HTTPError:
         raise HTTPException(502, "Flux indisponible")
-    if r.status_code != 200:
-        raise HTTPException(502, "Flux indisponible")
-    return Response(content=r.content, media_type="image/jpeg",
-                    headers={"Cache-Control": "no-store"})
+    raise HTTPException(502, "Flux indisponible")
 
 
 # ============ Bibliothèque de fabricants — endpoints ============

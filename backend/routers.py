@@ -151,6 +151,9 @@ class CameraInput(BaseModel):
     ptz_enabled: bool = False
     record_enabled: bool = True
     detect_enabled: bool = False
+    # Transport RTSP + codec préféré (P0 finalisation)
+    rtsp_transport: str = "tcp"  # tcp | udp
+    preferred_codec: str = "auto"  # auto | h264 | h265
     lat: Optional[float] = None
     lng: Optional[float] = None
 
@@ -546,6 +549,67 @@ async def ai_debug(camera_id: str, user: dict = Depends(require_role("technician
     if not snap:
         return {"available": False, "message": "Aucune analyse récente pour cette caméra"}
     return {"available": True, "camera_id": camera_id, **snap}
+
+
+@api_router.get("/cameras/{camera_id}/diagnostic")
+async def camera_diagnostic(camera_id: str, user: dict = Depends(require_permission("view_live"))):
+    """Diagnostic complet caméra : flux + IA + dernières détections.
+    Utilisé par la page Diagnostic (bouton "Diagnostic" dans la fiche caméra)."""
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "password": 0})
+    if not cam:
+        raise HTTPException(404, "Caméra introuvable")
+    # Vérifie l'état go2rtc réel
+    from streaming import _stream_name, _stream_registered
+    name = _stream_name(camera_id)
+    go2rtc_ok = await _stream_registered(name)
+    # Dernier événement + dernière plaque + dernier objet
+    latest_event = await db.events.find_one({"camera_id": camera_id}, {"_id": 0},
+                                             sort=[("timestamp", -1)])
+    latest_plate = await db.plates.find_one({"camera_id": camera_id}, {"_id": 0},
+                                             sort=[("timestamp", -1)])
+    # Compteurs 24h
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    events_24h = await db.events.count_documents({"camera_id": camera_id, "timestamp": {"$gte": since}})
+    plates_24h = await db.plates.count_documents({"camera_id": camera_id, "timestamp": {"$gte": since}})
+    from ai_engine import get_debug_snapshot
+    ai_snap = get_debug_snapshot(camera_id) or {}
+    return {
+        "camera": {
+            "id": cam["id"], "name": cam["name"], "status": cam.get("status", "offline"),
+            "site_name": cam.get("site_name"),
+            "mode": cam.get("mode"), "manufacturer": cam.get("manufacturer"), "model": cam.get("model"),
+            "resolution": cam.get("resolution"), "fps": cam.get("fps"), "codec": cam.get("codec"),
+            "rtsp_transport": cam.get("rtsp_transport") or "tcp",
+            "preferred_codec": cam.get("preferred_codec") or "auto",
+            "profile_token": cam.get("profile_token"),
+            "record_enabled": cam.get("record_enabled", True),
+            "record_mode": cam.get("record_mode", "continuous"),
+            "detect_enabled": cam.get("detect_enabled", False),
+            "last_seen": cam.get("last_seen"),
+        },
+        "flux": {
+            "go2rtc_registered": go2rtc_ok,
+            "camera_online": cam.get("status") == "online",
+            "rtsp_transport_used": cam.get("rtsp_transport") or "tcp",
+            "stream_urls": {
+                "live_mjpeg": f"/api/stream/{camera_id}/live.mjpeg",
+                "frame_jpeg": f"/api/stream/{camera_id}/frame.jpeg",
+            },
+        },
+        "ai": {
+            "detect_enabled": bool(cam.get("detect_enabled")),
+            "last_analysis_at": ai_snap.get("timestamp"),
+            "last_detections_count": len(ai_snap.get("detections", []) or []),
+            "last_yolo_ms": ai_snap.get("yolo_ms"),
+            "last_alpr_ms": ai_snap.get("alpr_ms"),
+            "motion_pct": ai_snap.get("motion_pct"),
+            "detections": (ai_snap.get("detections") or [])[:10],
+            "plates_debug": ai_snap.get("plate_debug", [])[:10],
+        },
+        "stats_24h": {"events": events_24h, "plates": plates_24h},
+        "last_event": latest_event,
+        "last_plate": latest_plate,
+    }
 
 
 # ============ RECORDING RETENTION (P2.a) ============

@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 18 — Validation Finalisation chaîne vidéo (live MJPEG fix P0, RTSP transport/codec, endpoint diagnostic). Backend pytest 11/11 : live.mjpeg renvoie HTTP 200 + Content-Type 'multipart/x-mixed-replace;boundary=frame' + >1kB en 3s pour demo-cam-001 ET demo-cam-002 (avant : 0 byte, boundary manquant) ; frame.jpeg renvoie JPEG valide (FFD8FF) ; nouveaux champs rtsp_transport/preferred_codec dans CameraInput persistent en base (create + update + get) ; /api/cameras/{id}/diagnostic retourne bien la structure {camera, flux, ai, stats_24h, last_event, last_plate} avec tous les sous-champs attendus ; _build_rtsp_url ajoute bien '#transport=tcp|udp' à l'URL RTSP ; régressions /api/plugins (10 plugins), /api/storage/overview, /api/plugins/anpr/config OK. Frontend Playwright OK : /live affiche 2 <img data-testid=live-stream> pointant vers /api/stream/{cam}/live.mjpeg?token=… ; /cameras a bien 2 diagnostic-btn + 2 edit-camera-btn ; dialog édition contient les selects data-testid rtsp-transport (=tcp) et preferred-codec (=auto) ; DiagnosticDialog s'ouvre et affiche les 3 sections (Flux vidéo : Caméra ONLINE, go2rtc flux enregistré, Transport TCP · Codec H264 · Codec préféré AUTO ; Intelligence artificielle avec YOLO/ALPR timings ; Activité 24h avec compteurs événements et plaques).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Cameras (edit dialog + diagnostic dialog)", "issues": ["Warning React : 'Missing Description or aria-describedby={undefined} for DialogContent' — accessibilité mineure, ajouter un DialogDescription dans DiagnosticDialog et Edit dialog."]},
+      {"screen": "Cameras (select camera-site-filter)", "issues": ["Hydration warning : <span> ne peut pas être enfant d'<option> (voir sélecteur camera-site-filter dans Cameras.jsx L231). Impact fonctionnel nul mais bruite la console."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter18_finalisation.py", "/app/test_reports/pytest/iter18.xml"],
+  "action_items": [
+    "(optionnel) Ajouter <DialogDescription> aux DiagnosticDialog et à la dialog d'édition caméra pour supprimer le warning Radix a11y.",
+    "(optionnel) Corriger l'hydration warning sur le select camera-site-filter (Cameras.jsx L231) — le contenu de l'<option> ne doit pas contenir de <span>."
+  ],
+  "critical_code_review_comments": [
+    "streaming.py::_mjpeg_stream retourne systématiquement `{name}_sd` — fix P0 correct : go2rtc 1.9.8 ne transcode pas H.264→MJPEG à la volée sur le producer principal, seul `_sd` a l'entrée ffmpeg #video=mjpeg.",
+    "streaming.py::live_mjpeg relaye désormais le content-type upstream (boundary compris) → OK, testé multipart/x-mixed-replace;boundary=frame reçu par le client.",
+    "streaming.py::_build_rtsp_url ajoute #transport=tcp|udp uniquement si absent → idempotent, comportement attendu.",
+    "routers.py::camera_diagnostic ne vérifie pas allowed_sites pour un utilisateur restreint (même faille latente déjà notée en iter17). Non bloquant pour admin, mais un opérateur restreint pourrait lister n'importe quelle caméra si sa permission view_live est globale."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter18_finalisation.py (nouveau — 11 tests P0 finalisation)"],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100% (live streams x2, edit dialog fields, diagnostic dialog structure)"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (OK)",
+  "seed_data_creation": "1 caméra TEST_iter18_cam créée et supprimée pendant le test de persistance rtsp_transport/preferred_codec.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iter18_finalisation.py couvre les régressions P0 finalisation. Lancer via `export $(grep REACT_APP_BACKEND_URL /app/frontend/.env) && pytest -o addopts= backend/tests/test_iter18_finalisation.py -v`. Le test unitaire _build_rtsp_url utilise un subprocess python avec load_dotenv('/app/backend/.env') pour contourner l'init Motor. Le fix live.mjpeg est validé : curl reçoit bien >100kB en 3s au lieu de 0 avant. Warning React mineur (DialogDescription manquant + hydration option/span) à traiter séparément si le PO souhaite un console propre.",
+  "rca of the issue": "RCA du bug P0 (rappel) : go2rtc 1.9.8 ne convertit plus H.264→MJPEG à la volée sur /api/stream.mjpeg pour un producteur H.264 pur → Content-Length: 0. Fix : _mjpeg_stream() retourne systématiquement `{cam}_sd` (variante avec ffmpeg #video=mjpeg explicite dans go2rtc.yaml) au lieu de dépendre de la permission stream_hd. Validation : test_live_mjpeg_boundary_and_bytes reçoit >1kB en 3.5s avec boundary=frame. Confirmé sur les deux caméras de démo."
+}
