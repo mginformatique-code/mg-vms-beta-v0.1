@@ -18,32 +18,46 @@ plugins_router = APIRouter(prefix="/api/plugins", tags=["plugins"])
 
 PLUGIN_CATALOG = [
     {"id": "anpr", "name": "ANPR / LPR", "category": "Vision", "core": True, "version": "1.0.0",
-     "description": "Lecture automatique des plaques + listes blanche/noire + alertes."},
+     "description": "Lecture automatique des plaques + listes blanche/noire + alertes.",
+     "route": "/anpr"},
     {"id": "ai_detection", "name": "Détection IA (YOLO)", "category": "Vision", "core": False, "version": "0.9.0",
-     "description": "Détection d'objets temps réel (personne, véhicule, incendie, fumée, intrusion)."},
+     "description": "Détection d'objets temps réel (personne, véhicule, incendie, fumée, intrusion).",
+     "route": "/plugins/ai_detection"},
     {"id": "tracking", "name": "Tracking (ByteTrack)", "category": "Vision", "core": False, "version": "0.6.0",
-     "description": "Suivi multi-objets avec identifiant persistant entre images."},
+     "description": "Suivi multi-objets avec identifiant persistant entre images.",
+     "route": "/plugins/tracking"},
     {"id": "face_recognition", "name": "Reconnaissance faciale", "category": "Vision", "core": False, "version": "0.1.0",
-     "description": "Identification de visages (sous réserve d'autorisation légale)."},
+     "description": "Identification de visages (sous réserve d'autorisation légale).",
+     "route": "/plugins/face_recognition"},
     {"id": "parking", "name": "Gestion Parking", "category": "Métier", "core": False, "version": "0.5.0",
-     "description": "Comptage des places, durée de stationnement, taux d'occupation."},
+     "description": "Comptage des places, durée de stationnement, taux d'occupation.",
+     "route": "/plugins/parking"},
     {"id": "thermal", "name": "Caméras thermiques", "category": "Capteurs", "core": False, "version": "0.2.0",
-     "description": "Flux thermiques et seuils de température configurables."},
+     "description": "Flux thermiques et seuils de température configurables.",
+     "route": "/plugins/thermal"},
     {"id": "radar", "name": "Radar vitesse", "category": "Capteurs", "core": False, "version": "0.1.0",
-     "description": "Mesure de vitesse et détection d'infractions."},
+     "description": "Mesure de vitesse et détection d'infractions.",
+     "route": "/plugins/radar"},
     {"id": "drone", "name": "Drone", "category": "Capteurs", "core": False, "version": "0.1.0",
-     "description": "Intégration de flux drone et patrouilles aériennes."},
+     "description": "Intégration de flux drone et patrouilles aériennes.",
+     "route": "/plugins/drone"},
     {"id": "mqtt", "name": "Passerelle MQTT", "category": "Intégration", "core": False, "version": "0.4.0",
-     "description": "Publication/souscription d'événements via un broker MQTT."},
+     "description": "Publication/souscription d'événements via un broker MQTT.",
+     "route": "/plugins/mqtt"},
     {"id": "access_control", "name": "Contrôle d'accès", "category": "Intégration", "core": False, "version": "0.3.0",
-     "description": "Pilotage des barrières, portails et lecteurs de badges."},
+     "description": "Pilotage des barrières, portails et lecteurs de badges.",
+     "route": "/plugins/access_control"},
 ]
 
 
 async def seed_plugins():
     for p in PLUGIN_CATALOG:
-        if not await db.plugins.find_one({"id": p["id"]}):
+        existing = await db.plugins.find_one({"id": p["id"]})
+        if not existing:
             await db.plugins.insert_one({**p, "enabled": p["id"] == "anpr"})
+        else:
+            # Maintient à jour les champs statiques (route, description, version) sans écraser `enabled`
+            await db.plugins.update_one({"id": p["id"]}, {"$set": {k: v for k, v in p.items() if k != "id"}})
 
 
 async def is_enabled(plugin_id: str) -> bool:

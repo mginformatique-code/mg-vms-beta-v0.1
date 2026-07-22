@@ -4,8 +4,13 @@ import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import {
   LayoutDashboard, Grid3x3, Cctv, Building2, ScanLine, Car, Bell, Map, Zap,
-  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, ShieldCheck, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server,
+  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, ShieldCheck, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen,
 } from "lucide-react";
+
+const PLUGIN_ICON = {
+  anpr: ScanLine, ai_detection: Brain, tracking: Activity, face_recognition: ScanFace,
+  parking: Car, thermal: Thermometer, radar: Radar, drone: Plane, mqtt: Radio, access_control: DoorOpen,
+};
 
 const NAV = [
   { group: "nav.operations", items: [
@@ -53,6 +58,7 @@ export default function Layout({ children }) {
   const navigate = useNavigate();
   const [sys, setSys] = useState({ cpu: 0, ram: 0, storage: 0 });
   const [alertCount, setAlertCount] = useState(0);
+  const [pluginPages, setPluginPages] = useState([]);
 
   const loadStats = () => {
     api.get("/dashboard/stats").then((r) => {
@@ -60,10 +66,21 @@ export default function Layout({ children }) {
       setAlertCount(r.data.alerts_active);
     }).catch(() => {});
   };
+  const loadPluginMenus = () => {
+    api.get("/plugins").then((r) => {
+      // On affiche les plugins actifs — même en "not_configured", pour laisser accès à la config.
+      // Les plugins "disabled" et "error" ne sont pas ajoutés au menu (fonctionnalité masquée).
+      const visible = (r.data || [])
+        .filter((p) => p.enabled && p.status !== "disabled" && p.status !== "error")
+        .filter((p) => p.id !== "anpr"); // ANPR a déjà son entrée /anpr dans le NAV principal
+      setPluginPages(visible);
+    }).catch(() => setPluginPages([]));
+  };
   useEffect(() => {
-    loadStats();
+    loadStats(); loadPluginMenus();
     const i = setInterval(loadStats, 30000);
-    return () => clearInterval(i);
+    const j = setInterval(loadPluginMenus, 30000);
+    return () => { clearInterval(i); clearInterval(j); };
   }, []);
 
   // Mise à jour live via WebSocket
@@ -101,6 +118,31 @@ export default function Layout({ children }) {
               ))}
             </div>
           ))}
+          {/* Section Extensions : alimentée dynamiquement par les plugins actifs */}
+          {pluginPages.length > 0 && (
+            <div className="mb-4" data-testid="nav-extensions">
+              <div className="px-4 mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground font-medium flex items-center gap-1">
+                <Puzzle size={10} /> Extensions
+              </div>
+              {pluginPages.map((p) => {
+                const Ic = PLUGIN_ICON[p.id] || Puzzle;
+                return (
+                  <NavLink key={p.id} to={p.route || `/plugins/${p.id}`}
+                    data-testid={`nav-plugin-${p.id}`}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-4 py-2 text-sm transition-colors border-l-2 ${
+                        isActive ? "border-l-[#0044FF] bg-secondary text-foreground font-medium"
+                                 : "border-l-transparent text-muted-foreground hover:bg-secondary hover:text-foreground"
+                      }`}>
+                    <Ic size={17} strokeWidth={1.5} />
+                    <span className="flex-1 truncate">{p.name}</span>
+                    {p.status === "not_configured" && <span className="w-1.5 h-1.5 rounded-full bg-[#FFB800]" title="À configurer" />}
+                    {p.status === "ok" && <span className="w-1.5 h-1.5 rounded-full bg-[#00E676]" title="Opérationnel" />}
+                  </NavLink>
+                );
+              })}
+            </div>
+          )}
         </nav>
         <div className="border-t border-border p-3">
           <div className="flex items-center gap-2 mb-2">

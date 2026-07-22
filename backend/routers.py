@@ -537,6 +537,31 @@ async def ai_debug(camera_id: str, user: dict = Depends(require_role("technician
     return {"available": True, "camera_id": camera_id, **snap}
 
 
+# ============ MQTT PLUGIN CONFIG ============
+class MqttConfig(BaseModel):
+    host: str = ""
+    port: int = 1883
+    username: str = ""
+    password: str = ""
+    topic_prefix: str = "mgvms"
+    tls: bool = False
+
+
+@api_router.get("/settings/mqtt")
+async def mqtt_get(user: dict = Depends(require_role("admin"))):
+    doc = await db.settings.find_one({"key": "mqtt_broker"}, {"_id": 0})
+    val = (doc or {}).get("value", {}) or {}
+    return MqttConfig(**val).model_dump()
+
+
+@api_router.put("/settings/mqtt")
+async def mqtt_put(data: MqttConfig, user: dict = Depends(require_role("admin"))):
+    await db.settings.update_one({"key": "mqtt_broker"},
+                                 {"$set": {"key": "mqtt_broker", "value": data.model_dump()}}, upsert=True)
+    await log_audit(user, "mqtt_config_updated", data.host)
+    return data.model_dump()
+
+
 async def maybe_blacklist_alert(plate_doc: dict, background: BackgroundTasks):
     """Crée une alerte critique + diffuse + notifie si la plaque est en liste noire."""
     if plate_doc.get("list_status") != "black":

@@ -1,6 +1,20 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **SPRINT P0.4 — Pages dédiées par plugin (2.6.3 — 2026-07-22)**
+  - **Backend** — `PLUGIN_CATALOG` déclare désormais un champ `route` par plugin. `seed_plugins` met à jour les manifestes (route/description/version) sans écraser `enabled`. Nouveau endpoint `GET/PUT /api/settings/mqtt` (broker host/port/user/pass/prefix/tls).
+  - **Frontend** — nouvelle page générique `/plugins/:pluginId` (composant `PluginPage.jsx`) qui affiche pour chaque plugin :
+    - En-tête : nom, catégorie, version, badge de statut réel.
+    - Checklist santé + métriques (Total / 24 h / Dernier événement).
+    - Section spécifique :
+      - **Détection IA (YOLO)** → formulaire complet éditable (intervalle 0.2–60 s, seuil confiance 0.1–0.95, taille min plaque, cache plaques, cible cpu/cuda/auto) branché sur `PUT /api/ai/config`. Application à chaud.
+      - **MQTT** → formulaire complet (host, port, user, pass, préfixe topic, TLS) branché sur `PUT /api/settings/mqtt`. Bouton **Tester la connexion (TCP)** vers le broker.
+      - Autres plugins (tracking, face_recognition, parking, thermal, radar, drone, access_control) → note « Fonctionnalité en développement » **honnête**, avec la checklist des prérequis réels et la roadmap explicite (P2/P3, matériel requis, etc.). Aucun bouton fictif.
+  - **Sidebar dynamique** — nouvelle section **Extensions** qui liste automatiquement les plugins activés + non-erreur, avec icône dédiée et pastille de statut (vert=OK, orange=à configurer). Route configurée par le manifeste plugin. Le plugin ANPR conserve son entrée principale `/anpr` (pas de doublon).
+  - **App.js** : nouvelle route `/plugins/:pluginId`.
+  - Vérifié en preview : sidebar affiche `Détection IA (YOLO)` (vert), `Tracking (ByteTrack)` (orange), `Gestion Parking` (orange). Page Détection IA charge la config live et permet l'édition à chaud. MQTT config persistée en base et lue au refresh de la page Plugins → passe l'item "Broker MQTT configuré" à ✓.
+
+## Implemented (2026-07)
 - ✅ **SPRINT P0.3 — État réel des plugins (2.6.2 — 2026-07-22)**
   - Refonte `/app/backend/plugins.py` : ajout d'un `health_check()` par plugin qui **teste réellement** les dépendances et la configuration (aucune donnée fictive).
   - Nouveaux endpoints : `GET /api/plugins` renvoie désormais `{...manifest, enabled, status, health: {checks:[{name, ok, detail}], loaded, configured, healthy, events_total, events_24h, last_event_at, warning?}}` · `GET /api/plugins/{id}/health` pour un check à la demande.

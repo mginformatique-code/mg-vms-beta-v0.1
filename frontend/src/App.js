@@ -24,6 +24,7 @@ import UsersPage from "@/pages/Users";
 import SettingsPage from "@/pages/Settings";
 import Notifications from "@/pages/Notifications";
 import Plugins from "@/pages/Plugins";
+import PluginPage from "@/pages/PluginPage";
 
 function Protected({ children }) {
   const { user } = useApp();
@@ -54,6 +55,7 @@ function AppRoutes() {
       <Route path="/users" element={<Protected><UsersPage /></Protected>} />
       <Route path="/notifications" element={<Protected><Notifications /></Protected>} />
       <Route path="/plugins" element={<Protected><Plugins /></Protected>} />
+      <Route path="/plugins/:pluginId" element={<Protected><PluginPage /></Protected>} />
       <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
