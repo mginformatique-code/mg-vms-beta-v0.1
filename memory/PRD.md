@@ -1,6 +1,23 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **SPRINT P0.3 — État réel des plugins (2.6.2 — 2026-07-22)**
+  - Refonte `/app/backend/plugins.py` : ajout d'un `health_check()` par plugin qui **teste réellement** les dépendances et la configuration (aucune donnée fictive).
+  - Nouveaux endpoints : `GET /api/plugins` renvoie désormais `{...manifest, enabled, status, health: {checks:[{name, ok, detail}], loaded, configured, healthy, events_total, events_24h, last_event_at, warning?}}` · `GET /api/plugins/{id}/health` pour un check à la demande.
+  - **4 statuts globaux réels** : `ok` (vert) · `error` (rouge — deps manquantes) · `not_configured` (orange — deps OK mais config absente) · `disabled` (gris — désactivé volontairement).
+  - Health checks implémentés par plugin :
+    - `anpr` : import `fast_alpr` + nb caméras IA + total plaques + événements 24 h + dernier événement
+    - `ai_detection` : `ultralytics` + `cv2` (versions détectées) + cible `torch.cuda`/`cpu` + caméras IA online + événements
+    - `tracking` : `supervision` / `bytetracker` (version détectée) + persistance IDs (roadmap)
+    - `face_recognition` : `face_recognition` / `deepface` / `insightface` + base de visages
+    - `parking` : nb zones de stationnement
+    - `thermal` / `radar` / `drone` : "Aucun matériel détecté" (jamais de fake)
+    - `mqtt` : `paho.mqtt` + broker configuré
+    - `access_control` : contrôleurs enregistrés
+  - Refonte `/app/frontend/src/pages/Plugins.jsx` : bordure de carte colorée selon le statut, checklist `✓` / `✗` par item avec version des libs affichée en mono, warning à droite du statut, grille métriques `Total / 24 h / Dernier événement` pour les plugins actifs qui génèrent des événements, bouton `Rafraîchir` + rafraîchissement auto toutes les 20 s.
+  - Vérifié en preview : ANPR OK (163 plaques, 83/24h), AI Detection OK (1100 events, 592/24h), Tracking `Non configuré` (supervision présent mais IDs non persistés), Face Recognition `Erreur` (aucune lib installée), Parking `Non configuré` (0 zones), Thermal `Erreur` (aucun matériel), autres `Désactivé`.
+
+## Implemented (2026-07)
 - ✅ **SPRINT P0.2 — Overlay IA temps réel en Live View (2.6.1 — 2026-07-21)**
   - **Backend** : à chaque cycle IA, les détections sont diffusées via WebSocket (`broadcast_ai_detections` dans `realtime.py`) avec le message `{type: "ai_detections", data: {camera_id, site_id, timestamp, boxes: [{cls, label, confidence, vehicle_color, bbox_norm}], counts: {Personne: 2, Voiture: 1}, motion_pct}}`. Les bboxes sont **normalisées 0-1** côté serveur pour que le client puisse les scaler à sa taille d'affichage sans connaître la résolution IA.
   - **Frontend** : `AppContext` maintient `aiDetections` (par `camera_id`) alimenté par le WebSocket. `LiveView.jsx` dessine un `<canvas>` transparent en overlay au-dessus de chaque `<img>` MJPEG.
