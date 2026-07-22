@@ -1,6 +1,17 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **BUG FIX RTSP DEBUG — Debug + Validation obligatoire + Encodage RFC3986 (2.9.2 — 2026-07-22)**
+  - **Debug RTSP en clair** : `POST /api/cameras/test-connectivity` renvoie désormais `rtsp_url_validated: bool`, `validated_url: URL_masquée`, `validated_transport`, et `debug_attempts: [{url_masked, transport, ok, codec, resolution, fps}]`. Chaque tentative montre l'URL EXACTE testée avec le password masqué (`admin:******@…`).
+  - **Encodage RFC3986 UNE seule fois** : `_build_rtsp_url` détecte la présence de credentials via `host_part.split("/", 1)[0]` (au lieu de chercher `@` n'importe où dans l'URL) → ne réencode jamais. `Rlwt29#+jpf` → `Rlwt29%23%2Bjpf`, jamais `%2523%252Bjpf`. Vérifié : URL déjà avec creds encodés est préservée.
+  - **Ordre de test explicite** : `_try_ffprobe_variants` teste dans l'ordre demandé — **H264 TCP → H265 TCP → H264 UDP → H265 UDP** — en cyclant chaque variante Reolink/Hik/Dahua. Si `preferred_codec="h264"` ou `"h265"`, seul ce codec est testé (mais sur les 2 transports).
+  - **Nouvel helper `_mask_url_password`** : remplace le password (encodé ou non) par `******` pour affichage sûr.
+  - **Validation OBLIGATOIRE** : `POST /api/cameras` avec `mode="rtsp"` + `allow_rtsp_override=false` refuse désormais avec **HTTP 400** si aucune variante ne répond à ffprobe (message : "URL RTSP invalide — aucune variante n'a répondu"). Auparavant la caméra était acceptée puis go2rtc tentait la connexion à la demande.
+  - **Frontend `Cameras.jsx`** : nouveau bloc `[data-testid=rtsp-debug-panel]` (ouvert par défaut si validation échoue) qui liste les tentatives avec badge Transport, indicateur ✓/✗, URL masquée + codec/résolution détectés. Ligne verte `[data-testid=validated-url]` affichant l'URL retenue quand validated=true. Le bouton "Créer la caméra" refuse la soumission si `rtsp_url_validated=false` (toast d'erreur explicite).
+  - **Tests testing_agent iteration_20 + retest iteration_21 : 15/15 backend pytest + Playwright OK — 0 issue.**
+
+
+## Implemented (2026-07)
 - ✅ **BUG FIX ONVIF Reolink — RTSP fallback constructeur + Override (2.9.1 — 2026-07-22)**
   - **Cause racine** : ONVIF Reolink retourne parfois `/h264Preview_01_main` alors que la caméra encode réellement en H.265 → ffprobe échoue → création caméra bloquée.
   - **Fallback constructeur intelligent** : nouvelle fonction `_rtsp_variants(base_url, preferred_codec)` génère la liste des URLs à tester dans l'ordre optimal :
