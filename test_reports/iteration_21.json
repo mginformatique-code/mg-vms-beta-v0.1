@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 21 — RE-TEST du fix RTSP ONVIF POST /api/cameras. Le fix CRITIQUE demandé (rejet 400 si aucune variante ffprobe ne répond en mode='rtsp' avec allow_rtsp_override=false) est CONFIRMÉ opérationnel : POST /api/cameras {mode:'rtsp', rtsp_url:'rtsp://127.0.0.1:8554/does_not_exist'} → HTTP 400 + detail contient 'URL RTSP invalide — aucune variante n'a répondu'. Les 14 tests OK de iteration_20 restent tous verts (14/15 en parallèle, flaky sur live.mjpeg à cause de la charge simultanée, mais 15/15 en isolation). Toutefois, un NOUVEAU bug de régression est mis en évidence par ce RE-TEST : POST /api/cameras avec URL RTSP RÉELLEMENT valide (rtsp://127.0.0.1:8554/cam_demo-cam-001 — mediamtx local) retourne 400 alors qu'il devrait passer, car `_build_rtsp_url` ajoute un fragment `#transport=tcp` à l'URL passée à `ffprobe`, et le serveur RTSP mediamtx répond `400 Bad Request` sur ce fragment. Cas C (invalid URL + override=true) : le backend accepte la création (HTTP 200) — comportement conforme à la spec.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/cameras (mode='rtsp', URL valide)",
+        "issue": "L'URL passée à ffprobe par _try_ffprobe_variants inclut le fragment `#transport=tcp|udp` (streaming.py L73-74 dans _build_rtsp_url). ffprobe transmet ce fragment dans le path RTSP → mediamtx/go2rtc répond `400 Bad Request` → ffprobe retourne None → _try_ffprobe_variants retourne (None, None) → create_camera raise 400 'URL RTSP invalide'. Résultat : IMPOSSIBLE de créer une caméra RTSP même avec une URL 100% valide et un serveur RTSP réel qui répond. Reproduction : rtsp://127.0.0.1:8554/cam_demo-cam-001 (mediamtx interne, ffprobe direct sans fragment répond h264 1280x720 en < 1s) → POST /api/cameras retourne 400. Vérif shell : `/app/bin/ffprobe -rtsp_transport tcp 'rtsp://127.0.0.1:8554/cam_demo-cam-001#transport=tcp'` → `Server returned 400 Bad Request`. Sans fragment : OK. Fix proposé : dans _ffprobe (streaming.py L242-271), stripper le fragment `#transport=...` avant subprocess.run, OU dans _try_ffprobe_variants (L381-382), ne pas ajouter le fragment quand on appelle _build_rtsp_url pour ffprobe (le transport est déjà passé en -rtsp_transport CLI). Le fragment n'est utile qu'à go2rtc (register_camera_stream), pas à ffprobe.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "GET /api/stream/{id}/live.mjpeg",
+        "issue": "Flakiness observé sous charge (test_live_mjpeg_demo_cam_gt_10kb_in_3s a reçu 26 bytes en 3.5s au lieu de >10kB quand exécuté en parallèle avec test_connectivity qui monopolise ffprobe). En isolation → 365 kB en 6s, HTTP 200, multipart/x-mixed-replace OK. Non bloquant."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter21_rtsp_final.py",
+    "/app/backend/tests/test_iter20_rtsp_debug.py",
+    "/app/test_reports/pytest/iter21.xml",
+    "/app/test_reports/pytest/iter21_final.xml"
+  ],
+  "action_items": [
+    "CRITIQUE — Retirer/stripper le fragment `#transport=...` avant l'appel subprocess ffprobe. Fix minimal dans streaming.py::_ffprobe : `rtsp_url = rtsp_url.split('#', 1)[0]` avant subprocess.run. Ou plus propre : dans _try_ffprobe_variants (L381), construire deux URLs : une pour ffprobe (sans fragment) et une pour go2rtc. Sinon aucune caméra RTSP réellement valide ne peut être créée avec allow_rtsp_override=false.",
+    "Vérifier ensuite que la valeur retournée dans payload['rtsp_url'] (working_url) ne contient PAS le fragment, sinon la caméra sera stockée avec un rtsp_url invalide."
+  ],
+  "critical_code_review_comments": [
+    "streaming.py L73-74 : `_build_rtsp_url` ajoute systématiquement `#transport=X` — c'est une convention go2rtc/mediamtx-fmp4 mais PAS un standard RTSP. ffprobe et beaucoup de serveurs RTSP (mediamtx en RTSP natif) l'interprètent comme un fragment de path → 400 Bad Request. Il faut séparer la construction pour ffprobe (sans fragment) et pour go2rtc (avec fragment).",
+    "streaming.py::_try_ffprobe_variants L385-390 : `url_masked` inclut le fragment `#transport=tcp` — cohérent pour debug UI, mais confirme que la même URL est utilisée pour ffprobe → source du bug.",
+    "routers.py L242-258 : la logique de fix est correcte (rejette 400 si !details && !allow_rtsp_override) — le bug n'est pas ici mais en amont dans _build_rtsp_url."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter21_rtsp_final.py (nouveau — 6 tests)"],
+  "success_rate": {
+    "backend": "5/6 (83%) sur les scénarios ciblés iter21 + 14/15 régression iter20 (flaky) — le fix CRITIQUE demandé (Cas A) PASSE ✓. Cas B (URL RTSP valide) échoue à cause du bug #transport fragment.",
+    "frontend": "N/A (backend-only)"
+  },
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (OK)",
+  "seed_data_creation": "Caméras TEST_iter21_invalid_*, TEST_iter21_valid_*, TEST_iter21_override_* créées puis auto-cleanup via fixture module scope",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Après le fix du fragment #transport dans _ffprobe/_try_ffprobe_variants, relancer `pytest backend/tests/test_iter21_rtsp_final.py -v -o addopts=''` doit donner 6/6. Attention à pytest.ini qui active xdist par défaut → utiliser `-o addopts=''` pour éviter les conflits de scope avec la fixture module. Le serveur RTSP local mediamtx écoute sur 127.0.0.1:8554 avec des streams 'cam_demo-cam-001' (h264 720p) — utilisable pour tests réels. ffprobe est à /app/bin/ffprobe (dans le PATH du backend supervisor mais pas du shell interactif root sans reload).",
+  "rca of the issue": "Fix appliqué dans routers.py::create_camera (L242-258) : correct, appelle bien _try_ffprobe_variants et raise 400 si details=None. MAIS _try_ffprobe_variants (streaming.py L381) appelle _build_rtsp_url qui ajoute `#transport=tcp|udp` à l'URL (L73-74), puis passe cette URL directement à ffprobe subprocess (L384 → _ffprobe L247-252). ffprobe considère `#transport=tcp` comme un fragment RTSP, l'envoie au serveur RTSP dans la requête DESCRIBE/SETUP, et mediamtx (comme la plupart des serveurs RTSP standards) répond `400 Bad Request` car ce n'est pas une ressource valide. Résultat : ffprobe retourne None, _try_ffprobe_variants retourne (base_url, None, [attempts]), create_camera raise 400. Manifestation : impossible de créer une caméra RTSP valide sans allow_rtsp_override=true. Fix minimal (1 ligne) : dans _ffprobe, ajouter `rtsp_url = rtsp_url.split('#', 1)[0]` en début de fonction — ffprobe reçoit le transport en argument CLI, le fragment est redondant."
+}

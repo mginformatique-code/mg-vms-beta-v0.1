@@ -239,6 +239,23 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
     else:  # mode RTSP pur
         if not (payload.get("rtsp_url") or "").lower().startswith("rtsp://"):
             raise HTTPException(400, "Mode RTSP : l'URL RTSP est obligatoire (rtsp://…)")
+        # Validation OBLIGATOIRE ffprobe (sauf allow_rtsp_override=True)
+        if not data.allow_rtsp_override:
+            from streaming import _try_ffprobe_variants
+            working_url, ffprobe_details, _attempts = await asyncio.to_thread(
+                _try_ffprobe_variants, payload["rtsp_url"],
+                data.preferred_codec, data.rtsp_transport, data.username, data.password,
+            )
+            if not ffprobe_details:
+                raise HTTPException(400,
+                    "URL RTSP invalide — aucune variante n'a répondu. "
+                    "Utilisez le test de connexion pour diagnostiquer, "
+                    "puis cochez « Créer malgré le test RTSP » pour forcer.")
+            payload["rtsp_url"] = working_url
+            payload["resolution"] = ffprobe_details.get("resolution", payload.get("resolution", ""))
+            payload["fps"] = ffprobe_details.get("fps")
+            payload["codec"] = (ffprobe_details.get("codec") or "H264").upper()
+            payload["rtsp_transport"] = ffprobe_details.get("transport_used") or data.rtsp_transport
 
     now = datetime.now(timezone.utc).isoformat()
     doc = {
