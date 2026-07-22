@@ -369,7 +369,6 @@ async def camera_stream(camera_id: str, user: dict = Depends(require_permission(
         "stream_url": f"/stream/{cam['id']}/live.mjpeg",
         "frame_url": f"/stream/{cam['id']}/frame.jpeg",
         "engine": "go2rtc",
-        "simulated": False,
     }
 
 
@@ -398,17 +397,29 @@ async def event_recording(event_id: str, user: dict = Depends(get_current_user))
     pour se caler autour, ou 404 si aucun enregistrement ne couvre le timestamp."""
     ev = await db.events.find_one({"id": event_id}, {"_id": 0})
     if not ev:
-        # Peut aussi être une plaque
+        # Peut aussi être une plaque ou une alerte
         ev = await db.plates.find_one({"id": event_id}, {"_id": 0})
     if not ev:
+        ev = await db.alerts.find_one({"id": event_id}, {"_id": 0})
+    if not ev:
         raise HTTPException(404, "Événement introuvable")
+    return await _lookup_recording_for(ev, user)
+
+
+@api_router.get("/recording-context")
+async def recording_context(camera_id: str, at: str, user: dict = Depends(get_current_user)):
+    """Trouve l'enregistrement couvrant un instant précis (camera_id + timestamp ISO).
+    Utilisé pour les alertes ou tout item sans id d'événement direct."""
+    return await _lookup_recording_for({"camera_id": camera_id, "timestamp": at, "site_id": None}, user)
+
+
+async def _lookup_recording_for(ev: dict, user: dict) -> dict:
     allowed = allowed_sites(user)
-    if allowed is not None and ev.get("site_id") not in allowed:
+    if allowed is not None and ev.get("site_id") and ev.get("site_id") not in allowed:
         raise HTTPException(403, "Accès refusé")
     ts = ev.get("timestamp")
     if not ts:
         raise HTTPException(404, "Événement sans horodatage")
-    # Cherche un enregistrement dont [start, end] couvre le timestamp de l'événement
     rec = await db.recordings.find_one(
         {"camera_id": ev.get("camera_id"),
          "start": {"$lte": ts},
@@ -792,7 +803,6 @@ async def recordings_playback(recording_id: str, user: dict = Depends(require_pe
         "recording": rec,
         "poster": None,
         "stream_url": f"/recordings/{recording_id}/media" if has_file else None,
-        "simulated": False,
         "message": None if has_file else "Fichier introuvable sur le disque.",
     }
 

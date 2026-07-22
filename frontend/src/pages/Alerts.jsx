@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
-import { Bell, Check, AlertTriangle, Info, ShieldAlert, BrainCircuit } from "lucide-react";
+import { Bell, Check, AlertTriangle, Info, ShieldAlert, BrainCircuit, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import EventViewer from "@/components/EventViewer";
 
 const SEV = {
   critical: { color: "#FF3333", icon: ShieldAlert },
@@ -114,6 +115,16 @@ export default function Alerts() {
   const [alerts, setAlerts] = useState([]);
   const [filter, setFilter] = useState("all");
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [viewerIdx, setViewerIdx] = useState(null);
+
+  // Adapte les alertes pour EventViewer (mêmes clés que event/plate)
+  const viewerItems = alerts.map((a) => ({
+    id: a.id, thumbnail: a.thumbnail || a.plate_crop,
+    camera_id: a.camera_id, camera_name: a.camera_name, site_name: a.site_name,
+    timestamp: a.timestamp, plugin: a.plugin || (a.scenario ? `IA · ${a.scenario}` : "Alerte"),
+    type: a.type || a.scenario || "alert", label: a.message,
+    plate: a.plate, list_status: a.list_status,
+  }));
 
   const load = () => {
     const q = filter === "all" ? "" : `?acknowledged=${filter === "acked"}`;
@@ -140,18 +151,23 @@ export default function Alerts() {
       </div>
 
       <div className="space-y-1.5">
-        {alerts.map((a) => {
+        {alerts.map((a, idx) => {
           const s = SEV[a.severity] || SEV.info; const Icon = s.icon;
           const img = a.thumbnail || a.plate_crop;
           return (
             <div key={a.id} className={`bg-card border-l-2 border border-border flex items-center gap-3 px-4 py-3 fade-up ${a.acknowledged ? "opacity-55" : ""}`} style={{ borderLeftColor: s.color }} data-testid="alert-item">
               <Icon size={18} style={{ color: s.color }} className={a.acknowledged ? "" : "rec-dot"} />
-              {img && <img src={img} alt="" className="w-20 h-12 object-cover bg-black shrink-0 border border-border" data-testid="alert-thumbnail" />}
+              {img && (
+                <button onClick={() => setViewerIdx(idx)} className="w-20 h-12 shrink-0 border border-border overflow-hidden hover:ring-2 hover:ring-[#0044FF] transition" data-testid="alert-thumb-btn" title="Voir en HD">
+                  <img src={img} alt="" className="w-full h-full object-cover bg-black" data-testid="alert-thumbnail" />
+                </button>
+              )}
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium">{a.message}</div>
                 <div className="text-xs text-muted-foreground mono">{a.camera_name} · {a.site_name} · {new Date(a.timestamp).toLocaleString()}</div>
               </div>
               <span className="text-[9px] uppercase tracking-wider px-2 py-0.5 border" style={{ borderColor: s.color, color: s.color }}>{a.severity}</span>
+              <button onClick={() => setViewerIdx(idx)} className="flex items-center gap-1 px-2 py-1.5 text-xs border border-border hover:bg-secondary" data-testid="alert-view-btn" title="Ouvrir la visionneuse"><Eye size={13} /></button>
               {!a.acknowledged && can("client") && (
                 <button onClick={() => ack(a.id)} data-testid="alert-ack-btn" className="flex items-center gap-1 px-3 py-1.5 text-xs border border-border hover:bg-secondary"><Check size={13} /> {t("alerts.ack")}</button>
               )}
@@ -162,6 +178,10 @@ export default function Alerts() {
       </div>
 
       <AiRulesDialog open={rulesOpen} onClose={() => setRulesOpen(false)} />
+      {viewerIdx !== null && (
+        <EventViewer items={viewerItems} index={viewerIdx} onIndex={setViewerIdx}
+                      onClose={() => setViewerIdx(null)} kind="event" />
+      )}
     </div>
   );
 }

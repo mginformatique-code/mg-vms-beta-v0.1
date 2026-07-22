@@ -212,13 +212,6 @@ async def _health_mqtt() -> dict:
             "last_event_at": None}
 
 
-async def _health_access_control() -> dict:
-    checks = [{"name": "Contrôleurs configurés", "ok": False, "detail": "Aucun contrôleur enregistré"}]
-    return {"checks": checks, "loaded": False, "configured": False, "healthy": False,
-            "events_total": 0, "events_24h": 0, "last_event_at": None,
-            "warning": "Nécessite matériel de contrôle d'accès (Wiegand/OSDP) — roadmap P2"}
-
-
 HEALTH_HANDLERS = {
     "anpr": _health_anpr_v2,
     "ai_detection": _health_ai_detection,

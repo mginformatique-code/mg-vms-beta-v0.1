@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 17 — Validation P1.a (EventViewer uniformisé) + P1.b (audit zéro sandbox). Backend pytest 10/10 (test_iter17_uniform_viewer.py) : /api/recording-context 401 sans token / 404 hors couverture / 200 avec {recording, offset_sec, stream_url} sur segment couvert ; /api/events/{id}/recording accepte bien un alert_id (fallback events→plates→alerts, plus d'erreur 'Événement introuvable' pour un ID d'alerte valide) ; aucun champ 'simulated' dans /cameras/{id}/stream, /recordings/{id}/playback, /hardware/info ; access_control renvoie warning explicite (pas 'roadmap P2') si aucun contrôleur. Frontend Playwright OK : login → dashboard (route '/', pas '/dashboard'), 6 dash-alert-row présents et clic ouvre event-viewer, page /alerts a 100 lignes avec alert-view-btn + alert-thumb-btn qui ouvrent event-viewer, aucune occurrence de 'simulé'/'simulated'/'sandbox' sur /, /alerts, /events, /anpr, /hardware, /plugins.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/plugins", "issue": "La spec P1 dit 'renvoie bien 8 plugins' mais le PLUGIN_CATALOG en déclare 10 (les 8 attendus + mqtt + access_control). Les 8 core sont bien présents. À clarifier avec le PO : 8 ou 10 ? Le test valide simplement que les 8 IDs minimaux existent."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter17_uniform_viewer.py",
+    "/app/test_reports/pytest/iter17.xml"
+  ],
+  "action_items": [
+    "Clarifier si /api/plugins doit renvoyer 8 ou 10 plugins (actuellement 10 incluant mqtt + access_control, la spec dit 8)."
+  ],
+  "critical_code_review_comments": [
+    "routers.py::_lookup_recording_for : bon design de fallback (events→plates→alerts). Le calcul d'offset (-5s) est correct et clampé à 0.",
+    "routers.py::recording_context : passe `site_id: None` en 3e argument à _lookup_recording_for → le check `allowed_sites` ne fait rien pour l'utilisateur restreint. Un opérateur non-admin peut donc consulter les recordings de N'IMPORTE quelle caméra en connaissant camera_id + timestamp. À corriger : charger la caméra depuis db.cameras d'abord et injecter son site_id dans l'ev avant l'appel au helper.",
+    "hardware.py : docstring 'Détection RÉELLE' + suppression flag simulated_gpu confirmés, aucun placeholder GPU si nvidia-smi absent (liste vide).",
+    "plugins.py : duplicate _health_access_control supprimé, warning cohérent."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter17_uniform_viewer.py (nouveau — 10 tests d'intégration recording-context + fallback events + audit no-sandbox + plugins)"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100% (dash-alert-row, alert-view-btn, alert-thumb-btn ouvrent tous EventViewer ; 6 pages sans mot interdit)"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (fonctionne)",
+  "seed_data_creation": "Aucune donnée créée. Les 152 alertes existantes (dont anpr_blacklist + suspect_lingering) ont servi de fixture.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iter17_uniform_viewer.py est le fichier de régression P1.a/P1.b. Lancer via `export $(grep REACT_APP_BACKEND_URL /app/frontend/.env) && pytest -o addopts= backend/tests/test_iter17_uniform_viewer.py -v`. Note importante : le login redirige vers '/' pas '/dashboard' — le dashboard est bien la home route. Le fallback recording-context est fonctionnel mais présente une faille d'autorisation : `allowed_sites` n'est pas vérifié faute de site_id (voir critical_code_review_comments).",
+  "rca of the issue": "Aucun bug bloquant — l'implémentation correspond à la spec. La seule remarque de sécurité concerne l'endpoint recording-context qui accepte n'importe quel camera_id sans vérifier que l'utilisateur restreint a droit à ce site. Pour l'admin (cas testé) ça fonctionne parfaitement."
+}

@@ -87,10 +87,17 @@ export default function EventViewer({ items, index, onClose, onIndex, kind = "ev
     } catch { toast.error("Copie impossible"); }
   };
   const playAround = async () => {
-    if (!item?.id) return;
+    if (!item) return;
     setRecLoading(true);
     try {
-      const { data } = await api.get(`/events/${item.id}/recording`);
+      let data;
+      if (item.id) {
+        ({ data } = await api.get(`/events/${item.id}/recording`));
+      } else if (item.camera_id && item.timestamp) {
+        ({ data } = await api.get("/recording-context", { params: { camera_id: item.camera_id, at: item.timestamp } }));
+      } else {
+        throw new Error("Item sans identifiant");
+      }
       const token = localStorage.getItem("mg_token");
       const url = `${process.env.REACT_APP_BACKEND_URL}/api${data.stream_url}?token=${encodeURIComponent(token || "")}`;
       setRecInfo({ ...data, url });

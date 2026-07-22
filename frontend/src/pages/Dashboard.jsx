@@ -3,6 +3,7 @@ import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar } from "recharts";
 import { Cctv, Wifi, WifiOff, Building2, Activity, Bell, ScanLine, Cpu, MemoryStick, HardDrive, Thermometer, Gauge, Clock } from "lucide-react";
+import EventViewer from "@/components/EventViewer";
 
 const PIE_COLORS = ["#0044FF", "#00E676", "#FFB800", "#FF3333", "#A855F7", "#06B6D4", "#EC4899", "#84CC16", "#F97316"];
 
@@ -40,6 +41,13 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [ts, setTs] = useState({ hourly: [], breakdown: [] });
   const [alerts, setAlerts] = useState([]);
+  const [viewerIdx, setViewerIdx] = useState(null);
+  const viewerItems = alerts.map((a) => ({
+    id: a.id, thumbnail: a.thumbnail || a.plate_crop,
+    camera_id: a.camera_id, camera_name: a.camera_name, site_name: a.site_name,
+    timestamp: a.timestamp, plugin: a.plugin || (a.scenario ? `IA · ${a.scenario}` : "Alerte"),
+    type: a.type || a.scenario || "alert", label: a.message, plate: a.plate,
+  }));
 
   const loadAll = () => {
     api.get("/dashboard/stats").then((r) => setStats(r.data)).catch(() => {});
@@ -130,17 +138,21 @@ export default function Dashboard() {
         <div className="xl:col-span-2 bg-card border border-border p-4">
           <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground mb-3">{t("dash.recent_alerts")}</div>
           <div className="divide-y divide-border">
-            {alerts.map((a) => (
-              <div key={a.id} className="flex items-center gap-3 py-2.5" data-testid="dash-alert-row">
+            {alerts.map((a, idx) => (
+              <button key={a.id} onClick={() => setViewerIdx(idx)} className="w-full text-left flex items-center gap-3 py-2.5 hover:bg-secondary/50 px-1 transition" data-testid="dash-alert-row">
                 <span className="w-2 h-2 rounded-full shrink-0 rec-dot" style={{ background: sev[a.severity] }} />
                 <span className="text-sm flex-1 truncate">{a.message}</span>
                 <span className="text-xs text-muted-foreground hidden sm:inline">{a.camera_name}</span>
                 <span className="text-[10px] mono text-muted-foreground">{new Date(a.timestamp).toLocaleString()}</span>
-              </div>
+              </button>
             ))}
           </div>
         </div>
       </div>
+      {viewerIdx !== null && (
+        <EventViewer items={viewerItems} index={viewerIdx} onIndex={setViewerIdx}
+                      onClose={() => setViewerIdx(null)} kind="event" />
+      )}
     </div>
   );
 }

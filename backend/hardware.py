@@ -1,9 +1,8 @@
-"""MG-VMS — Gestion intelligente des ressources matérielles (CPU/GPU) — Phase 1.
+"""MG-VMS — Gestion intelligente des ressources matérielles (CPU/GPU).
 
-Sandbox : CPU/RAM détectés réellement (psutil). GPU détectés si présents
-sans GPU physique, l'inventaire GPU est vide.
-La détection/accélération matérielle réelle (CUDA/NVENC/OpenVINO/Coral) vit
-dans /deploy. Persiste la configuration (assignations, profil, priorités, pools).
+Détection RÉELLE : CPU/RAM via `psutil`, GPU via `nvidia-smi` (CUDA), `rocm-smi` (AMD) et OpenVINO.
+Si aucun accélérateur n'est physiquement présent, l'inventaire GPU est vide (aucun placeholder).
+Persiste la configuration (assignations plugin→appareil, profil, priorités, pools).
 """
 import os
 import shutil
@@ -137,10 +136,10 @@ def _default_config() -> dict:
 async def seed_hardware():
     """Détecte le matériel et initialise la config (idempotent)."""
     doc = await db.hardware.find_one({"id": "global"}, {"_id": 0})
-    gpus, simulated = _detect_gpus()
+    gpus, _ = _detect_gpus()
     info = {
         "cpu": _detect_cpu(), "ram": _detect_ram(),
-        "gpus": gpus, "accelerators": _accelerators(gpus), "simulated_gpu": simulated,
+        "gpus": gpus, "accelerators": _accelerators(gpus),
         "detected_at": datetime.now(timezone.utc).isoformat(),
     }
     if not doc:
@@ -225,7 +224,7 @@ async def hardware_info(user: dict = Depends(get_current_user)):
     doc = await _load()
     return {
         "cpu": doc["cpu"], "ram": doc["ram"], "gpus": doc["gpus"],
-        "accelerators": doc["accelerators"], "simulated_gpu": doc.get("simulated_gpu", True),
+        "accelerators": doc["accelerators"],
         "detected_at": doc.get("detected_at"),
     }
 
