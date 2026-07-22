@@ -1,6 +1,23 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **BUG FIX ONVIF Reolink — RTSP fallback constructeur + Override (2.9.1 — 2026-07-22)**
+  - **Cause racine** : ONVIF Reolink retourne parfois `/h264Preview_01_main` alors que la caméra encode réellement en H.265 → ffprobe échoue → création caméra bloquée.
+  - **Fallback constructeur intelligent** : nouvelle fonction `_rtsp_variants(base_url, preferred_codec)` génère la liste des URLs à tester dans l'ordre optimal :
+    - **Reolink** : 6 combinaisons `/h26[45]Preview_0[12]_(main|sub)`.
+    - **Hikvision** : 4 chaînes `/Streaming/Channels/{101,102,201,202}`.
+    - **Dahua** : 4 canaux `/cam/realmonitor?channel={1,2}&subtype={0,1}`.
+    - Le codec préféré (`h264` / `h265`) place les variantes correspondantes en tête.
+  - **`_try_ffprobe_variants`** essaie chaque variante avec `ffprobe -rtsp_transport tcp|udp`, valide le codec réel, et retourne l'URL qui fonctionne + les métadonnées (résolution, fps, codec, bitrate).
+  - **`_ffprobe(url, transport)`** respecte désormais `transport="tcp"|"udp"` (avant : TCP hardcodé). Ajoute la récupération du bitrate.
+  - **`test-connectivity`** : le step `rtsp_open` en cas d'échec renvoie `allow_override: true` + `tried_variants: [...]`.
+  - **`POST /api/cameras`** : nouveau champ `allow_rtsp_override` (défaut False). Si True + mode ONVIF + go2rtc échoue à ouvrir le flux, la caméra est créée en `status: "offline"` avec audit `camera_created_no_rtsp`. Résolution auto : `payload.rtsp_url`, `codec`, `resolution`, `fps` sont remplis depuis ffprobe des variantes.
+  - **Frontend `Cameras.jsx`** : nouveau bouton conditionnel `cam-form-override` ("Créer malgré le test RTSP", jaune) qui apparaît uniquement si `mode="onvif"` + `onvif_auth=ok` + `rtsp_open=error`. Injecte `allow_rtsp_override=true` dans le POST.
+  - **`GET /api/cameras/{id}/diagnostic`** : ajoute `profile_name` et `rtsp_url_masked` (mot de passe → `****`). Dialog frontend affiche Fabricant / Modèle / Profil / URL RTSP masquée.
+  - **Tests testing_agent iteration_19 : 17/17 backend pytest + Playwright OK — 0 issue.**
+
+
+## Implemented (2026-07)
 - ✅ **SPRINT FINAL — Correction chaîne vidéo live + RTSP + Diagnostic (2.9.0 — 2026-07-22)**
   - **BLOCKER LIVE RÉSOLU** : go2rtc 1.9.8 ne transcode plus H.264 → MJPEG automatiquement sur `/api/stream.mjpeg` pour un producer H.264 pur (retour Content-Length: 0). Fix : `_mjpeg_stream(camera_id)` retourne **toujours** la variante `_sd` (qui contient explicitement `ffmpeg:...#video=mjpeg#width=640`). L'en-tête `content-type` (avec `boundary=frame`) est désormais transmis intact au navigateur (avant : le paramètre boundary était perdu). Résultat testé : Chrome/Firefox affichent le live des 2 caméras démo (mire + trafic).
   - **RTSP TCP/UDP par caméra** : nouveau champ `rtsp_transport` ("tcp"|"udp", défaut "tcp"). `_build_rtsp_url` ajoute `#transport=tcp|udp` au fragment go2rtc → passage TCP/UDP réel au niveau ffmpeg upstream.
