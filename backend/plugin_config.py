@@ -11,10 +11,13 @@ Endpoints CRUD et paramétrage pour chaque plugin :
 Aucune donnée fictive : ce que l'admin saisit est le seul contenu réel.
 """
 import uuid
+import io
+import csv
 from datetime import datetime, timezone
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from database import db
@@ -108,6 +111,176 @@ async def anpr_cameras_list(user: dict = Depends(get_current_user)):
         c["bl_count"] = len(cfg.get("blacklist_local", []) or [])
         c.pop("anpr_config", None)
     return cams
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Import / Export CSV — Watchlist globale + listes locales par caméra
+# ═══════════════════════════════════════════════════════════════════
+def _normalize_plate(raw: str) -> str:
+    """Normalise une plaque : uppercase, sans espace, sans tirets superflus."""
+    return (raw or "").upper().replace(" ", "").strip()
+
+
+def _parse_csv_plates(content: bytes, default_list_type: Optional[str] = None) -> tuple:
+    """Parse un CSV. Colonnes acceptées :
+      - Ligne 1 = en-têtes optionnelles : `plate,list_type,reason` OU juste `plate`
+      - Si list_type est absent : default_list_type est utilisé
+    Retourne (rows, errors) : rows = list de dicts prêts à être insérés."""
+    rows: list = []
+    errors: list = []
+    try:
+        text = content.decode("utf-8-sig")  # tolère le BOM Excel
+    except UnicodeDecodeError:
+        try:
+            text = content.decode("latin-1")
+        except UnicodeDecodeError as exc:
+            return [], [f"Encodage illisible : {exc}"]
+    reader = csv.reader(io.StringIO(text))
+    header = None
+    for i, row in enumerate(reader):
+        if not row or all(not (c or "").strip() for c in row):
+            continue
+        # Détecte l'en-tête
+        if i == 0 and any(k in (row[0] or "").lower() for k in ("plate", "plaque", "immatriculation")):
+            header = [c.strip().lower() for c in row]
+            continue
+        plate_raw = row[0] if row else ""
+        plate = _normalize_plate(plate_raw)
+        if not plate:
+            errors.append(f"Ligne {i + 1} : plaque vide")
+            continue
+        list_type = default_list_type or ""
+        reason = ""
+        if header:
+            idx = {name: n for n, name in enumerate(header)}
+            if "list_type" in idx and idx["list_type"] < len(row):
+                list_type = (row[idx["list_type"]] or "").strip().lower()
+            elif "type" in idx and idx["type"] < len(row):
+                list_type = (row[idx["type"]] or "").strip().lower()
+            if "reason" in idx and idx["reason"] < len(row):
+                reason = (row[idx["reason"]] or "").strip()
+            elif "motif" in idx and idx["motif"] < len(row):
+                reason = (row[idx["motif"]] or "").strip()
+        else:
+            if len(row) >= 2:
+                list_type = (row[1] or "").strip().lower()
+            if len(row) >= 3:
+                reason = (row[2] or "").strip()
+        list_type = list_type.replace("blanche", "white").replace("noire", "black")
+        if list_type not in ("white", "black"):
+            errors.append(f"Ligne {i + 1} ({plate}) : list_type invalide '{list_type}' (attendu 'white' ou 'black')")
+            continue
+        rows.append({"plate": plate, "list_type": list_type, "reason": reason})
+    return rows, errors
+
+
+@plugin_config_router.post("/anpr/watchlist/import")
+async def anpr_watchlist_import(csv_file: UploadFile = File(...),
+                                 default_list_type: Optional[str] = None,
+                                 user: dict = Depends(require_role("technician"))):
+    """Import CSV de la watchlist GLOBALE (upsert par plaque).
+    Formats acceptés : `plate,list_type,reason` (ou `plate` seul + `default_list_type` en query)."""
+    if not (csv_file.filename or "").lower().endswith((".csv", ".txt")):
+        raise HTTPException(400, "Fichier CSV attendu (.csv)")
+    content = await csv_file.read()
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(400, "Fichier trop volumineux (max 2 Mo)")
+    rows, errors = _parse_csv_plates(content, default_list_type)
+    if not rows:
+        raise HTTPException(400, f"Aucune plaque valide dans le CSV. {'; '.join(errors[:3])}")
+    now = datetime.now(timezone.utc).isoformat()
+    inserted, updated = 0, 0
+    for row in rows:
+        existing = await db.watchlist.find_one({"plate": row["plate"]}, {"_id": 0, "id": 1})
+        if existing:
+            await db.watchlist.update_one({"id": existing["id"]},
+                                           {"$set": {"list_type": row["list_type"],
+                                                     "reason": row["reason"], "updated_at": now}})
+            updated += 1
+        else:
+            await db.watchlist.insert_one({
+                "id": str(uuid.uuid4()), "created_at": now,
+                "plate": row["plate"], "list_type": row["list_type"], "reason": row["reason"],
+                "imported_by": user.get("email"),
+            })
+            inserted += 1
+        # Rétro-application : mise à jour du list_status des plaques déjà lues
+        await db.plates.update_many({"plate": row["plate"]},
+                                     {"$set": {"list_status": row["list_type"]}})
+    await log_audit(user, "anpr_watchlist_imported",
+                    csv_file.filename, f"inserted={inserted} updated={updated} errors={len(errors)}")
+    return {"ok": True, "inserted": inserted, "updated": updated,
+            "total": inserted + updated, "errors": errors[:20]}
+
+
+@plugin_config_router.get("/anpr/watchlist/export")
+async def anpr_watchlist_export(user: dict = Depends(get_current_user)):
+    """Export CSV de la watchlist globale."""
+    rows = await db.watchlist.find({}, {"_id": 0}).sort("plate", 1).to_list(10000)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["plate", "list_type", "reason"])
+    for r in rows:
+        writer.writerow([r.get("plate", ""), r.get("list_type", ""), r.get("reason", "")])
+    return Response(content=buf.getvalue(), media_type="text/csv",
+                     headers={"Content-Disposition": 'attachment; filename="mgvms_watchlist.csv"'})
+
+
+@plugin_config_router.post("/anpr/cameras/{camera_id}/lists/import")
+async def anpr_camera_lists_import(camera_id: str,
+                                    csv_file: UploadFile = File(...),
+                                    target: str = "whitelist",  # "whitelist" ou "blacklist"
+                                    user: dict = Depends(require_role("technician"))):
+    """Import CSV des plaques dans la liste LOCALE (whitelist ou blacklist) d'une caméra.
+    Format : une plaque par ligne. Les entrées existantes sont conservées (union)."""
+    if target not in ("whitelist", "blacklist"):
+        raise HTTPException(400, "target doit être 'whitelist' ou 'blacklist'")
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "name": 1, "anpr_config": 1})
+    if not cam:
+        raise HTTPException(404, "Caméra introuvable")
+    if not (csv_file.filename or "").lower().endswith((".csv", ".txt")):
+        raise HTTPException(400, "Fichier CSV attendu")
+    content = await csv_file.read()
+    if len(content) > 512 * 1024:
+        raise HTTPException(400, "Fichier trop volumineux (max 512 Ko)")
+    # Parse en forçant le type (whitelist → 'white' pour compatibilité) — on n'utilise
+    # que la 1re colonne, les autres champs sont ignorés
+    default = "white" if target == "whitelist" else "black"
+    rows, errors = _parse_csv_plates(content, default)
+    plates = list({r["plate"] for r in rows})
+    if not plates:
+        raise HTTPException(400, f"Aucune plaque valide. {'; '.join(errors[:3])}")
+    field = "whitelist_local" if target == "whitelist" else "blacklist_local"
+    current = set((cam.get("anpr_config") or {}).get(field, []) or [])
+    merged = sorted(current.union(plates))
+    await db.cameras.update_one({"id": camera_id},
+                                 {"$set": {f"anpr_config.{field}": merged}})
+    added = len(merged) - len(current)
+    await log_audit(user, "anpr_camera_list_imported", cam["name"],
+                    f"target={target} added={added} total={len(merged)}")
+    return {"ok": True, "target": target, "added": added,
+            "total": len(merged), "errors": errors[:10]}
+
+
+@plugin_config_router.get("/anpr/cameras/{camera_id}/lists/export")
+async def anpr_camera_lists_export(camera_id: str,
+                                    target: str = "whitelist",
+                                    user: dict = Depends(get_current_user)):
+    """Export CSV d'une liste locale (whitelist ou blacklist) d'une caméra."""
+    if target not in ("whitelist", "blacklist"):
+        raise HTTPException(400, "target invalide")
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "name": 1, "anpr_config": 1})
+    if not cam:
+        raise HTTPException(404, "Caméra introuvable")
+    field = "whitelist_local" if target == "whitelist" else "blacklist_local"
+    plates = (cam.get("anpr_config") or {}).get(field, []) or []
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["plate"])
+    for p in plates:
+        writer.writerow([p])
+    return Response(content=buf.getvalue(), media_type="text/csv",
+                     headers={"Content-Disposition": f'attachment; filename="cam_{camera_id}_{target}.csv"'})
 
 
 # ═══════════════════════════════════════════════════════════════════

@@ -328,7 +328,29 @@ function AnprSettings({ onSaved }) {
       </div>
 
       <div className="border border-border p-4 bg-card">
-        <div className="flex items-center gap-2 mb-3"><Waypoints size={18} className="text-[#00E676]" /><span className="font-head font-semibold">Configuration par caméra (ROI, listes locales)</span></div>
+        <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+          <div className="flex items-center gap-2"><Waypoints size={18} className="text-[#00E676]" /><span className="font-head font-semibold">Configuration par caméra (ROI, listes locales)</span></div>
+          <div className="flex items-center gap-2">
+            <a href={`${process.env.REACT_APP_BACKEND_URL}/api/plugins/anpr/watchlist/export?token=${encodeURIComponent(localStorage.getItem("mg_token") || "")}`}
+               className="text-xs px-2.5 py-1 border border-border hover:bg-secondary flex items-center gap-1" data-testid="wl-export-btn">
+              <Save size={11} /> Exporter watchlist globale (CSV)
+            </a>
+            <label className="text-xs px-2.5 py-1 border border-[#0044FF] text-[#0044FF] hover:bg-[#0044FF]/10 flex items-center gap-1 cursor-pointer" data-testid="wl-import-btn">
+              <Plus size={11} /> Importer CSV
+              <input type="file" accept=".csv,.txt" className="hidden"
+                     onChange={async (e) => {
+                       const file = e.target.files?.[0]; if (!file) return;
+                       const fd = new FormData(); fd.append("csv_file", file);
+                       try {
+                         const { data } = await api.post("/plugins/anpr/watchlist/import", fd, { headers: { "Content-Type": "multipart/form-data" } });
+                         toast.success(`Import OK : ${data.inserted} ajoutée(s), ${data.updated} mise(s) à jour · ${data.errors?.length || 0} erreur(s)`);
+                         if (data.errors?.length) console.warn("CSV errors", data.errors);
+                       } catch (err) { toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Import échoué"); }
+                       finally { e.target.value = ""; }
+                     }} />
+            </label>
+          </div>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
@@ -362,6 +384,37 @@ function AnprSettings({ onSaved }) {
     </div>
   );
 }
+
+function LocalListImportButtons({ camId, target, onImported }) {
+  const token = encodeURIComponent(localStorage.getItem("mg_token") || "");
+  const [importing, setImporting] = useState(false);
+  const handleImport = async (file) => {
+    if (!file) return;
+    setImporting(true);
+    try {
+      const fd = new FormData(); fd.append("csv_file", file);
+      const { data } = await api.post(`/plugins/anpr/cameras/${camId}/lists/import?target=${target}`, fd,
+        { headers: { "Content-Type": "multipart/form-data" } });
+      toast.success(`${target} : ${data.added} plaque(s) ajoutée(s) (total ${data.total})`);
+      onImported?.(data.added);
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Import échoué"); }
+    finally { setImporting(false); }
+  };
+  return (
+    <div className="flex items-center gap-1.5 mt-1">
+      <a href={`${process.env.REACT_APP_BACKEND_URL}/api/plugins/anpr/cameras/${camId}/lists/export?target=${target}&token=${token}`}
+         className="text-[10px] px-2 py-0.5 border border-border hover:bg-secondary flex items-center gap-1" data-testid={`local-${target}-export`}>
+        <Save size={10} /> Export CSV
+      </a>
+      <label className="text-[10px] px-2 py-0.5 border border-[#0044FF] text-[#0044FF] hover:bg-[#0044FF]/10 flex items-center gap-1 cursor-pointer" data-testid={`local-${target}-import`}>
+        {importing ? <Loader2 size={10} className="animate-spin" /> : <Plus size={10} />} Import CSV
+        <input type="file" accept=".csv,.txt" className="hidden"
+                onChange={(e) => { handleImport(e.target.files?.[0]); e.target.value = ""; }} />
+      </label>
+    </div>
+  );
+}
+
 
 function AnprCameraDialog({ camera, onClose, onSaved }) {
   const [cfg, setCfg] = useState(null);
@@ -436,9 +489,13 @@ function AnprCameraDialog({ camera, onClose, onSaved }) {
             </Field>
             <Field label="Whitelist locale (plaques autorisées)" hint="Une par ligne">
               <textarea rows={4} value={wlText} onChange={(e) => setWlText(e.target.value)} className="inp mono" placeholder="AB-123-CD&#10;XY-456-ZZ" data-testid="anpr-cam-wl" />
+              <LocalListImportButtons camId={camera.id} target="whitelist" onImported={(added) => {
+                if (added > 0) { setWlText((prev) => prev); toast.info("Rechargez la config pour voir les plaques importées"); }
+              }} />
             </Field>
             <Field label="Blacklist locale (alerte immédiate)" hint="Une par ligne">
               <textarea rows={4} value={blText} onChange={(e) => setBlText(e.target.value)} className="inp mono" placeholder="FG-789-HI" data-testid="anpr-cam-bl" />
+              <LocalListImportButtons camId={camera.id} target="blacklist" onImported={() => {}} />
             </Field>
           </div>
           <div className="p-4 border-t border-border flex justify-end gap-2">
