@@ -103,7 +103,13 @@ async def register_camera_stream(cam: dict) -> bool:
     """Déclare (ou met à jour) le flux d'une caméra dans go2rtc.
     IMPORTANT : ne pas appeler dans une boucle périodique — la re-registration
     déconnecte tous les consommateurs (live/recorder/IA). Uniquement sur
-    create / update / réparation ciblée."""
+    create / update / réparation ciblée.
+
+    Enregistre 3 variantes :
+      - `{name}`     : source RTSP brute (H.264/H.265) — utilisée par le recorder + IA
+      - `{name}_hd`  : ffmpeg → MJPEG à résolution native (aperçu HD)
+      - `{name}_sd`  : ffmpeg → MJPEG width=640 (aperçu SD faible bande passante)
+    """
     if cam.get("id") in DEMO_IDS:
         return True  # flux de démonstration défini statiquement dans go2rtc.yaml
     rtsp_url = _build_rtsp_url(cam)
@@ -112,19 +118,23 @@ async def register_camera_stream(cam: dict) -> bool:
     name = _stream_name(cam["id"])
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            # Supprime l'ancien enregistrement pour repartir propre (évite les producteurs en doublon)
-            await client.delete(f"{GO2RTC_URL}/api/streams", params={"src": name})
-            await client.delete(f"{GO2RTC_URL}/api/streams", params={"src": f"{name}_sd"})
-            # UNE seule source RTSP → un seul décodage. Les consommateurs MJPEG
-            # obtiennent la conversion à la demande via /api/stream.mjpeg (go2rtc pipeline).
+            # Supprime les anciens enregistrements (source + variantes) pour repartir propre
+            for src in (name, f"{name}_hd", f"{name}_sd"):
+                await client.delete(f"{GO2RTC_URL}/api/streams", params={"src": src})
+            # 1) Source unique RTSP (un seul décodage) — utilisée par le recorder et l'IA
             r = await client.put(f"{GO2RTC_URL}/api/streams",
                                  params=[("name", name), ("src", rtsp_url)])
             r.raise_for_status()
-            # Variante SD : produite à la demande, uniquement quand un client la consomme
-            r2 = await client.put(f"{GO2RTC_URL}/api/streams",
-                                  params=[("name", f"{name}_sd"),
-                                          ("src", f"ffmpeg:{name}#video=mjpeg#width=640")])
-            r2.raise_for_status()
+            # 2) Variante HD : MJPEG à résolution native (aperçu haute qualité)
+            r_hd = await client.put(f"{GO2RTC_URL}/api/streams",
+                                     params=[("name", f"{name}_hd"),
+                                             ("src", f"ffmpeg:{name}#video=mjpeg")])
+            r_hd.raise_for_status()
+            # 3) Variante SD : MJPEG 640 (aperçu faible bande passante)
+            r_sd = await client.put(f"{GO2RTC_URL}/api/streams",
+                                     params=[("name", f"{name}_sd"),
+                                             ("src", f"ffmpeg:{name}#video=mjpeg#width=640")])
+            r_sd.raise_for_status()
         if not await _stream_registered(name):
             logger.warning("go2rtc: flux %s introuvable après enregistrement", name)
             return False
@@ -140,7 +150,7 @@ async def unregister_camera_stream(camera_id: str) -> None:
     name = _stream_name(camera_id)
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            for stream in (name, f"{name}_sd"):
+            for stream in (name, f"{name}_hd", f"{name}_sd"):
                 await client.delete(f"{GO2RTC_URL}/api/streams", params={"src": stream})
     except httpx.HTTPError:
         pass
@@ -829,17 +839,31 @@ def _quality_stream(user: dict, camera_id: str) -> str:
     return name if has_permission(user, "stream_hd") else f"{name}_sd"
 
 
-def _mjpeg_stream(camera_id: str) -> str:
-    """Toujours la variante `_sd` (transcodée MJPEG) — sinon le navigateur reçoit 0 byte."""
-    return f"{_stream_name(camera_id)}_sd"
+def _mjpeg_stream(camera_id: str, hd: bool = False) -> str:
+    """Retourne la variante MJPEG à consommer.
+
+    - `hd=True`  → `{name}_hd`  (résolution native, transcodée MJPEG)
+    - `hd=False` → `{name}_sd`  (width=640, transcodée MJPEG, faible bande passante)
+
+    Les 2 variantes sont enregistrées dans go2rtc par `register_camera_stream`.
+    Elles utilisent le producteur brut `{name}` en amont (un seul décodage RTSP).
+    """
+    name = _stream_name(camera_id)
+    return f"{name}_hd" if hd else f"{name}_sd"
 
 
 # ============ Proxys de flux authentifiés ============
 @stream_router.get("/stream/{camera_id}/live.mjpeg")
-async def live_mjpeg(camera_id: str, request: Request, user: dict = Depends(stream_user)):
-    """Flux vidéo MJPEG temps réel (transcodé par go2rtc via le stream `_sd`)."""
+async def live_mjpeg(camera_id: str, request: Request,
+                     hd: int = 0, user: dict = Depends(stream_user)):
+    """Flux vidéo MJPEG temps réel (transcodé par go2rtc via `{name}_hd` ou `{name}_sd`).
+
+    Query param `hd=1` → variante HD (résolution native). Nécessite la permission
+    `stream_hd` ; sinon rétrogradation silencieuse vers SD.
+    """
     await _authorize_camera(user, camera_id)
-    src = _mjpeg_stream(camera_id)
+    want_hd = bool(int(hd or 0)) and has_permission(user, "stream_hd")
+    src = _mjpeg_stream(camera_id, hd=want_hd)
     client = httpx.AsyncClient(timeout=httpx.Timeout(15, read=None))
     req = client.build_request("GET", f"{GO2RTC_URL}/api/stream.mjpeg", params={"src": src})
     upstream = await client.send(req, stream=True)
@@ -864,15 +888,28 @@ async def live_mjpeg(camera_id: str, request: Request, user: dict = Depends(stre
 
 
 @stream_router.get("/stream/{camera_id}/frame.jpeg")
-async def frame_jpeg(camera_id: str, user: dict = Depends(stream_user)):
-    """Image instantanée réelle extraite du flux (HD si autorisé, sinon SD)."""
+async def frame_jpeg(camera_id: str, hd: int = 1, user: dict = Depends(stream_user)):
+    """Image instantanée réelle extraite du flux.
+
+    - `hd=1` (défaut) : tente le flux source brut (résolution native, HD) puis
+      les variantes `{name}_hd` / `{name}_sd` en fallback si go2rtc ne peut pas
+      extraire un JPEG du producteur H.264/H.265 direct.
+    - `hd=0` : force la variante SD (rapide, 640px).
+    Nécessite la permission `stream_hd` pour obtenir la version HD ; sinon
+    rétrogradation silencieuse vers SD.
+    """
     await _authorize_camera(user, camera_id)
-    src_hd = _quality_stream(user, camera_id)
-    src_sd = _mjpeg_stream(camera_id)
+    want_hd = bool(int(hd or 0)) and has_permission(user, "stream_hd")
+    name = _stream_name(camera_id)
+    if want_hd:
+        # Priorité au flux natif (résolution originale). Fallback sur variante
+        # MJPEG HD transcodée, puis SD en dernier recours.
+        sources = [name, f"{name}_hd", f"{name}_sd"]
+    else:
+        sources = [f"{name}_sd"]
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            # Essaie HD si l'utilisateur a le droit ; fallback SD si HD ne répond pas
-            for src in [src_hd, src_sd] if src_hd != src_sd else [src_sd]:
+            for src in sources:
                 r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": src})
                 if r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff":
                     return Response(content=r.content, media_type="image/jpeg",

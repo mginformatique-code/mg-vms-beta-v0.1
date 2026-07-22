@@ -1,6 +1,29 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **BUG FIX Live SD/HD + Miniatures d'événements HD (2.13.0 — 2026-07-22)**
+  - **Bug 1** — le bouton SD/HD du Live n'avait aucun effet, la prévisualisation restait toujours en 640px (sous-flux).
+    - **Cause racine** : `_mjpeg_stream()` retournait *toujours* `{name}_sd` (variante MJPEG 640 hardcodée). L'endpoint `/api/stream/{id}/live.mjpeg` n'acceptait pas de paramètre HD.
+    - **Fix backend** :
+      - `register_camera_stream` enregistre désormais **3 variantes** dans go2rtc : `{name}` (source RTSP brute pour recorder+IA), `{name}_hd` (ffmpeg → MJPEG résolution native), `{name}_sd` (ffmpeg → MJPEG width=640).
+      - `_mjpeg_stream(camera_id, hd=False)` retourne `{name}_hd` ou `{name}_sd` selon le booléen.
+      - `/api/stream/{camera_id}/live.mjpeg?hd=1` accepte le param, vérifie `has_permission(user, "stream_hd")`, et proxifie la bonne variante. Rétrogradation silencieuse vers SD si l'utilisateur n'a pas la permission.
+      - `/api/stream/{camera_id}/frame.jpeg?hd=1` (défaut) tente le flux brut natif → fallback `_hd` → fallback `_sd`.
+      - `unregister_camera_stream` supprime les 3 variantes.
+      - `go2rtc.yaml` (caméras démo) enrichi avec les entrées `_hd`.
+    - **Fix frontend `LiveView.jsx`** :
+      - `streamUrl(camId, hd)` propage `&hd=1` dans l'URL.
+      - Le `useEffect` du composant `Feed` inclut désormais `hd` dans les dépendances → force le rechargement du `<img>` MJPEG à chaque toggle SD ↔ HD.
+    - **Validation** : `curl /api/stream/demo-cam-001/frame.jpeg?hd=0` → **640×360**, `?hd=1` → **1280×720**. Idem sur `live.mjpeg` (bytes MJPEG extraits) : SD = 640×360, HD = 1280×720. ✅
+  - **Bug 2** — miniatures des événements trop faibles pour identifier personnes/plaques/objets.
+    - **Cause racine** : `_jpeg_data_uri()` compressait à `max_width=360 @ quality=60` par défaut. De plus, les événements YOLO (Personne/Voiture) stockaient uniquement le *crop* du bbox (souvent < 100 px) comme thumbnail.
+    - **Fix** :
+      - `_jpeg_data_uri()` : nouveau défaut **1280 max_width @ q=85**. Ne fait JAMAIS de upscale (préserve la taille naturelle des petits crops). Interpolation `INTER_AREA` pour downscale de qualité.
+      - Événements YOLO : `thumbnail = frame_thumb` (scène complète HD 1280×720 ou native) + `crop_thumbnail = det["thumbnail"]` (le crop bbox reste en secondaire).
+      - Événements Mouvement, Visage, Alertes IA : déjà en `frame_thumb`, bénéficient automatiquement du nouveau défaut HD.
+    - **Validation** : nouvel événement Personne enregistré → `thumbnail=768×432 · 16 KB` (scène complète du flux principal) + `crop_thumbnail=30×49 · 1 KB` (bbox précis conservé). Identifiable en plein écran. ✅
+  - **Tests** : `tests/test_iter27_sd_hd_thumbs.py` (7 tests unitaires — sélecteur MJPEG HD/SD, `_jpeg_data_uri` HD par défaut + pas de upscale + max_width custom, noms de flux distincts). **Total pytest : 30/30** (iter25 + iter26 + iter27).
+
 - ✅ **BUG FIX ONVIF — Le profil choisi (main/sub) est désormais persisté exactement (2.12.0 — 2026-07-22)**
   - **Cause racine** : `POST /api/cameras` (mode ONVIF) appelait `_try_ffprobe_variants(selected["rtsp_url"], …)` qui générait des variantes RTSP (main + sub, h264 + h265) et retenait la **première qui répondait** — potentiellement le sub-stream, même si l'utilisateur avait explicitement coché le profil main dans le dialog. Résultat : la debug page affichait bien `h264Preview_02_main` (2304x1296), mais après sauvegarde, go2rtc/live preview utilisait le sub-stream basse résolution.
   - **Fix backend** :

@@ -20,9 +20,9 @@ const CLASS_COLORS = {
 };
 const colorFor = (label) => CLASS_COLORS[label] || "#FF3333";
 
-function streamUrl(camId) {
+function streamUrl(camId, hd = false) {
   const token = localStorage.getItem("mg_token");
-  return `${API}/stream/${camId}/live.mjpeg?token=${encodeURIComponent(token || "")}`;
+  return `${API}/stream/${camId}/live.mjpeg?token=${encodeURIComponent(token || "")}&hd=${hd ? 1 : 0}`;
 }
 
 function OverlayCanvas({ cam, boxes, showOverlay }) {
@@ -67,7 +67,8 @@ function Feed({ cam, idx, canPtz, hd, showOverlay, aiState }) {
   const [reloadKey, setReloadKey] = useState(0);
   const retryTimer = useRef(null);
   const online = cam?.status === "online";
-  useEffect(() => { setReloadKey(0); }, [cam?.id]);
+  // Reset reloadKey lors d'un changement de caméra OU d'un toggle HD/SD (force le rechargement du <img>).
+  useEffect(() => { setReloadKey((k) => k + 1); }, [cam?.id, hd]);
   useEffect(() => () => { if (retryTimer.current) clearTimeout(retryTimer.current); }, []);
   const handleError = () => {
     if (retryTimer.current) clearTimeout(retryTimer.current);
@@ -84,7 +85,7 @@ function Feed({ cam, idx, canPtz, hd, showOverlay, aiState }) {
       {online ? (
         <>
           <img
-            src={`${streamUrl(cam.id)}&r=${reloadKey}`}
+            src={`${streamUrl(cam.id, hd)}&r=${reloadKey}`}
             alt="" className="w-full h-full object-cover"
             onError={handleError} data-testid="live-stream"
           />

@@ -160,14 +160,23 @@ def _load_models():
             _alpr = False
 
 
-def _jpeg_data_uri(bgr_img, max_width: int = 360):
+def _jpeg_data_uri(bgr_img, max_width: int = 1280, quality: int = 85):
+    """Encode une image BGR en data-URI JPEG.
+
+    - `max_width` : largeur maximale — n'agrandit JAMAIS l'image (upscale non désiré).
+      Default = 1280 px pour permettre l'identification à l'œil (personnes, plaques, objets).
+    - `quality` : compression JPEG (85 par défaut — bon compromis qualité / taille).
+
+    Retourne `None` si l'image est vide ou l'encodage échoue.
+    """
     import cv2
     if bgr_img is None or bgr_img.size == 0:
         return None
     h, w = bgr_img.shape[:2]
     if w > max_width:
-        bgr_img = cv2.resize(bgr_img, (max_width, int(h * max_width / w)))
-    ok, buf = cv2.imencode(".jpg", bgr_img, [cv2.IMWRITE_JPEG_QUALITY, 60])
+        bgr_img = cv2.resize(bgr_img, (max_width, int(h * max_width / w)),
+                              interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".jpg", bgr_img, [cv2.IMWRITE_JPEG_QUALITY, int(quality)])
     return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode() if ok else None
 
 
@@ -740,7 +749,11 @@ async def _process_camera(cam: dict) -> None:
             continue
         await db.events.insert_one({
             "id": str(uuid.uuid4()), "type": det["label"], **base,
-            "confidence": det["confidence"], "thumbnail": det["thumbnail"],
+            "confidence": det["confidence"],
+            # Miniature = image complète HD du flux principal (identification personnes/objets
+            # au visionnage plein écran). Le crop du bbox reste disponible en secondaire.
+            "thumbnail": result.get("frame_thumb") or det["thumbnail"],
+            "crop_thumbnail": det["thumbnail"],
             "vehicle_color": det.get("vehicle_color"),
             "track_id": det.get("track_id"),
         })
