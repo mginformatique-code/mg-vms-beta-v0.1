@@ -1,0 +1,25 @@
+{
+  "summary": "Iteration 24 — Bug fix RTSP ffprobe fragment stripping VALIDATED. 18/18 pytest PASS. Confirmed: POST /api/cameras/test-connectivity with rtsp://127.0.0.1:8554/cam_demo-cam-001 now returns rtsp_url_validated=true, codec=H264, resolution=1280x720. Unit tests confirm _strip_go2rtc_fragments removes everything after first '#', while _build_rtsp_url STILL appends '#transport=tcp' (required by go2rtc). Passwords never leak in HTTP responses (masked as ******). All logging markers present in backend.err.log (TEST_CONNECTIVITY start/end, TRY_VARIANTS, VARIANT_TEST, FFPROBE URL/CMD/RC/OK). Massive regression suite green: /api/plugins, /api/storage/overview, /api/cameras/{id}/diagnostic, /api/plugins/anpr/config, /api/plugins/anpr/cameras, /api/plugins/anpr/watchlist/export, /api/plugins/face_recognition/config, /api/plugins/face_recognition/faces. Live MJPEG stream /api/stream/demo-cam-001/live.mjpeg streams >10KB in 3s with Content-Type boundary=frame.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter24_rtsp_ffprobe_fix.py",
+    "/app/test_reports/pytest/iter24.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "streaming.py:242-250 — _strip_go2rtc_fragments uses str.find('#'). Correct and simple. Consider urllib.parse.urldefrag for RFC-compliance, but current impl is fine because rtsp:// URIs have no legitimate use of '#'.",
+    "streaming.py:263-267 — FFPROBE CMD log prints '…' placeholder (good — hides show_entries verbosity) but the actual URL passed to subprocess.run is clean_url; ensure logs never contain unmasked url. Currently only 'masked' is logged which is correct.",
+    "streaming.py:498 — the local `add()` helper accepts **extra; on line 562-566 kwargs `rtsp_url` and `rtsp_url_used` are both passed (main agent notes fix of duplicate rtsp_url_used kwarg). Verified no TypeError at runtime.",
+    "streaming.py:407-427 — _try_ffprobe_variants uses _build_rtsp_url THEN _ffprobe (which strips the fragment). Double transformation is intentional but slightly wasteful; a single normalization pass could be cleaner."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter24_rtsp_ffprobe_fix.py"
+  ],
+  "success_rate": {"backend": "18/18 (100%)", "frontend": "N/A (backend-only per request)"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (OK)",
+  "seed_data_creation": "None — read-only regression + fix verification against real demo-cam-001 running under go2rtc.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run with: `cd /app/backend && python -m pytest tests/test_iter24_rtsp_ffprobe_fix.py -v -o addopts=''` (pytest.ini enables xdist by default). The test file self-loads MONGO_URL/DB_NAME from /app/backend/.env and REACT_APP_BACKEND_URL from /app/frontend/.env if not exported. The demo RTSP stream `rtsp://127.0.0.1:8554/cam_demo-cam-001` is served by go2rtc under supervisor and is the source-of-truth for validating _ffprobe."
+}

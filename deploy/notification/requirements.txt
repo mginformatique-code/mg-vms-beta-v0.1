@@ -1,6 +1,0 @@
-# MG-VMS Notification — versions verrouillées (Python 3.11)
-fastapi==0.115.6
-uvicorn[standard]==0.32.1
-redis==5.2.1
-httpx==0.28.1
-aiosmtplib==3.0.2

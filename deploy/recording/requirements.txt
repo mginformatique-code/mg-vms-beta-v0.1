@@ -1,8 +1,0 @@
-# Service d'enregistrement (PRODUCTION)
-fastapi==0.110.0
-uvicorn==0.25.0
-SQLAlchemy==2.0.25
-psycopg[binary]==3.1.17
-boto3==1.34.69        # push MinIO/S3
-redis==5.0.1
-httpx==0.28.1

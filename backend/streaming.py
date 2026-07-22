@@ -239,20 +239,39 @@ def _tcp_check(host: str, port: int, timeout: float = 3.0) -> bool:
         return False
 
 
+def _strip_go2rtc_fragments(url: str) -> str:
+    """Retire les fragments spécifiques go2rtc (`#transport=tcp`, `#video=...`) qui ne sont
+    PAS des fragments RTSP standards. ffprobe interprète le # comme partie du chemin et
+    retourne '404 Stream Not Found'. Cette fonction sanitise l'URL avant l'appel ffprobe."""
+    if not url:
+        return url
+    # Retire tout après le premier #
+    idx = url.find("#")
+    return url[:idx] if idx >= 0 else url
+
+
 def _ffprobe(rtsp_url: str, transport: str = "tcp") -> Optional[dict]:
     """Sonde ffprobe réelle (résolution, fps, codec, bitrate).
-    Applique le transport RTSP demandé (TCP par défaut) pour respecter la config caméra."""
+    Applique le transport RTSP demandé (TCP par défaut) via -rtsp_transport CLI.
+    IMPORTANT : retire les fragments `#transport=...` de l'URL avant l'appel — ffprobe
+    ne connaît pas ces fragments (spécifiques go2rtc) et répond 404."""
     tr = "tcp" if (transport or "tcp").lower() != "udp" else "udp"
+    # Fix critique : ffprobe interprète #transport=tcp comme partie du path → 404
+    clean_url = _strip_go2rtc_fragments(rtsp_url)
+    masked = _mask_url_password(clean_url)
+    logger.info("FFPROBE URL=%s (transport=%s)", masked, tr)
+    cmd = ["ffprobe", "-v", "error", "-rtsp_transport", tr,
+           "-select_streams", "v:0",
+           "-show_entries", "stream=width,height,avg_frame_rate,codec_name,bit_rate",
+           "-of", "json", clean_url]
+    logger.info("FFPROBE CMD=%s", ["ffprobe", "-rtsp_transport", tr, "…", masked])
     try:
-        out = subprocess.run(
-            ["ffprobe", "-v", "error", "-rtsp_transport", tr,
-             "-select_streams", "v:0",
-             "-show_entries", "stream=width,height,avg_frame_rate,codec_name,bit_rate",
-             "-of", "json", rtsp_url],
-            capture_output=True, timeout=12,
-        )
+        out = subprocess.run(cmd, capture_output=True, timeout=12)
+        logger.info("FFPROBE RC=%s stderr=%r", out.returncode,
+                    (out.stderr or b"")[:200].decode(errors="replace"))
         info = json.loads(out.stdout or "{}").get("streams", [])
         if not info:
+            logger.info("FFPROBE : aucun stream trouvé (URL invalide ou codec inconnu)")
             return None
         s = info[0]
         fps = None
@@ -264,10 +283,16 @@ def _ffprobe(rtsp_url: str, transport: str = "tcp") -> Optional[dict]:
             br = int(s.get("bit_rate")) if s.get("bit_rate") else None
         except (ValueError, TypeError):
             br = None
-        return {"resolution": f"{s.get('width')}x{s.get('height')}",
-                "fps": fps, "codec": (s.get("codec_name") or "").upper(),
-                "bitrate": br, "transport": tr}
-    except Exception:
+        result = {"resolution": f"{s.get('width')}x{s.get('height')}",
+                   "fps": fps, "codec": (s.get("codec_name") or "").upper(),
+                   "bitrate": br, "transport": tr}
+        logger.info("FFPROBE OK → %s", result)
+        return result
+    except subprocess.TimeoutExpired:
+        logger.warning("FFPROBE TIMEOUT après 12s pour %s", masked)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("FFPROBE crash sur %s : %s", masked, exc)
         return None
 
 
@@ -339,13 +364,12 @@ def _try_ffprobe_variants(base_url: str, preferred_codec: str, transport: str,
        1) H.264 TCP   2) H.265 TCP   3) H.264 UDP   4) H.265 UDP
     (Si `preferred_codec` est forcé h264 ou h265, on ne teste que ce codec sur les 2 transports.)
 
-    Retourne un tuple `(working_url, ffprobe_details, debug_attempts)` :
-      - `working_url` : URL brute (sans credentials) qui a répondu, ou base_url si aucune ne marche.
-      - `ffprobe_details` : dict {resolution, fps, codec, bitrate, transport} ou None.
-      - `debug_attempts` : list de dicts pour affichage debug UI (`{url_masked, transport, ok, codec}`).
-    """
+    Retourne un tuple `(working_url, ffprobe_details, debug_attempts)`."""
     pref = (preferred_codec or "auto").lower()
     variants = _rtsp_variants(base_url, pref)
+    logger.info("TRY_VARIANTS base=%s pref=%s transport=%s → %d variante(s) : %s",
+                base_url, pref, transport, len(variants),
+                [_strip_go2rtc_fragments(v) for v in variants])
 
     def _variant_codec(u: str) -> str:
         low = u.lower()
@@ -381,6 +405,7 @@ def _try_ffprobe_variants(base_url: str, preferred_codec: str, transport: str,
         full = _build_rtsp_url({"rtsp_url": variant_url, "username": username,
                                  "password": password, "rtsp_transport": tr})
         masked = _mask_url_password(full)
+        logger.info("VARIANT_TEST transport=%s url=%s", tr.upper(), masked)
         details = _ffprobe(full, transport=tr)
         attempt = {"url_masked": masked, "transport": tr.upper(),
                     "ok": bool(details),
@@ -391,15 +416,18 @@ def _try_ffprobe_variants(base_url: str, preferred_codec: str, transport: str,
         if not details:
             continue
         codec_up = (details.get("codec") or "").upper()
-        # Filtre codec forcé
         if pref == "h264" and codec_up not in ("H264", "AVC"):
+            logger.info("VARIANT_TEST skip : codec=%s ≠ preferred=h264", codec_up)
             continue
         if pref == "h265" and codec_up not in ("H265", "HEVC"):
+            logger.info("VARIANT_TEST skip : codec=%s ≠ preferred=h265", codec_up)
             continue
         details["rtsp_url_used"] = variant_url
         details["transport_used"] = tr
+        logger.info("VARIANT_TEST MATCH → %s (transport=%s, codec=%s)", masked, tr, codec_up)
         return variant_url, details, attempts
 
+    logger.info("VARIANT_TEST : aucune variante n'a répondu (%d tentative(s))", len(attempts))
     return base_url, None, attempts
 
 
@@ -455,6 +483,8 @@ class ConnectivityTestInput(BaseModel):
 async def test_connectivity(data: ConnectivityTestInput) -> dict:
     """Test de connexion RÉEL, mode-aware, retourne un tableau `steps[]` de statuts détaillés.
        Chaque étape a: {name, status: 'ok'|'warn'|'error'|'skip', message}."""
+    logger.info("TEST_CONNECTIVITY start mode=%s ip=%s transport=%s codec_pref=%s",
+                data.mode, data.ip, data.rtsp_transport, data.preferred_codec)
     ip = (data.ip or "").strip()
     steps: list[dict] = []
     onvif_info = None
@@ -469,12 +499,14 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
         steps.append({"name": name, "status": status, "message": message, **extra})
 
     if not ip:
+        logger.info("TEST_CONNECTIVITY early return : IP vide")
         add("ip", "error", "Adresse IP obligatoire")
         return {"success": False, "mode": data.mode, "steps": steps, "message": "Adresse IP obligatoire"}
 
     # 1) Ping ICMP ou fallback TCP sur port cible (rapide)
     tgt_port = int(data.onvif_port if data.mode == "onvif" else data.rtsp_port)
     ping_ok = await asyncio.to_thread(_tcp_check, ip, tgt_port, 3.0)
+    logger.info("TEST_CONNECTIVITY ping %s:%s → %s", ip, tgt_port, ping_ok)
     add("ping", "ok" if ping_ok else "error",
         f"IP {ip} joignable sur port {tgt_port}" if ping_ok else f"IP {ip} injoignable (port {tgt_port} fermé)")
 
@@ -527,7 +559,7 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
                     "rtsp_transport": rtsp_details.get("transport_used") or transport})
                 add("rtsp_open", "ok",
                     f"Flux RTSP OK · {rtsp_details.get('resolution')} @ {rtsp_details.get('fps','?')}fps {rtsp_details.get('codec','')} (transport {(rtsp_details.get('transport_used') or transport).upper()})",
-                    **{k: v for k, v in rtsp_details.items() if k != "transport_used"},
+                    **{k: v for k, v in rtsp_details.items() if k not in ("transport_used", "rtsp_url_used")},
                     rtsp_url=working_url, rtsp_url_used=working_url,
                     validated_url_masked=_mask_url_password(rtsp_final_url),
                     transport_used=rtsp_details.get("transport_used"),
@@ -566,7 +598,7 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
             if rtsp_details:
                 add("rtsp_open", "ok",
                     f"Flux RTSP OK · {rtsp_details.get('resolution')} @ {rtsp_details.get('fps','?')}fps {rtsp_details.get('codec','')} (transport {(rtsp_details.get('transport_used') or transport).upper()})",
-                    **{k: v for k, v in rtsp_details.items() if k != "transport_used"},
+                    **{k: v for k, v in rtsp_details.items() if k not in ("transport_used", "rtsp_url_used")},
                     rtsp_url=working_url, rtsp_url_used=working_url,
                     validated_url_masked=_mask_url_password(rtsp_final_url),
                     transport_used=rtsp_details.get("transport_used"),
@@ -630,6 +662,8 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
     critical_ok = all(s["status"] in ("ok", "skip") for s in steps
                       if s["name"] in ("ping", "onvif_auth" if data.mode == "onvif" else "rtsp_open"))
     success = critical_ok
+    logger.info("TEST_CONNECTIVITY end mode=%s success=%s rtsp_validated=%s attempts=%d",
+                data.mode, success, rtsp_url_validated, len(debug_attempts))
 
     return {
         "success": success, "mode": data.mode, "steps": steps,
