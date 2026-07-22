@@ -1,0 +1,24 @@
+{
+  "summary": "Iteration 23 — ANPR watchlist & camera local-lists CSV import/export. 20/20 pytest tests PASS. Backend endpoints fully validated: POST /api/plugins/anpr/watchlist/import (header CSV + plate-only + default_list_type + UTF-8 BOM + invalid list_type skipped + empty→400 + non-csv→400 + >2MB→400 + upsert re-import), GET /api/plugins/anpr/watchlist/export (Bearer + query-token via <a href>), POST/GET /api/plugins/anpr/cameras/{id}/lists/import|export (whitelist/blacklist, union no-duplicates), get_current_user query-param fallback works (/api/auth/me?token=…). Frontend smoke OK on /plugins/anpr : wl-export-btn + wl-import-btn visibles ; dialog AnprCameraDialog affiche local-{whitelist|blacklist}-{import|export} tous présents et cliquables. Regression: /api/plugins/anpr/config et /api/plugins/anpr/cameras intactes.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter23_anpr_csv.py",
+    "/app/test_reports/pytest/iter23.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "plugin_config.py:185 — `await csv_file.read()` reads full body before enforcing the 2MB cap. A malicious upload of e.g. 50MB briefly spikes memory before rejection. Consider streaming size guard or FastAPI/uvicorn max_body_size limit (same pattern as face upload).",
+    "plugin_config.py:144 — header detection triggers on any first-column string containing 'plate/plaque/immatriculation'. A first data-row like 'PLATE-123' (unlikely but possible) could be swallowed as header. Consider a strict exact-match on the whole cell.",
+    "plugin_config.py:209 — the retro-application `db.plates.update_many({'plate': row['plate']}, {'$set':{'list_status': ...}})` will overwrite list_status on ALL historical reads even those pre-import; documented behaviour but worth logging count for auditing.",
+    "auth.py:131 — query-param token fallback is convenient for <a href> exports but the token then appears in server access logs. Confirm access logs are not shipped to third-parties, otherwise consider signed short-lived download tokens.",
+    "PluginPage.jsx:389 — `encodeURIComponent(localStorage.getItem('mg_token') || '')` embeds JWT in URL used as href. Same log-leakage risk as backend note; acceptable but worth a short-lived download-token endpoint in future."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter23_anpr_csv.py"],
+  "success_rate": {"backend": "20/20 (100%)", "frontend": "100% (both global buttons + all 4 local buttons visible in AnprCameraDialog)"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (OK)",
+  "seed_data_creation": "TEST-* plates inserted/removed via module-scope cleanup fixture. TEST-CAM-* plates on demo-cam-001 removed in test_cleanup_camera_local_lists.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "iter23 tests run cleanly with `python -m pytest backend/tests/test_iter23_anpr_csv.py -o addopts=''` (repo pytest.ini enables xdist by default, but this suite must run sequentially because tests share the same watchlist state across test functions and rely on ordering). Demo camera id used: demo-cam-001. Watchlist DELETE endpoint /api/watchlist/{id} exists and is used for cleanup."
+}
