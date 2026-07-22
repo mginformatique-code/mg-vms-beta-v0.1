@@ -437,6 +437,39 @@ def _try_ffprobe_variants(base_url: str, preferred_codec: str, transport: str,
     return base_url, None, attempts
 
 
+def _ffprobe_validate_exact(base_url: str, transport: str,
+                             username: str = "", password: str = "") -> tuple:
+    """Valide EXACTEMENT l'URL fournie (aucune substitution de variante).
+    Essaie le transport demandé d'abord, puis l'autre en fallback (tcp↔udp).
+    Retourne `(base_url, details, attempts)` — `base_url` reste inchangé.
+    Utilisé quand l'utilisateur a explicitement choisi un profil ONVIF (main/sub).
+    """
+    tr_pref = (transport or "tcp").lower()
+    tr_seq = ["tcp", "udp"] if tr_pref != "udp" else ["udp", "tcp"]
+    attempts: list = []
+    logger.info("EXACT_VALIDATE base=%s pref_transport=%s", base_url, tr_pref)
+    for tr in tr_seq:
+        full = _build_rtsp_url({"rtsp_url": base_url, "username": username,
+                                 "password": password, "rtsp_transport": tr})
+        masked = _mask_url_password(full)
+        logger.info("EXACT_VALIDATE transport=%s url=%s", tr.upper(), masked)
+        details = _ffprobe(full, transport=tr)
+        attempt = {"url_masked": masked, "transport": tr.upper(),
+                    "ok": bool(details),
+                    "codec": (details or {}).get("codec"),
+                    "resolution": (details or {}).get("resolution"),
+                    "fps": (details or {}).get("fps")}
+        attempts.append(attempt)
+        if details:
+            details["rtsp_url_used"] = base_url
+            details["transport_used"] = tr
+            logger.info("EXACT_VALIDATE MATCH → %s (transport=%s, codec=%s, res=%s)",
+                        masked, tr, details.get("codec"), details.get("resolution"))
+            return base_url, details, attempts
+    logger.info("EXACT_VALIDATE : URL injoignable sur tcp+udp (%d tentative(s))", len(attempts))
+    return base_url, None, attempts
+
+
 async def probe_camera(cam: dict) -> dict:
     """Test de connexion réel : frame via go2rtc + ffprobe sur l'URL RTSP."""
     await register_camera_stream(cam)
@@ -484,6 +517,7 @@ class ConnectivityTestInput(BaseModel):
     password: str = ""
     rtsp_transport: str = "tcp"      # tcp | udp
     preferred_codec: str = "auto"    # auto | h264 | h265
+    profile_token: str = ""          # profil ONVIF explicite (main/sub) — pas de substitution de variante si fourni
 
 
 async def test_connectivity(data: ConnectivityTestInput) -> dict:
@@ -544,7 +578,15 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
             add("onvif_auth", "skip", "Ignoré (port ONVIF fermé)")
 
         # 4) Port RTSP (déduction de l'URI RTSP découverte)
-        discovered_rtsp = next((p.get("rtsp_url") for p in (onvif_info or {}).get("profiles", []) if p.get("rtsp_url")), None)
+        # Si l'utilisateur a explicitement choisi un profil, on utilise SON URL (pas la première).
+        onvif_profiles = (onvif_info or {}).get("profiles", [])
+        selected_profile = None
+        if data.profile_token:
+            selected_profile = next((p for p in onvif_profiles if p.get("token") == data.profile_token and p.get("rtsp_url")), None)
+        if not selected_profile:
+            selected_profile = next((p for p in onvif_profiles if p.get("rtsp_url")), None)
+        discovered_rtsp = selected_profile.get("rtsp_url") if selected_profile else None
+        selected_profile_name = selected_profile.get("name") if selected_profile else ""
         if discovered_rtsp:
             m = re.match(r"rtsp://[^/]*?([\d.]+)(?::(\d+))?", discovered_rtsp)
             rtsp_host = m.group(1) if m else ip
@@ -552,23 +594,33 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
             rtsp_port_ok = await asyncio.to_thread(_tcp_check, rtsp_host, rtsp_port, 3.0)
             add("rtsp_port", "ok" if rtsp_port_ok else "error",
                 f"Port RTSP {rtsp_port} ouvert" if rtsp_port_ok else f"Port RTSP {rtsp_port} fermé")
-            # 5) Ouverture RTSP — TESTE variantes multiples (fallback constructeur si ONVIF ment)
+            # 5) Ouverture RTSP
+            # - Si profile_token fourni : validation EXACTE de l'URL du profil (aucune substitution)
+            # - Sinon : essai de variantes constructeur (Reolink main/sub, Hik, Dahua) en fallback
             transport = (data.rtsp_transport or "tcp").lower()
             pref = (data.preferred_codec or "auto").lower()
-            working_url, rtsp_details, attempts = await asyncio.to_thread(
-                _try_ffprobe_variants, discovered_rtsp, pref, transport, data.username, data.password
-            )
+            if data.profile_token:
+                working_url, rtsp_details, attempts = await asyncio.to_thread(
+                    _ffprobe_validate_exact, discovered_rtsp, transport, data.username, data.password
+                )
+            else:
+                working_url, rtsp_details, attempts = await asyncio.to_thread(
+                    _try_ffprobe_variants, discovered_rtsp, pref, transport, data.username, data.password
+                )
             if rtsp_details:
                 rtsp_final_url = _build_rtsp_url({
                     "rtsp_url": working_url, "username": data.username,
                     "password": data.password,
                     "rtsp_transport": rtsp_details.get("transport_used") or transport})
+                profile_label = f" · profil « {selected_profile_name} »" if selected_profile_name else ""
                 add("rtsp_open", "ok",
-                    f"Flux RTSP OK · {rtsp_details.get('resolution')} @ {rtsp_details.get('fps','?')}fps {rtsp_details.get('codec','')} (transport {(rtsp_details.get('transport_used') or transport).upper()})",
+                    f"Flux RTSP OK{profile_label} · {rtsp_details.get('resolution')} @ {rtsp_details.get('fps','?')}fps {rtsp_details.get('codec','')} (transport {(rtsp_details.get('transport_used') or transport).upper()})",
                     **{k: v for k, v in rtsp_details.items() if k not in ("transport_used", "rtsp_url_used")},
                     rtsp_url=working_url, rtsp_url_used=working_url,
                     validated_url_masked=_mask_url_password(rtsp_final_url),
                     transport_used=rtsp_details.get("transport_used"),
+                    profile_token=(selected_profile or {}).get("token", ""),
+                    profile_name=selected_profile_name,
                     attempts=attempts)
                 rtsp_url_validated = True
                 validated_url_masked = _mask_url_password(rtsp_final_url)

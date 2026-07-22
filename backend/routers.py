@@ -212,22 +212,28 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
             selected = next((p for p in profiles if p.get("rtsp_url")), None)
         if not selected or not selected.get("rtsp_url"):
             raise HTTPException(400, "Aucun profil ONVIF n'a renvoyé d'URL RTSP")
-        # Auto-résolution : teste l'URL ONVIF puis ses variantes constructeur (Reolink h264/h265, Hik, Dahua)
-        from streaming import _try_ffprobe_variants
+        # Validation EXACTE de l'URL du profil choisi (aucune substitution de variante).
+        # Le choix explicite du profil (main/sub) doit être respecté : go2rtc utilisera
+        # exactement cette URL. Fallback autorisé uniquement entre TCP et UDP.
+        from streaming import _ffprobe_validate_exact
         working_url, ffprobe_details, _attempts = await asyncio.to_thread(
-            _try_ffprobe_variants, selected["rtsp_url"],
-            data.preferred_codec, data.rtsp_transport, data.username, data.password,
+            _ffprobe_validate_exact, selected["rtsp_url"],
+            data.rtsp_transport, data.username, data.password,
         )
         if ffprobe_details:
-            payload["rtsp_url"] = working_url
+            payload["rtsp_url"] = working_url  # == selected["rtsp_url"]
             payload["resolution"] = ffprobe_details.get("resolution", selected.get("resolution", ""))
             payload["fps"] = ffprobe_details.get("fps")
             payload["codec"] = (ffprobe_details.get("codec") or "H264").upper()
             payload["rtsp_transport"] = ffprobe_details.get("transport_used") or data.rtsp_transport
-        else:
+        elif data.allow_rtsp_override:
             payload["rtsp_url"] = selected["rtsp_url"]
             payload["resolution"] = selected.get("resolution") or payload.get("resolution", "")
             payload["codec"] = (selected.get("codec") or payload.get("codec", "H264")).upper().replace("VIDEO", "").strip() or "H264"
+        else:
+            raise HTTPException(400,
+                f"URL RTSP du profil « {selected.get('name','?')} » injoignable — "
+                f"choisissez un autre profil ou cochez « Créer malgré le test RTSP ».")
         payload["profile_token"] = selected.get("token", "")
         payload["profile_name"] = str(selected.get("name", ""))
         payload["protocol"] = "ONVIF"
@@ -324,11 +330,23 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
                     selected = next((p for p in profiles if p.get("rtsp_url")), None)
                 if not selected or not selected.get("rtsp_url"):
                     raise HTTPException(400, "Aucun profil ONVIF n'a renvoyé d'URL RTSP")
+                # Validation EXACTE de l'URL du profil choisi (pas de substitution)
+                from streaming import _ffprobe_validate_exact
+                working_url, ffprobe_details, _attempts = await asyncio.to_thread(
+                    _ffprobe_validate_exact, selected["rtsp_url"],
+                    data.rtsp_transport, data.username, data.password or existing.get("password", ""),
+                )
                 payload["rtsp_url"] = selected["rtsp_url"]
                 payload["profile_token"] = selected.get("token", "")
                 payload["profile_name"] = str(selected.get("name", ""))
-                payload["resolution"] = selected.get("resolution") or payload.get("resolution", "")
-                payload["codec"] = (selected.get("codec") or payload.get("codec", "H264")).upper().replace("VIDEO", "").strip() or "H264"
+                if ffprobe_details:
+                    payload["resolution"] = ffprobe_details.get("resolution") or selected.get("resolution") or payload.get("resolution", "")
+                    payload["fps"] = ffprobe_details.get("fps")
+                    payload["codec"] = (ffprobe_details.get("codec") or "H264").upper()
+                    payload["rtsp_transport"] = ffprobe_details.get("transport_used") or data.rtsp_transport
+                else:
+                    payload["resolution"] = selected.get("resolution") or payload.get("resolution", "")
+                    payload["codec"] = (selected.get("codec") or payload.get("codec", "H264")).upper().replace("VIDEO", "").strip() or "H264"
                 payload["ptz_enabled"] = bool(info.get("ptz_supported")) or payload.get("ptz_enabled", False)
             except HTTPException:
                 raise

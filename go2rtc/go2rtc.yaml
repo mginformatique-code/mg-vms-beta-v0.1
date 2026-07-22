@@ -23,3 +23,5 @@ streams:
     - exec:ffmpeg -stream_loop -1 -re -i /app/media/street-demo.mp4 -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -g 30 -an -f rtsp {output}
   cam_demo-cam-002_sd:
     - ffmpeg:cam_demo-cam-002#video=mjpeg#width=640
+  probe_1784758674468:
+    - rtsp://127.0.0.1:8554/cam_demo-cam-001

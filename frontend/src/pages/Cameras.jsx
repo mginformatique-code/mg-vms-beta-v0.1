@@ -95,14 +95,26 @@ export default function Cameras() {
         username: form.username, password: form.password,
         rtsp_transport: form.rtsp_transport || "tcp",
         preferred_codec: form.preferred_codec || "auto",
+        profile_token: form.mode === "onvif" ? (form.profile_token || "") : "",
       });
       setConnCheck(data);
       if (data.profiles && data.profiles.length) {
         setProfiles(data.profiles);
-        // Sélectionne automatiquement le premier profil si aucun choisi
+        // Sélectionne par défaut le profil de plus haute résolution (typiquement Main),
+        // pas le premier de la liste (Reolink renvoie Sub en premier). L'utilisateur
+        // peut toujours changer manuellement via les radios.
         if (!form.profile_token && data.profiles.length > 0) {
-          const first = data.profiles.find((p) => p.rtsp_url) || data.profiles[0];
-          setForm((f) => ({ ...f, profile_token: first.token || "", profile_name: first.name || "" }));
+          const parseRes = (r) => {
+            const m = /(\d+)\s*x\s*(\d+)/i.exec(r || "");
+            return m ? (parseInt(m[1], 10) * parseInt(m[2], 10)) : 0;
+          };
+          const best = [...data.profiles]
+            .filter((p) => p.rtsp_url)
+            .sort((a, b) => parseRes(b.resolution) - parseRes(a.resolution))[0]
+            || data.profiles[0];
+          setForm((f) => ({ ...f, profile_token: best.token || "", profile_name: best.name || "",
+                            codec: (best.codec || f.codec || "H264").toUpperCase().replace("VIDEO", "").trim() || "H264",
+                            resolution: best.resolution || f.resolution }));
         }
       }
       return data;
@@ -119,7 +131,14 @@ export default function Cameras() {
         username: form.username, password: form.password,
       });
       setProfiles(data.profiles || []);
-      const first = (data.profiles || []).find((p) => p.rtsp_url) || (data.profiles || [])[0];
+      const parseRes = (r) => {
+        const m = /(\d+)\s*x\s*(\d+)/i.exec(r || "");
+        return m ? (parseInt(m[1], 10) * parseInt(m[2], 10)) : 0;
+      };
+      const first = [...(data.profiles || [])]
+        .filter((p) => p.rtsp_url)
+        .sort((a, b) => parseRes(b.resolution) - parseRes(a.resolution))[0]
+        || (data.profiles || [])[0];
       setForm((f) => ({
         ...f, mode: "onvif", protocol: "ONVIF",
         manufacturer: data.manufacturer || f.manufacturer,
@@ -337,21 +356,34 @@ export default function Cameras() {
                 )}
                 {profiles.length > 0 && (
                   <div>
-                    <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Profil vidéo</label>
+                    <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Profil vidéo — le flux choisi sera utilisé exactement</label>
                     <div className="mt-1 space-y-1" data-testid="onvif-profiles">
-                      {profiles.map((p, i) => (
-                        <label key={p.token || i} className="flex items-center gap-2 p-2 border border-border cursor-pointer hover:bg-secondary/50">
-                          <input type="radio" name="profile"
-                            checked={form.profile_token === p.token}
-                            onChange={() => setForm({ ...form, profile_token: p.token, profile_name: p.name, codec: (p.codec || "H264").toUpperCase().replace("VIDEO", "").trim() || "H264", resolution: p.resolution || form.resolution })}
-                            data-testid={`profile-radio-${i}`} />
-                          <div className="flex-1 text-xs">
-                            <div className="font-medium">{p.name} <span className="text-muted-foreground mono">{p.resolution || ""} {p.codec || ""}</span></div>
-                            <div className="text-[10px] text-muted-foreground truncate mono">{p.rtsp_url || "(pas d'URI RTSP)"}</div>
-                          </div>
-                        </label>
-                      ))}
+                      {profiles.map((p, i) => {
+                        const label = (p.name || "").toLowerCase();
+                        const isMain = /main|hd|high|primary|profile_?1|_01_main|channel1|principal/i.test(label + " " + (p.rtsp_url || ""));
+                        const isSub = /sub|low|secondary|_01_sub|_02_sub|preview/i.test(label + " " + (p.rtsp_url || ""));
+                        const badge = isMain ? "MAIN" : (isSub ? "SUB" : "");
+                        return (
+                          <label key={p.token || i} className={`flex items-center gap-2 p-2 border cursor-pointer hover:bg-secondary/50 ${form.profile_token === p.token ? "border-[#00E5FF] bg-[#00E5FF]/5" : "border-border"}`}>
+                            <input type="radio" name="profile"
+                              checked={form.profile_token === p.token}
+                              onChange={() => { setForm({ ...form, profile_token: p.token, profile_name: p.name, codec: (p.codec || "H264").toUpperCase().replace("VIDEO", "").trim() || "H264", resolution: p.resolution || form.resolution }); setConnCheck(null); }}
+                              data-testid={`profile-radio-${i}`} />
+                            <div className="flex-1 text-xs">
+                              <div className="font-medium flex items-center gap-2">
+                                <span>{p.name}</span>
+                                {badge && <span className={`text-[9px] px-1.5 py-0.5 font-bold ${isMain ? "bg-[#0044FF] text-white" : "bg-muted text-muted-foreground"}`}>{badge}</span>}
+                                <span className="text-muted-foreground mono">{p.resolution || ""} {p.codec || ""}</span>
+                              </div>
+                              <div className="text-[10px] text-muted-foreground truncate mono">{p.rtsp_url || "(pas d'URI RTSP)"}</div>
+                            </div>
+                          </label>
+                        );
+                      })}
                     </div>
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      Aucune substitution de flux — l&apos;URL exacte du profil coché est persistée et utilisée par go2rtc. Cliquez sur « Tester la connexion » après avoir changé de profil pour re-valider.
+                    </p>
                   </div>
                 )}
               </div>

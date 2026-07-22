@@ -1,0 +1,29 @@
+{
+  "summary": "Backend regression + contract tests for iteration 26 (ONVIF profile exact fix). All targets green: 22/22 pytest (18 iter25 + 4 iter26), _ffprobe_validate_exact importable, new profile_token field accepted (backward-compat), POST /cameras on unreachable ONVIF returns 400 (not 422), RTSP baseline test-connectivity fully ok.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter25_rtsp_no_fragment.py",
+    "/app/backend/tests/test_iter26_onvif_profile_exact.py"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "streaming.py is large — consider splitting connectivity/probe helpers into a submodule to improve maintainability, but not blocking."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "not_tested"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (verified working)",
+  "seed_data_creation": "none",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter26 ONVIF profile exact bugfix validated end-to-end at API contract level. No live ONVIF device in sandbox — validation relies on unit tests + 4xx response shape. All 22 pytests pass. Public backend URL is https://video-command-6.preview.emergentagent.com. When testing /api/cameras/test-connectivity, note that 'ip' is required even for mode='rtsp' (payload schema).",
+  "test_results_detail": {
+    "auth_login": "200 OK, access_token len=243",
+    "test_connectivity_rtsp": "200 OK, rtsp_url_validated=true, all 4 active steps ok (ping/rtsp_port/rtsp_open/go2rtc/preview) for rtsp://127.0.0.1:8554/cam_demo-cam-001",
+    "test_connectivity_onvif_with_profile_token_empty": "200 OK — profile_token='' accepted (no 422), onvif_port error as expected for unreachable target",
+    "post_cameras_onvif_unreachable": "400 with detail 'Port ONVIF 80 injoignable sur 10.255.255.1' (not 422)",
+    "pytest_iter25": "18/18 passed",
+    "pytest_iter26": "4/4 passed",
+    "helper_import": "from streaming import _ffprobe_validate_exact -> callable=True"
+  }
+}
