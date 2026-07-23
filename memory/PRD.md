@@ -1,6 +1,50 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **Régression perf ANPR corrigée + Phase 1 Diagnostic caméra (2.13.5 + 2.14.0 — 2026-07-23)**
+  - **Bug utilisateur** : « L'ANPR est bcp plus lent, moins réactif » sur le dernier push.
+  - **Cause racine** :
+    1. Depuis v2.13.0, `_jpeg_data_uri()` compressait par défaut à 1280 wide @ q85 (au lieu de 360 @ q60) — encodage ~10× plus lent.
+    2. `_analyze_frame` encodait systématiquement `frame_thumb` à chaque cycle IA, MÊME sans événement (30-80 ms/cycle inutiles sur caméras 2K).
+    3. Premier fix insuffisant : `_evaluate_scenarios` appelait `_ensure_frame_thumb(result)` en début de fonction, neutralisant le lazy contract → **détecté par le bug_testing_agent**.
+  - **Fix v2.13.5** (encodage lazy) :
+    - `_analyze_frame` retourne l'image numpy `_img_bgr` (au lieu de la base64 précalculée).
+    - Nouveau helper `_ensure_frame_thumb(result)` avec mémoïsation dans `result["frame_thumb"]` — appelé UNIQUEMENT à l'insertion d'un événement. 0 event = 0 encodage.
+    - `frame_preview` (debug) réduit à q60.
+    - Tous les callers (`_process_camera` motion/face/YOLO/plate) migrés vers `_ensure_frame_thumb(result)`.
+  - **Fix v2.13.6** (correctif après bug_testing_agent) :
+    - `_evaluate_scenarios` : `thumb` devient `lambda: _ensure_frame_thumb(result)` — appelé UNIQUEMENT dans les branches où un scénario matche réellement.
+    - 2 nouveaux tests prouvent le contrat : `test_no_encoding_when_no_detections` (0 détection → 0 encodage) + `test_encoding_only_when_scenario_triggers` (1 match → 1 seul encodage mémoïsé).
+  - **Phase 1 Diagnostic caméra (2.14.0)** — sections 1-4 du prompt refonte :
+    - Nouveau module `/app/backend/diagnostics.py` (~250 lignes) :
+      - Table `CAUSE_RULES` : 18 patterns regex mappés à des causes explicites (Timeout RTSP, Authentification refusée, Caméra hors ligne, Erreur DNS, GOP corrompu, Pertes réseau, Flux interrompu, Flux RTSP invalide, Erreur ONVIF, Crash go2rtc, Saturation GPU, Mémoire insuffisante, Saturation CPU, Exception Python, TCP réinitialisé, Erreur UDP, Caméra redémarrée, Cause inconnue).
+      - `identify_cause(error_text)` retourne `(cause, confidence_%, detail)`.
+      - `capture_stream_metrics(cam)` interroge go2rtc pour fps réel, bitrate, codec détecté (fallback gracieux).
+      - `record_disconnect(cam, error_text, source)` + `record_reconnect(camera_id, attempts)` : logue les transitions online↔offline dans la collection `camera_diagnostics` avec URL masquée, uptime avant incident, tentatives, durée reconnexion, erreur brute complète (4KB max).
+      - `tail_log(source, filter_text, lines)` : lecture async des logs supervisor (backend/go2rtc) via `deque` (efficace sur gros fichiers).
+      - `camera_diagnostic_summary(id)` : MTBF, moyenne reconnexion, top 5 causes, dernier incident (fenêtre 30 j).
+    - Hook dans `streaming.camera_status_loop` : détection des transitions ONLINE↔OFFLINE, capture de l'erreur brute go2rtc (HTTP status + body), enregistrement automatique. Compteur de tentatives de reconnexion par caméra.
+    - **5 nouveaux endpoints** :
+      - `GET /api/diagnostics/journal?camera_id=&cause=&event_type=&limit=&offset=` — journal global filtrable + multi-site.
+      - `GET /api/diagnostics/camera/{id}/summary` — résumé 30j.
+      - `GET /api/diagnostics/camera/{id}/logs?lines=100` — tail logs backend+go2rtc filtrés sur la caméra.
+      - `GET /api/diagnostics/camera/{id}/report` — rapport JSON complet téléchargeable (config + summary + 200 incidents + 200 lignes de logs, URL masquée, **pas de mot de passe en clair**).
+      - `POST /api/diagnostics/camera/{id}/test-cause` — utilitaire admin pour tester l'heuristique sur un texte d'erreur.
+    - **Nouvelle page frontend `/diagnostics`** :
+      - Vue d'ensemble par caméra : cartes MTBF/déconnexions/reconnexions/temps moyen + causes fréquentes colorées + bouton téléchargement rapport (JSON avec nom `mgvms-diag-{cam}-{date}.json`).
+      - Filtres : caméra, cause, type d'événement (déconnexion/reconnexion).
+      - Journal (table) : date, caméra, site, cause probable (badge coloré par sévérité), uptime avant, état reconnexion.
+      - Modal détail incident : type, source, états, uptime, tentatives, durée reconnexion, profil ONVIF, codec/résolution/FPS demandé & réel/bitrate/transport, URL masquée, **erreur brute complète** (pré-formatée, jusqu'à 4KB).
+      - Nouveau lien `Journal de diagnostic` dans le sidebar (section Administration).
+      - i18n FR + EN.
+  - **Validation bug_testing_agent** :
+    - Verdict = **fixed**, 100% backend + 100% frontend, retest_needed=false.
+    - Vérifié : spy `_ensure_frame_thumb` sur `_evaluate_scenarios` sans détection → `call_count=0`. Avec attroupement → `call_count=1`.
+    - Vérifié : événements réels demo-cam-002 génèrent bien des miniatures HD (~768×432).
+    - Vérifié : les 5 endpoints diagnostic répondent correctement, URL RTSP masquée dans le rapport, page frontend `/diagnostics` rend pour admin.
+    - Pytest : **37/37** (iter25 + iter26 + iter27 + iter28 = 7 nouveaux).
+
+
 - ✅ **Hybridation ANPR — Scène HD + insets véhicule + plaque OCR (2.13.4 — 2026-07-23)**
   - **Contexte** : après le passage au HD des miniatures d'événements (v2.13.0), les plaques LAPI et alertes blacklist restaient sur `plate_crop` seul (~21×26 px) — plaque lisible mais aucun contexte visuel de la scène.
   - **Fix backend `ai_engine.py`** :
