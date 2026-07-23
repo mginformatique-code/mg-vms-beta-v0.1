@@ -1,6 +1,17 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **UX Mur vidéo : tuiles rectangulaires, cliquables + focus mode + détection sous-flux (2.13.2 — 2026-07-23)**
+  - **Format rectangulaire 16:9** : les tuiles utilisent maintenant `aspect-video` + `object-contain` (au lieu de `object-cover` sur cellule carrée). Plus aucun cropping — l'intégralité de la vidéo caméra (nativement en 16:9) est visible dans chaque tuile de la mosaïque.
+  - **Tuiles cliquables → mode focus** : cliquer une tuile ouvre une vue "focus" single-view où la caméra sélectionnée occupe toute la largeur (`gridTemplateColumns: 1fr`). Un bouton **« Fermer le focus »** apparaît dans la barre supérieure. Retour à la mosaïque via clic sur la tuile, sur ce bouton, ou touche **ESC**. Les boutons de layout (1/4/9/16…) sont masqués en mode focus. Bordure `#00E5FF` autour de la tuile active. Le clic sur les boutons PTZ n'active PAS le focus (event.stopPropagation + `data-ptz-btn`).
+  - **Détection automatique de sous-flux** :
+    - Live View : badge d'alerte jaune « ⚠ Sous-flux détecté ({résolution}) — ouvrez le diagnostic pour re-sélectionner le profil principal. » superposé sur chaque tuile dont la caméra a une `resolution < 1280×720`.
+    - Cameras (liste) : badge `SUB` orange dans la colonne Résolution avec tooltip explicatif.
+    - Diagnostic (dialog) : bandeau d'alerte détaillé avec instructions étape par étape pour re-sélectionner le profil main via le formulaire d'édition.
+    - Le badge résolution est aussi affiché en overlay sur chaque tuile Live pour un contrôle visuel immédiat.
+  - **Sortie ESC** : `useEffect` avec listener global `keydown` sur `Escape` en mode focus.
+  - **Validation UI** : Playwright screenshots — mosaïque 4 tuiles 16:9 (2 vidéos actives visibles entières + 2 slots vides rectangulaires), mode focus (tuile 1 en pleine largeur avec bouton "Fermer le focus"). pytest backend 30/30 vert (aucune régression).
+
 - ✅ **BUG FIX Live SD/HD + Miniatures d'événements HD (2.13.0 → 2.13.1 — 2026-07-23)**
   - **Complément v2.13.1** — auto-migration pour caméras existantes :
     - **Problème** : les caméras enregistrées avant le fix v2.13.0 n'avaient que la variante `_sd` dans go2rtc → le toggle HD frontend envoyait `?hd=1` mais le backend proxifiait vers un `_hd` inexistant → écran gris ou fallback SD.

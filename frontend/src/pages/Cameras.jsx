@@ -285,7 +285,16 @@ export default function Cameras() {
                 <td className="px-3 py-2 text-muted-foreground">{c.site_name}</td>
                 <td className="px-3 py-2 mono text-xs">{c.ip}</td>
                 <td className="px-3 py-2"><span className="text-[10px] px-1.5 py-0.5 border border-border uppercase">{c.mode || c.protocol}</span></td>
-                <td className="px-3 py-2 mono text-[11px]">{c.resolution || "—"}{c.fps ? ` @ ${c.fps}` : ""} <span className="text-muted-foreground">{c.codec}</span></td>
+                <td className="px-3 py-2 mono text-[11px]">
+                  {c.resolution || "—"}{c.fps ? ` @ ${c.fps}` : ""} <span className="text-muted-foreground">{c.codec}</span>
+                  {(() => {
+                    const [w, h] = (c.resolution || "").split(/x/i).map((n) => parseInt(n, 10) || 0);
+                    if (w > 0 && h > 0 && (w < 1280 || h < 720)) {
+                      return <span title="Résolution < HD — probable sous-flux. Modifiez la caméra et cochez le profil principal." className="ml-1 text-[9px] px-1 bg-[#FFB800] text-black font-bold" data-testid="sub-stream-badge">SUB</span>;
+                    }
+                    return null;
+                  })()}
+                </td>
                 <td className="px-3 py-2 text-xs">{c.ptz_enabled ? "✓" : "—"}</td>
                 <td className="px-3 py-2"><div className="flex items-center justify-end gap-1">
                   <button onClick={() => test(c)} data-testid="test-camera-btn" title="Tester" className="p-1.5 hover:bg-secondary">{testing === c.id ? <Loader2 size={15} className="animate-spin" /> : <Activity size={15} />}</button>
@@ -663,6 +672,17 @@ function DiagnosticDialog({ state, onClose, onRefresh }) {
                 <div className="text-xs text-muted-foreground mono">Profil : <b className="text-foreground">{camera?.profile_name || camera?.profile_token || "—"}</b></div>
                 <div className="text-xs text-muted-foreground mono">Transport : <b>{(flux?.rtsp_transport_used || "tcp").toUpperCase()}</b> · Codec : <b>{(camera?.codec || "auto").toUpperCase()}</b></div>
                 <div className="text-xs text-muted-foreground mono">Résolution source : {camera?.resolution || "—"}{camera?.fps ? ` @ ${camera.fps} FPS` : ""}</div>
+                {(() => {
+                  const [w, h] = (camera?.resolution || "").split(/x/i).map((n) => parseInt(n, 10) || 0);
+                  if (w > 0 && h > 0 && (w < 1280 || h < 720)) {
+                    return (
+                      <div className="text-[11px] text-[#FFB800] mt-1 p-1.5 border border-[#FFB800]/40 bg-[#FFB800]/10" data-testid="substream-warning">
+                        ⚠ <b>Sous-flux détecté</b> ({camera.resolution}) — la caméra utilise probablement le profil <i>sub</i>. Fermez ce diagnostic, cliquez sur « Modifier » et re-cochez le profil <b>MAIN</b> (résolution &ge; 1280×720).
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
                 {camera?.rtsp_url_masked && <div className="text-[10px] text-muted-foreground mono truncate" title={camera.rtsp_url_masked}>URL RTSP : {camera.rtsp_url_masked}</div>}
                 {(!flux?.go2rtc_hd_registered || !flux?.go2rtc_sd_registered) && (
                   <div className="text-[11px] text-[#FFB800] mt-1">

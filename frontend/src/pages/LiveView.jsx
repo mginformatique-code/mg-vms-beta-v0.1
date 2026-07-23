@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
-import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff } from "lucide-react";
+import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X } from "lucide-react";
 
 const LAYOUTS = [1, 4, 9, 16, 25, 36, 49, 64];
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -27,7 +27,6 @@ function streamUrl(camId, hd = false) {
 
 function OverlayCanvas({ cam, boxes, showOverlay }) {
   const ref = useRef(null);
-  const box = useRef(null);
   useEffect(() => {
     if (!showOverlay) return;
     const canvas = ref.current;
@@ -62,7 +61,7 @@ function OverlayCanvas({ cam, boxes, showOverlay }) {
   return <canvas ref={ref} className="absolute inset-0 w-full h-full pointer-events-none" data-testid="ai-overlay" />;
 }
 
-function Feed({ cam, idx, canPtz, hd, showOverlay, aiState }) {
+function Feed({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onToggleFocus }) {
   const [hover, setHover] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const retryTimer = useRef(null);
@@ -74,19 +73,28 @@ function Feed({ cam, idx, canPtz, hd, showOverlay, aiState }) {
     if (retryTimer.current) clearTimeout(retryTimer.current);
     retryTimer.current = setTimeout(() => setReloadKey((k) => k + 1), 2500);
   };
-  const ptz = async (command) => { try { await api.post(`/cameras/${cam.id}/ptz?command=${command}`); } catch (e) {} };
+  const ptz = async (command) => { try { await api.post(`/cameras/${cam.id}/ptz?command=${command}`); } catch (e) { /* ignore */ } };
 
   const boxes = aiState?.boxes || [];
   const counts = aiState?.counts || {};
   const totalDetected = Object.values(counts).reduce((a, b) => a + b, 0);
+  // Détection sous-flux (résolution < 1280x720) — le user a probablement gardé un sub-stream
+  const [subW, subH] = (cam?.resolution || "").split(/x/i).map((n) => parseInt(n, 10) || 0);
+  const isSubStream = online && subW > 0 && subH > 0 && (subW < 1280 || subH < 720);
 
   return (
-    <div className="relative bg-black overflow-hidden group" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} data-testid="video-feed">
+    <div
+      className={`relative bg-black overflow-hidden group aspect-video cursor-pointer transition-shadow ${focused ? "ring-2 ring-[#00E5FF]" : "hover:ring-1 hover:ring-[#0044FF]/60"}`}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      onClick={(e) => { if (!e.target.closest("[data-ptz-btn]")) onToggleFocus?.(cam?.id); }}
+      title={cam ? (focused ? "Cliquez pour revenir à la mosaïque" : "Cliquez pour agrandir") : ""}
+      data-testid="video-feed"
+    >
       {online ? (
         <>
           <img
             src={`${streamUrl(cam.id, hd)}&r=${reloadKey}`}
-            alt="" className="w-full h-full object-cover"
+            alt="" className="w-full h-full object-contain bg-black"
             onError={handleError} data-testid="live-stream"
           />
           {cam?.detect_enabled && <OverlayCanvas cam={cam} boxes={boxes} showOverlay={showOverlay} />}
@@ -104,10 +112,21 @@ function Feed({ cam, idx, canPtz, hd, showOverlay, aiState }) {
               {Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(" · ")}
             </span>
           )}
+          {online && cam?.resolution && (
+            <span className="text-[9px] mono px-1 text-white/80 bg-black/50" data-testid="feed-resolution">{cam.resolution}</span>
+          )}
           {online && <span data-testid="feed-quality" className="text-[8px] mono px-1 font-bold" style={{ color: hd ? "#00E676" : "#FFB800" }}>{hd ? "HD" : "SD"}</span>}
           {online && <span className="flex items-center gap-1 text-[9px] mono text-[#00E676]"><Circle size={6} className="fill-[#00E676] rec-dot" /> LIVE</span>}
+          {focused && <X size={13} className="text-white/80" />}
         </div>
       </div>
+      {isSubStream && (
+        <div className="absolute top-8 inset-x-0 px-2" data-testid="substream-warning">
+          <div className="text-[10px] mono px-2 py-1 bg-[#FFB800]/95 text-black flex items-center gap-1.5">
+            ⚠ Sous-flux détecté ({cam.resolution}) — ouvrez le diagnostic pour re-sélectionner le profil principal.
+          </div>
+        </div>
+      )}
       <div className="absolute bottom-0 inset-x-0 px-2 py-1 bg-gradient-to-t from-black/70 to-transparent flex justify-between">
         <span className="text-[9px] mono text-white/70">{cam?.site_name || ""}</span>
         <span className="text-[9px] mono text-white/70">{new Date().toLocaleTimeString()}</span>
@@ -116,7 +135,7 @@ function Feed({ cam, idx, canPtz, hd, showOverlay, aiState }) {
         <div className="absolute inset-0 flex items-center justify-center gap-1 bg-black/30" data-testid="ptz-controls">
           <div className="grid grid-cols-3 gap-0.5">
             {[[ZoomIn, "zoom_in"], [Move, "home"], [ZoomOut, "zoom_out"]].map(([Ic, cmd], i) => (
-              <button key={i} onClick={() => ptz(cmd)} className="w-7 h-7 bg-black/60 hover:bg-[#0044FF] flex items-center justify-center text-white"><Ic size={14} /></button>
+              <button key={i} data-ptz-btn onClick={(e) => { e.stopPropagation(); ptz(cmd); }} className="w-7 h-7 bg-black/60 hover:bg-[#0044FF] flex items-center justify-center text-white"><Ic size={14} /></button>
             ))}
           </div>
         </div>
@@ -131,31 +150,50 @@ export default function LiveView() {
   const [layout, setLayout] = useState(4);
   const [hd, setHd] = useState(false);
   const [showOverlay, setShowOverlay] = useState(() => localStorage.getItem("mg_ai_overlay") !== "off");
+  const [focusedId, setFocusedId] = useState(null);  // camera_id focalisée (single-view) — null = mosaïque
   const canPtz = can("technician");
 
   useEffect(() => {
     api.get("/cameras").then((r) => setCams(r.data));
-    const iv = setInterval(() => api.get("/cameras").then((r) => setCams(r.data)).catch(() => {}), 20000);
+    const iv = setInterval(() => api.get("/cameras").then((r) => setCams(r.data)).catch(() => { /* ignore */ }), 20000);
     return () => clearInterval(iv);
   }, []);
   useEffect(() => { localStorage.setItem("mg_ai_overlay", showOverlay ? "on" : "off"); }, [showOverlay]);
+  // Sortie du mode focus via ESC
+  useEffect(() => {
+    if (!focusedId) return;
+    const onKey = (e) => { if (e.key === "Escape") setFocusedId(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [focusedId]);
 
   const goFull = () => { const el = document.getElementById("live-grid"); if (el?.requestFullscreen) el.requestFullscreen(); };
-  const cols = Math.ceil(Math.sqrt(layout));
-  const gridStyle = { display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridAutoRows: "1fr", gap: 2, aspectRatio: `${cols} / ${Math.ceil(layout / cols)}` };
+  const focusedCam = focusedId ? cams.find((c) => c.id === focusedId) : null;
+  const toggleFocus = (id) => { if (!id) return; setFocusedId((cur) => cur === id ? null : id); };
+
+  // Grille rectangulaire (16:9 par tuile) — pas d'étirement/rognage.
+  const cols = focusedCam ? 1 : Math.ceil(Math.sqrt(layout));
+  const gridStyle = focusedCam
+    ? { display: "grid", gridTemplateColumns: "1fr", gap: 2 }
+    : { display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: 2 };
 
   return (
     <div className="p-4">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h1 className="font-head font-bold text-2xl tracking-tight">{t("live.title")}</h1>
         <div className="flex items-center gap-2">
+          {focusedCam && (
+            <button onClick={() => setFocusedId(null)} data-testid="exit-focus" className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[#00E5FF] text-[#00E5FF] hover:bg-[#00E5FF] hover:text-black">
+              <X size={13} /> Fermer le focus
+            </button>
+          )}
           <button onClick={() => setShowOverlay((v) => !v)} data-testid="toggle-ai-overlay"
             className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs border ${showOverlay ? "bg-[#0044FF] text-white border-[#0044FF]" : "border-border hover:bg-secondary"}`}
             title="Afficher/masquer les détections IA">
             {showOverlay ? <Eye size={13} /> : <EyeOff size={13} />} Overlay IA
           </button>
           <button onClick={() => setHd(!hd)} data-testid="hd-toggle" className={`px-2.5 py-1.5 text-xs border ${hd ? "bg-[#00E676] text-black border-[#00E676]" : "border-border"} hover:opacity-80`}>{hd ? "HD" : "SD"}</button>
-          {LAYOUTS.map((n) => (
+          {!focusedCam && LAYOUTS.map((n) => (
             <button key={n} onClick={() => setLayout(n)} data-testid={`layout-${n}`}
               className={`px-2.5 py-1.5 text-xs mono ${layout === n ? "bg-[#0044FF] text-white" : "border border-border hover:bg-secondary"}`}>{n}</button>
           ))}
@@ -164,11 +202,17 @@ export default function LiveView() {
       </div>
 
       <div id="live-grid" className="bg-background" style={gridStyle}>
-        {Array.from({ length: layout }).map((_, i) => (
-          <Feed key={i} cam={cams[i]} idx={i} canPtz={canPtz} hd={hd}
-                showOverlay={showOverlay}
-                aiState={cams[i] ? aiDetections[cams[i].id] : null} />
-        ))}
+        {focusedCam ? (
+          <Feed cam={focusedCam} idx={0} canPtz={canPtz} hd={hd} showOverlay={showOverlay}
+                aiState={aiDetections[focusedCam.id]} focused={true} onToggleFocus={toggleFocus} />
+        ) : (
+          Array.from({ length: layout }).map((_, i) => (
+            <Feed key={i} cam={cams[i]} idx={i} canPtz={canPtz} hd={hd}
+                  showOverlay={showOverlay} focused={false}
+                  aiState={cams[i] ? aiDetections[cams[i].id] : null}
+                  onToggleFocus={toggleFocus} />
+          ))
+        )}
       </div>
     </div>
   );
