@@ -623,10 +623,12 @@ async def camera_diagnostic(camera_id: str, user: dict = Depends(require_permiss
     cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "password": 0})
     if not cam:
         raise HTTPException(404, "Caméra introuvable")
-    # Vérifie l'état go2rtc réel
+    # Vérifie l'état go2rtc réel (source + variantes _hd/_sd)
     from streaming import _stream_name, _stream_registered
     name = _stream_name(camera_id)
     go2rtc_ok = await _stream_registered(name)
+    hd_ok = await _stream_registered(f"{name}_hd")
+    sd_ok = await _stream_registered(f"{name}_sd")
     # Dernier événement + dernière plaque + dernier objet
     latest_event = await db.events.find_one({"camera_id": camera_id}, {"_id": 0},
                                              sort=[("timestamp", -1)])
@@ -656,11 +658,15 @@ async def camera_diagnostic(camera_id: str, user: dict = Depends(require_permiss
         },
         "flux": {
             "go2rtc_registered": go2rtc_ok,
+            "go2rtc_hd_registered": hd_ok,
+            "go2rtc_sd_registered": sd_ok,
             "camera_online": cam.get("status") == "online",
             "rtsp_transport_used": cam.get("rtsp_transport") or "tcp",
             "stream_urls": {
                 "live_mjpeg": f"/api/stream/{camera_id}/live.mjpeg",
+                "live_mjpeg_hd": f"/api/stream/{camera_id}/live.mjpeg?hd=1",
                 "frame_jpeg": f"/api/stream/{camera_id}/frame.jpeg",
+                "frame_jpeg_hd": f"/api/stream/{camera_id}/frame.jpeg?hd=1",
             },
         },
         "ai": {
@@ -677,6 +683,30 @@ async def camera_diagnostic(camera_id: str, user: dict = Depends(require_permiss
         "last_event": latest_event,
         "last_plate": latest_plate,
     }
+
+
+@api_router.post("/cameras/{camera_id}/refresh-stream")
+async def refresh_camera_stream(camera_id: str, user: dict = Depends(require_role("technician"))):
+    """Force la (ré)-registration complète du flux caméra dans go2rtc.
+    Utile quand :
+      - la caméra a été créée avant l'upgrade v2.13.0 (variantes _hd/_sd manquantes),
+      - go2rtc a été redémarré et le flux n'a pas encore été (ré)-enregistré,
+      - l'URL RTSP en base a été mise à jour (nouveau profil ONVIF) mais go2rtc a
+        gardé l'ancienne config.
+
+    Recrée les 3 flux : source RTSP + variante MJPEG HD (native) + variante MJPEG SD (640).
+    """
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
+    if not cam:
+        raise HTTPException(404, "Caméra introuvable")
+    from streaming import register_camera_stream, _mask_url_password
+    ok = await register_camera_stream(cam)
+    if not ok:
+        raise HTTPException(502, "Impossible d'enregistrer le flux dans go2rtc")
+    await log_audit(user, "camera_stream_refreshed", cam.get("name", camera_id),
+                    f"URL: {_mask_url_password(cam.get('rtsp_url',''))}")
+    return {"success": True, "camera_id": camera_id,
+             "rtsp_url_masked": _mask_url_password(cam.get("rtsp_url", ""))}
 
 
 # ============ RECORDING RETENTION (P2.a) ============

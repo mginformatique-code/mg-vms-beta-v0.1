@@ -1,6 +1,17 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **BUG FIX Live SD/HD + Miniatures d'événements HD (2.13.0 → 2.13.1 — 2026-07-23)**
+  - **Complément v2.13.1** — auto-migration pour caméras existantes :
+    - **Problème** : les caméras enregistrées avant le fix v2.13.0 n'avaient que la variante `_sd` dans go2rtc → le toggle HD frontend envoyait `?hd=1` mais le backend proxifiait vers un `_hd` inexistant → écran gris ou fallback SD.
+    - **Fix backend `_ensure_variants(name)`** : nouveau helper qui vérifie et crée à la volée les variantes `_hd`/`_sd` manquantes dans go2rtc, sans toucher au producteur principal (pas de churn recorder/IA). Appelé :
+      - au démarrage via `sync_all_streams` — parcourt toutes les caméras existantes et complète les variantes manquantes ;
+      - à chaque hit sur `/api/stream/{id}/live.mjpeg` et `/api/stream/{id}/frame.jpeg` — auto-migration transparente en cas de config obsolète.
+    - **Nouvel endpoint `POST /api/cameras/{id}/refresh-stream`** (permission `technician`) : force la ré-registration complète des 3 flux (base + `_hd` + `_sd`) dans go2rtc. Utile après un redémarrage go2rtc ou un changement de config caméra. Auditté (`camera_stream_refreshed`).
+    - **Diagnostic enrichi** (`GET /api/cameras/{id}/diagnostic`) : expose désormais `flux.go2rtc_hd_registered` + `flux.go2rtc_sd_registered` + `stream_urls.live_mjpeg_hd` + `stream_urls.frame_jpeg_hd` pour visualiser l'état exact des 3 variantes.
+    - **Frontend `DiagnosticDialog`** : nouveaux indicateurs (checks HD/SD séparés) + bouton **"Ré-enregistrer le flux (HD + SD)"** avec toast de confirmation. Bandeau d'alerte jaune si une variante manque.
+  - **Validation** : test de simulation → suppression manuelle de `cam_demo-cam-001_hd` dans go2rtc, puis appel de `/frame.jpeg?hd=1` → la variante est recréée automatiquement, HD 1280×720 renvoyé. `POST /refresh-stream` renvoie 200 + URL masquée. Diagnostic expose bien les 3 checks. ✅
+
 - ✅ **BUG FIX Live SD/HD + Miniatures d'événements HD (2.13.0 — 2026-07-22)**
   - **Bug 1** — le bouton SD/HD du Live n'avait aucun effet, la prévisualisation restait toujours en 640px (sous-flux).
     - **Cause racine** : `_mjpeg_stream()` retournait *toujours* `{name}_sd` (variante MJPEG 640 hardcodée). L'endpoint `/api/stream/{id}/live.mjpeg` n'acceptait pas de paramètre HD.

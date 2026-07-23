@@ -156,6 +156,30 @@ async def unregister_camera_stream(camera_id: str) -> None:
         pass
 
 
+async def _ensure_variants(name: str) -> None:
+    """Garantit que les variantes `{name}_hd` et `{name}_sd` sont enregistrées dans go2rtc.
+    Ne touche PAS au producteur principal `{name}` (évite le churn côté recorder/IA).
+    Utile lors d'un upgrade de la plateforme : les caméras existantes qui n'avaient
+    que la variante SD (ancien code) reçoivent maintenant la variante HD à la volée.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(f"{GO2RTC_URL}/api/streams")
+            existing = set((r.json() or {}).keys()) if r.status_code == 200 else set()
+            if f"{name}_hd" not in existing:
+                await client.put(f"{GO2RTC_URL}/api/streams",
+                                  params=[("name", f"{name}_hd"),
+                                          ("src", f"ffmpeg:{name}#video=mjpeg")])
+                logger.info("go2rtc: variante HD ajoutée à la volée pour %s", name)
+            if f"{name}_sd" not in existing:
+                await client.put(f"{GO2RTC_URL}/api/streams",
+                                  params=[("name", f"{name}_sd"),
+                                          ("src", f"ffmpeg:{name}#video=mjpeg#width=640")])
+                logger.info("go2rtc: variante SD ajoutée à la volée pour %s", name)
+    except httpx.HTTPError as e:
+        logger.warning("go2rtc: échec ensure_variants(%s) : %s", name, e)
+
+
 async def sync_all_streams() -> None:
     """Synchronise TOUS les flux caméra + supprime les flux temporaires (`probe_*`).
     Idempotent : appelé au démarrage."""
@@ -177,15 +201,26 @@ async def sync_all_streams() -> None:
     await _ensure_demo_camera()
     # 3) (Re)-enregistrement des caméras réelles
     cams = await db.cameras.find({}, {"_id": 0}).to_list(1000)
-    n = 0
+    n_new = 0
+    n_upgraded = 0
     for cam in cams:
         if cam.get("id") in DEMO_IDS:
+            # Les démos : variantes _hd et _sd déjà déclarées statiquement dans go2rtc.yaml,
+            # mais on garantit qu'elles existent quand même (utile après upgrade).
+            await _ensure_variants(_stream_name(cam["id"]))
             continue
-        if await _stream_registered(_stream_name(cam["id"])):
-            continue  # déjà présent — ne PAS re-registrer (éviterait le churn)
+        name = _stream_name(cam["id"])
+        if await _stream_registered(name):
+            # Producteur principal déjà présent → on ajoute uniquement les variantes manquantes
+            # (migration transparente depuis les versions antérieures à v2.13.0 qui n'avaient
+            # pas la variante _hd).
+            await _ensure_variants(name)
+            n_upgraded += 1
+            continue
         if await register_camera_stream(cam):
-            n += 1
-    logger.info("go2rtc: %d flux caméra (ré)enregistrés au démarrage", n)
+            n_new += 1
+    logger.info("go2rtc: %d flux caméra enregistrés (nouveaux) · %d variantes HD/SD garanties (existants)",
+                n_new, n_upgraded)
 
 
 async def _ensure_demo_camera() -> None:
@@ -860,10 +895,15 @@ async def live_mjpeg(camera_id: str, request: Request,
 
     Query param `hd=1` → variante HD (résolution native). Nécessite la permission
     `stream_hd` ; sinon rétrogradation silencieuse vers SD.
+
+    Si la variante demandée n'est pas encore enregistrée dans go2rtc (caméra créée
+    avant l'upgrade v2.13.0), elle est créée à la volée via `_ensure_variants`.
     """
     await _authorize_camera(user, camera_id)
     want_hd = bool(int(hd or 0)) and has_permission(user, "stream_hd")
     src = _mjpeg_stream(camera_id, hd=want_hd)
+    # Garantit que la variante HD/SD existe côté go2rtc (auto-migration)
+    await _ensure_variants(_stream_name(camera_id))
     client = httpx.AsyncClient(timeout=httpx.Timeout(15, read=None))
     req = client.build_request("GET", f"{GO2RTC_URL}/api/stream.mjpeg", params={"src": src})
     upstream = await client.send(req, stream=True)
@@ -901,6 +941,8 @@ async def frame_jpeg(camera_id: str, hd: int = 1, user: dict = Depends(stream_us
     await _authorize_camera(user, camera_id)
     want_hd = bool(int(hd or 0)) and has_permission(user, "stream_hd")
     name = _stream_name(camera_id)
+    # Garantit que les variantes HD/SD existent (auto-migration après upgrade)
+    await _ensure_variants(name)
     if want_hd:
         # Priorité au flux natif (résolution originale). Fallback sur variante
         # MJPEG HD transcodée, puis SD en dernier recours.

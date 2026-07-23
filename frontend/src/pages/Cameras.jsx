@@ -633,6 +633,17 @@ export default function Cameras() {
 function DiagnosticDialog({ state, onClose, onRefresh }) {
   const { cam, loading, camera, flux, ai, stats_24h, last_event, last_plate } = state;
   const ok = (v) => v ? <CheckCircle2 size={13} className="text-[#00E676]" /> : <XCircle size={13} className="text-[#FF3333]" />;
+  const [refreshing, setRefreshing] = useState(false);
+  const forceRegister = async () => {
+    setRefreshing(true);
+    try {
+      await api.post(`/cameras/${cam.id}/refresh-stream`);
+      toast.success("Flux ré-enregistré dans go2rtc — variantes HD/SD recréées");
+      onRefresh?.();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec du ré-enregistrement du flux");
+    } finally { setRefreshing(false); }
+  };
   return (
     <Dialog open={true} onOpenChange={onClose}>
       <DialogContent className="max-w-3xl" data-testid="diagnostic-dialog">
@@ -645,13 +656,27 @@ function DiagnosticDialog({ state, onClose, onRefresh }) {
               <div className="font-head font-semibold mb-2">Flux vidéo</div>
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2">{ok(flux?.camera_online)} <span className="text-xs">Caméra {camera?.status?.toUpperCase()}</span></div>
-                <div className="flex items-center gap-2">{ok(flux?.go2rtc_registered)} <span className="text-xs">go2rtc — flux enregistré</span></div>
+                <div className="flex items-center gap-2">{ok(flux?.go2rtc_registered)} <span className="text-xs">go2rtc — flux source enregistré</span></div>
+                <div className="flex items-center gap-2">{ok(flux?.go2rtc_hd_registered)} <span className="text-xs">go2rtc — variante <b>HD</b> (résolution native)</span></div>
+                <div className="flex items-center gap-2">{ok(flux?.go2rtc_sd_registered)} <span className="text-xs">go2rtc — variante <b>SD</b> (640 px)</span></div>
                 <div className="text-xs text-muted-foreground mono">Fabricant : <b className="text-foreground">{camera?.manufacturer || "—"}</b> · Modèle : <b className="text-foreground">{camera?.model || "—"}</b></div>
-                <div className="text-xs text-muted-foreground mono">Profil : <b className="text-foreground">{camera?.profile_token || "—"}</b></div>
+                <div className="text-xs text-muted-foreground mono">Profil : <b className="text-foreground">{camera?.profile_name || camera?.profile_token || "—"}</b></div>
                 <div className="text-xs text-muted-foreground mono">Transport : <b>{(flux?.rtsp_transport_used || "tcp").toUpperCase()}</b> · Codec : <b>{(camera?.codec || "auto").toUpperCase()}</b></div>
-                <div className="text-xs text-muted-foreground mono">Résolution : {camera?.resolution || "—"}{camera?.fps ? ` @ ${camera.fps} FPS` : ""}</div>
-                <div className="text-xs text-muted-foreground mono">Codec préféré (config) : {(camera?.preferred_codec || "auto").toUpperCase()}</div>
-                {camera?.rtsp_url_masked && <div className="text-[10px] text-muted-foreground mono truncate" title={camera.rtsp_url_masked}>URL : {camera.rtsp_url_masked}</div>}
+                <div className="text-xs text-muted-foreground mono">Résolution source : {camera?.resolution || "—"}{camera?.fps ? ` @ ${camera.fps} FPS` : ""}</div>
+                {camera?.rtsp_url_masked && <div className="text-[10px] text-muted-foreground mono truncate" title={camera.rtsp_url_masked}>URL RTSP : {camera.rtsp_url_masked}</div>}
+                {(!flux?.go2rtc_hd_registered || !flux?.go2rtc_sd_registered) && (
+                  <div className="text-[11px] text-[#FFB800] mt-1">
+                    ⚠ Variantes HD/SD manquantes dans go2rtc. Cliquez sur « Ré-enregistrer le flux » ci-dessous.
+                  </div>
+                )}
+              </div>
+              <div className="mt-2 pt-2 border-t border-border">
+                <button onClick={forceRegister} disabled={refreshing}
+                        className="text-xs px-2.5 py-1.5 border border-[#0044FF] text-[#0044FF] hover:bg-[#0044FF] hover:text-white flex items-center gap-1"
+                        data-testid="stream-force-register">
+                  {refreshing ? <Loader2 size={12} className="animate-spin" /> : <Radar size={12} />}
+                  Ré-enregistrer le flux (HD + SD)
+                </button>
               </div>
             </section>
             <section className="border border-border p-3">
