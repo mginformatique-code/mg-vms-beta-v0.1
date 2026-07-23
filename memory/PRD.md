@@ -1,6 +1,21 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **Mur vidéo — Navigation clavier + timeline événements en mode focus (2.13.3 — 2026-07-23)**
+  - **Navigation entre caméras au clavier** (mode focus uniquement) :
+    - `←` / `→` : caméra précédente / suivante (cyclique). Skip automatique des slots vides.
+    - `ESC` : sortie du mode focus.
+    - `T` : bascule affichage timeline.
+    - Boutons `ChevronLeft` / `ChevronRight` + compteur `N/M` (position dans la mosaïque) dans la barre d'action.
+    - Ignore les événements clavier si l'utilisateur tape dans un `<input>` / `<textarea>`.
+  - **Mini-timeline des 10 derniers événements** en overlay bas de la caméra focalisée :
+    - Fetch initial + rafraîchissement toutes les 8 s via `GET /api/events?camera_id=X&limit=10`.
+    - Vignette + label + heure (`HH:MM:SS`) pour chaque événement. Vignettes cliquables → **modal plein écran** avec image HD (utilise la miniature 1280×720 du fix v2.13.0), horodatage FR complet, nom caméra, confidence YOLO.
+    - Bouton toggle « Timeline » (raccourci `T`) pour masquer/afficher.
+    - État vide propre : « Aucun événement récent pour cette caméra. »
+  - **UX** : la timeline est superposée au flux vidéo (pointer-events-auto sur la timeline, transparent partout ailleurs), sans bloquer l'image en dessous. Design cohérent (`bg-black/80`, bordure `#00E5FF` au hover, mono-font pour les timestamps).
+  - **Validation Playwright** : screenshot mode focus (compteur 2/2, timeline 10 vignettes avec heures 06:17:30 → 06:20:53, bordures noires) + navigation ← → confirmée (2/2 → 1/2, changement de caméra effectif). ✅
+
 - ✅ **UX Mur vidéo : tuiles rectangulaires, cliquables + focus mode + détection sous-flux (2.13.2 — 2026-07-23)**
   - **Format rectangulaire 16:9** : les tuiles utilisent maintenant `aspect-video` + `object-contain` (au lieu de `object-cover` sur cellule carrée). Plus aucun cropping — l'intégralité de la vidéo caméra (nativement en 16:9) est visible dans chaque tuile de la mosaïque.
   - **Tuiles cliquables → mode focus** : cliquer une tuile ouvre une vue "focus" single-view où la caméra sélectionnée occupe toute la largeur (`gridTemplateColumns: 1fr`). Un bouton **« Fermer le focus »** apparaît dans la barre supérieure. Retour à la mosaïque via clic sur la tuile, sur ce bouton, ou touche **ESC**. Les boutons de layout (1/4/9/16…) sont masqués en mode focus. Bordure `#00E5FF` autour de la tuile active. Le clic sur les boutons PTZ n'active PAS le focus (event.stopPropagation + `data-ptz-btn`).

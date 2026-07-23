@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
-import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X } from "lucide-react";
+import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X, ChevronLeft, ChevronRight } from "lucide-react";
 
 const LAYOUTS = [1, 4, 9, 16, 25, 36, 49, 64];
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -144,6 +144,68 @@ function Feed({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onToggleFoc
   );
 }
 
+function FocusTimeline({ cameraId, onSelect }) {
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!cameraId) return;
+    let alive = true;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const { data } = await api.get(`/events?camera_id=${cameraId}&limit=10`);
+        if (alive) setEvents(Array.isArray(data) ? data : (data.items || []));
+      } catch (e) { if (alive) setEvents([]); }
+      finally { if (alive) setLoading(false); }
+    };
+    load();
+    const iv = setInterval(load, 8000);  // rafraîchissement des 10 derniers événements toutes les 8 s
+    return () => { alive = false; clearInterval(iv); };
+  }, [cameraId]);
+
+  if (!cameraId) return null;
+  return (
+    <div className="absolute bottom-6 inset-x-2 pointer-events-auto" data-testid="focus-timeline">
+      <div className="bg-black/80 border border-white/10 px-2 py-1.5">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-[9px] uppercase tracking-wider text-white/60 mono">
+            10 derniers événements {loading && <span className="text-[#00E5FF]">…</span>}
+          </span>
+          <span className="text-[9px] mono text-white/40">{events.length}</span>
+        </div>
+        {events.length === 0 ? (
+          <div className="text-[10px] text-white/40 py-1">Aucun événement récent pour cette caméra.</div>
+        ) : (
+          <div className="flex gap-1 overflow-x-auto">
+            {events.map((ev) => {
+              const label = ev.type || ev.label || "?";
+              const ts = ev.timestamp ? new Date(ev.timestamp) : null;
+              const time = ts ? ts.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—";
+              const thumb = ev.thumbnail || ev.crop_thumbnail;
+              return (
+                <button key={ev.id} onClick={() => onSelect?.(ev)}
+                        data-testid={`timeline-event-${ev.id}`}
+                        className="flex-shrink-0 w-28 border border-white/10 hover:border-[#00E5FF] bg-black/60 text-left group"
+                        title={`${label} · ${time}`}>
+                  {thumb ? (
+                    <img src={thumb} alt={label} className="w-full h-14 object-cover" />
+                  ) : (
+                    <div className="w-full h-14 bg-black/70 flex items-center justify-center text-white/30 text-xs">—</div>
+                  )}
+                  <div className="px-1.5 py-0.5">
+                    <div className="text-[9px] mono text-white truncate">{label}</div>
+                    <div className="text-[8px] mono text-white/50">{time}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function LiveView() {
   const { t, can, aiDetections } = useApp();
   const [cams, setCams] = useState([]);
@@ -151,6 +213,8 @@ export default function LiveView() {
   const [hd, setHd] = useState(false);
   const [showOverlay, setShowOverlay] = useState(() => localStorage.getItem("mg_ai_overlay") !== "off");
   const [focusedId, setFocusedId] = useState(null);  // camera_id focalisée (single-view) — null = mosaïque
+  const [showTimeline, setShowTimeline] = useState(true);
+  const [previewEvent, setPreviewEvent] = useState(null);  // événement cliqué depuis la timeline
   const canPtz = can("technician");
 
   useEffect(() => {
@@ -159,17 +223,43 @@ export default function LiveView() {
     return () => clearInterval(iv);
   }, []);
   useEffect(() => { localStorage.setItem("mg_ai_overlay", showOverlay ? "on" : "off"); }, [showOverlay]);
-  // Sortie du mode focus via ESC
+
+  // Liste des caméras naviguables (celles présentes dans la mosaïque, dans l'ordre affiché)
+  const gridCams = useMemo(() => {
+    if (!focusedId) return cams;
+    // Slice à la taille du layout courant (les slots vides ne comptent pas)
+    return cams.slice(0, Math.max(layout, cams.length));
+  }, [cams, focusedId, layout]);
+  const focusedIndex = focusedId ? gridCams.findIndex((c) => c?.id === focusedId) : -1;
+  const gotoDelta = (delta) => {
+    if (focusedIndex < 0 || !gridCams.length) return;
+    const n = gridCams.length;
+    let next = (focusedIndex + delta + n) % n;
+    // Skip les slots null (cams undefined si le tableau contient moins d'entrées que le layout)
+    let safety = n;
+    while (!gridCams[next]?.id && safety > 0) { next = (next + delta + n) % n; safety--; }
+    if (gridCams[next]?.id) setFocusedId(gridCams[next].id);
+  };
+
+  // Raccourcis clavier en mode focus : ESC (sortie), ← (précédent), → (suivant), T (toggle timeline).
   useEffect(() => {
     if (!focusedId) return;
-    const onKey = (e) => { if (e.key === "Escape") setFocusedId(null); };
+    const onKey = (e) => {
+      // Ignore si l'utilisateur est en train de taper dans un champ
+      const tag = (e.target?.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea") return;
+      if (e.key === "Escape") { setFocusedId(null); setPreviewEvent(null); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); gotoDelta(+1); }
+      else if (e.key === "ArrowLeft")  { e.preventDefault(); gotoDelta(-1); }
+      else if (e.key.toLowerCase() === "t") { setShowTimeline((v) => !v); }
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [focusedId]);
+  }, [focusedId, focusedIndex, gridCams.length]);
 
   const goFull = () => { const el = document.getElementById("live-grid"); if (el?.requestFullscreen) el.requestFullscreen(); };
   const focusedCam = focusedId ? cams.find((c) => c.id === focusedId) : null;
-  const toggleFocus = (id) => { if (!id) return; setFocusedId((cur) => cur === id ? null : id); };
+  const toggleFocus = (id) => { if (!id) return; setFocusedId((cur) => cur === id ? null : id); setPreviewEvent(null); };
 
   // Grille rectangulaire (16:9 par tuile) — pas d'étirement/rognage.
   const cols = focusedCam ? 1 : Math.ceil(Math.sqrt(layout));
@@ -183,9 +273,28 @@ export default function LiveView() {
         <h1 className="font-head font-bold text-2xl tracking-tight">{t("live.title")}</h1>
         <div className="flex items-center gap-2">
           {focusedCam && (
-            <button onClick={() => setFocusedId(null)} data-testid="exit-focus" className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[#00E5FF] text-[#00E5FF] hover:bg-[#00E5FF] hover:text-black">
-              <X size={13} /> Fermer le focus
-            </button>
+            <>
+              <button onClick={() => gotoDelta(-1)} data-testid="focus-prev" title="Caméra précédente (←)"
+                      className="p-1.5 border border-border hover:bg-secondary">
+                <ChevronLeft size={14} />
+              </button>
+              <span className="text-[10px] mono text-muted-foreground px-1">
+                {focusedIndex + 1}/{gridCams.filter((c) => c?.id).length}
+              </span>
+              <button onClick={() => gotoDelta(+1)} data-testid="focus-next" title="Caméra suivante (→)"
+                      className="p-1.5 border border-border hover:bg-secondary">
+                <ChevronRight size={14} />
+              </button>
+              <button onClick={() => setShowTimeline((v) => !v)} data-testid="focus-timeline-toggle"
+                      title="Afficher/masquer la timeline des événements (T)"
+                      className={`px-2.5 py-1.5 text-xs border flex items-center gap-1 ${showTimeline ? "bg-[#00E5FF]/20 border-[#00E5FF] text-[#00E5FF]" : "border-border hover:bg-secondary"}`}>
+                Timeline
+              </button>
+              <button onClick={() => { setFocusedId(null); setPreviewEvent(null); }} data-testid="exit-focus"
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[#00E5FF] text-[#00E5FF] hover:bg-[#00E5FF] hover:text-black">
+                <X size={13} /> Fermer le focus
+              </button>
+            </>
           )}
           <button onClick={() => setShowOverlay((v) => !v)} data-testid="toggle-ai-overlay"
             className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs border ${showOverlay ? "bg-[#0044FF] text-white border-[#0044FF]" : "border-border hover:bg-secondary"}`}
@@ -201,10 +310,13 @@ export default function LiveView() {
         </div>
       </div>
 
-      <div id="live-grid" className="bg-background" style={gridStyle}>
+      <div id="live-grid" className="bg-background relative" style={gridStyle}>
         {focusedCam ? (
-          <Feed cam={focusedCam} idx={0} canPtz={canPtz} hd={hd} showOverlay={showOverlay}
-                aiState={aiDetections[focusedCam.id]} focused={true} onToggleFocus={toggleFocus} />
+          <>
+            <Feed cam={focusedCam} idx={0} canPtz={canPtz} hd={hd} showOverlay={showOverlay}
+                  aiState={aiDetections[focusedCam.id]} focused={true} onToggleFocus={toggleFocus} />
+            {showTimeline && <FocusTimeline cameraId={focusedCam.id} onSelect={setPreviewEvent} />}
+          </>
         ) : (
           Array.from({ length: layout }).map((_, i) => (
             <Feed key={i} cam={cams[i]} idx={i} canPtz={canPtz} hd={hd}
@@ -214,6 +326,29 @@ export default function LiveView() {
           ))
         )}
       </div>
+
+      {previewEvent && (
+        <div className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-8" onClick={() => setPreviewEvent(null)} data-testid="event-preview-modal">
+          <div className="max-w-5xl w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <div className="text-white font-head font-semibold text-lg">{previewEvent.type || previewEvent.label || "Événement"}</div>
+                <div className="text-white/60 text-xs mono">
+                  {previewEvent.timestamp ? new Date(previewEvent.timestamp).toLocaleString("fr-FR") : ""}
+                  {previewEvent.camera_name ? ` · ${previewEvent.camera_name}` : ""}
+                  {previewEvent.confidence ? ` · ${(previewEvent.confidence * 100).toFixed(0)}%` : ""}
+                </div>
+              </div>
+              <button onClick={() => setPreviewEvent(null)} className="p-2 hover:bg-white/10 text-white" data-testid="event-preview-close">
+                <X size={18} />
+              </button>
+            </div>
+            {previewEvent.thumbnail && (
+              <img src={previewEvent.thumbnail} alt={previewEvent.type} className="w-full max-h-[80vh] object-contain bg-black" />
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
