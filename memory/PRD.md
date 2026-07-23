@@ -1,6 +1,24 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **Phase 4 (suite) — Player WebRTC frontend (2.16.1 — 2026-07-23)**
+  - **Objectif** : remplacer l'`<img>` MJPEG par un `<video>` HTML5 recevant du H.264 pass-through via WebRTC — latence 200-500 ms au lieu de 1-2 s, aucun transcodage go2rtc (donc 0 charge CPU/GPU serveur pour l'aperçu), aucun artefact MJPEG.
+  - **Backend** : nouveau endpoint `POST /api/pipeline/webrtc/{camera_id}` — proxy SDP signaling entre le navigateur et go2rtc `/api/webrtc?src=cam_XXX`. Auth centralisée, aucun besoin de reverse-proxy custom pour le signaling (le média RTP passe ensuite en direct navigateur↔go2rtc:8555 via ICE).
+  - **Frontend** :
+    - Nouveau composant `WebRTCPlayer.jsx` : `new RTCPeerConnection` avec STUN Google, `addTransceiver("video"/"audio", recvonly)`, `createOffer` + gathering ICE complet (2 s max), POST offer au backend, applique la SDP answer. `<video autoPlay playsInline muted>` reçoit le stream H.264 natif. Overlay "Négociation WebRTC…" pendant le handshake. Callbacks `onError` + `onConnected`.
+    - `LiveView.jsx` :
+      - Charge `preview_mode` depuis `/api/pipeline/config` au démarrage.
+      - Composant `Feed` : essaie WebRTC en 1er sauf si `preview_mode=mjpeg` forcé. Bascule automatique sur MJPEG (`<img>` classique) si WebRTC échoue (`onError` → `setWebrtcFailed(true)` → re-render).
+      - Badge de qualité coloré : `WEBRTC` cyan quand actif, `HD` vert / `SD` orange en fallback.
+      - Reset du fallback à chaque changement de caméra / mode / HD-SD.
+  - **Comportement sandbox** : Cloudflare edge ne relaie pas les ports UDP ICE (go2rtc:8555 pas exposé), donc négociation ICE timeout → **fallback MJPEG activé automatiquement**. Les 2 caméras démo restent visibles sans écran noir ni crash. C'est exactement le comportement attendu en cas d'infrastructure non-WebRTC-ready.
+  - **Comportement production (RTX A2000 + reverse-proxy configuré)** :
+    - Reverse-proxy doit exposer `go2rtc:8555/tcp` (WebRTC signaling secondaire) + range UDP (par défaut auto-négocié).
+    - Alternative simplifiée : ajouter dans `go2rtc.yaml` la ligne `webrtc.ice_servers` avec un serveur STUN/TURN public + `webrtc.listen: ":8555"` déjà présent.
+    - Une fois routé → badge `WEBRTC` cyan, latence typique 200-500 ms, 0 charge CPU/GPU serveur pour l'aperçu (H.264 pass-through direct depuis la caméra).
+  - **À suivre** : NVDEC direct pour le pipeline IA (bypass OpenCV VideoCapture pour lire directement depuis `ffmpeg -hwaccel cuda -c:v h264_cuvid` piped en numpy) — ~2 jours de travail.
+
+
 - ✅ **Phase 4 — Moteur vidéo intelligent (2.16.0 — 2026-07-23)**
   - **Objectif** : refonte du pipeline vidéo pour exploiter NVDEC / NVENC / scale_cuda quand présents, WebRTC pass-through au lieu de MJPEG systématique, recorder `-c copy` sans perte, et interface admin claire pour tout piloter.
   - **Backend `/app/backend/video_engine.py`** (~250 lignes) :

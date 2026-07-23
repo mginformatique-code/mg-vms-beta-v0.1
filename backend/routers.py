@@ -894,6 +894,42 @@ async def pipeline_webrtc_url(camera_id: str, user: dict = Depends(get_current_u
     name = _stream_name(camera_id)
     # URL relative (le frontend construit l'URL WS en préfixant REACT_APP_BACKEND_URL)
     return {"ws_url": f"/webrtc/api/ws?src={name}", "src": name}
+
+
+class WebRTCOfferInput(BaseModel):
+    type: str
+    sdp: str
+
+
+@api_router.post("/pipeline/webrtc/{camera_id}")
+async def pipeline_webrtc_offer(camera_id: str, offer: WebRTCOfferInput,
+                                  user: dict = Depends(get_current_user)):
+    """Proxy WebRTC signaling — le frontend POST son SDP offer ici, on relaie à
+    go2rtc `/api/webrtc?src={name}` et on renvoie la SDP answer. Aucun WS ni
+    reverse-proxy custom nécessaire : la communication passe uniquement par
+    `/api/pipeline/webrtc/*` (donc par le backend authentifié).
+
+    Le média (RTP DTLS-SRTP) est ensuite négocié en direct navigateur↔go2rtc
+    via ICE — go2rtc utilise typiquement les ports 8555 (WebRTC) + un range UDP.
+    """
+    from streaming import _stream_name, _authorize_camera, GO2RTC_URL, _ensure_variants
+    await _authorize_camera(user, camera_id)
+    name = _stream_name(camera_id)
+    # Vérifie que le flux source existe côté go2rtc (auto-migration si besoin)
+    await _ensure_variants(name)
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                f"{GO2RTC_URL}/api/webrtc",
+                params={"src": name},
+                json={"type": offer.type, "sdp": offer.sdp},
+            )
+        if r.status_code != 200:
+            raise HTTPException(502, f"go2rtc WebRTC signaling échec: HTTP {r.status_code} · {r.text[:400]}")
+        return r.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"go2rtc unreachable: {type(e).__name__}: {e}")
 # ============ COMPARAISON PERFORMANCE ANPR (Phase 3 - section 12) ============
 @api_router.post("/system/anpr-benchmark")
 async def anpr_benchmark(camera_id: Optional[str] = None,
