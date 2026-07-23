@@ -144,10 +144,34 @@ export default function EventViewer({ items, index, onClose, onIndex, kind = "ev
         {showVideo && recInfo ? (
           <video ref={videoRef} src={recInfo.url} controls autoPlay className="w-full h-full bg-black" data-testid="viewer-video" />
         ) : item.thumbnail ? (
-          <img ref={imgRef} src={item.thumbnail} alt=""
-               className="absolute top-1/2 left-1/2 select-none pointer-events-none max-w-none"
-               style={{ transform: `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px) scale(${scale})`, transition: dragging ? "none" : "transform .15s ease-out", maxHeight: "100%" }}
-               data-testid="viewer-image" />
+          <>
+            <img ref={imgRef} src={item.thumbnail} alt=""
+                 className="absolute top-1/2 left-1/2 select-none pointer-events-none max-w-none"
+                 style={{ transform: `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px) scale(${scale})`, transition: dragging ? "none" : "transform .15s ease-out", maxHeight: "100%" }}
+                 data-testid="viewer-image" />
+            {/* Hybridation ANPR : la scène HD reste le visuel principal ; les crops
+                nets (plaque + véhicule) sont épinglés en overlay bas-droit pour
+                garantir la lisibilité OCR même quand la plaque est petite dans la scène. */}
+            {(item.plate_crop || item.vehicle_crop) && (
+              <div className="absolute bottom-16 right-3 flex flex-col gap-1.5 z-10" data-testid="viewer-crops">
+                {item.vehicle_crop && (
+                  <div className="bg-black/80 border border-white/20 p-1">
+                    <div className="text-[8px] uppercase tracking-wider text-white/50 mb-0.5 mono">Véhicule</div>
+                    <img src={item.vehicle_crop} alt="véhicule" className="max-w-[180px] max-h-[110px] object-contain block" data-testid="viewer-vehicle-crop" />
+                  </div>
+                )}
+                {item.plate_crop && (
+                  <div className="bg-black/80 border border-[#00E5FF] p-1">
+                    <div className="text-[8px] uppercase tracking-wider text-[#00E5FF] mb-0.5 mono">Plaque OCR</div>
+                    <img src={item.plate_crop} alt="plaque" className="max-w-[180px] max-h-[70px] object-contain block bg-black" data-testid="viewer-plate-crop" />
+                    {item.plate && (
+                      <div className="text-center text-[13px] mono font-bold text-white mt-0.5 tracking-widest">{item.plate}</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         ) : (
           <div className="w-full h-full flex items-center justify-center text-white/40">Aucune image disponible</div>
         )}

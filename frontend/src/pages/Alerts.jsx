@@ -118,8 +118,11 @@ export default function Alerts() {
   const [viewerIdx, setViewerIdx] = useState(null);
 
   // Adapte les alertes pour EventViewer (mêmes clés que event/plate)
+  // Hybridation ANPR : préserve `plate_crop` + `vehicle_crop` pour l'affichage
+  // en insets à côté de la scène HD (thumbnail).
   const viewerItems = alerts.map((a) => ({
-    id: a.id, thumbnail: a.thumbnail || a.plate_crop,
+    id: a.id, thumbnail: a.thumbnail || a.vehicle_crop || a.plate_crop,
+    plate_crop: a.plate_crop, vehicle_crop: a.vehicle_crop,
     camera_id: a.camera_id, camera_name: a.camera_name, site_name: a.site_name,
     timestamp: a.timestamp, plugin: a.plugin || (a.scenario ? `IA · ${a.scenario}` : "Alerte"),
     type: a.type || a.scenario || "alert", label: a.message,

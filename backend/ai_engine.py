@@ -480,7 +480,12 @@ async def _raise_blacklist_alert(cam: dict, plate_doc: dict, reason: str):
         "camera_id": cam["id"], "camera_name": cam["name"],
         "site_id": cam.get("site_id", ""), "site_name": cam.get("site_name", ""),
         "plate": plate_doc["plate"], "plate_id": plate_doc["id"],
+        # Hybridation : scène HD complète pour identifier le contexte + crops nets
+        # (plaque lisible + véhicule). Le frontend affiche la scène en fond avec
+        # les crops en insets.
+        "thumbnail": plate_doc.get("frame_thumb") or plate_doc.get("vehicle_crop") or plate_doc.get("plate_crop"),
         "plate_crop": plate_doc.get("plate_crop"),
+        "vehicle_crop": plate_doc.get("vehicle_crop"),
         "acknowledged": False, "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     await db.alerts.insert_one(dict(alert))
@@ -791,6 +796,9 @@ async def _process_camera(cam: dict) -> None:
             "lat": cam.get("lat"), "lng": cam.get("lng"),
             "list_status": list_status,
             "vehicle_crop": p.get("vehicle_crop"), "plate_crop": p.get("plate_crop"),
+            # Hybridation : scène HD complète (contexte visuel) — le frontend affiche
+            # la scène en fond avec plate_crop/vehicle_crop en insets pour la lisibilité OCR.
+            "frame_thumb": result.get("frame_thumb"),
         }
         await db.plates.insert_one(dict(doc))
         doc.pop("_id", None)

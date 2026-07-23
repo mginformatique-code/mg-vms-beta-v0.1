@@ -30,10 +30,13 @@ export default function Anpr() {
   const [file, setFile] = useState(null);
   const [viewerIdx, setViewerIdx] = useState(null);
 
-  // Prépare les items pour la visionneuse (utilise vehicle_crop en priorité pour la plaque)
+  // Hybridation ANPR : scène HD complète (frame_thumb) en visuel principal
+  // + plate_crop + vehicle_crop en insets nets dans EventViewer.
   const viewerItems = plates.map((p) => ({
     ...p,
-    thumbnail: p.vehicle_crop || p.plate_crop || p.thumbnail,
+    thumbnail: p.frame_thumb || p.vehicle_crop || p.plate_crop || p.thumbnail,
+    plate_crop: p.plate_crop,
+    vehicle_crop: p.vehicle_crop,
     type: "Plaque détectée",
     plugin: "ANPR (fast-alpr)",
   }));

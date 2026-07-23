@@ -1,6 +1,25 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **Hybridation ANPR — Scène HD + insets véhicule + plaque OCR (2.13.4 — 2026-07-23)**
+  - **Contexte** : après le passage au HD des miniatures d'événements (v2.13.0), les plaques LAPI et alertes blacklist restaient sur `plate_crop` seul (~21×26 px) — plaque lisible mais aucun contexte visuel de la scène.
+  - **Fix backend `ai_engine.py`** :
+    - Documents `plates` : ajout du champ `frame_thumb` (scène HD complète 1280 wide, quality 85) en plus de `plate_crop` (crop OCR net) et `vehicle_crop` (crop véhicule complet).
+    - `_raise_blacklist_alert` : la miniature principale (`thumbnail`) est désormais `frame_thumb` (scène HD) ; `plate_crop` et `vehicle_crop` conservés en champs séparés pour l'affichage en insets.
+  - **Fix frontend `EventViewer.jsx`** — **hybridation visuelle** :
+    - Fond : scène HD (item.thumbnail) zoomable/pannable (comportement existant).
+    - Overlay bas-droite (bordure blanche) : **inset VÉHICULE** (`vehicle_crop`, max 180×110).
+    - En dessous (bordure cyan `#00E5FF`) : **inset PLAQUE OCR** (`plate_crop`, max 180×70) + libellé texte de la plaque (tracking-widest, mono, gras) sous le crop pour lisibilité maximale.
+  - **Fix frontend `Anpr.jsx` + `Alerts.jsx`** :
+    - `viewerItems` transmet désormais `thumbnail: frame_thumb`, `plate_crop`, `vehicle_crop` séparément — EventViewer déclenche automatiquement le rendu hybride quand les 2 champs coexistent.
+  - **Validation Playwright** : plaque `G57854` @ 33s fraîchement détectée → JSON API expose `frame_thumb=768×432·16KB`, `vehicle_crop=116×102·3KB`, `plate_crop=21×26·<1KB`. Ouverture du viewer sur `/anpr` → screenshot confirme scène HD au centre + insets `VÉHICULE` et `PLAQUE OCR G57854` en overlay droit. crops=1/vehicle=1/plate=1 côté DOM. ✅
+  - **Récapitulatif complet des miniatures HD** :
+    | Type d'alerte | thumbnail | crops annexes |
+    | --- | --- | --- |
+    | YOLO (Personne, Voiture, …) | scène HD (1280 wide) | `crop_thumbnail` (bbox) |
+    | Mouvement, Face, Scénarios IA | scène HD | — |
+    | Plaque LAPI + Alerte blacklist | scène HD (1280 wide) | `plate_crop`, `vehicle_crop` (insets) |
+
 - ✅ **Mur vidéo — Navigation clavier + timeline événements en mode focus (2.13.3 — 2026-07-23)**
   - **Navigation entre caméras au clavier** (mode focus uniquement) :
     - `←` / `→` : caméra précédente / suivante (cyclique). Skip automatique des slots vides.
