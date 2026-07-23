@@ -33,6 +33,7 @@ const NAV = [
     { to: "/audit", icon: ScrollText, key: "nav.audit", role: "technician" },
     { to: "/diagnostics", icon: Activity, key: "nav.diagnostics", role: "technician" },
     { to: "/gpu", icon: Zap, key: "nav.gpu", role: "technician" },
+    { to: "/pipeline", icon: Film, key: "nav.pipeline", role: "technician" },
     { to: "/anpr-benchmark", icon: Cpu, key: "nav.anpr_benchmark", role: "technician" },
     { to: "/reports", icon: FileText, key: "nav.reports", role: "technician" },
     { to: "/notifications", icon: BellRing, key: "nav.notifications", role: "technician" },

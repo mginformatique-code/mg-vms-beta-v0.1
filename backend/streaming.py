@@ -116,6 +116,18 @@ async def register_camera_stream(cam: dict) -> bool:
     if not rtsp_url.lower().startswith(("rtsp://", "rtmp://", "http://", "https://")):
         return False
     name = _stream_name(cam["id"])
+    # Résolution du pipeline effectif (auto/GPU/CPU) — construit les filtres ffmpeg optimisés
+    try:
+        from video_engine import resolve_pipeline
+        pipe = await resolve_pipeline(cam)
+        hd_filter = pipe["mjpeg_filter_hd"]
+        sd_filter = pipe["mjpeg_filter_sd"]
+        logger.info("register_camera_stream %s → mode=%s decoder=%s preview=%s rec=%s ai=%s",
+                     name, pipe["mode"], pipe["decoder"], pipe["preview"], pipe["recorder"], pipe["ai"])
+    except Exception as e:
+        logger.warning("video_engine.resolve_pipeline échec (fallback SW) : %s", e)
+        hd_filter = "video=mjpeg"
+        sd_filter = "video=mjpeg#width=640"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             # Supprime les anciens enregistrements (source + variantes) pour repartir propre
@@ -125,15 +137,15 @@ async def register_camera_stream(cam: dict) -> bool:
             r = await client.put(f"{GO2RTC_URL}/api/streams",
                                  params=[("name", name), ("src", rtsp_url)])
             r.raise_for_status()
-            # 2) Variante HD : MJPEG à résolution native (aperçu haute qualité)
+            # 2) Variante HD : MJPEG à résolution native (avec accel matérielle si dispo)
             r_hd = await client.put(f"{GO2RTC_URL}/api/streams",
                                      params=[("name", f"{name}_hd"),
-                                             ("src", f"ffmpeg:{name}#video=mjpeg")])
+                                             ("src", f"ffmpeg:{name}#{hd_filter}")])
             r_hd.raise_for_status()
-            # 3) Variante SD : MJPEG 640 (aperçu faible bande passante)
+            # 3) Variante SD : MJPEG 640 (avec accel matérielle si dispo)
             r_sd = await client.put(f"{GO2RTC_URL}/api/streams",
                                      params=[("name", f"{name}_sd"),
-                                             ("src", f"ffmpeg:{name}#video=mjpeg#width=640")])
+                                             ("src", f"ffmpeg:{name}#{sd_filter}")])
             r_sd.raise_for_status()
         if not await _stream_registered(name):
             logger.warning("go2rtc: flux %s introuvable après enregistrement", name)
@@ -161,7 +173,22 @@ async def _ensure_variants(name: str) -> None:
     Ne touche PAS au producteur principal `{name}` (évite le churn côté recorder/IA).
     Utile lors d'un upgrade de la plateforme : les caméras existantes qui n'avaient
     que la variante SD (ancien code) reçoivent maintenant la variante HD à la volée.
+    Reconstruit avec les filtres optimisés du moteur vidéo (NVDEC + scale_cuda si dispo).
     """
+    # Récupère la config de la caméra pour construire les bons filtres ffmpeg
+    hd_filter = "video=mjpeg"
+    sd_filter = "video=mjpeg#width=640"
+    try:
+        # extraction du camera_id depuis le nom `cam_{id}`
+        camera_id = name[4:] if name.startswith("cam_") else name
+        cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
+        if cam:
+            from video_engine import resolve_pipeline
+            pipe = await resolve_pipeline(cam)
+            hd_filter = pipe["mjpeg_filter_hd"]
+            sd_filter = pipe["mjpeg_filter_sd"]
+    except Exception:
+        pass
     try:
         async with httpx.AsyncClient(timeout=8) as client:
             r = await client.get(f"{GO2RTC_URL}/api/streams")
@@ -169,13 +196,13 @@ async def _ensure_variants(name: str) -> None:
             if f"{name}_hd" not in existing:
                 await client.put(f"{GO2RTC_URL}/api/streams",
                                   params=[("name", f"{name}_hd"),
-                                          ("src", f"ffmpeg:{name}#video=mjpeg")])
-                logger.info("go2rtc: variante HD ajoutée à la volée pour %s", name)
+                                          ("src", f"ffmpeg:{name}#{hd_filter}")])
+                logger.info("go2rtc: variante HD ajoutée à la volée pour %s (filter=%s)", name, hd_filter)
             if f"{name}_sd" not in existing:
                 await client.put(f"{GO2RTC_URL}/api/streams",
                                   params=[("name", f"{name}_sd"),
-                                          ("src", f"ffmpeg:{name}#video=mjpeg#width=640")])
-                logger.info("go2rtc: variante SD ajoutée à la volée pour %s", name)
+                                          ("src", f"ffmpeg:{name}#{sd_filter}")])
+                logger.info("go2rtc: variante SD ajoutée à la volée pour %s (filter=%s)", name, sd_filter)
     except httpx.HTTPError as e:
         logger.warning("go2rtc: échec ensure_variants(%s) : %s", name, e)
 

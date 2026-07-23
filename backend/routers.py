@@ -834,6 +834,66 @@ async def system_gpu_full(user: dict = Depends(require_role("technician"))):
     return gpu_full_info()
 
 
+# ============ MOTEUR VIDÉO — Config, statut, WebRTC (Phase 4) ============
+@api_router.get("/pipeline/config")
+async def pipeline_config_get(user: dict = Depends(require_permission("view_live"))):
+    """Config actuelle du moteur vidéo (modes globaux + prévisualisation)."""
+    from video_engine import get_config, _ffmpeg_capabilities, has_cuda_pipeline
+    return {"config": await get_config(),
+             "capabilities": _ffmpeg_capabilities(),
+             "cuda_pipeline_ready": has_cuda_pipeline()}
+
+
+class PipelineConfigInput(BaseModel):
+    pipeline_mode: Optional[str] = None   # auto | gpu | cpu | direct
+    preview_mode: Optional[str] = None    # auto | webrtc | mjpeg | mse
+    ai_pipeline: Optional[str] = None     # auto | gpu | cpu
+    recorder_mode: Optional[str] = None   # auto | copy | reencode
+    hd_preview_width: Optional[int] = None
+    sd_preview_width: Optional[int] = None
+    sd_preview_fps: Optional[int] = None
+    low_latency: Optional[bool] = None
+
+
+@api_router.put("/pipeline/config")
+async def pipeline_config_set(data: PipelineConfigInput, user: dict = Depends(require_role("admin"))):
+    """Met à jour la config du moteur vidéo. Force la ré-création des variantes go2rtc."""
+    from video_engine import set_config
+    payload = {k: v for k, v in data.dict().items() if v is not None}
+    allowed_vals = {
+        "pipeline_mode": ("auto", "gpu", "cpu", "direct"),
+        "preview_mode": ("auto", "webrtc", "mjpeg", "mse"),
+        "ai_pipeline": ("auto", "gpu", "cpu"),
+        "recorder_mode": ("auto", "copy", "reencode"),
+    }
+    for k, allowed in allowed_vals.items():
+        if k in payload and payload[k] not in allowed:
+            raise HTTPException(400, f"{k}: valeurs autorisées {allowed}")
+    new = await set_config(payload)
+    await log_audit(user, "pipeline_config_updated", "video_engine",
+                     f"nouvelle config: {payload}")
+    return {"success": True, "config": new,
+             "note": "Les nouveaux paramètres s'appliqueront au prochain (re)enregistrement des flux — utilisez /refresh-stream par caméra pour forcer."}
+
+
+@api_router.get("/pipeline/status")
+async def pipeline_status(user: dict = Depends(require_permission("view_live"))):
+    """Rapport global : config + capacités FFmpeg + pipeline effectif par caméra."""
+    from video_engine import engine_status
+    return await engine_status()
+
+
+@api_router.get("/pipeline/webrtc/offer/{camera_id}")
+async def pipeline_webrtc_url(camera_id: str, user: dict = Depends(get_current_user)):
+    """URL du WebRTC signaling go2rtc pour cette caméra.
+    Le frontend utilise `RTCPeerConnection` avec cette URL comme signaling websocket.
+    go2rtc gère la négociation SDP et streaming H.264 en pass-through (aucun transcodage).
+    """
+    from streaming import _stream_name, _authorize_camera
+    await _authorize_camera(user, camera_id)
+    name = _stream_name(camera_id)
+    # URL relative (le frontend construit l'URL WS en préfixant REACT_APP_BACKEND_URL)
+    return {"ws_url": f"/webrtc/api/ws?src={name}", "src": name}
 # ============ COMPARAISON PERFORMANCE ANPR (Phase 3 - section 12) ============
 @api_router.post("/system/anpr-benchmark")
 async def anpr_benchmark(camera_id: Optional[str] = None,

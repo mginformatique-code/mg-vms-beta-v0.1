@@ -23,6 +23,7 @@ import Audit from "@/pages/Audit";
 import Diagnostics from "@/pages/Diagnostics";
 import GPUStatus from "@/pages/GPUStatus";
 import AnprBenchmark from "@/pages/AnprBenchmark";
+import PipelineVideo from "@/pages/PipelineVideo";
 import UsersPage from "@/pages/Users";
 import SettingsPage from "@/pages/Settings";
 import Notifications from "@/pages/Notifications";
@@ -58,6 +59,7 @@ function AppRoutes() {
       <Route path="/diagnostics" element={<Protected><Diagnostics /></Protected>} />
       <Route path="/gpu" element={<Protected><GPUStatus /></Protected>} />
       <Route path="/anpr-benchmark" element={<Protected><AnprBenchmark /></Protected>} />
+      <Route path="/pipeline" element={<Protected><PipelineVideo /></Protected>} />
       <Route path="/users" element={<Protected><UsersPage /></Protected>} />
       <Route path="/notifications" element={<Protected><Notifications /></Protected>} />
       <Route path="/plugins" element={<Protected><Plugins /></Protected>} />

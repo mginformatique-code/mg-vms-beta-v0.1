@@ -1,6 +1,35 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **Phase 4 — Moteur vidéo intelligent (2.16.0 — 2026-07-23)**
+  - **Objectif** : refonte du pipeline vidéo pour exploiter NVDEC / NVENC / scale_cuda quand présents, WebRTC pass-through au lieu de MJPEG systématique, recorder `-c copy` sans perte, et interface admin claire pour tout piloter.
+  - **Backend `/app/backend/video_engine.py`** (~250 lignes) :
+    - `_ffmpeg_capabilities()` mémoïsée : détecte via subprocess ffmpeg `-hwaccels` / `-decoders` / `-encoders` / `-filters` la présence de : `cuda` / `vaapi` / `vulkan` / `qsv`, décodeurs cuvid (h264/hevc/av1/mjpeg/mpeg4/vp9/vp8), encodeurs nvenc (h264/hevc/av1), filtres CUDA (scale_cuda, colorspace_cuda, hwupload_cuda, overlay_cuda, thumbnail_cuda, yadif_cuda, scale_npp).
+    - `has_cuda_pipeline()` croise capabilities FFmpeg + présence GPU NVIDIA (NVML) — n'active le pipeline GPU que si les 2 sont OK.
+    - Config persistée (collection `system_config` clé `video_engine`) : `pipeline_mode` (auto/gpu/cpu/direct), `preview_mode` (auto/webrtc/mjpeg/mse), `ai_pipeline` (auto/gpu/cpu), `recorder_mode` (auto/copy/reencode), `hd_preview_width`, `sd_preview_width`, `low_latency`.
+    - `resolve_pipeline(cam)` : décide par caméra le pipeline effectif — retourne mode, décodeur (h264_cuvid / hevc_cuvid / software), preview (webrtc si H.264, sinon mjpeg), recorder (copy si H.264/H.265, reencode-gpu/cpu sinon), IA (gpu si torch.cuda dispo), + **filtres FFmpeg optimisés** (`#hardware=cuda#width=640#low_latency`) — appliqués aux flux go2rtc.
+    - `engine_status()` : rapport global pour la page `/pipeline` (config + capabilities + pipeline effectif par caméra + raison du choix).
+  - **Backend `streaming.py`** :
+    - `register_camera_stream()` et `_ensure_variants()` utilisent maintenant `resolve_pipeline(cam)` pour construire les filtres. Sur GPU présent → `ffmpeg:{name}#video=mjpeg#hardware=cuda#width=640#low_latency` (NVDEC + scale_cuda + faible latence). Sur CPU → filtres SW classiques + low_latency.
+  - **4 endpoints REST** :
+    - `GET /api/pipeline/config` — config actuelle + capabilities FFmpeg + `cuda_pipeline_ready`.
+    - `PUT /api/pipeline/config` — met à jour (admin) avec validation stricte des valeurs autorisées + audit log.
+    - `GET /api/pipeline/status` — rapport global (config + caps + pipeline par caméra).
+    - `GET /api/pipeline/webrtc/offer/{camera_id}` — URL du signaling go2rtc WebRTC pour cette caméra (`/webrtc/api/ws?src=cam_XXX`) — le frontend l'utilisera pour établir la `RTCPeerConnection` H.264 pass-through.
+  - **Frontend nouvelle page `/pipeline` (PipelineVideo.jsx)** :
+    - Bandeau **Capacités FFmpeg détectées** : 8 badges (CUDA pipeline / hwaccel cuda / h264_cuvid / hevc_cuvid / h264_nvenc / hevc_nvenc / scale_cuda / colorspace_cuda) — verts si présents, rouges sinon. Version FFmpeg + liste des hwaccels bruts.
+    - 4 blocs radio (Pipeline vidéo global · Prévisualisation · Pipeline IA · Recorder) avec descriptions humaines.
+    - Options avancées : largeur HD (0=native), largeur SD, faible latence.
+    - **Tableau Pipeline effectif par caméra** : nom, codec/résolution, mode (badge coloré CPU/GPU), décodeur, preview, recorder, IA, **raison du choix** — permet de comprendre en un coup d'œil pourquoi telle caméra tourne sur CPU ou GPU.
+    - Boutons Actualiser, Sauvegarder (activé si `dirty`), **Appliquer à toutes les caméras** (déclenche `/refresh-stream` en batch → recrée les flux go2rtc avec les nouveaux filtres).
+    - Sidebar : entrée `Pipeline vidéo` (Administration) i18n FR/EN.
+  - **Comportement observé sur sandbox (pas de GPU)** : `mode=cpu`, `decoder=software`, `preview=webrtc` (auto-choix H.264), `recorder=copy` (H.264 natif → 0 encodage inutile), `ai=cpu`, filtre `video=mjpeg#low_latency`. Sur RTX A2000 : tous les badges verts, `mode=gpu`, `decoder=h264_cuvid`, filtre `video=mjpeg#hardware=cuda#width=640#low_latency` = **NVDEC actif + scale_cuda**.
+  - **À suivre (backlog Phase 4 restant)** :
+    - Player WebRTC natif côté frontend (RTCPeerConnection + go2rtc signaling WebSocket) pour remplacer MJPEG quand `preview_mode=webrtc`.
+    - Fix des artefacts vidéo : analyse conversion couleur (yuv420p → rgb), buffers, pixel format à isoler par diagnostic sur les caméras affectées.
+    - Utilisation directe de NVDEC par le pipeline IA (bypass OpenCV VideoCapture actuel) — nécessite modification de `_fetch_frame` en `ai_engine.py` pour lire directement depuis un décodeur cuvid.
+
+
 - ✅ **Phase 3 — Accélération GPU + Benchmark ANPR (2.15.0 — 2026-07-23)**
   - **Objectif** : certifier le support GPU multi-vendor, ajouter une icône GPU dans le header (comme CPU/RAM/STO), et livrer un outil de comparaison de perf pour diagnostiquer les régressions ANPR.
   - **Backend `/app/backend/gpu.py`** (nouveau module ~250 lignes, 100% no-crash) :
