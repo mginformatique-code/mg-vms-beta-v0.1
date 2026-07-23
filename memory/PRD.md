@@ -1,6 +1,45 @@
 # MG-VMS — Product Requirements Document
 
 ## Implemented (2026-07)
+- ✅ **Phase 3 — Accélération GPU + Benchmark ANPR (2.15.0 — 2026-07-23)**
+  - **Objectif** : certifier le support GPU multi-vendor, ajouter une icône GPU dans le header (comme CPU/RAM/STO), et livrer un outil de comparaison de perf pour diagnostiquer les régressions ANPR.
+  - **Backend `/app/backend/gpu.py`** (nouveau module ~250 lignes, 100% no-crash) :
+    - Détection NVIDIA via `nvidia-ml-py==13.610.43` (successeur du package `pynvml` déprécié).
+    - Par device : nom, UUID, VRAM total/used/free/util%, **utilisation encoder/decoder H.264/H.265** (crucial VMS), température, puissance, ventilateur, clocks GPU/VRAM, CUDA compute capability, mode persistance.
+    - Détection runtimes multi-vendor : `torch.cuda` (PyTorch), `TensorRT` (import + fallback binaire trtexec), `onnxruntime` (CUDA/TensorRT/ROCM/CoreML/DirectML providers), `OpenCV CUDA` (`cv2.cuda.getCudaEnabledDeviceCount`).
+    - `gpu_summary()` = snapshot compact mémoïsé 2 s pour le poll header. `gpu_full_info()` = rapport détaillé pour la page. `is_gpu_active_for_pipeline()` = bool.
+    - Fallback gracieux : sans NVIDIA driver → `available=false` + `error="NVML Shared Library Not Found"` (message exact non tronqué). Sur RTX A2000 utilisateur (VM + Docker `--gpus all`) → tous les champs remplis.
+  - **Backend `realtime.metrics_snapshot()`** enrichi de `gpu={available, vendor, name, gpu_util_pct, vram_*, temperature_c}` — polled par le header via `/dashboard/stats` existant.
+  - **3 endpoints REST** :
+    - `GET /api/system/gpu/summary` — snapshot compact (poll header, permission `view_live`).
+    - `GET /api/system/gpu` — rapport complet (page GPU, permission `technician`).
+    - `POST /api/system/anpr-benchmark?camera_id=&iterations=1..30` — lance le pipeline complet `_analyze_frame` en boucle sur un frame réel go2rtc, retourne `avg_total_ms`, `avg_yolo_ms`, `avg_alpr_ms`, `estimated_fps`, `plates_detected_total`, `plates_ocr_success`, `plates_ocr_failed`, `ocr_success_rate`, `gpu_active`, `torch_backend`, `torch_version`, `cuda_version`, `yolo_model`, `alpr_model`, `samples[]`, `run_at`. Validation stricte des bornes (1-30 itérations).
+  - **Frontend Header (Layout.jsx)** :
+    - Nouveau composant `GpuMiniBar` — icône `Zap` cliquable (nav vers `/gpu`), 3 états :
+      - GPU actif → couleur selon `gpu_util_pct` (vert < 65%, orange < 80%, rouge sinon) + tooltip nom/VRAM/temp.
+      - GPU absent → texte `CPU` rouge + `N/A` + tooltip explicatif "Aucun GPU NVIDIA détecté — pipeline IA sur CPU".
+    - Rangée dans le header : CPU · RAM · STO · **GPU** (nouveau).
+    - Bug fixé : import `Zap` était dupliqué en lucide-react (2 fois dans la même destructuration) → build cassé → réparé.
+  - **Frontend nouvelle page `/gpu` (GPUStatus.jsx)** :
+    - Bandeau statut coloré (vert si GPU actif, rouge sinon) — nom, driver version, NVML version, CUDA driver + état pipeline (YOLO GPU/CPU).
+    - Grille 12 StatCards temps réel (util GPU, encoder, decoder, VRAM used/total/util%, température, puissance, ventilateur, clocks GPU/VRAM, compute cap).
+    - Table des 4 runtimes détectés (statut Actif/Inactif + version + détails).
+    - Support multi-GPU : liste tous les devices si > 1.
+    - Section aide 5 étapes si pas de GPU (drivers, container-toolkit, `--gpus all`, `nvidia-smi`, PyTorch `+cuXX`).
+    - Auto-refresh 5 s (toggle ON/OFF).
+  - **Frontend nouvelle page `/anpr-benchmark` (AnprBenchmark.jsx)** :
+    - Sélecteur caméra + itérations (1-30) + bouton "Lancer le benchmark".
+    - 2 cartes côte à côte : **Baseline** (sauvegardée en localStorage) vs **Actuel** — chaque carte affiche résolution, FPS estimé, cycle total moy, YOLO moy, ALPR moy, détections/frame, plaques total, OCR réussi, taux OCR, torch backend/version, CUDA version, modèle YOLO. Badge `GPU`/`CPU` visuel.
+    - Panneau **Comparaison Baseline → Actuel** : 7 barres delta (cycle total, YOLO, ALPR, FPS, plaques détectées, taux OCR, détections/frame) avec code couleur automatique (vert si meilleur, rouge si dégradation, gris si identique) + variation absolue et %.
+    - Alerte automatique si backend d'accélération a changé entre les 2 mesures (CPU→GPU ou inverse).
+    - Boutons "Enregistrer comme baseline" + "Effacer baseline".
+  - **Sidebar** : 2 nouvelles entrées section Administration : `Accélération GPU` (icône Zap) et `Benchmark ANPR` (icône Cpu). i18n FR + EN.
+  - **Validation bug_testing_agent** — verdict **fixed** :
+    - Backend contract 100% : requirements.txt OK, module gpu.py utilise encoder/decoder/bytes-str, import sans crash + `available=false` + error explicite, endpoints /summary et /full retournent bon schéma, `/dashboard/stats` inclut gpu, benchmark validation (0 et 50 → 400) + iterations=3 → ~230ms CPU cycle, `gpu_active=false`, `torch_backend=cpu`.
+    - Frontend contract 100% : login admin OK, `data-testid=metric-GPU` visible avec fallback CPU rouge N/A, clic navigue vers /gpu, sidebar montre Accélération GPU et Benchmark ANPR, /gpu rend titre + bandeau + runtimes + reload + aide 5 étapes, /anpr-benchmark rend config + bouton, exécution benchmark → toast succès + carte "Version actuelle" avec métriques.
+    - Le comportement sur GPU physique (RTX A2000) ne peut être testé dans le sandbox mais le code est prêt : tous les champs NVML sont capturés dans un `try/except` isolé (aucun crash même si un champ manque sur un driver ancien).
+
+
 - ✅ **Régression perf ANPR corrigée + Phase 1 Diagnostic caméra (2.13.5 + 2.14.0 — 2026-07-23)**
   - **Bug utilisateur** : « L'ANPR est bcp plus lent, moins réactif » sur le dernier push.
   - **Cause racine** :

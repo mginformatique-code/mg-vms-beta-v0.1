@@ -6,6 +6,7 @@ import io
 import csv
 import base64
 from datetime import datetime, timezone, timedelta
+import time
 from typing import Optional, List, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks, Response, Request
@@ -813,6 +814,118 @@ async def diagnostics_test_cause(camera_id: str, data: ManualIncidentInput,
     cause, confidence, detail = identify_cause(data.error_text)
     return {"cause": cause, "confidence": confidence, "detail": detail,
              "input_preview": data.error_text[:200]}
+
+
+# ============ GPU / ACCÉLÉRATION MATÉRIELLE (Phase 3) ============
+@api_router.get("/system/gpu/summary")
+async def system_gpu_summary(user: dict = Depends(get_current_user)):
+    """Snapshot compact du GPU pour le header web (poll ~5-10s).
+    Retourne `{available, vendor, name, gpu_util_pct, vram_*, temperature_c}`.
+    Sans GPU NVIDIA : `available=False` + `error` explicite."""
+    from gpu import gpu_summary
+    return gpu_summary()
+
+
+@api_router.get("/system/gpu")
+async def system_gpu_full(user: dict = Depends(require_role("technician"))):
+    """Rapport complet GPU + runtimes CUDA/TensorRT/ONNX/OpenCV + pipeline actif.
+    Pour la page /gpu (accélération matérielle)."""
+    from gpu import gpu_full_info
+    return gpu_full_info()
+
+
+# ============ COMPARAISON PERFORMANCE ANPR (Phase 3 - section 12) ============
+@api_router.post("/system/anpr-benchmark")
+async def anpr_benchmark(camera_id: Optional[str] = None,
+                          iterations: int = 5,
+                          user: dict = Depends(require_role("technician"))):
+    """Mesure la performance du pipeline ANPR sur un frame réel (ou test pattern).
+    Utile pour comparer 2 versions de MG-VMS et diagnostiquer un ralentissement.
+
+    Retourne :
+      - `resolution_analyzed` : taille du frame utilisé
+      - `avg_yolo_ms` : temps moyen de détection YOLO
+      - `avg_alpr_ms` : temps moyen d'OCR plaque
+      - `avg_total_ms` : cycle IA complet (fetch+yolo+alpr+encode)
+      - `plates_detected` : nombre de plaques trouvées (agrégé sur les itérations)
+      - `plates_ocr_success` : plaques dont l'OCR retourne au moins 4 caractères
+      - `plates_ocr_failed` : YOLO a trouvé mais OCR incapable
+      - `estimated_fps` : 1000 / avg_total_ms
+      - `gpu_active` : le pipeline utilise-t-il le GPU
+      - `models_info` : version + backend YOLO / ALPR
+    """
+    from gpu import is_gpu_active_for_pipeline, _runtime_pytorch
+    from ai_engine import _analyze_frame, _fetch_frame, _model_name, _alpr_model_name
+    if iterations < 1 or iterations > 30:
+        raise HTTPException(400, "iterations doit être entre 1 et 30")
+    # Choix du frame source
+    cam_id = camera_id
+    if not cam_id:
+        # Prend n'importe quelle caméra online (préfère demo-cam-002 qui a de vrais véhicules)
+        cam = await db.cameras.find_one({"status": "online"}, sort=[("id", 1)])
+        if not cam:
+            raise HTTPException(400, "Aucune caméra online — impossible de récupérer un frame")
+        cam_id = cam["id"]
+    frame_bytes = await _fetch_frame(cam_id)
+    if not frame_bytes:
+        raise HTTPException(502, f"Impossible de récupérer un frame de la caméra {cam_id}")
+    # Décode UNE fois pour connaître la résolution
+    import cv2
+    import numpy as np
+    arr = np.frombuffer(frame_bytes, dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    resolution = f"{img.shape[1]}x{img.shape[0]}" if img is not None else "unknown"
+    # Warm-up (compile CUDA kernels + charge modèles) — 1 passe non comptée
+    await asyncio.to_thread(_analyze_frame, cam_id, frame_bytes)
+    # N itérations mesurées
+    samples: list[dict] = []
+    plates_ok = 0
+    plates_ko = 0
+    plates_total = 0
+    for _ in range(iterations):
+        t0 = time.perf_counter()
+        result = await asyncio.to_thread(_analyze_frame, cam_id, frame_bytes)
+        total_ms = (time.perf_counter() - t0) * 1000.0
+        tim = result.get("timings", {})
+        plates = result.get("plates", [])
+        plates_total += len(plates)
+        for p in plates:
+            plate = p.get("plate", "") or ""
+            if len(plate.strip()) >= 4:
+                plates_ok += 1
+            else:
+                plates_ko += 1
+        samples.append({
+            "total_ms": round(total_ms, 1),
+            "yolo_ms": round(tim.get("yolo_ms", 0), 1),
+            "alpr_ms": round(tim.get("alpr_ms", 0), 1),
+            "detections": len(result.get("detections", [])),
+            "plates": len(plates),
+        })
+    avg = lambda k: round(sum(s[k] for s in samples) / len(samples), 1)  # noqa: E731
+    avg_total = avg("total_ms")
+    return {
+        "camera_id": cam_id,
+        "iterations": iterations,
+        "resolution_analyzed": resolution,
+        "avg_total_ms": avg_total,
+        "avg_yolo_ms": avg("yolo_ms"),
+        "avg_alpr_ms": avg("alpr_ms"),
+        "estimated_fps": round(1000.0 / avg_total, 2) if avg_total > 0 else 0,
+        "plates_detected_total": plates_total,
+        "plates_ocr_success": plates_ok,
+        "plates_ocr_failed": plates_ko,
+        "ocr_success_rate": round(plates_ok / plates_total * 100, 1) if plates_total else 0,
+        "avg_detections_per_frame": round(sum(s["detections"] for s in samples) / len(samples), 1),
+        "gpu_active": is_gpu_active_for_pipeline(),
+        "torch_backend": "cuda" if _runtime_pytorch().get("available") else "cpu",
+        "torch_version": _runtime_pytorch().get("version"),
+        "cuda_version": _runtime_pytorch().get("cuda_version"),
+        "yolo_model": _model_name(),
+        "alpr_model": _alpr_model_name(),
+        "samples": samples,
+        "run_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 # ============ RECORDING RETENTION (P2.a) ============

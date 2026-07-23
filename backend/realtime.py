@@ -44,9 +44,17 @@ def metrics_snapshot() -> dict:
         uptime_days = int((now - psutil.boot_time()) / 86400)
     except Exception:
         uptime_days = 0
+    # GPU (NVIDIA via NVML — fallback silencieux sur CPU-only)
+    gpu_data = {"available": False}
+    try:
+        from gpu import gpu_summary
+        gpu_data = gpu_summary()
+    except Exception:
+        pass
     return {
         "cpu": round(cpu), "ram": round(ram), "storage": round(storage),
         "temperature": temperature, "bandwidth_mbps": mbps, "uptime_days": uptime_days,
+        "gpu": gpu_data,
     }
 
 

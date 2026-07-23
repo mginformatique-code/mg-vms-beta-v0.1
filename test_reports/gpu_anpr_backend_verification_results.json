@@ -1,0 +1,116 @@
+{
+  "base_url": "https://video-command-6.preview.emergentagent.com",
+  "checks": [
+    {
+      "name": "requirements_nvidia_ml_py",
+      "ok": true,
+      "detail": "nvidia-ml-py==13.610.43 present"
+    },
+    {
+      "name": "gpu_py_contains_pynvml.NVML_TEMPERATURE_GPU",
+      "ok": true,
+      "detail": "pynvml.NVML_TEMPERATURE_GPU"
+    },
+    {
+      "name": "gpu_py_contains_nvmlDeviceGetEncoderUtilization",
+      "ok": true,
+      "detail": "nvmlDeviceGetEncoderUtilization"
+    },
+    {
+      "name": "gpu_py_contains_nvmlDeviceGetDecoderUtilization",
+      "ok": true,
+      "detail": "nvmlDeviceGetDecoderUtilization"
+    },
+    {
+      "name": "gpu_py_contains_bytes",
+      "ok": true,
+      "detail": "bytes"
+    },
+    {
+      "name": "gpu_py_contains_decode",
+      "ok": true,
+      "detail": "decode"
+    },
+    {
+      "name": "gpu_py_nvml_device_usage_count",
+      "ok": true,
+      "detail": "count=18"
+    },
+    {
+      "name": "gpu_module_no_crash_no_gpu",
+      "ok": true,
+      "detail": "{\"summary\": {\"available\": false, \"vendor\": null, \"name\": null, \"count\": 0, \"gpu_util_pct\": 0, \"vram_used_mb\": 0, \"vram_total_mb\": 0, \"vram_util_pct\": 0, \"temperature_c\": 0, \"error\": \"NVML Shared Library Not Found\"}, \"pipeline\": {\"yolo_uses_gpu\": false, \"detection_backend\": \"torch.cpu\"}, \"diagnostic\": {\"nvml_error\": \"NVML Shared Library Not Found\", \"nvidia_smi_available\": false}}\n"
+    },
+    {
+      "name": "admin_login",
+      "ok": true,
+      "detail": "status=200 body={\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0N2RkZjEzOS0xMGRlLTQ0ZGQtODU0Ni0xZDViYjMwM2M2YmEiLCJlbWFpbCI6ImFkbWluQG1nLXZtcy5jb20iLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3ODQ4NDkxNjMsInR5cGUiOiJhY2Nlc3MifQ.1fu7w39DZdrVzxqufNaWYcscSlrJopc6-lz5eOPTDco\",\"refresh_token\":\"eyJhbGciOiJIUzI1NiIsI"
+    },
+    {
+      "name": "gpu_summary_status_200",
+      "ok": true,
+      "detail": "status=200 body={\"available\":false,\"vendor\":null,\"name\":null,\"count\":0,\"gpu_util_pct\":0,\"vram_used_mb\":0,\"vram_total_mb\":0,\"vram_util_pct\":0,\"temperature_c\":0,\"error\":\"NVML Shared Library Not Found\"}"
+    },
+    {
+      "name": "gpu_summary_contract_keys",
+      "ok": true,
+      "detail": "{\"available\": false, \"vendor\": null, \"name\": null, \"count\": 0, \"gpu_util_pct\": 0, \"vram_used_mb\": 0, \"vram_total_mb\": 0, \"vram_util_pct\": 0, \"temperature_c\": 0, \"error\": \"NVML Shared Library Not Found\"}"
+    },
+    {
+      "name": "gpu_summary_no_gpu_fallback",
+      "ok": true,
+      "detail": "available=False error=NVML Shared Library Not Found"
+    },
+    {
+      "name": "gpu_full_status_200",
+      "ok": true,
+      "detail": "status=200 body={\"available\":false,\"vendor\":null,\"driver\":{},\"devices\":[],\"runtimes\":{\"pytorch\":{\"available\":false,\"version\":\"2.12.1+cu130\",\"cuda_version\":\"13.0\",\"device_count\":0,\"device_names\":[]},\"tensorrt\":{\"available\":false,\"version\":null,\"source\":null},\"onnx_runtime\":{\"available\":false,\"version\":\"1.27.0\",\"providers\":[\"AzureExecutionProvider\",\"CPUExecutionProvider\"],\"gpu_provider\":null},\"opencv_cuda\":{\"available\":false,\"version\":\"4.11.0\",\"cuda_devices\":0}},\"pipeline\":{\"yolo_uses_gpu\":false,\"detection_backen"
+    },
+    {
+      "name": "gpu_full_contract_keys",
+      "ok": true,
+      "detail": "{\"available\": false, \"vendor\": null, \"driver\": {}, \"devices\": [], \"runtimes\": {\"pytorch\": {\"available\": false, \"version\": \"2.12.1+cu130\", \"cuda_version\": \"13.0\", \"device_count\": 0, \"device_names\": []}, \"tensorrt\": {\"available\": false, \"version\": null, \"source\": null}, \"onnx_runtime\": {\"available\": false, \"version\": \"1.27.0\", \"providers\": [\"AzureExecutionProvider\", \"CPUExecutionProvider\"], \"gpu_provider\": null}, \"opencv_cuda\": {\"available\": false, \"version\": \"4.11.0\", \"cuda_devices\": 0}}, \"pipeline\": {\"yolo_uses_gpu\": false, \"detection_backend\": \"torch.cpu\"}, \"diagnostic\": {\"nvml_error\": \"NVML Shared Library Not Found\", \"nvidia_smi_available\": false}}"
+    },
+    {
+      "name": "gpu_full_cpu_pipeline",
+      "ok": true,
+      "detail": "{'yolo_uses_gpu': False, 'detection_backend': 'torch.cpu'}"
+    },
+    {
+      "name": "dashboard_stats_has_gpu",
+      "ok": true,
+      "detail": "status=200 gpu={'available': False, 'vendor': None, 'name': None, 'count': 0, 'gpu_util_pct': 0, 'vram_used_mb': 0, 'vram_total_mb': 0, 'vram_util_pct': 0, 'temperature_c': 0, 'error': 'NVML Shared Library Not Found'}"
+    },
+    {
+      "name": "anpr_benchmark_validation_0",
+      "ok": true,
+      "detail": "status=400 body={\"detail\":\"iterations doit être entre 1 et 30\"}"
+    },
+    {
+      "name": "anpr_benchmark_validation_50",
+      "ok": true,
+      "detail": "status=400 body={\"detail\":\"iterations doit être entre 1 et 30\"}"
+    },
+    {
+      "name": "anpr_benchmark_iterations_3_status_200",
+      "ok": true,
+      "detail": "status=200 body={\"camera_id\":\"demo-cam-001\",\"iterations\":3,\"resolution_analyzed\":\"1280x720\",\"avg_total_ms\":230.5,\"avg_yolo_ms\":197.5,\"avg_alpr_ms\":0.0,\"estimated_fps\":4.34,\"plates_detected_total\":0,\"plates_ocr_success\":0,\"plates_ocr_failed\":0,\"ocr_success_rate\":0,\"avg_detections_per_frame\":0.0,\"gpu_active\":false,\"torch_backend\":\"cpu\",\"torch_version\":\"2.12.1+cu130\",\"cuda_version\":\"13.0\",\"yolo_model\":\"yolo11n.pt\",\"alpr_model\":\"fast-alpr · yolo-v9-t-384-license-plate-end2end + european-plates-mobile-vit-v2-model\",\"samples\":[{\"total_ms\":269.6,\"yolo_ms\":259.8,\"alpr_ms\":0.0,\"detections\":0,\"plates\":0},{\"total_ms\":196.9,\"yolo_ms\":130.0,\"alpr_ms\":0.0,\"detections\":0,\"plates\":0},{\"total_ms\":225.0,\"yolo_ms\":202.7,\"alpr_ms\":0.0,\"detections\":0,\"plates\":0}],\"run_at\":\"2026-07-23T15:26:07.040905+00:00\"}"
+    },
+    {
+      "name": "anpr_benchmark_contract_keys",
+      "ok": true,
+      "detail": "{\"camera_id\": \"demo-cam-001\", \"iterations\": 3, \"resolution_analyzed\": \"1280x720\", \"avg_total_ms\": 230.5, \"avg_yolo_ms\": 197.5, \"avg_alpr_ms\": 0.0, \"estimated_fps\": 4.34, \"plates_detected_total\": 0, \"plates_ocr_success\": 0, \"plates_ocr_failed\": 0, \"ocr_success_rate\": 0, \"avg_detections_per_frame\": 0.0, \"gpu_active\": false, \"torch_backend\": \"cpu\", \"torch_version\": \"2.12.1+cu130\", \"cuda_version\": \"13.0\", \"yolo_model\": \"yolo11n.pt\", \"alpr_model\": \"fast-alpr · yolo-v9-t-384-license-plate-end2end + european-plates-mobile-vit-v2-model\", \"samples\": [{\"total_ms\": 269.6, \"yolo_ms\": 259.8, \"alpr_ms\": 0.0, \"detections\": 0, \"plates\": 0}, {\"total_ms\": 196.9, \"yolo_ms\": 130.0, \"alpr_ms\": 0.0, \"detections\": 0, \"plates\": 0}, {\"total_ms\": 225.0, \"yolo_ms\": 202.7, \"alpr_ms\": 0.0, \"detections\": 0, \"plates\": 0}], \"run_at\": \"2026-07-23T15:26:07.040905+00:00\"}"
+    },
+    {
+      "name": "anpr_benchmark_cpu_backend",
+      "ok": true,
+      "detail": "torch_backend=cpu gpu_active=False"
+    },
+    {
+      "name": "anpr_benchmark_sample_count",
+      "ok": true,
+      "detail": "samples=3"
+    }
+  ],
+  "overall_ok": true
+}

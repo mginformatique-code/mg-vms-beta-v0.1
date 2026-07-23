@@ -160,6 +160,16 @@ def _load_models():
             _alpr = False
 
 
+def _model_name() -> str:
+    """Retourne le nom du modèle YOLO chargé (pour benchmark/diagnostic)."""
+    return os.environ.get("AI_MODEL", "yolo11n.pt")
+
+
+def _alpr_model_name() -> str:
+    """Retourne les modèles ALPR utilisés (détecteur + OCR)."""
+    return "fast-alpr · yolo-v9-t-384-license-plate-end2end + european-plates-mobile-vit-v2-model"
+
+
 def _jpeg_data_uri(bgr_img, max_width: int = 1280, quality: int = 85):
     """Encode une image BGR en data-URI JPEG.
 

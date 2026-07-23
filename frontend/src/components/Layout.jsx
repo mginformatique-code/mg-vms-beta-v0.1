@@ -32,6 +32,8 @@ const NAV = [
   { group: "nav.admin", items: [
     { to: "/audit", icon: ScrollText, key: "nav.audit", role: "technician" },
     { to: "/diagnostics", icon: Activity, key: "nav.diagnostics", role: "technician" },
+    { to: "/gpu", icon: Zap, key: "nav.gpu", role: "technician" },
+    { to: "/anpr-benchmark", icon: Cpu, key: "nav.anpr_benchmark", role: "technician" },
     { to: "/reports", icon: FileText, key: "nav.reports", role: "technician" },
     { to: "/notifications", icon: BellRing, key: "nav.notifications", role: "technician" },
     { to: "/plugins", icon: Puzzle, key: "nav.plugins", role: "admin" },
@@ -54,10 +56,35 @@ function MiniBar({ label, value, icon: Icon }) {
   );
 }
 
+function GpuMiniBar({ gpu, onClick }) {
+  // 3 états : (a) GPU actif → couleur selon util%, (b) GPU absent → gris "CPU"
+  const isActive = !!(gpu?.available);
+  const util = isActive ? (gpu.gpu_util_pct || 0) : 0;
+  const color = !isActive ? "#666" : (util > 80 ? "#FF3333" : util > 65 ? "#FFB800" : "#00E676");
+  const label = isActive ? "GPU" : "CPU";
+  const title = isActive
+    ? `${gpu.name || "GPU"} · VRAM ${gpu.vram_used_mb || 0}/${gpu.vram_total_mb || 0} MB · ${gpu.temperature_c || 0}°C`
+    : `Aucun GPU NVIDIA détecté — pipeline IA sur CPU. ${gpu?.error || ""}`;
+  return (
+    <button onClick={onClick} data-testid="metric-GPU" title={title}
+            className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+      <Zap size={14} strokeWidth={1.5} style={{ color: isActive ? color : "#666" }} />
+      <span className="text-[10px] uppercase tracking-wider hidden xl:inline"
+            style={{ color: isActive ? "#00E676" : "#FF3333" }}>{label}</span>
+      <div className="w-14 h-1.5 bg-secondary overflow-hidden">
+        <div style={{ width: `${util}%`, backgroundColor: color }} className="h-full transition-all" />
+      </div>
+      <span className="text-xs mono w-8" style={{ color: isActive ? undefined : "#FF3333" }}>
+        {isActive ? `${util}%` : "N/A"}
+      </span>
+    </button>
+  );
+}
+
 export default function Layout({ children }) {
   const { t, user, logout, theme, toggleTheme, lang, toggleLang, can, hasPerm, liveMetrics, alertPing } = useApp();
   const navigate = useNavigate();
-  const [sys, setSys] = useState({ cpu: 0, ram: 0, storage: 0 });
+  const [sys, setSys] = useState({ cpu: 0, ram: 0, storage: 0, gpu: { available: false } });
   const [alertCount, setAlertCount] = useState(0);
   const [pluginPages, setPluginPages] = useState([]);
 
@@ -174,6 +201,7 @@ export default function Layout({ children }) {
             <MiniBar label="CPU" value={sys.cpu} icon={Cpu} />
             <MiniBar label="RAM" value={sys.ram} icon={MemoryStick} />
             <MiniBar label="STO" value={sys.storage} icon={HardDrive} />
+            <GpuMiniBar gpu={sys.gpu} onClick={() => navigate("/gpu")} />
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => navigate("/alerts")} data-testid="topbar-alerts" className="relative p-2 hover:bg-secondary transition-colors">
