@@ -87,3 +87,91 @@ class TestLazyFrameThumbEncoding:
         img = Image.open(io.BytesIO(raw))
         assert img.size[0] == 1280
         assert img.size[1] == 720
+
+
+class TestEvaluateScenariosLazy:
+    """`_evaluate_scenarios` NE DOIT PAS encoder de miniature quand aucun scénario ne
+    se déclenche (régression ANPR — sinon le fix lazy est neutralisé).
+    """
+
+    def test_no_encoding_when_no_detections(self, monkeypatch):
+        """0 détection → 0 encodage HD (le cas le plus fréquent en pratique)."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+        import numpy as np
+
+        # Rules avec tous scénarios activés — pour vérifier qu'ils sont bien évalués
+        # mais qu'aucun ne se déclenche faute de détection.
+        rules = {
+            "intrusion_nocturne": {"enabled": True, "night_start": 22, "night_end": 6, "webhook": ""},
+            "vol_vehicule": {"enabled": True, "night_start": 22, "night_end": 6, "webhook": ""},
+            "rodeur": {"enabled": True, "consecutive": 5, "webhook": ""},
+            "attroupement": {"enabled": True, "min_persons": 5, "webhook": ""},
+            "vive_allure": {"enabled": True, "motion_pct": 90.0, "webhook": ""},
+            "collision": {"enabled": True, "iou": 0.5, "webhook": ""},
+            "enfant_route": {"enabled": True, "ratio": 0.5, "webhook": ""},
+        }
+        monkeypatch.setattr(AI, "_get_scenario_rules", AsyncMock(return_value=rules))
+        monkeypatch.setattr(AI, "_raise_scenario_alert", AsyncMock())
+        monkeypatch.setattr(AI, "_is_night", MagicMock(return_value=False))  # pas la nuit
+
+        # Instrumente `_ensure_frame_thumb` — doit être appelé 0 fois si pas d'alerte.
+        original_ensure = AI._ensure_frame_thumb
+        call_count = {"n": 0}
+        def spy(res):
+            call_count["n"] += 1
+            return original_ensure(res)
+        monkeypatch.setattr(AI, "_ensure_frame_thumb", spy)
+
+        result = {
+            "_img_bgr": np.full((720, 1280, 3), 128, dtype="uint8"),
+            "detections": [],  # aucune détection
+            "motion_pct": 0.0,
+        }
+        cam = {"id": "test-cam-1", "name": "Test", "site_id": "", "site_name": ""}
+        from datetime import datetime
+        asyncio.get_event_loop().run_until_complete(
+            AI._evaluate_scenarios(cam, result, datetime.now())
+        )
+        assert call_count["n"] == 0, f"_ensure_frame_thumb appelé {call_count['n']}× sans détection → régression ANPR persiste"
+
+    def test_encoding_only_when_scenario_triggers(self, monkeypatch):
+        """1 attroupement déclenché → 1 seul encodage (mémoïsé)."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+        import numpy as np
+        rules = {
+            "intrusion_nocturne": {"enabled": False, "night_start": 22, "night_end": 6, "webhook": ""},
+            "vol_vehicule": {"enabled": False, "night_start": 22, "night_end": 6, "webhook": ""},
+            "rodeur": {"enabled": False, "consecutive": 5, "webhook": ""},
+            "attroupement": {"enabled": True, "min_persons": 2, "webhook": ""},  # seul activé
+            "vive_allure": {"enabled": False, "motion_pct": 90.0, "webhook": ""},
+            "collision": {"enabled": False, "iou": 0.5, "webhook": ""},
+            "enfant_route": {"enabled": False, "ratio": 0.5, "webhook": ""},
+        }
+        monkeypatch.setattr(AI, "_get_scenario_rules", AsyncMock(return_value=rules))
+        monkeypatch.setattr(AI, "_raise_scenario_alert", AsyncMock())
+        monkeypatch.setattr(AI, "_is_night", MagicMock(return_value=False))
+
+        original_ensure = AI._ensure_frame_thumb
+        call_count = {"n": 0}
+        def spy(res):
+            call_count["n"] += 1
+            return original_ensure(res)
+        monkeypatch.setattr(AI, "_ensure_frame_thumb", spy)
+
+        result = {
+            "_img_bgr": np.full((720, 1280, 3), 128, dtype="uint8"),
+            "detections": [
+                {"class": "person", "_bbox": [10, 10, 100, 200]},
+                {"class": "person", "_bbox": [110, 10, 200, 200]},
+            ],
+            "motion_pct": 0.0,
+        }
+        cam = {"id": "test-cam-2", "name": "Test2", "site_id": "", "site_name": ""}
+        from datetime import datetime
+        asyncio.get_event_loop().run_until_complete(
+            AI._evaluate_scenarios(cam, result, datetime.now())
+        )
+        # 1 seul scénario matche → 1 appel à thumb() → 1 encodage
+        assert call_count["n"] == 1, f"Expected 1 lazy encoding, got {call_count['n']}"

@@ -626,7 +626,10 @@ async def _evaluate_scenarios(cam: dict, result: dict, now: datetime) -> None:
     dets = result["detections"]
     persons = [d for d in dets if d["class"] == "person" and d.get("_bbox")]
     vehicles = [d for d in dets if d["class"] in VEHICLE_CLASSES and d.get("_bbox")]
-    thumb = _ensure_frame_thumb(result)
+    # Lazy : la miniature HD n'est PAS pré-encodée. Chaque branche appelle `thumb()`
+    # uniquement quand un scénario est déclenché et qu'une alerte va être insérée.
+    # Sans événement, on n'encode rien (cycle IA reste réactif, cf. régression ANPR).
+    thumb = lambda: _ensure_frame_thumb(result)  # noqa: E731
 
     # Persistance de présence humaine (rôdeur)
     _presence[cam["id"]] = _presence.get(cam["id"], 0) + 1 if persons else 0
@@ -634,26 +637,26 @@ async def _evaluate_scenarios(cam: dict, result: dict, now: datetime) -> None:
     r = rules["intrusion_nocturne"]
     if r["enabled"] and persons and _is_night(now, int(r["night_start"]), int(r["night_end"])):
         await _raise_scenario_alert(cam, "intrusion_nocturne", r,
-                                    f"{len(persons)} personne(s) détectée(s) en période de surveillance", thumb)
+                                    f"{len(persons)} personne(s) détectée(s) en période de surveillance", thumb())
 
     r = rules["vol_vehicule"]
     if r["enabled"] and persons and vehicles and _is_night(now, int(r["night_start"]), int(r["night_end"])):
         await _raise_scenario_alert(cam, "vol_vehicule", r,
-                                    "personne à proximité d'un véhicule en période nocturne", thumb)
+                                    "personne à proximité d'un véhicule en période nocturne", thumb())
 
     r = rules["rodeur"]
     if r["enabled"] and _presence[cam["id"]] >= int(r["consecutive"]):
         await _raise_scenario_alert(cam, "rodeur", r,
-                                    f"présence continue depuis ~{_presence[cam['id']] * int(AI_INTERVAL)} s", thumb)
+                                    f"présence continue depuis ~{_presence[cam['id']] * int(AI_INTERVAL)} s", thumb())
 
     r = rules["attroupement"]
     if r["enabled"] and len(persons) >= int(r["min_persons"]):
-        await _raise_scenario_alert(cam, "attroupement", r, f"{len(persons)} personnes simultanées", thumb)
+        await _raise_scenario_alert(cam, "attroupement", r, f"{len(persons)} personnes simultanées", thumb())
 
     r = rules["vive_allure"]
     if r["enabled"] and vehicles and result["motion_pct"] >= float(r["motion_pct"]):
         await _raise_scenario_alert(cam, "vive_allure", r,
-                                    f"mouvement {result['motion_pct']}% avec véhicule en scène", thumb)
+                                    f"mouvement {result['motion_pct']}% avec véhicule en scène", thumb())
 
     r = rules["collision"]
     if r["enabled"] and len(vehicles) >= 2:
@@ -662,7 +665,7 @@ async def _evaluate_scenarios(cam: dict, result: dict, now: datetime) -> None:
             for j in range(i + 1, len(vehicles)):
                 if _iou(vehicles[i]["_bbox"], vehicles[j]["_bbox"]) >= float(r["iou"]):
                     await _raise_scenario_alert(cam, "collision", r,
-                                                f"chevauchement {vehicles[i]['label']}/{vehicles[j]['label']}", thumb)
+                                                f"chevauchement {vehicles[i]['label']}/{vehicles[j]['label']}", thumb())
                     done = True
                     break
             if done:
@@ -674,7 +677,7 @@ async def _evaluate_scenarios(cam: dict, result: dict, now: datetime) -> None:
         median = heights[len(heights) // 2]
         if median > 0 and heights[0] < median * float(r["ratio"]):
             await _raise_scenario_alert(cam, "enfant_route", r,
-                                        "silhouette de petite taille détectée près de véhicules", thumb)
+                                        "silhouette de petite taille détectée près de véhicules", thumb())
 
 
 async def _process_camera(cam: dict) -> None:
