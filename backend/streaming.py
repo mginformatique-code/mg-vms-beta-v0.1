@@ -790,39 +790,59 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
 
 
 # ============ Sonde périodique du statut des caméras (online/offline réel) ============
-async def _probe_status_once(cam: dict) -> str:
-    """Extrait une image depuis go2rtc pour vérifier que le flux est réellement lisible.
+async def _probe_status_once(cam: dict) -> tuple[str, str]:
+    """Retourne (status, error_text). `error_text` est vide si online.
     NE JAMAIS re-enregistrer ici (déconnecterait les consommateurs live/recorder/IA)."""
     name = _stream_name(cam["id"])
     if cam.get("id") not in DEMO_IDS and not await _stream_registered(name):
         # Le flux n'existe pas côté go2rtc (probablement effacé par un restart go2rtc) :
         # une SEULE ré-inscription ciblée, pas de churn.
         if not await register_camera_stream(cam):
-            return "offline"
+            return ("offline", "go2rtc: ré-enregistrement échoué (flux introuvable après tentative)")
     try:
         async with httpx.AsyncClient(timeout=8) as client:
             r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": name})
         if r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff":
-            return "online"
-    except httpx.HTTPError:
-        pass
-    return "offline"
+            return ("online", "")
+        return ("offline", f"go2rtc HTTP {r.status_code}: {r.text[:800]}")
+    except httpx.HTTPError as e:
+        return ("offline", f"HTTP client error: {type(e).__name__}: {e}")
 
 
 async def camera_status_loop() -> None:
-    """Sonde périodiquement chaque caméra ; met à jour le statut réel en base."""
+    """Sonde périodiquement chaque caméra ; met à jour le statut réel en base +
+    enregistre les transitions online↔offline dans le journal diagnostic."""
     from datetime import datetime, timezone
+    from diagnostics import record_disconnect, record_reconnect
     await asyncio.sleep(15)  # laisser go2rtc / seeding démarrer
+    # Compteur de tentatives par caméra (pour la reconnect chain)
+    reconnect_attempts: dict = {}
     while True:
         try:
             cams = await db.cameras.find({}, {"_id": 0}).to_list(1000)
             for cam in cams:
-                status = await _probe_status_once(cam)
+                status, error_text = await _probe_status_once(cam)
                 now = datetime.now(timezone.utc).isoformat()
+                previous = cam.get("status", "unknown")
                 changes = {"status": status}
                 if status == "online":
                     changes["last_seen"] = now
                 await db.cameras.update_one({"id": cam["id"]}, {"$set": changes})
+                # Détecte les transitions et logue dans le journal diagnostic
+                if previous == "online" and status == "offline":
+                    try:
+                        await record_disconnect(cam, error_text=error_text, source="camera_status_loop")
+                        reconnect_attempts[cam["id"]] = 0
+                    except Exception:
+                        logger.exception("record_disconnect a échoué (non bloquant)")
+                elif previous == "offline" and status == "offline":
+                    reconnect_attempts[cam["id"]] = reconnect_attempts.get(cam["id"], 0) + 1
+                elif previous == "offline" and status == "online":
+                    try:
+                        attempts = reconnect_attempts.pop(cam["id"], 1) or 1
+                        await record_reconnect(cam["id"], attempts=attempts)
+                    except Exception:
+                        logger.exception("record_reconnect a échoué (non bloquant)")
         except Exception:
             logger.exception("camera_status_loop : erreur, reprise dans 30s")
         await asyncio.sleep(30)

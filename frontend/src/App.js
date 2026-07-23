@@ -20,6 +20,7 @@ import Events from "@/pages/Events";
 import VehicleSearch from "@/pages/VehicleSearch";
 import Alerts from "@/pages/Alerts";
 import Audit from "@/pages/Audit";
+import Diagnostics from "@/pages/Diagnostics";
 import UsersPage from "@/pages/Users";
 import SettingsPage from "@/pages/Settings";
 import Notifications from "@/pages/Notifications";
@@ -52,6 +53,7 @@ function AppRoutes() {
       <Route path="/vehicles" element={<Protected><VehicleSearch /></Protected>} />
       <Route path="/alerts" element={<Protected><Alerts /></Protected>} />
       <Route path="/audit" element={<Protected><Audit /></Protected>} />
+      <Route path="/diagnostics" element={<Protected><Diagnostics /></Protected>} />
       <Route path="/users" element={<Protected><UsersPage /></Protected>} />
       <Route path="/notifications" element={<Protected><Notifications /></Protected>} />
       <Route path="/plugins" element={<Protected><Plugins /></Protected>} />

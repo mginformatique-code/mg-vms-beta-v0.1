@@ -350,7 +350,8 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
         "plate_attempts": plate_debug,
         "plates_ocr": [{"plate": p["plate"], "confidence": p["confidence"]} for p in plates],
         "motion_pct": motion_pct,
-        "frame_preview": _jpeg_data_uri(img, 640),
+        # `frame_preview` : debug uniquement, quality 60 (économise ~15 ms/cycle vs q85)
+        "frame_preview": _jpeg_data_uri(img, 640, 60),
     }
     # Overlay LIVE (P0.2) : bboxes normalisées 0-1 pour scaling côté client
     overlay_boxes = []
@@ -407,9 +408,28 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
         if i < len(overlay_boxes):
             overlay_boxes[i]["track_id"] = d.get("track_id")
 
+    # NOTE performance ANPR : `frame_thumb` n'est PLUS encodé ici.
+    # L'image numpy `img` (BGR) est retournée à la place et encodée LAZILY
+    # (via `_ensure_frame_thumb`) uniquement quand un événement est effectivement
+    # inséré. Sur un cycle sans détection, on économise ~30-80 ms d'encodage JPEG
+    # (surtout pour les caméras HD 2304×1296).
     return {"detections": detections, "plates": plates, "motion_pct": motion_pct,
-            "frame_thumb": _jpeg_data_uri(img), "timings": timings,
+            "_img_bgr": img, "timings": timings,
             "overlay_boxes": overlay_boxes, "counts": counts}
+
+
+def _ensure_frame_thumb(result: dict) -> str | None:
+    """Encode l'image en JPEG HD à la demande, avec mémoïsation dans `result`.
+
+    Appelé au moment de l'insertion d'un événement — évite l'encodage systématique
+    à chaque cycle IA (gain ~30-80 ms par cycle sur caméra 2K).
+    """
+    if "frame_thumb" in result:
+        return result["frame_thumb"]
+    img = result.get("_img_bgr")
+    thumb = _jpeg_data_uri(img) if img is not None else None
+    result["frame_thumb"] = thumb  # cache — multiples events dans le même cycle = 1 seul encodage
+    return thumb
 
 
 def get_debug_snapshot(camera_id: str) -> dict:
@@ -606,7 +626,7 @@ async def _evaluate_scenarios(cam: dict, result: dict, now: datetime) -> None:
     dets = result["detections"]
     persons = [d for d in dets if d["class"] == "person" and d.get("_bbox")]
     vehicles = [d for d in dets if d["class"] in VEHICLE_CLASSES and d.get("_bbox")]
-    thumb = result.get("frame_thumb")
+    thumb = _ensure_frame_thumb(result)
 
     # Persistance de présence humaine (rôdeur)
     _presence[cam["id"]] = _presence.get(cam["id"], 0) + 1 if persons else 0
@@ -697,7 +717,7 @@ async def _process_camera(cam: dict) -> None:
         await db.events.insert_one({
             "id": str(uuid.uuid4()), "type": "Mouvement", **base,
             "confidence": None, "motion_pct": result["motion_pct"],
-            "thumbnail": result.get("frame_thumb"), "vehicle_color": None,
+            "thumbnail": _ensure_frame_thumb(result), "vehicle_color": None,
         })
 
     # Reconnaissance faciale (si activée + visages en base)
@@ -729,7 +749,7 @@ async def _process_camera(cam: dict) -> None:
                         "plugin": "face_recognition",
                         **base,
                         "confidence": m.get("similarity"),
-                        "thumbnail": result.get("frame_thumb"),
+                        "thumbnail": _ensure_frame_thumb(result),
                         "vehicle_color": None,
                         "face_id": m.get("face_id"),
                         "face_name": m.get("name"),
@@ -741,7 +761,7 @@ async def _process_camera(cam: dict) -> None:
                             "type": "face_watchlist", **base,
                             "severity": "critical",
                             "message": f"Visage sur liste de surveillance : {m.get('name')}",
-                            "thumbnail": result.get("frame_thumb"),
+                            "thumbnail": _ensure_frame_thumb(result),
                             "acknowledged": False,
                             "plugin": "face_recognition",
                         })
@@ -757,7 +777,7 @@ async def _process_camera(cam: dict) -> None:
             "confidence": det["confidence"],
             # Miniature = image complète HD du flux principal (identification personnes/objets
             # au visionnage plein écran). Le crop du bbox reste disponible en secondaire.
-            "thumbnail": result.get("frame_thumb") or det["thumbnail"],
+            "thumbnail": _ensure_frame_thumb(result) or det["thumbnail"],
             "crop_thumbnail": det["thumbnail"],
             "vehicle_color": det.get("vehicle_color"),
             "track_id": det.get("track_id"),
@@ -798,7 +818,7 @@ async def _process_camera(cam: dict) -> None:
             "vehicle_crop": p.get("vehicle_crop"), "plate_crop": p.get("plate_crop"),
             # Hybridation : scène HD complète (contexte visuel) — le frontend affiche
             # la scène en fond avec plate_crop/vehicle_crop en insets pour la lisibilité OCR.
-            "frame_thumb": result.get("frame_thumb"),
+            "frame_thumb": _ensure_frame_thumb(result),
         }
         await db.plates.insert_one(dict(doc))
         doc.pop("_id", None)

@@ -709,6 +709,112 @@ async def refresh_camera_stream(camera_id: str, user: dict = Depends(require_rol
              "rtsp_url_masked": _mask_url_password(cam.get("rtsp_url", ""))}
 
 
+# ============ DIAGNOSTIC CAMÉRA (Phase 1) ============
+@api_router.get("/diagnostics/journal")
+async def diagnostics_journal(camera_id: Optional[str] = None, cause: Optional[str] = None,
+                                event_type: Optional[str] = None, limit: int = 100, offset: int = 0,
+                                user: dict = Depends(require_permission("view_live"))):
+    """Journal global des incidents caméra — filtrable par caméra, cause probable, ou type d'événement.
+    Les caméras hors des sites autorisés sont filtrées.
+    """
+    q: dict = {}
+    if camera_id:
+        q["camera_id"] = camera_id
+    if cause:
+        q["cause"] = cause
+    if event_type:
+        q["event_type"] = event_type
+    # Filtrage multi-site
+    allowed = allowed_sites(user)
+    if allowed is not None:
+        q["site_id"] = {"$in": list(allowed)}
+    total = await db.camera_diagnostics.count_documents(q)
+    docs = await db.camera_diagnostics.find(q, {"_id": 0}).sort("timestamp", -1).skip(offset).limit(limit).to_list(limit)
+    return {"total": total, "items": docs}
+
+
+@api_router.get("/diagnostics/camera/{camera_id}/summary")
+async def diagnostics_camera_summary(camera_id: str, user: dict = Depends(require_permission("view_live"))):
+    """Résumé d'exploitation (uptime, MTBF, moyenne reconnexion, top causes) — 30 j."""
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
+    if not cam:
+        raise HTTPException(404, "Caméra introuvable")
+    from diagnostics import camera_diagnostic_summary
+    return await camera_diagnostic_summary(camera_id)
+
+
+@api_router.get("/diagnostics/camera/{camera_id}/logs")
+async def diagnostics_camera_logs(camera_id: str, lines: int = 100,
+                                    user: dict = Depends(require_permission("view_live"))):
+    """Récupère les dernières lignes de logs (backend + go2rtc) mentionnant cette caméra."""
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
+    if not cam:
+        raise HTTPException(404, "Caméra introuvable")
+    from diagnostics import camera_recent_errors
+    return await camera_recent_errors(camera_id, camera_name=cam.get("name", ""), lines=max(1, min(500, lines)))
+
+
+@api_router.get("/diagnostics/camera/{camera_id}/report")
+async def diagnostics_camera_report(camera_id: str, user: dict = Depends(require_permission("view_live"))):
+    """Rapport complet téléchargeable (JSON) — configuration caméra + résumé + historique + logs."""
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
+    if not cam:
+        raise HTTPException(404, "Caméra introuvable")
+    from streaming import _mask_url_password, _stream_registered, _stream_name
+    from diagnostics import camera_diagnostic_summary, camera_recent_errors
+    name = _stream_name(camera_id)
+    incidents = await db.camera_diagnostics.find(
+        {"camera_id": camera_id}, {"_id": 0},
+    ).sort("timestamp", -1).limit(200).to_list(200)
+    summary = await camera_diagnostic_summary(camera_id)
+    logs = await camera_recent_errors(camera_id, camera_name=cam.get("name", ""), lines=200)
+    report = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "camera": {
+            "id": camera_id,
+            "name": cam.get("name"),
+            "site_name": cam.get("site_name"),
+            "manufacturer": cam.get("manufacturer"),
+            "model": cam.get("model"),
+            "mode": cam.get("mode"),
+            "profile_name": cam.get("profile_name"),
+            "resolution": cam.get("resolution"),
+            "fps": cam.get("fps"),
+            "codec": cam.get("codec"),
+            "rtsp_transport": cam.get("rtsp_transport"),
+            "rtsp_url_masked": _mask_url_password(cam.get("rtsp_url", "")),
+            "status": cam.get("status"),
+            "last_seen": cam.get("last_seen"),
+            "detect_enabled": cam.get("detect_enabled"),
+        },
+        "go2rtc": {
+            "source_registered": await _stream_registered(name),
+            "hd_registered": await _stream_registered(f"{name}_hd"),
+            "sd_registered": await _stream_registered(f"{name}_sd"),
+        },
+        "summary": summary,
+        "recent_incidents": incidents,
+        "recent_logs": logs,
+    }
+    return report
+
+
+class ManualIncidentInput(BaseModel):
+    error_text: str
+    source: str = "manual"
+
+
+@api_router.post("/diagnostics/camera/{camera_id}/test-cause")
+async def diagnostics_test_cause(camera_id: str, data: ManualIncidentInput,
+                                    user: dict = Depends(require_role("admin"))):
+    """Utilitaire : teste l'heuristique de cause probable sur un texte d'erreur brut.
+    Pratique pour valider les patterns après ajout de nouveaux logs constructeur."""
+    from diagnostics import identify_cause
+    cause, confidence, detail = identify_cause(data.error_text)
+    return {"cause": cause, "confidence": confidence, "detail": detail,
+             "input_preview": data.error_text[:200]}
+
+
 # ============ RECORDING RETENTION (P2.a) ============
 class RetentionInput(BaseModel):
     retention_days: int = 7

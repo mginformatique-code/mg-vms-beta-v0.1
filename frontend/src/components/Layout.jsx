@@ -31,6 +31,7 @@ const NAV = [
   ]},
   { group: "nav.admin", items: [
     { to: "/audit", icon: ScrollText, key: "nav.audit", role: "technician" },
+    { to: "/diagnostics", icon: Activity, key: "nav.diagnostics", role: "technician" },
     { to: "/reports", icon: FileText, key: "nav.reports", role: "technician" },
     { to: "/notifications", icon: BellRing, key: "nav.notifications", role: "technician" },
     { to: "/plugins", icon: Puzzle, key: "nav.plugins", role: "admin" },
