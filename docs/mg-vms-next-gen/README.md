@@ -30,9 +30,9 @@ Chaque fonctionnalité doit satisfaire **trois critères non-négociables** :
 
 ### Partie I — Fondations
 - `01-vision-positionnement.md` — *à rédiger*
-- `02-philosophie-principes.md` — *à rédiger*
+- **`02-philosophie-principes.md`** — ✅ **v1 rédigé** (2026-07-24)
 - `03-personas.md` — *à rédiger*
-- **`04-architecture-cible.md`** — ✅ **v1 rédigé** (2026-07-24)
+- **`04-architecture-cible.md`** — ✅ **v1 rédigé et validé** (2026-07-24, Traefik 3, Fernet env, single-node v3.0)
 - `05-contrats-interfaces.md` — *à rédiger*
 
 ### Partie II — Expérience utilisateur transverse
