@@ -315,6 +315,8 @@ export default function Diagnostics() {
       <IncidentDetail item={detail} onClose={() => setDetail(null)} />
 
       <FrameSourceSection />
+      <AiHealthSection />
+      <StreamsSyncSection />
       <StreamLifecycleSection />
     </div>
   );
@@ -384,7 +386,7 @@ function FrameSourceSection() {
           {!state.cuvid_available && state.mode !== "none" && (
             <div className="mt-3 text-xs text-[#FFB800]">
               ⚠️ FFmpeg sans support cuvid détecté dans ce container — décodage CPU uniquement.
-              Assurez-vous que le backend est bâti avec l'image <span className="mono">nvidia/cuda</span> + FFmpeg NVDEC.
+              Assurez-vous que le backend est bâti avec l&apos;image <span className="mono">nvidia/cuda</span> + FFmpeg NVDEC.
             </div>
           )}
         </div>
@@ -632,3 +634,277 @@ function StreamLifecycleSection() {
     </div>
   );
 }
+
+// Badge component (extracted to avoid react/no-unstable-nested-components)
+function AiBadge({ ok, label, testid }) {
+  return (
+    <span data-testid={testid} className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider mono"
+          style={{ background: ok ? "#00E67620" : "#FF333320", color: ok ? "#00E676" : "#FF3333", border: `1px solid ${ok ? "#00E676" : "#FF3333"}` }}>
+      {ok ? "✓" : "✗"} {label}
+    </span>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Section "Santé IA (temps réel)" — v2.21.0 Phase 0
+// Poll `/api/diagnostics/ai-health` pour montrer YOLO / ALPR / torch / CUDA
+// en badges verts/rouges avec message d'erreur exact si un modèle est KO.
+// ══════════════════════════════════════════════════════════════════════════
+function AiHealthSection() {
+  const [h, setH] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await api.get("/diagnostics/ai-health");
+      setH(r.data);
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => {
+    load();
+    const iv = setInterval(load, 5000);
+    return () => clearInterval(iv);
+  }, []);
+
+  if (!h) {
+    return (
+      <div className="mt-8 border border-border bg-card p-4" data-testid="ai-health-section-loading">
+        <h2 className="font-head font-semibold text-lg">Santé IA (temps réel)</h2>
+        <p className="text-xs text-muted-foreground mt-2">Chargement…</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-8 border border-border bg-card p-4" data-testid="ai-health-section">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h2 className="font-head font-semibold text-lg flex items-center gap-2">
+            <Zap size={16} className="text-[#00E5FF]" />
+            Santé IA (temps réel)
+          </h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            État exact du pipeline de détection. Auto-refresh 5s. Si un composant est rouge, l&apos;erreur exacte est indiquée en dessous.
+          </p>
+        </div>
+        <button onClick={load} disabled={loading} data-testid="ai-health-refresh"
+                className="text-xs px-3 py-1 border border-border hover:border-[#00E5FF] disabled:opacity-50">
+          <RefreshCw size={12} className={`inline mr-1 ${loading ? "animate-spin" : ""}`} />
+          Actualiser
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-2 mb-4">
+        <AiBadge ok={h.loop_alive} label="Boucle IA vivante" testid="ai-badge-loop" />
+        <AiBadge ok={h.yolo_loaded} label="YOLO chargé" testid="ai-badge-yolo" />
+        <AiBadge ok={h.alpr_loaded} label="LAPI/ANPR chargé" testid="ai-badge-alpr" />
+        <AiBadge ok={h.torch_available} label={`PyTorch ${h.torch_version || "?"}`} testid="ai-badge-torch" />
+        <AiBadge ok={h.torch_cuda_available} label={h.torch_cuda_available ? "CUDA actif" : "CPU"} testid="ai-badge-cuda" />
+        {h.force_cpu_env && (
+          <span data-testid="ai-badge-force-cpu" className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider mono"
+                style={{ background: "#FFB80020", color: "#FFB800", border: "1px solid #FFB800" }}>
+            ⚠ MGVMS_AI_FORCE_CPU=1
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+        <div>
+          <div className="text-muted-foreground text-[10px] uppercase tracking-wider">Device effectif</div>
+          <div className="mono font-semibold" data-testid="ai-device-effective">{h.device_effective || "—"}</div>
+        </div>
+        <div>
+          <div className="text-muted-foreground text-[10px] uppercase tracking-wider">Cycles totaux</div>
+          <div className="mono font-semibold" data-testid="ai-cycles-total">{h.cycles_total}</div>
+        </div>
+        <div>
+          <div className="text-muted-foreground text-[10px] uppercase tracking-wider">Modèle YOLO</div>
+          <div className="mono">{h.yolo_model || "—"}</div>
+        </div>
+        <div>
+          <div className="text-muted-foreground text-[10px] uppercase tracking-wider">Ultralytics</div>
+          <div className="mono">{h.ultralytics_version || "—"}</div>
+        </div>
+      </div>
+
+      {!h.yolo_loaded && h.yolo_error && (
+        <div className="mt-4 p-3 bg-[#FF333310] border border-[#FF3333]" data-testid="ai-yolo-error">
+          <div className="text-[10px] uppercase tracking-wider text-[#FF3333] font-semibold mb-1">Erreur YOLO ({h.yolo_load_attempts} tentative{h.yolo_load_attempts > 1 ? "s" : ""})</div>
+          <div className="mono text-xs break-words">{h.yolo_error}</div>
+        </div>
+      )}
+      {!h.alpr_loaded && h.alpr_error && (
+        <div className="mt-2 p-3 bg-[#FF333310] border border-[#FF3333]" data-testid="ai-alpr-error">
+          <div className="text-[10px] uppercase tracking-wider text-[#FF3333] font-semibold mb-1">Erreur LAPI ({h.alpr_load_attempts} tentative{h.alpr_load_attempts > 1 ? "s" : ""})</div>
+          <div className="mono text-xs break-words">{h.alpr_error}</div>
+        </div>
+      )}
+      {h.last_cycle_error && (
+        <div className="mt-2 p-3 bg-[#FFB80010] border border-[#FFB800]" data-testid="ai-cycle-error">
+          <div className="text-[10px] uppercase tracking-wider text-[#FFB800] font-semibold mb-1">Dernière erreur cycle</div>
+          <div className="mono text-xs break-words">{h.last_cycle_error}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Section "Réconciliation DB ↔ go2rtc" — v2.22.0 Phase 2 option (a)
+// Vérifie que toutes les caméras DB sont bien provisionnées côté moteur vidéo.
+// Bouton "Resynchroniser go2rtc" pour forcer un sync_all_streams().
+// ══════════════════════════════════════════════════════════════════════════
+function StreamsSyncSection() {
+  const [state, setState] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [repairing, setRepairing] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await api.get("/diagnostics/streams-sync");
+      setState(r.data);
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  };
+
+  const repair = async () => {
+    if (!confirm("Forcer la resynchronisation DB → go2rtc ? Cette action re-provisionne tous les flux caméra dans go2rtc (idempotent).")) return;
+    setRepairing(true);
+    try {
+      const r = await api.post("/diagnostics/streams-sync/repair");
+      setState(r.data);
+      toast.success("Resynchronisation terminée");
+    } catch (e) {
+      toast.error(`Échec resync : ${e?.response?.data?.detail || e.message}`);
+    } finally {
+      setRepairing(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    const iv = setInterval(load, 10000);
+    return () => clearInterval(iv);
+  }, []);
+
+  if (!state) {
+    return (
+      <div className="mt-8 border border-border bg-card p-4" data-testid="streams-sync-loading">
+        <h2 className="font-head font-semibold text-lg">Réconciliation DB ↔ go2rtc</h2>
+        <p className="text-xs text-muted-foreground mt-2">Chargement…</p>
+      </div>
+    );
+  }
+
+  const missing = state.missing_in_go2rtc || [];
+  const drift = state.variant_drift || [];
+  const orphans = state.orphan_in_go2rtc || [];
+  const inSync = state.in_sync || [];
+  const hasIssue = missing.length + drift.length + orphans.length > 0;
+
+  return (
+    <div className="mt-8 border border-border bg-card p-4" data-testid="streams-sync-section">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h2 className="font-head font-semibold text-lg flex items-center gap-2">
+            <Activity size={16} className="text-[#00E5FF]" />
+            Réconciliation DB ↔ go2rtc
+          </h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            Vérifie que chaque caméra en base est bien provisionnée dans go2rtc (source unique = DB).
+            Utile après un <span className="mono">docker restart go2rtc</span> ou un reset de conteneur.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={load} disabled={loading} data-testid="streams-sync-refresh"
+                  className="text-xs px-3 py-1 border border-border hover:border-[#00E5FF] disabled:opacity-50">
+            <RefreshCw size={12} className={`inline mr-1 ${loading ? "animate-spin" : ""}`} />
+            Actualiser
+          </button>
+          <button onClick={repair} disabled={repairing || !state.go2rtc_reachable} data-testid="streams-sync-repair-btn"
+                  className="text-xs px-3 py-1 border border-[#00E5FF] text-[#00E5FF] hover:bg-[#00E5FF20] disabled:opacity-50 font-semibold">
+            {repairing ? "Resynchronisation…" : "Resynchroniser go2rtc"}
+          </button>
+        </div>
+      </div>
+
+      {!state.go2rtc_reachable && (
+        <div className="p-3 bg-[#FF333310] border border-[#FF3333] mb-3" data-testid="streams-sync-unreachable">
+          <div className="text-[10px] uppercase tracking-wider text-[#FF3333] font-semibold mb-1">go2rtc injoignable</div>
+          <div className="mono text-xs break-words">{state.go2rtc_error || "Aucune réponse HTTP"}</div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs mb-4">
+        <div>
+          <div className="text-muted-foreground text-[10px] uppercase tracking-wider">Caméras DB</div>
+          <div className="mono font-semibold text-lg" data-testid="streams-sync-db-count">{state.db_cameras_count}</div>
+        </div>
+        <div>
+          <div className="text-muted-foreground text-[10px] uppercase tracking-wider">Flux go2rtc</div>
+          <div className="mono font-semibold text-lg" data-testid="streams-sync-go2rtc-count">{state.go2rtc_streams_count}</div>
+        </div>
+        <div>
+          <div className="text-muted-foreground text-[10px] uppercase tracking-wider">Alignés</div>
+          <div className="mono font-semibold text-lg text-[#00E676]" data-testid="streams-sync-in-sync-count">{inSync.length}</div>
+        </div>
+        <div>
+          <div className="text-muted-foreground text-[10px] uppercase tracking-wider">Problèmes</div>
+          <div className={`mono font-semibold text-lg ${hasIssue ? "text-[#FF3333]" : "text-[#00E676]"}`} data-testid="streams-sync-issues-count">
+            {missing.length + drift.length + orphans.length}
+          </div>
+        </div>
+      </div>
+
+      {missing.length > 0 && (
+        <div className="mb-3 p-3 bg-[#FF333310] border border-[#FF3333]" data-testid="streams-sync-missing">
+          <div className="text-[10px] uppercase tracking-wider text-[#FF3333] font-semibold mb-2">
+            {missing.length} caméra{missing.length > 1 ? "s" : ""} manquante{missing.length > 1 ? "s" : ""} dans go2rtc — cliquez &laquo;&nbsp;Resynchroniser go2rtc&nbsp;&raquo;
+          </div>
+          {missing.map((m) => (
+            <div key={m.stream_name} className="mono text-xs">• {m.name} <span className="text-muted-foreground">({m.stream_name})</span></div>
+          ))}
+        </div>
+      )}
+
+      {drift.length > 0 && (
+        <div className="mb-3 p-3 bg-[#FFB80010] border border-[#FFB800]" data-testid="streams-sync-drift">
+          <div className="text-[10px] uppercase tracking-wider text-[#FFB800] font-semibold mb-2">
+            {drift.length} caméra{drift.length > 1 ? "s" : ""} avec variantes HD/SD manquantes
+          </div>
+          {drift.map((d) => (
+            <div key={d.stream_name} className="mono text-xs">
+              • {d.name} <span className="text-muted-foreground">({d.stream_name})</span>
+              <span className="ml-2">HD:{d.hd_present ? "✓" : "✗"} SD:{d.sd_present ? "✓" : "✗"}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {orphans.length > 0 && (
+        <div className="mb-3 p-3 bg-[#FFB80010] border border-[#FFB800]" data-testid="streams-sync-orphans">
+          <div className="text-[10px] uppercase tracking-wider text-[#FFB800] font-semibold mb-2">
+            {orphans.length} flux orphelin{orphans.length > 1 ? "s" : ""} dans go2rtc (caméra supprimée en DB)
+          </div>
+          {orphans.map((o) => (
+            <div key={o.stream_name} className="mono text-xs">• {o.stream_name}</div>
+          ))}
+        </div>
+      )}
+
+      {!hasIssue && state.go2rtc_reachable && (
+        <div className="p-3 bg-[#00E67610] border border-[#00E676]" data-testid="streams-sync-ok">
+          <div className="flex items-center gap-2 text-[#00E676] text-xs font-semibold">
+            <CheckCircle2 size={14} />
+            DB et go2rtc alignés — {inSync.length} caméra{inSync.length > 1 ? "s" : ""} en synchronisation
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+

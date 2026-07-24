@@ -1,0 +1,26 @@
+{
+  "summary": "Iteration 31 — Phase 2 (v2.22.0) : DB reste maître + réconciliation DB ↔ go2rtc. Nouveaux endpoints GET /api/diagnostics/streams-sync et POST /repair. UI /diagnostics enrichie de 2 nouvelles sections auto-refresh (Santé IA temps réel + Réconciliation DB↔go2rtc avec bouton Resynchroniser). Backend 19/19 pytest passing (10 iter29 + 6 iter30 + 3 iter31). Drift détecté → repair → aligned : cycle complet validé sur sandbox.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_iter31_streams_sync.py"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "streaming.reconcile_streams_with_go2rtc: diagnostic pur, classe caméras en 4 buckets (in_sync/missing/drift/orphan). Ignore variantes _hd/_sd et probe_*.",
+    "routers /api/diagnostics/streams-sync + /repair : permission technician + audit log stream_sync_repair.",
+    "Diagnostics.jsx: AiHealthSection + StreamsSyncSection ajoutées avec data-testid complets (auto-refresh 5s/10s).",
+    "AiBadge component extrait pour respecter react/no-unstable-nested-components."
+  ],
+  "updated_files": [
+    "/app/backend/streaming.py",
+    "/app/backend/routers.py",
+    "/app/frontend/src/pages/Diagnostics.jsx",
+    "/app/backend/tests/test_iter31_streams_sync.py",
+    "/app/memory/PRD.md"
+  ],
+  "success_rate": {"backend": "100% (19/19)", "frontend": "PASS (2 nouvelles sections rendues, 5 testids validés)"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "aucun",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phases 0+1+2 livrées. DB MongoDB reste source de vérité unique pour les caméras. go2rtc est un moteur éphémère provisionné via PUT /api/streams. La réconciliation est visible dans /diagnostics (sections 'Santé IA' + 'Réconciliation DB↔go2rtc'). Backlog restant : modularisation routers.py (P2), multi-tenant/permissions granulaires (P2), logo dark mode (en attente asset utilisateur)."
+}

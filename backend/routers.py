@@ -826,6 +826,49 @@ async def diagnostics_ai_health(user: dict = Depends(require_permission("view_li
     return get_ai_health()
 
 
+@api_router.get("/diagnostics/streams-sync")
+async def diagnostics_streams_sync(user: dict = Depends(require_permission("technician"))):
+    """Phase 2 (v2.22.0) — Réconciliation DB ↔ go2rtc.
+
+    Diagnostic pur (aucune écriture) qui expose :
+      - `in_sync[]` : caméras alignées des 2 côtés
+      - `missing_in_go2rtc[]` : caméras en DB mais absentes du moteur → nécessite un
+        `sync_all_streams()` (bouton "Resynchroniser go2rtc")
+      - `orphan_in_go2rtc[]` : flux orphelins dans go2rtc (caméra supprimée en DB
+        pendant que go2rtc était HS)
+      - `variant_drift[]` : producteur OK mais variantes `_hd`/`_sd` manquantes
+      - `go2rtc_reachable` / `go2rtc_error` : le moteur vidéo répond-il ?
+
+    Utile après un `docker restart go2rtc` ou un reset de conteneur pour vérifier
+    que tous les flux sont bien re-provisionnés côté moteur vidéo.
+    """
+    from streaming import reconcile_streams_with_go2rtc
+    return await reconcile_streams_with_go2rtc()
+
+
+@api_router.post("/diagnostics/streams-sync/repair")
+async def diagnostics_streams_sync_repair(user: dict = Depends(require_permission("technician"))):
+    """Phase 2 (v2.22.0) — Force la resynchronisation complète DB → go2rtc.
+
+    Appelle `sync_all_streams()` qui :
+      1. Nettoie les flux temporaires `probe_*` orphelins
+      2. Garantit les caméras démo
+      3. (Re)-enregistre les caméras réelles absentes de go2rtc
+      4. Ajoute les variantes `_hd`/`_sd` manquantes sur les producteurs existants
+
+    Idempotent : n'écrase pas les flux déjà présents avec la bonne config.
+    Après appel, refaire un `GET /diagnostics/streams-sync` pour vérifier `missing_in_go2rtc == []`.
+
+    Auditté : `stream_sync_repair` par l'utilisateur `{user.email}`.
+    """
+    from streaming import sync_all_streams, reconcile_streams_with_go2rtc
+    from auth import log_audit
+    await log_audit(user, "stream_sync_repair", details="manual")
+    await sync_all_streams()
+    # Retourne le nouvel état pour affichage immédiat
+    return await reconcile_streams_with_go2rtc()
+
+
 @api_router.get("/diagnostics/camera/{camera_id}/logs")
 async def diagnostics_camera_logs(camera_id: str, lines: int = 100,
                                     user: dict = Depends(require_permission("view_live"))):

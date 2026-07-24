@@ -409,6 +409,99 @@ async def sync_all_streams() -> None:
                 n_new, n_upgraded)
 
 
+async def reconcile_streams_with_go2rtc() -> dict:
+    """Phase 2 (v2.22.0) — Diagnostic de réconciliation DB ↔ go2rtc.
+
+    Compare la vérité DB (MongoDB `cameras` collection) avec l'état réel go2rtc
+    (`GET /api/streams`) et retourne :
+      - `in_sync` : caméras présentes des 2 côtés avec toutes les variantes attendues
+      - `missing_in_go2rtc` : caméras en DB mais absentes du moteur vidéo
+        → il FAUT re-push (probablement après un restart go2rtc / reset du conteneur)
+      - `orphan_in_go2rtc` : flux dans go2rtc sans caméra DB correspondante
+        → à supprimer (résidus d'une caméra supprimée en DB pendant que go2rtc était HS)
+      - `variant_drift` : caméras avec producteur OK mais variantes `_hd`/`_sd` manquantes
+        → réparable via `_ensure_variants(name)`
+      - `demo_names` : liste des flux démo (traités séparément, jamais dans "orphans")
+
+    N'écrit RIEN. C'est un diagnostic pur, utilisé par `GET /api/diagnostics/streams-sync`.
+    La réparation se fait via l'endpoint `POST /api/diagnostics/streams-sync/repair` qui
+    appelle `sync_all_streams()`.
+    """
+    result = {
+        "in_sync": [], "missing_in_go2rtc": [], "orphan_in_go2rtc": [],
+        "variant_drift": [], "demo_names": [],
+        "go2rtc_reachable": False, "go2rtc_error": None,
+        "db_cameras_count": 0, "go2rtc_streams_count": 0,
+    }
+    # ── Récupérer l'état go2rtc ─────────────────────────────────────────
+    go2rtc_streams: dict = {}
+    try:
+        async with httpx.AsyncClient(timeout=6) as client:
+            r = await client.get(f"{GO2RTC_URL}/api/streams")
+            r.raise_for_status()
+            go2rtc_streams = r.json() or {}
+            result["go2rtc_reachable"] = True
+    except httpx.HTTPError as e:
+        result["go2rtc_error"] = f"{type(e).__name__}: {str(e)[:180]}"
+        return result
+    result["go2rtc_streams_count"] = len(go2rtc_streams)
+
+    # ── Récupérer la vérité DB ─────────────────────────────────────────
+    cams = await db.cameras.find({}, {"_id": 0}).to_list(1000)
+    result["db_cameras_count"] = len(cams)
+    expected_names: set[str] = set()
+    for cam in cams:
+        cam_id = cam.get("id", "")
+        if not cam_id:
+            continue
+        name = _stream_name(cam_id)
+        expected_names.add(name)
+        is_demo = cam_id in DEMO_IDS
+        if is_demo:
+            result["demo_names"].append(name)
+        present = name in go2rtc_streams
+        hd_present = f"{name}_hd" in go2rtc_streams
+        sd_present = f"{name}_sd" in go2rtc_streams
+        if not present:
+            result["missing_in_go2rtc"].append({
+                "camera_id": cam_id,
+                "name": cam.get("name", ""),
+                "stream_name": name,
+                "is_demo": is_demo,
+                "status": cam.get("status", ""),
+            })
+        elif not (hd_present and sd_present):
+            result["variant_drift"].append({
+                "camera_id": cam_id,
+                "name": cam.get("name", ""),
+                "stream_name": name,
+                "hd_present": hd_present,
+                "sd_present": sd_present,
+            })
+        else:
+            result["in_sync"].append({
+                "camera_id": cam_id,
+                "name": cam.get("name", ""),
+                "stream_name": name,
+            })
+
+    # ── Orphelins go2rtc (flux sans caméra DB) ────────────────────────
+    # Exclut : variantes _hd/_sd (déjà comptées via leur producteur),
+    # flux temporaires probe_*, et les caméras démo statiques du yaml.
+    for stream_name in go2rtc_streams:
+        if stream_name.endswith("_hd") or stream_name.endswith("_sd"):
+            continue
+        if stream_name.startswith("probe_"):
+            continue
+        if not stream_name.startswith("cam_"):
+            continue
+        if stream_name in expected_names:
+            continue
+        result["orphan_in_go2rtc"].append({"stream_name": stream_name})
+
+    return result
+
+
 async def _ensure_demo_camera() -> None:
     """Caméras de démonstration : vrais flux H.264 générés localement (pipeline réel)."""
     site = await db.sites.find_one({}, {"_id": 0})

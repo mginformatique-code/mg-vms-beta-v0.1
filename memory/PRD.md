@@ -1,5 +1,68 @@
 # MG-VMS — Product Requirements Document
 
+## Implemented (2026-07-24 · v2.22.0 — Phase 2 : DB maître + réconciliation DB ↔ go2rtc)
+
+**Décision produit** : la DB MongoDB reste la **source de vérité unique** pour les caméras (URL RTSP + credentials + toutes les métadonnées VMS : permissions, ANPR config, ROI, whitelist/blacklist, config recorder, etc.). go2rtc est un moteur vidéo _éphémère_ provisionné à la demande via son API HTTP (`PUT /api/streams`). Aucun `go2rtc.yaml` généré, aucune duplication de state en fichier.
+
+### P1 — Nouveaux endpoints de réconciliation
+
+**`GET /api/diagnostics/streams-sync`** (permission `technician`) — diagnostic pur, aucune écriture :
+```json
+{
+  "in_sync": [{"camera_id","name","stream_name"}],
+  "missing_in_go2rtc": [{"camera_id","name","stream_name","is_demo","status"}],
+  "variant_drift": [{"camera_id","name","stream_name","hd_present","sd_present"}],
+  "orphan_in_go2rtc": [{"stream_name"}],
+  "demo_names": [...],
+  "go2rtc_reachable": true, "go2rtc_error": null,
+  "db_cameras_count": 2, "go2rtc_streams_count": 6
+}
+```
+
+**`POST /api/diagnostics/streams-sync/repair`** (permission `technician`) — force `sync_all_streams()` : (1) nettoie les `probe_*` orphelins, (2) garantit les démos, (3) re-provisionne les caméras absentes, (4) ajoute les variantes `_hd`/`_sd` manquantes. Idempotent. Auditté (`stream_sync_repair`).
+
+**Implémentation** `streaming.reconcile_streams_with_go2rtc()` :
+- Récupère l'état go2rtc via `GET /api/streams`.
+- Récupère toutes les caméras DB (`db.cameras.find({}, ...)`).
+- Compare et classe : in_sync / missing / drift / orphan.
+- Traitement spécial des flux démo statiques (`cam_demo-cam-001/002` du yaml).
+- Exclut les variantes `_hd`/`_sd` et `probe_*` de la détection d'orphelins.
+
+### P1 — UI /diagnostics : 2 nouvelles sections auto-refresh
+
+**Section « Santé IA (temps réel) »** (v2.21.0 + rendu) :
+- Poll `/api/diagnostics/ai-health` toutes les 5s.
+- Badges verts/rouges : Boucle IA vivante · YOLO chargé · LAPI/ANPR chargé · PyTorch version · CUDA · MGVMS_AI_FORCE_CPU (si actif).
+- Métriques : device effectif · cycles totaux · modèle YOLO · version ultralytics.
+- **Panneau d'erreur explicite** si un composant est KO (`yolo_error`, `alpr_error`, `last_cycle_error`).
+- `data-testid` : `ai-health-section`, `ai-badge-{yolo,alpr,torch,cuda,loop,force-cpu}`, `ai-cycles-total`, `ai-device-effective`, `ai-{yolo,alpr,cycle}-error`.
+
+**Section « Réconciliation DB ↔ go2rtc »** :
+- Poll `/api/diagnostics/streams-sync` toutes les 10s.
+- 4 KPIs : Caméras DB · Flux go2rtc · Alignés · Problèmes.
+- Panneaux d'alerte détaillés (rouge/jaune) listant les caméras missing / variant_drift / orphelines.
+- Bouton **« Resynchroniser go2rtc »** avec confirmation → `POST /repair` → toast succès.
+- Bandeau OK vert quand tout est aligné.
+- `data-testid` : `streams-sync-section`, `-refresh`, `-repair-btn`, `-db-count`, `-go2rtc-count`, `-in-sync-count`, `-issues-count`, `-missing`, `-drift`, `-orphans`, `-ok`, `-unreachable`.
+
+### Testé (sandbox — 2026-07-24)
+- `GET /api/diagnostics/streams-sync` retourne l'état complet (in_sync=2, missing=0, drift=0, orphans=0) ✅
+- Simulation drift : `DELETE cam_demo-cam-001_hd` sur go2rtc → diag détecte `variant_drift=1` avec `hd_present=false, sd_present=true` ✅
+- `POST /repair` → variants recréées → nouvel état `in_sync=2, drift=0` ✅
+- UI : les 2 sections rendues, badges verts, 48 cycles IA en 4 min, DB et go2rtc alignés (2 caméras) ✅
+- Régression : 16/16 pytest passent toujours (iter29 + iter30) ✅
+
+### Rationale — pourquoi option (a) et pas (b)/(c)
+Sur ~15 champs par caméra, **1 seul** (URL RTSP + creds) est commun avec go2rtc. Les 14 autres (nom, site, permissions par user, ANPR config, ROI polygonale, whitelist/blacklist, cooldown, recorder config, storage pool, PTZ, profil ONVIF, transport, codec préféré, historique diag, lifecycle journal) sont spécifiques VMS et ne peuvent PAS vivre dans `go2rtc.yaml`. Option (b) aurait forcé à maintenir 2 sources (yaml + DB). Option (c) aurait supprimé le workflow ONVIF intégré. Option (a) = statu quo assaini où go2rtc est un moteur éphémère provisionné depuis la DB.
+
+### À valider par l'utilisateur en PROD
+1. `git pull && docker compose build backend frontend && docker compose up -d`
+2. Aller sur `/diagnostics` — les 2 nouvelles sections apparaissent en bas :
+   - Badge « Boucle IA vivante » vert → tout va bien
+   - Badge YOLO ou LAPI rouge → l'erreur exacte est en dessous, à copier dans le prochain message
+3. Après un `docker restart go2rtc`, cliquer « Resynchroniser go2rtc » — les caméras se re-provisionnent en 1-2 s.
+
+
 ## Implemented (2026-07-24 · v2.21.0 — Phase 0 + Phase 1 : IA résiliente + go2rtc = unique gateway)
 
 **Contexte utilisateur** : après le rebuild GPU (v2.18) en prod, plus AUCUNE détection IA / plaque / événement, même en repassant CPU. Sans logs prod, le RCA a été fait sur le code. Livrable = pipeline IA qui **ne peut plus mourir silencieusement** + endpoint de diagnostic exhaustif pour identifier en 1 requête ce qui casse en prod + garde-fou architectural go2rtc.
