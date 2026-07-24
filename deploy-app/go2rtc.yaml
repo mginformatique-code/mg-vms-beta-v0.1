@@ -128,3 +128,9 @@ streams:
     - ffmpeg:cam_79af295a-b590-4590-a822-d1858f86072e#video=mjpeg#low_latency
   cam_79af295a-b590-4590-a822-d1858f86072e_sd:
     - ffmpeg:cam_79af295a-b590-4590-a822-d1858f86072e#video=mjpeg#width=640#low_latency
+  cam_18bb356c-d647-43a0-b532-8c84a46a3de8:
+    - rtsp://admin:Rlwt29%23%2Bjpf@192.168.5.206:554/
+  cam_18bb356c-d647-43a0-b532-8c84a46a3de8_hd:
+    - ffmpeg:cam_18bb356c-d647-43a0-b532-8c84a46a3de8#video=mjpeg#low_latency
+  cam_18bb356c-d647-43a0-b532-8c84a46a3de8_sd:
+    - ffmpeg:cam_18bb356c-d647-43a0-b532-8c84a46a3de8#video=mjpeg#width=640#low_latency
