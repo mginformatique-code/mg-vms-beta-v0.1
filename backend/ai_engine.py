@@ -878,10 +878,13 @@ async def _sync_frame_source_workers(cams: list[dict]) -> None:
     - Arrête les workers dont la caméra a été désactivée ou supprimée.
 
     Résolution des URL RTSP :
-      - Priorité : `cam.rtsp_url` en base (URL directe de la caméra, la plus
-        efficace : 1 seule session RTSP côté caméra pour ffmpeg-CUDA).
-      - Sinon : `rtsp://go2rtc:8554/cam_{id}` (via go2rtc, partage la session
-        avec le recorder et autres consommateurs).
+      - TOUJOURS via go2rtc : `rtsp://go2rtc:8554/cam_{id}`.
+        Raisons : (1) `cam.rtsp_url` en base est stocké SANS identifiants →
+        connexion directe = 401 en boucle qui martèle la caméra ; (2) la connexion
+        directe ouvrait une 2e session RTSP sur la caméra physique (beaucoup de
+        caméras limitent les sessions simultanées → déconnexions des autres
+        consommateurs). Via go2rtc, la session caméra reste UNIQUE et partagée
+        (viewers + recorder + IA).
     """
     import frame_source
     go2rtc_rtsp = os.environ.get("GO2RTC_RTSP", "rtsp://go2rtc:8554")
@@ -893,9 +896,9 @@ async def _sync_frame_source_workers(cams: list[dict]) -> None:
         if cam_id.startswith("demo-") or cam_id.startswith("demo_"):
             continue
         active_ids.add(cam_id)
-        # Choix de la source RTSP : directe (préféré) ou via go2rtc
-        rtsp_url = cam.get("rtsp_url") or f"{go2rtc_rtsp}/cam_{cam_id}"
-        codec = (cam.get("video_codec") or "auto").lower()
+        # Source RTSP : TOUJOURS le relais go2rtc (session caméra unique partagée)
+        rtsp_url = f"{go2rtc_rtsp}/cam_{cam_id}"
+        codec = (cam.get("codec") or "auto").lower()
         if codec not in ("h264", "h265", "hevc", "auto"):
             codec = "auto"
         if codec == "hevc":

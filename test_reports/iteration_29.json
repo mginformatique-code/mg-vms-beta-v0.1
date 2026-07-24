@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 29 — Full regression on 6 backend fixes (ONVIF/preview/disconnect) validated end-to-end. Backend: 10/10 pytest passing including 65s stability soak + real-camera creation with lifecycle inspection. Frontend: LiveView shows both demo streams (MJPEG w/ SD badge, AI overlay on demo-cam-002), Cameras/Scan ONVIF displays hint 'onvif-discover-hint' with Docker/multicast explanation, Diagnostics displays 'Cycle de vie des streams' with status_probe_ok entries and reason 'producteur actif ou caméra joignable (probe non-invasif)'. All 3 production bugs mitigated.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": ["Pre-existing React hydration warning about <span> being child of <option> in some Routes (non-blocking, not related to current fixes)"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter29_probe_and_bugs.py",
+    "/app/test_reports/pytest/iter29.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "streaming.py::_probe_status_once correctly branches: demo uses frame.jpeg (local), real cameras use bytes_recv delta then TCP check — non-invasive as designed. Lifecycle entry 'status_probe_ok' with reason 'probe non-invasif' confirmed on real created camera.",
+    "video_engine.resolve_pipeline: pipeline.mjpeg_filter_hd/sd contain NO 'hardware=cuda' for demo cameras (GO2RTC_FFMPEG_CUDA unset).",
+    "discover_cameras: returns count=0/devices=[]/hint with Docker/multicast bridge message in sandbox (as expected).",
+    "test_connectivity ONVIF error path returns 200 with detailed message (not just class name) — confirmed with mongo port 27017 as non-ONVIF target.",
+    "AI engine still generates events on demo-cam-002 (813 events/24h visible in dashboard, GET /api/events non-empty).",
+    "Real-camera creation flow: after ~30s the new camera is 'online' via non-invasive probe with only 1 'registering' entry (no reconnect churn) — matches expected behaviour."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter29_probe_and_bugs.py",
+    "/app/test_reports/iteration_29.json"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100%"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Test camera 'TEST_iter29_real' created via POST /api/cameras and deleted at end of test (bc9164ae-... lifecycle visible in diagnostics screenshot).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All 6 fixes (A→F) validated. Backend probe non-invasive: demo cams use frame.jpeg locally, real cams use bytes_recv delta then TCP fallback. GO2RTC_FFMPEG_CUDA gate works (no cuda in pipeline filters). ONVIF discovery hint present with data-testid='onvif-discover-hint'. test_connectivity ONVIF errors return meaningful messages. Do NOT modify /app/frontend/src/pages/LiveView.jsx (players always mounted — critical fix). Backend runs under supervisor with hot reload; go2rtc local on :1984/:8554 with cam_demo-cam-001 (mire) + cam_demo-cam-002 (traffic+IA)."
+}

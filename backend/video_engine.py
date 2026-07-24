@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -224,10 +225,15 @@ async def resolve_pipeline(cam: dict) -> dict:
     # 6) Chaîne ffmpeg pour les variantes MJPEG (utilisées par register_camera_stream)
     # NB : go2rtc accepte des paramètres ffmpeg custom via query-string. Format :
     #   ffmpeg:{name}#video=mjpeg#hardware=cuda#width=640
-    # Si `decoder` = h264_cuvid, on prépend `#hardware=cuda` qui active NVDEC + scale_cuda.
+    # ⚠ CRITIQUE : ces filtres sont exécutés par le ffmpeg DU CONTENEUR GO2RTC, pas
+    # par le backend. Le conteneur go2rtc n'a en général NI runtime nvidia NI ffmpeg
+    # compilé CUDA → `#hardware=cuda` fait échouer le transcodage MJPEG (aperçu noir,
+    # frame.jpeg KO, statuts qui flappent). On n'émet ce flag QUE si l'admin a
+    # explicitement déclaré GO2RTC_FFMPEG_CUDA=1 (go2rtc avec GPU passthrough).
     # `low_latency` : ajoute `#low_latency` (flag reconnu par go2rtc)
     ll = "#low_latency" if cfg["low_latency"] else ""
-    hw = "#hardware=cuda" if decoder != "software" else ""
+    go2rtc_cuda = os.environ.get("GO2RTC_FFMPEG_CUDA", "0") == "1"
+    hw = "#hardware=cuda" if (decoder != "software" and go2rtc_cuda) else ""
     width_hd = int(cfg["hd_preview_width"] or 0)
     width_sd = int(cfg["sd_preview_width"] or 640)
     hd_filter = f"video=mjpeg{hw}"

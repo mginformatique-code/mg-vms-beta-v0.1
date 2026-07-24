@@ -772,10 +772,11 @@ function streamLabel(key) {
 function OnvifDiscovery({ open, onClose, onPick }) {
   const [scanning, setScanning] = useState(false);
   const [devices, setDevices] = useState(null);
+  const [hint, setHint] = useState("");
 
   const scan = async () => {
-    setScanning(true); setDevices(null);
-    try { const { data } = await api.post("/cameras/discover"); setDevices(data.devices); }
+    setScanning(true); setDevices(null); setHint("");
+    try { const { data } = await api.post("/cameras/discover"); setDevices(data.devices); setHint(data.hint || ""); }
     catch (e) { toast.error("Échec de la découverte ONVIF"); }
     finally { setScanning(false); }
   };
@@ -790,7 +791,12 @@ function OnvifDiscovery({ open, onClose, onPick }) {
           </button>
           {devices !== null && (
             <div className="border border-border">
-              {devices.length === 0 && <p className="p-3 text-sm text-muted-foreground" data-testid="onvif-no-devices">Aucun appareil ONVIF détecté sur ce réseau.</p>}
+              {devices.length === 0 && (
+                <div className="p-3 space-y-1.5">
+                  <p className="text-sm text-muted-foreground" data-testid="onvif-no-devices">Aucun appareil ONVIF détecté sur ce réseau.</p>
+                  {hint && <p className="text-[11px] text-[#FFB800] border border-[#FFB800]/40 bg-[#FFB800]/10 p-2" data-testid="onvif-discover-hint">{hint}</p>}
+                </div>
+              )}
               {devices.map((d) => (
                 <div key={d.xaddr} className="flex items-center justify-between px-3 py-2 border-b border-border last:border-0" data-testid="onvif-device-row">
                   <div><span className="mono text-sm">{d.ip}:{d.port}</span>{d.already_added && <span className="ml-2 text-[10px] px-1.5 py-0.5 border border-border text-muted-foreground">déjà ajoutée</span>}</div>

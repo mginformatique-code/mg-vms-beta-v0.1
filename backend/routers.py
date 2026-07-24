@@ -198,12 +198,12 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
         try:
             info = await asyncio.wait_for(
                 asyncio.to_thread(_onvif_probe, data.ip, int(data.onvif_port), data.username, data.password),
-                timeout=15,
+                timeout=25,
             )
         except asyncio.TimeoutError:
             raise HTTPException(504, "Appareil ONVIF injoignable (délai dépassé)")
         except Exception as e:
-            raise HTTPException(400, f"ONVIF injoignable : {type(e).__name__} — vérifiez IP/port/identifiants")
+            raise HTTPException(400, f"ONVIF injoignable : {type(e).__name__}: {str(e)[:160]} — vérifiez IP/port/identifiants")
         profiles = info.get("profiles", [])
         # Sélection du profil : utilise `profile_token` si fourni, sinon premier profil avec URI RTSP
         selected = None
@@ -321,7 +321,7 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
                 info = await asyncio.wait_for(
                     asyncio.to_thread(_onvif_probe, data.ip, int(data.onvif_port),
                                       data.username, data.password or existing.get("password", "")),
-                    timeout=15,
+                    timeout=25,
                 )
                 profiles = info.get("profiles", [])
                 selected = None
@@ -354,7 +354,7 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
             except asyncio.TimeoutError:
                 raise HTTPException(504, "Appareil ONVIF injoignable (délai dépassé)")
             except Exception as e:
-                raise HTTPException(400, f"ONVIF injoignable : {type(e).__name__} — vérifiez IP/port/identifiants")
+                raise HTTPException(400, f"ONVIF injoignable : {type(e).__name__}: {str(e)[:160]} — vérifiez IP/port/identifiants")
         else:
             payload["rtsp_url"] = existing.get("rtsp_url", "")
     else:

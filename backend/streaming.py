@@ -136,6 +136,50 @@ async def _get_go2rtc_stream_sources(name: str) -> Optional[list[str]]:
     return []
 
 
+# ── Probe de statut NON-INVASIF (ne touche jamais la caméra physique) ──────
+# Dernier compteur bytes_recv observé par caméra (détection de flux gelé).
+_probe_last_bytes: dict[str, int] = {}
+
+
+async def _stream_bytes_recv(name: str) -> int:
+    """Total `bytes_recv` des producteurs ACTIFS d'un stream go2rtc.
+    0 si le producteur est idle (aucun consommateur → go2rtc n'est pas connecté
+    à la caméra) ou si l'appel échoue. Coût : 1 GET local, aucun décodage."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{GO2RTC_URL}/api/streams", params={"src": name})
+            if r.status_code != 200:
+                return 0
+            data = r.json() or {}
+    except (httpx.HTTPError, ValueError):
+        return 0
+    total = 0
+    for prod in (data.get("producers") or []):
+        if isinstance(prod, dict):
+            try:
+                total += int(prod.get("bytes_recv") or 0)
+            except (TypeError, ValueError):
+                pass
+    return total
+
+
+def _camera_tcp_target(cam: dict) -> Optional[tuple]:
+    """(host, port) RTSP de la caméra pour un TCP-check léger.
+    Priorité : hôte de l'URL RTSP en base, sinon cam.ip + rtsp_port."""
+    url = (cam.get("rtsp_url") or "").strip()
+    m = re.match(r"^rtsp://(?:[^@/]*@)?([^:/?#]+)(?::(\d+))?", url, re.IGNORECASE)
+    if m:
+        return m.group(1), int(m.group(2) or 554)
+    host = (cam.get("ip") or "").strip()
+    if host:
+        try:
+            port = int(cam.get("rtsp_port") or cam.get("port") or 554)
+        except (TypeError, ValueError):
+            port = 554
+        return host, port
+    return None
+
+
 async def register_camera_stream(cam: dict, *, caller: str = "unknown",
                                   force: bool = False) -> bool:
     """Déclare (ou met à jour) le flux d'une caméra dans go2rtc.
@@ -747,7 +791,7 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
             try:
                 onvif_info = await asyncio.wait_for(
                     asyncio.to_thread(_onvif_probe, ip, int(data.onvif_port), data.username, data.password),
-                    timeout=12,
+                    timeout=25,
                 )
                 n_prof = len(onvif_info.get("profiles", []))
                 add("onvif_auth", "ok",
@@ -760,7 +804,8 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
             except asyncio.TimeoutError:
                 add("onvif_auth", "error", "Service ONVIF ne répond pas (délai dépassé)")
             except Exception as e:
-                add("onvif_auth", "error", f"Auth ONVIF refusée — {type(e).__name__}")
+                add("onvif_auth", "error",
+                    f"Auth ONVIF refusée — {type(e).__name__}: {str(e)[:160]}")
         else:
             add("onvif_auth", "skip", "Ignoré (port ONVIF fermé)")
 
@@ -972,17 +1017,48 @@ async def _probe_status_once(cam: dict) -> tuple[str, str, bool]:
             except httpx.HTTPError as e:
                 return ("offline", f"go2rtc unreachable: {type(e).__name__}", False)
 
-    # ── Étape 2 : vérifier qu'une frame récente est disponible (frame.jpeg léger) ──
-    # NOTE : ce probe n'est PAS forcément 100% fiable (H.265, keyframes espacés) —
-    # d'où l'hystérésis à N échecs avant de flipper offline.
-    try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": name})
-        if r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff":
-            return ("online", "", False)
-        return ("offline_transient", f"go2rtc frame HTTP {r.status_code}", False)
-    except httpx.HTTPError as e:
-        return ("offline_transient", f"HTTP client error: {type(e).__name__}", False)
+    # ── Étape 2 : probe NON-INVASIF ──
+    # ⚠ NE PLUS UTILISER frame.jpeg pour les caméras réelles : chaque appel forçait
+    # go2rtc à ouvrir une session RTSP on-demand vers la caméra physique (connect +
+    # décodage H.265 + disconnect toutes les 30 s). Beaucoup de caméras (Reolink…)
+    # limitent les sessions simultanées → ce churn faisait tomber les sessions des
+    # autres consommateurs (viewers/recorder) = « caméras qui se déconnectent ».
+    # Nouveau probe :
+    #   a) producteur go2rtc ACTIF avec bytes_recv qui augmente → online (coût zéro)
+    #   b) producteur idle (aucun consommateur) → simple TCP check IP:port RTSP
+    if is_demo:
+        # Les démos sont générées localement par go2rtc → frame.jpeg reste OK ici.
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": name})
+            if r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff":
+                return ("online", "", False)
+            return ("offline_transient", f"go2rtc frame HTTP {r.status_code}", False)
+        except httpx.HTTPError as e:
+            return ("offline_transient", f"HTTP client error: {type(e).__name__}", False)
+
+    # a) Producteur actif ? (bytes_recv > 0 = go2rtc est connecté à la caméra)
+    bytes_recv = await _stream_bytes_recv(name)
+    if bytes_recv > 0:
+        prev = _probe_last_bytes.get(cam_id)
+        _probe_last_bytes[cam_id] = bytes_recv
+        if prev is not None and bytes_recv == prev:
+            return ("offline_transient",
+                    "producteur go2rtc gelé (0 octet reçu depuis le dernier probe)", False)
+        return ("online", "", False)
+    _probe_last_bytes.pop(cam_id, None)
+
+    # b) Producteur idle (go2rtc on-demand, aucun consommateur actif) →
+    #    TCP check léger sur la caméra : n'ouvre AUCUNE session RTSP/décodage.
+    target = _camera_tcp_target(cam)
+    if target is None:
+        # Aucune IP connue → impossible de vérifier sans ouvrir de session : online.
+        return ("online", "", False)
+    host, port = target
+    ok = await asyncio.to_thread(_tcp_check, host, port, 3.0)
+    if ok:
+        return ("online", "", False)
+    return ("offline_transient", f"caméra injoignable (TCP {host}:{port})", False)
 
 
 async def camera_status_loop() -> None:
@@ -1016,7 +1092,8 @@ async def camera_status_loop() -> None:
                 should_offline, fail_count = record_probe_result(cam_id, probe_ok, error_text)
                 if probe_ok:
                     status = "online"
-                    _lc_record(cam_id, "status_probe_ok", reason="frame.jpeg valid",
+                    _lc_record(cam_id, "status_probe_ok",
+                               reason="producteur actif ou caméra joignable (probe non-invasif)",
                                caller="camera_status_loop")
                 elif should_offline:
                     status = "offline"
@@ -1350,12 +1427,12 @@ async def cameras_auto_detect(body: AutoDetectInput, user: dict = Depends(requir
     try:
         info = await asyncio.wait_for(
             asyncio.to_thread(_onvif_probe, ip, int(body.onvif_port), body.username, body.password),
-            timeout=15,
+            timeout=25,
         )
     except asyncio.TimeoutError:
         raise HTTPException(504, "Appareil ONVIF injoignable (délai dépassé)")
     except Exception as e:
-        raise HTTPException(400, f"ONVIF injoignable : {type(e).__name__} — vérifiez identifiants")
+        raise HTTPException(400, f"ONVIF injoignable : {type(e).__name__}: {str(e)[:160]} — vérifiez identifiants")
     # ffprobe le premier flux pour enrichir la résolution effective
     profiles = info.get("profiles", [])
     if profiles and profiles[0].get("rtsp_url"):
@@ -1426,7 +1503,13 @@ async def discover_cameras(user: dict = Depends(require_role("technician"))):
     for device in devices:
         device["already_added"] = device.get("ip") in known_ips
     await log_audit(user, "onvif_discovery", details=f"{len(devices)} appareil(s) trouvé(s)")
-    return {"devices": devices, "count": len(devices)}
+    hint = None
+    if not devices:
+        hint = ("Aucun appareil détecté. La découverte WS-Discovery utilise du multicast UDP qui ne "
+                "traverse PAS un réseau Docker bridge : si MG-VMS tourne en Docker, ajoutez la caméra "
+                "par IP directe (bouton « Auto-détection ONVIF » du formulaire), ou passez le service "
+                "backend en network_mode: host dans docker-compose.")
+    return {"devices": devices, "count": len(devices), "hint": hint}
 
 
 class OnvifProbeInput(BaseModel):
@@ -1481,11 +1564,11 @@ async def onvif_probe(body: OnvifProbeInput, user: dict = Depends(require_role("
     try:
         result = await asyncio.wait_for(
             asyncio.to_thread(_onvif_probe, body.ip, body.port, body.username, body.password),
-            timeout=20,
+            timeout=25,
         )
     except asyncio.TimeoutError:
         raise HTTPException(504, "Appareil ONVIF injoignable (délai dépassé)")
     except Exception as e:
-        raise HTTPException(502, f"Échec ONVIF : {type(e).__name__} — vérifiez IP/port/identifiants")
+        raise HTTPException(502, f"Échec ONVIF : {type(e).__name__}: {str(e)[:160]} — vérifiez IP/port/identifiants")
     await log_audit(user, "onvif_probe", target=body.ip)
     return result

@@ -64,6 +64,10 @@ services:
       NVIDIA_DRIVER_CAPABILITIES: compute,utility,video  # video → NVDEC/NVENC ffmpeg
       # Auto-fallback si NVDEC indisponible (cam H.264 SW ou GPU saturé)
       MGVMS_AI_HW_ACCEL: ${MGVMS_AI_HW_ACCEL:-auto}   # auto | cuda | none
+      # ⚠ Les variantes MJPEG (_hd/_sd) sont transcodées par le ffmpeg DU CONTENEUR
+      # GO2RTC qui n'a PAS de GPU. Laisser à 0 (CPU) sauf si vous donnez un runtime
+      # nvidia + ffmpeg CUDA au conteneur go2rtc.
+      GO2RTC_FFMPEG_CUDA: ${GO2RTC_FFMPEG_CUDA:-0}
     depends_on:
       - mongo
       - go2rtc

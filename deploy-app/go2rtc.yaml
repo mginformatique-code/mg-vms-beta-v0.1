@@ -5,14 +5,15 @@
 api:
   listen: ":1984"
 
-# ─── RTSP (client-side pour VLC/autres) ────────────────────────────────
-# Force TCP transport pour tous les inputs RTSP (évite les timeouts UDP
-# et surtout le crash H.265 pkg/h265/rtp.go déclenché par paquets UDP perdus).
+# ─── RTSP (clients internes : recorder, frame_source IA, VLC…) ─────────
+# `default_query` = filtre de codecs par défaut pour les CLIENTS qui consomment
+# rtsp://go2rtc:8554/cam_X. ⚠ NE PAS mettre "mp4" ici : cela exclut les pistes
+# audio PCM (pcm_alaw/pcm_mulaw, très courantes sur caméras IP) des enregistrements.
+# NOTE : ce paramètre ne concerne PAS les connexions sortantes vers les caméras —
+# go2rtc utilise déjà TCP par défaut pour ses sources RTSP.
 rtsp:
   listen: ":8554"
-  # Applique automatiquement `?rtsp_transport=tcp` à toutes les caméras
-  # ajoutées via API MG-VMS. Réduit drastiquement les crash H.265.
-  default_query: "mp4&transport=tcp"
+  default_query: "video&audio"
 
 # ─── WebRTC ────────────────────────────────────────────────────────────
 # CRITIQUE : sans `candidates` explicites, le navigateur ne peut pas atteindre
