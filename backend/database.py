@@ -19,3 +19,6 @@ async def create_indexes():
     await db.audit_logs.create_index("timestamp")
     await db.login_attempts.create_index("identifier", unique=True)
     await db.password_reset_tokens.create_index("token", unique=True)
+    # Journal lifecycle des streams (persistance des transitions notables)
+    await db.stream_lifecycle_journal.create_index([("camera_id", 1), ("ts", -1)])
+    await db.stream_lifecycle_journal.create_index("ts")

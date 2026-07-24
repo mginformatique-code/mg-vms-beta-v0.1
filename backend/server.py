@@ -64,6 +64,9 @@ async def on_startup():
     await seed_hardware()
     await seed_plugins()
     await sweep_orphan_recorders()
+    # Re-hydrate le journal lifecycle depuis MongoDB (survit aux redémarrages backend)
+    from lifecycle import hydrate_journal_from_db
+    await hydrate_journal_from_db()
     asyncio.create_task(metrics_broadcaster())
     asyncio.create_task(network_poll_broadcaster())
     asyncio.create_task(sync_all_streams())
@@ -76,7 +79,13 @@ async def on_startup():
 @app.on_event("shutdown")
 async def on_shutdown():
     await stop_all_recorders()
-    logger.info("MG-VMS API arrêté — enregistreurs ffmpeg terminés")
+    # Arrêt propre des workers ffmpeg-CUDA persistants (frame_source)
+    try:
+        from frame_source import stop_all as _fs_stop_all
+        _fs_stop_all()
+    except Exception:
+        pass
+    logger.info("MG-VMS API arrêté — enregistreurs ffmpeg + workers IA terminés")
 
 
 @app.get("/api/")

@@ -47,6 +47,9 @@ def record(camera_id: str, action: str, reason: str = "",
       - variants_ensured        : _ensure_variants a créé HD/SD dans go2rtc
       - variants_cache_hit      : _ensure_variants_cached a court-circuité (TTL)
       - stream_absent_from_go2rtc: probe /api/streams ne trouve pas le stream (situation anormale, NON auto-réparée)
+
+    Certaines actions "notables" sont AUSSI persistées en base MongoDB pour survivre
+    au redémarrage du backend (voir `_NOTABLE_ACTIONS`).
     """
     ts = datetime.now(timezone.utc).isoformat()
     entry = {
@@ -63,6 +66,59 @@ def record(camera_id: str, action: str, reason: str = "",
         "[Camera %s] stream_lifecycle: %s reason=%r caller=%r",
         camera_id, action, reason, caller,
     )
+    # Persistance en MongoDB pour les actions notables (asynchrone, non bloquant)
+    if action in _NOTABLE_ACTIONS:
+        try:
+            asyncio.get_event_loop().create_task(_persist(camera_id, entry))
+        except RuntimeError:
+            # pas d'event loop actif (import time, tests) — skip persistance
+            pass
+
+
+# Actions considérées "notables" et donc persistées en base pour l'historique
+_NOTABLE_ACTIONS = {
+    "created", "destroyed", "register_failed",
+    "stream_absent_from_go2rtc",
+    "status_offline_confirmed", "status_online_restored",
+    "webrtc_failed",
+}
+
+
+async def _persist(camera_id: str, entry: dict) -> None:
+    """Persiste UNE entrée notable en collection `stream_lifecycle_journal`.
+    Collection cappée à 20 000 documents (auto-rotation FIFO) via un TTL manuel.
+    Non bloquant : les erreurs sont silencieusement ignorées."""
+    try:
+        from database import db
+        await db.stream_lifecycle_journal.insert_one({**entry, "camera_id": camera_id})
+        # Rotation légère : purge les vieilles entrées si la collection dépasse 20k docs
+        # (opération peu coûteuse car les indexes ts sont maintenus)
+        count = await db.stream_lifecycle_journal.estimated_document_count()
+        if count > 20000:
+            # Supprime les 1000 plus vieilles pour rester sous le seuil
+            old = await db.stream_lifecycle_journal.find({}, {"_id": 1}).sort("ts", 1).limit(1000).to_list(1000)
+            if old:
+                await db.stream_lifecycle_journal.delete_many({"_id": {"$in": [d["_id"] for d in old]}})
+    except Exception:
+        pass
+
+
+async def hydrate_journal_from_db() -> None:
+    """Au démarrage du backend, recharge les 100 dernières entrées notables de chaque
+    caméra depuis MongoDB dans la deque mémoire. Permet à la page Diagnostics de
+    montrer les incidents PRÉ-redémarrage plutôt qu'une page vide."""
+    try:
+        from database import db
+        # Les 2000 entrées les plus récentes toutes caméras confondues, triées par ts asc
+        docs = await db.stream_lifecycle_journal.find({}, {"_id": 0}).sort("ts", -1).limit(2000).to_list(2000)
+        docs.reverse()   # chronologique asc pour préserver l'ordre dans deque
+        for d in docs:
+            cam_id = d.pop("camera_id", None)
+            if cam_id:
+                _journal[cam_id].append(d)
+        logger.info("lifecycle: %d entrées notables re-hydratées depuis MongoDB", len(docs))
+    except Exception as e:
+        logger.warning("lifecycle: échec re-hydratation MongoDB (%s) — journal démarré vide", e)
 
 
 def get_journal(camera_id: str, limit: int = 100) -> list[dict]:

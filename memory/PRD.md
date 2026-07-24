@@ -1,5 +1,43 @@
 # MG-VMS — Product Requirements Document
 
+## Implemented (2026-07-24 · v2.19.0 — Logo MG-VMS + Reorg Extensions + Diag IA + Persistance journal)
+
+### P1 — UI "Santé pipeline IA" dans Diagnostics
+- Nouvelle section `FrameSourceSection` dans `/app/frontend/src/pages/Diagnostics.jsx`
+- Auto-refresh 8s, table : Caméra · Codec · Résolution · GPU (CUDA/CPU badge) · Restarts · Âge frame · État · Dernière erreur ffmpeg
+- Badge de mode global : "GPU (NVDEC)" / "CPU (fallback)" / "CUDA forcé" / "CPU forcé (env)"
+- Message clair quand aucun worker (démo uniquement) ou fallback CPU détecté
+- API : `GET /api/diagnostics/frame-source` (déjà en place depuis v2.18.0)
+
+### P2 — Réorganisation UI "Extensions" (logique cohérente)
+- **ANPR / LPR** déplacé de la section "Intelligence" vers **"Extensions"** (via plugins actifs)
+- Sous-lien **"Benchmark ANPR"** rattaché à ANPR dans Extensions (visible aux techniciens, indentation)
+- `anpr-benchmark` retiré de la section "Administration" (plus dispersé)
+- Layout.jsx : filtre `plugins` retire l'exclusion spéciale d'ANPR + ajoute sous-liens conditionnels via `<React.Fragment>`
+- Section Extensions désormais unifiée : ANPR, Détection IA, Tracking, Reconnaissance faciale, Parking, Thermal, Radar, Drone, MQTT, Contrôle d'accès
+
+### P2 — Intégration logo MG-VMS fourni
+- Logo `/app/frontend/src/assets/mg-vms-logo.png` (36 KB, PNG) importé partout
+- **Sidebar Layout** : logo 9×9 en haut à gauche (remplace le `<ShieldCheck>` générique)
+- **Login page** : logo 12×12 dans le brand panel gauche (grand format)
+- **Reset Password page** : logo 11×11 en tête du formulaire
+- **Favicon** : `<link rel="icon" href="mg-vms-logo.png">` dans `public/index.html` (+ apple-touch-icon)
+- Fichier également copié dans `/app/frontend/public/mg-vms-logo.png` pour accès direct
+
+### P3 — Persistance journal lifecycle en MongoDB
+- Nouveau `_persist(camera_id, entry)` async dans `lifecycle.py` : insère les entrées "notables" (`created`, `destroyed`, `register_failed`, `stream_absent_from_go2rtc`, `status_offline_confirmed`, `status_online_restored`, `webrtc_failed`) dans la collection `stream_lifecycle_journal`
+- **Rotation FIFO auto** : si > 20 000 documents, purge les 1000 plus anciens
+- **Re-hydration au boot** : `hydrate_journal_from_db()` charge les 2000 dernières entrées de MongoDB dans la deque mémoire au démarrage backend → la page Diagnostics affiche l'historique pré-redémarrage
+- Nouveaux index MongoDB : `[("camera_id",1),("ts",-1)]` + `ts` pour tris chronologiques rapides
+- Hooks : startup `on_startup()` appelle `hydrate_journal_from_db`, shutdown appelle `frame_source.stop_all()` proprement
+
+### Testé sandbox
+- Login → sidebar → Extensions affiche ANPR + Benchmark ANPR (indenté) ✅
+- Diagnostics affiche "Santé pipeline IA — workers ffmpeg" avec badge "CPU (fallback)" attendu ✅
+- Backend log : `lifecycle: 0 entrées notables re-hydratées depuis MongoDB` ✅
+- Aucune régression IA (démo continue à générer des détections) ✅
+
+
 ## Implemented (2026-07-24 · v2.18.0 — Audit chaîne vidéo complet + Fix GPU/H.265/IA)
 
 **Audit** : identifié 9 causes racines, dont 3 critiques :

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { useApp } from "@/context/AppContext";
-import { Activity, AlertTriangle, CheckCircle2, Download, Filter, RefreshCw, ChevronRight, Info, X } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, Download, Filter, RefreshCw, ChevronRight, Info, X, Cpu, Zap } from "lucide-react";
 
 const CAUSE_COLORS = {
   "Timeout RTSP": "#FFB800",
@@ -314,7 +314,130 @@ export default function Diagnostics() {
 
       <IncidentDetail item={detail} onClose={() => setDetail(null)} />
 
+      <FrameSourceSection />
       <StreamLifecycleSection />
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Section "Santé pipeline IA" — workers ffmpeg-CUDA persistants (frame_source)
+// ══════════════════════════════════════════════════════════════════════════
+function FrameSourceSection() {
+  const [state, setState] = useState({ workers: {}, cuvid_available: false, mode: "auto" });
+  const [cams, setCams] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [fs, cs] = await Promise.all([
+        api.get("/diagnostics/frame-source"),
+        api.get("/cameras"),
+      ]);
+      setState(fs.data || { workers: {} });
+      setCams(cs.data || []);
+    } catch (e) { /* silent */ }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => {
+    load();
+    const iv = setInterval(load, 8000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const camName = (id) => cams.find((c) => c.id === id)?.name || id;
+  const workers = Object.entries(state.workers || {});
+  const modeBadge = state.mode === "cuda" ? { color: "#00E676", label: "CUDA forcé" }
+                    : state.mode === "none" ? { color: "#666", label: "CPU forcé (env)" }
+                    : state.cuvid_available ? { color: "#00E676", label: "GPU (NVDEC)" }
+                    : { color: "#FFB800", label: "CPU (fallback)" };
+
+  return (
+    <div className="mt-8 border border-border bg-card p-4" data-testid="frame-source-section">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h2 className="font-head font-semibold text-lg flex items-center gap-2">
+            <Zap size={16} className="text-[#00E5FF]" />
+            Santé pipeline IA — workers ffmpeg
+          </h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            Un worker <span className="mono">ffmpeg -hwaccel cuda</span> par caméra IA (décodage GPU NVDEC direct → numpy zéro-copie).
+            Aucun transit MJPEG. Redémarrage automatique sur crash RTSP.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="px-2 py-1 border font-bold mono text-xs" style={{ borderColor: modeBadge.color, color: modeBadge.color }} data-testid="frame-source-mode">
+            {modeBadge.label}
+          </span>
+          <button onClick={load} disabled={loading} className="px-2 py-1 text-xs border border-border hover:bg-secondary flex items-center gap-1">
+            <RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Rafraîchir
+          </button>
+        </div>
+      </div>
+
+      {workers.length === 0 ? (
+        <div className="p-6 text-center text-muted-foreground text-sm border border-dashed border-border" data-testid="frame-source-empty">
+          <Info size={16} className="inline mr-1" />
+          Aucun worker actif. Les workers sont démarrés automatiquement pour les caméras réelles (non-démo) avec IA activée.
+          {!state.cuvid_available && state.mode !== "none" && (
+            <div className="mt-3 text-xs text-[#FFB800]">
+              ⚠️ FFmpeg sans support cuvid détecté dans ce container — décodage CPU uniquement.
+              Assurez-vous que le backend est bâti avec l'image <span className="mono">nvidia/cuda</span> + FFmpeg NVDEC.
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs mono" data-testid="frame-source-table">
+            <thead className="border-b border-border">
+              <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                <th className="px-2 py-1.5">Caméra</th>
+                <th className="px-2 py-1.5">Codec</th>
+                <th className="px-2 py-1.5">Résolution</th>
+                <th className="px-2 py-1.5">GPU</th>
+                <th className="px-2 py-1.5">Restarts</th>
+                <th className="px-2 py-1.5">Âge dernière frame</th>
+                <th className="px-2 py-1.5">État</th>
+                <th className="px-2 py-1.5">Dernière erreur</th>
+              </tr>
+            </thead>
+            <tbody>
+              {workers.map(([camId, w]) => {
+                const age = w.last_frame_age_s;
+                const ageColor = age == null ? "#666" : (age < 3 ? "#00E676" : age < 10 ? "#FFB800" : "#FF3333");
+                const restartColor = w.restart_count > 5 ? "#FF3333" : w.restart_count > 1 ? "#FFB800" : "#00E676";
+                return (
+                  <tr key={camId} className="border-b border-border/40 hover:bg-secondary/30" data-testid={`frame-source-row-${camId}`}>
+                    <td className="px-2 py-1.5 font-semibold">{camName(camId)}</td>
+                    <td className="px-2 py-1.5 uppercase">{w.codec}</td>
+                    <td className="px-2 py-1.5">{w.resolution}</td>
+                    <td className="px-2 py-1.5">
+                      <span className="px-1.5 py-0.5 border text-[10px] font-bold" style={{
+                        borderColor: w.gpu ? "#00E676" : "#666", color: w.gpu ? "#00E676" : "#666" }}>
+                        {w.gpu ? "CUDA" : "CPU"}
+                      </span>
+                    </td>
+                    <td className="px-2 py-1.5" style={{ color: restartColor }}>{w.restart_count}×</td>
+                    <td className="px-2 py-1.5" style={{ color: ageColor }}>
+                      {age == null ? "—" : `${age.toFixed(1)}s`}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {w.alive ? (
+                        <span className="text-[#00E676] flex items-center gap-1"><CheckCircle2 size={12} /> actif</span>
+                      ) : (
+                        <span className="text-[#FF3333] flex items-center gap-1"><AlertTriangle size={12} /> mort</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5 text-white/60 truncate max-w-md" title={w.last_error || ""}>{w.last_error || "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

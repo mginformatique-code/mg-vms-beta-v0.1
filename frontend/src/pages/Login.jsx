@@ -2,8 +2,9 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
-import { ShieldCheck, Loader2, Moon, Sun, Languages } from "lucide-react";
+import { Loader2, Moon, Sun, Languages } from "lucide-react";
 import { toast } from "sonner";
+import mgLogo from "@/assets/mg-vms-logo.png";
 
 export default function Login() {
   const { login, t, theme, toggleTheme, lang, toggleLang, user } = useApp();
@@ -51,9 +52,7 @@ export default function Login() {
         <div className="absolute inset-0 bg-background/70" />
         <div className="relative z-10 flex flex-col justify-between p-12 w-full">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-primary flex items-center justify-center">
-              <ShieldCheck className="text-primary-foreground" />
-            </div>
+            <img src={mgLogo} alt="MG-VMS" className="w-12 h-12 object-contain" data-testid="login-brand-logo" />
             <div>
               <div className="font-head font-black text-xl tracking-tight">MG-VMS</div>
               <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">MG Informatique</div>

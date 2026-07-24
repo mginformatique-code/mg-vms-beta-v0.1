@@ -2,9 +2,10 @@ import React, { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
+import mgLogo from "@/assets/mg-vms-logo.png";
 import {
   LayoutDashboard, Grid3x3, Cctv, Building2, ScanLine, Car, Bell, Map, Zap,
-  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, ShieldCheck, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen,
+  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen,
 } from "lucide-react";
 
 const PLUGIN_ICON = {
@@ -25,16 +26,17 @@ const NAV = [
   ]},
   { group: "nav.intelligence", items: [
     { to: "/events", icon: Zap, key: "nav.events" },
-    { to: "/anpr", icon: ScanLine, key: "nav.anpr", perm: "read_plates" },
     { to: "/vehicles", icon: Car, key: "nav.vehicles", perm: "read_plates" },
     { to: "/alerts", icon: Bell, key: "nav.alerts" },
+    // NOTE : ANPR est déplacé dans la section "Extensions" (voir plus bas) pour
+    // regrouper logiquement les extensions activables (ANPR, IA détection avancée,
+    // reconnaissance faciale, contrôle d'accès, etc.). Cf. plugins.py.
   ]},
   { group: "nav.admin", items: [
     { to: "/audit", icon: ScrollText, key: "nav.audit", role: "technician" },
     { to: "/diagnostics", icon: Activity, key: "nav.diagnostics", role: "technician" },
     { to: "/gpu", icon: Zap, key: "nav.gpu", role: "technician" },
     { to: "/pipeline", icon: Film, key: "nav.pipeline", role: "technician" },
-    { to: "/anpr-benchmark", icon: Cpu, key: "nav.anpr_benchmark", role: "technician" },
     { to: "/reports", icon: FileText, key: "nav.reports", role: "technician" },
     { to: "/notifications", icon: BellRing, key: "nav.notifications", role: "technician" },
     { to: "/plugins", icon: Puzzle, key: "nav.plugins", role: "admin" },
@@ -97,11 +99,10 @@ export default function Layout({ children }) {
   };
   const loadPluginMenus = () => {
     api.get("/plugins").then((r) => {
-      // On affiche les plugins actifs — même en "not_configured", pour laisser accès à la config.
-      // Les plugins "disabled" et "error" ne sont pas ajoutés au menu (fonctionnalité masquée).
+      // Toutes les extensions actives (y compris ANPR) s'affichent dans la section
+      // dédiée « Extensions » — évite la dispersion des fonctions optionnelles.
       const visible = (r.data || [])
-        .filter((p) => p.enabled && p.status !== "disabled" && p.status !== "error")
-        .filter((p) => p.id !== "anpr"); // ANPR a déjà son entrée /anpr dans le NAV principal
+        .filter((p) => p.enabled && p.status !== "disabled" && p.status !== "error");
       setPluginPages(visible);
     }).catch(() => setPluginPages([]));
   };
@@ -120,10 +121,8 @@ export default function Layout({ children }) {
     <div className="h-screen flex overflow-hidden bg-background text-foreground">
       {/* Sidebar */}
       <aside className="w-60 shrink-0 border-r border-border bg-card flex flex-col" data-testid="sidebar">
-        <div className="h-14 flex items-center gap-2 px-4 border-b border-border">
-          <div className="w-8 h-8 bg-primary flex items-center justify-center">
-            <ShieldCheck size={18} className="text-primary-foreground" strokeWidth={2} />
-          </div>
+        <div className="h-14 flex items-center gap-2.5 px-4 border-b border-border">
+          <img src={mgLogo} alt="MG-VMS" className="w-9 h-9 object-contain shrink-0" data-testid="sidebar-logo" />
           <div className="leading-none">
             <div className="font-head font-black text-base tracking-tight">MG-VMS</div>
             <div className="text-[9px] uppercase tracking-[0.2em] text-muted-foreground">MG Informatique</div>
@@ -156,18 +155,32 @@ export default function Layout({ children }) {
               {pluginPages.map((p) => {
                 const Ic = PLUGIN_ICON[p.id] || Puzzle;
                 return (
-                  <NavLink key={p.id} to={p.route || `/plugins/${p.id}`}
-                    data-testid={`nav-plugin-${p.id}`}
-                    className={({ isActive }) =>
-                      `flex items-center gap-3 px-4 py-2 text-sm transition-colors border-l-2 ${
-                        isActive ? "border-l-[#0044FF] bg-secondary text-foreground font-medium"
-                                 : "border-l-transparent text-muted-foreground hover:bg-secondary hover:text-foreground"
-                      }`}>
-                    <Ic size={17} strokeWidth={1.5} />
-                    <span className="flex-1 truncate">{p.name}</span>
-                    {p.status === "not_configured" && <span className="w-1.5 h-1.5 rounded-full bg-[#FFB800]" title="À configurer" />}
-                    {p.status === "ok" && <span className="w-1.5 h-1.5 rounded-full bg-[#00E676]" title="Opérationnel" />}
-                  </NavLink>
+                  <React.Fragment key={p.id}>
+                    <NavLink to={p.route || `/plugins/${p.id}`}
+                      data-testid={`nav-plugin-${p.id}`}
+                      className={({ isActive }) =>
+                        `flex items-center gap-3 px-4 py-2 text-sm transition-colors border-l-2 ${
+                          isActive ? "border-l-[#0044FF] bg-secondary text-foreground font-medium"
+                                   : "border-l-transparent text-muted-foreground hover:bg-secondary hover:text-foreground"
+                        }`}>
+                      <Ic size={17} strokeWidth={1.5} />
+                      <span className="flex-1 truncate">{p.name}</span>
+                      {p.status === "not_configured" && <span className="w-1.5 h-1.5 rounded-full bg-[#FFB800]" title="À configurer" />}
+                      {p.status === "ok" && <span className="w-1.5 h-1.5 rounded-full bg-[#00E676]" title="Opérationnel" />}
+                    </NavLink>
+                    {/* Sous-liens ANPR : Benchmark (technicien seulement) */}
+                    {p.id === "anpr" && can("technician") && (
+                      <NavLink to="/anpr-benchmark" data-testid="nav-anpr_benchmark"
+                        className={({ isActive }) =>
+                          `flex items-center gap-3 pl-11 pr-4 py-1.5 text-xs transition-colors border-l-2 ${
+                            isActive ? "border-l-[#0044FF] bg-secondary text-foreground font-medium"
+                                     : "border-l-transparent text-muted-foreground/80 hover:bg-secondary hover:text-foreground"
+                          }`}>
+                        <Cpu size={13} strokeWidth={1.5} />
+                        {t("nav.anpr_benchmark")}
+                      </NavLink>
+                    )}
+                  </React.Fragment>
                 );
               })}
             </div>
