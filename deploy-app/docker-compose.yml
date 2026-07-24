@@ -1,6 +1,15 @@
-# MG-VMS — Déploiement Docker de l'application réelle (FastAPI + React + MongoDB)
+# MG-VMS — Déploiement Docker production (FastAPI + React + MongoDB + go2rtc)
+# ================================================================================
 # Démarrage : cp .env.example .env  &&  docker compose up -d --build
-# Frontend : http://localhost:3000   ·   API : http://localhost:8001/api/
+# Frontend  : http://192.168.1.21:3000
+# API       : http://192.168.1.21:8001/api/
+# go2rtc UI : http://192.168.1.21:1984
+#
+# Pré-requis serveur :
+#   - Ubuntu 22.04+ / Debian 12+
+#   - NVIDIA driver >= 550 (pour CUDA 12.4)
+#   - nvidia-container-toolkit installé (`docker run --rm --gpus all nvidia/cuda:12.4-runtime nvidia-smi` doit répondre)
+#   - Ports LAN ouverts : 3000 (UI), 8001 (API), 1984 (go2rtc UI), 8554 (RTSP), 8555 TCP+UDP (WebRTC)
 
 services:
   mongo:
@@ -10,40 +19,70 @@ services:
       - mongo_data:/data/db
     networks: [mgvms]
 
+  # ─── go2rtc : moteur central de flux vidéo ──────────────────────────────
+  # Ports exposés sur le host pour :
+  #   - WebRTC (candidate ICE = 192.168.1.21:8555 côté LAN → doit être atteignable)
+  #   - Debugging via UI go2rtc:1984
+  #   - RTSP éventuel côté client (VLC / autres)
   go2rtc:
-    image: alexxit/go2rtc:1.9.8
+    image: alexxit/go2rtc:1.9.9   # ← Upgrade 1.9.8 → 1.9.9 : fix crash H.265 pkg/h265/rtp.go
     restart: unless-stopped
     volumes:
       - ./go2rtc.yaml:/config/go2rtc.yaml
-      - ../media:/app/media:ro
-    # Conseillé sur Linux pour l'accès direct aux caméras du LAN + découverte ONVIF :
-    # network_mode: host   (et mettre GO2RTC_URL=http://localhost:1984 côté backend)
+      - ../media:/app/media:ro    # médias de démo (mp4 boucle)
+    ports:
+      - "1984:1984"       # HTTP API + WebSocket (frontend WebRTC signaling proxy)
+      - "8554:8554"       # RTSP (client direct type VLC)
+      - "8555:8555"       # WebRTC ICE TCP
+      - "8555:8555/udp"   # WebRTC ICE UDP (essentiel pour perf)
+    # NOTE : pour découverte ONVIF multicast LAN, utiliser plutôt "network_mode: host"
+    # (dans ce cas les ports ci-dessus deviennent inutiles, les services écoutent
+    # directement sur l'IP host 192.168.1.21).
     networks: [mgvms]
 
+  # ─── Backend FastAPI (Python 3.11 + torch cu124 + FFmpeg CUDA) ─────────
+  # GPU NVIDIA passthrough : nécessite nvidia-container-toolkit sur le host.
+  # Le container voit le RTX A2000 12GB → PyTorch YOLO tourne en CUDA + ffmpeg NVDEC.
   backend:
     build:
       context: ../backend
     restart: unless-stopped
+    runtime: nvidia   # ← passthrough GPU host → container (nvidia-container-toolkit)
     environment:
+      # ── Base MG-VMS ────────────────────────────────────────────
       MONGO_URL: mongodb://mongo:27017
       DB_NAME: ${DB_NAME:-mgvms}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
-      JWT_SECRET: ${JWT_SECRET:-please_change_this_secret}
+      # CORS : frontend sert depuis 192.168.1.21:3000 (LAN interne)
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://192.168.1.21:3000,http://localhost:3000}
+      JWT_SECRET: ${JWT_SECRET:-please_change_this_secret_in_production}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@mg-vms.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@2026}
       GO2RTC_URL: ${GO2RTC_URL:-http://go2rtc:1984}
+      GO2RTC_RTSP: ${GO2RTC_RTSP:-rtsp://go2rtc:8554}
+      # ── GPU / CUDA / FFmpeg NVDEC ───────────────────────────────
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,video  # video → NVDEC/NVENC ffmpeg
+      # Auto-fallback si NVDEC indisponible (cam H.264 SW ou GPU saturé)
+      MGVMS_AI_HW_ACCEL: ${MGVMS_AI_HW_ACCEL:-auto}   # auto | cuda | none
     depends_on:
       - mongo
       - go2rtc
     ports:
       - "8001:8001"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, video]   # 'video' nécessaire pour cuvid/nvenc
     networks: [mgvms]
 
   frontend:
     build:
       context: ../frontend
       args:
-        REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL:-http://localhost:8001}
+        REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL:-http://192.168.1.21:8001}
     restart: unless-stopped
     depends_on:
       - backend
@@ -52,7 +91,7 @@ services:
     networks: [mgvms]
 
 volumes:
-  mongo_data:
+  mongo_data:   # ← préservé, ne pas supprimer (données caméras/users/ANPR)
 
 networks:
   mgvms:

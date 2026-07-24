@@ -492,6 +492,30 @@ def analyze_image_local(image_bytes: bytes) -> dict:
 
 
 async def _fetch_frame(camera_id: str) -> bytes | None:
+    """Récupère la frame la plus récente d'une caméra pour analyse IA.
+
+    Pipeline (nouveau, GPU-first) :
+      1. **frame_source** : subprocess ffmpeg persistant avec NVDEC (H.265→BGR CUDA→CPU direct).
+         Aucun transit MJPEG. 1 décodage GPU permanent partagé par YOLO + ANPR.
+         → Retourne la frame numpy encodée en JPEG (compressée en RAM pour compatibilité avec
+         `_analyze_frame` qui fait cv2.imdecode).
+      2. **Fallback go2rtc /api/frame.jpeg** : si frame_source n'est pas prêt (worker qui vient
+         de démarrer, config manquante) — conserve la compatibilité avec la démo mire go2rtc
+         (`cam_demo-cam-XXX` sont générés par go2rtc, pas par une caméra RTSP externe).
+    """
+    import cv2  # local import (cv2 chargé après _load_models)
+    # ── Chemin GPU-first : frame_source worker ─────────────────────────
+    try:
+        from frame_source import get_latest_frame_async
+        frame = await get_latest_frame_async(camera_id, max_age_sec=5.0, wait_timeout=0.5)
+        if frame is not None:
+            # Encode JPEG en mémoire (qualité 85 = bon compromis pour _analyze_frame)
+            ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+            if ok:
+                return buf.tobytes()
+    except Exception as e:
+        logger.debug("_fetch_frame: frame_source indispo pour %s (%s) — fallback go2rtc", camera_id, e)
+    # ── Fallback : go2rtc frame.jpeg (compat démo + caméras non-encore-workerisées) ──
     try:
         async with httpx.AsyncClient(timeout=12) as client:
             r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": f"cam_{camera_id}"})
@@ -844,6 +868,53 @@ async def _get_global_anpr_country() -> str | None:
     return ((doc or {}).get("value", {}) or {}).get("country")
 
 
+async def _sync_frame_source_workers(cams: list[dict]) -> None:
+    """Synchronise les workers ffmpeg-CUDA persistants avec la liste des caméras actives.
+
+    - Démarre un worker pour chaque caméra `detect_enabled` + `status=online` réelle.
+    - Ne démarre PAS pour les caméras démo (id commence par `demo-`) : celles-ci
+      sont fournies par go2rtc en local (mire testsrc2 ou boucle mp4) → on utilise
+      le fallback `frame.jpeg` qui est très léger dans ce cas (source déjà H.264 SW).
+    - Arrête les workers dont la caméra a été désactivée ou supprimée.
+
+    Résolution des URL RTSP :
+      - Priorité : `cam.rtsp_url` en base (URL directe de la caméra, la plus
+        efficace : 1 seule session RTSP côté caméra pour ffmpeg-CUDA).
+      - Sinon : `rtsp://go2rtc:8554/cam_{id}` (via go2rtc, partage la session
+        avec le recorder et autres consommateurs).
+    """
+    import frame_source
+    go2rtc_rtsp = os.environ.get("GO2RTC_RTSP", "rtsp://go2rtc:8554")
+
+    active_ids = set()
+    for cam in cams:
+        cam_id = cam["id"]
+        # Skip démos : elles n'ont pas d'URL RTSP externe, elles sont générées par go2rtc local
+        if cam_id.startswith("demo-") or cam_id.startswith("demo_"):
+            continue
+        active_ids.add(cam_id)
+        # Choix de la source RTSP : directe (préféré) ou via go2rtc
+        rtsp_url = cam.get("rtsp_url") or f"{go2rtc_rtsp}/cam_{cam_id}"
+        codec = (cam.get("video_codec") or "auto").lower()
+        if codec not in ("h264", "h265", "hevc", "auto"):
+            codec = "auto"
+        if codec == "hevc":
+            codec = "h265"
+        # Résolution IA : 1280×720 par défaut (bon compromis YOLOv11 précision/vitesse)
+        try:
+            frame_source.start(cam_id, rtsp_url, codec=codec, width=1280, height=720)
+        except Exception as e:
+            logger.warning("frame_source.start(%s) échec: %s", cam_id, e)
+
+    # Arrêter les workers pour caméras qui ne sont plus dans la liste active
+    current = set(frame_source.status().get("workers", {}).keys())
+    for stale in current - active_ids:
+        try:
+            frame_source.stop(stale)
+        except Exception:
+            pass
+
+
 async def ai_loop() -> None:
     """Boucle IA : analyse en parallèle chaque caméra `detect_enabled`.
     Chaque caméra devient un worker indépendant → une caméra lente ne bloque plus les autres."""
@@ -861,6 +932,8 @@ async def ai_loop() -> None:
             await refresh_per_camera_configs()
             await load_runtime_config()  # rafraîchit bytetrack + IA globale
             cams = await db.cameras.find({"detect_enabled": True, "status": "online"}, {"_id": 0}).to_list(200)
+            # Synchronise les workers ffmpeg-CUDA persistants avec la liste actuelle
+            await _sync_frame_source_workers(cams)
             if cams:
                 logger.info("IA · cycle : %d caméra(s) réelle(s) en parallèle %s",
                             len(cams), [c["name"] for c in cams])

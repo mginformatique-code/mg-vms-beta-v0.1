@@ -788,6 +788,23 @@ async def diagnostics_stream_lifecycle_summary(user: dict = Depends(require_perm
     return {"summary": get_all_journal_summary()}
 
 
+@api_router.get("/diagnostics/frame-source")
+async def diagnostics_frame_source(user: dict = Depends(require_permission("view_live"))):
+    """État des workers FFmpeg-CUDA persistants (frame_source module).
+
+    Retourne pour chaque worker actif :
+      - codec, résolution, mode GPU actif
+      - restart_count : nombre de redémarrages depuis le boot (≥ 1 = crash upstream)
+      - last_frame_age_s : âge de la dernière frame produite (None si aucune)
+      - alive : le thread reader tourne toujours
+      - last_error : dernière ligne stderr ffmpeg (utile pour diag RTSP timeout / codec issue)
+
+    Utilisé par la page Diagnostics pour vérifier que l'IA reçoit bien des frames GPU.
+    """
+    from frame_source import status
+    return status()
+
+
 @api_router.get("/diagnostics/camera/{camera_id}/logs")
 async def diagnostics_camera_logs(camera_id: str, lines: int = 100,
                                     user: dict = Depends(require_permission("view_live"))):

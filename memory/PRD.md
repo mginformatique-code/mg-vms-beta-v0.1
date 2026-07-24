@@ -1,5 +1,61 @@
 # MG-VMS — Product Requirements Document
 
+## Implemented (2026-07-24 · v2.18.0 — Audit chaîne vidéo complet + Fix GPU/H.265/IA)
+
+**Audit** : identifié 9 causes racines, dont 3 critiques :
+1. **CAUSE #1 (fixée)** — Bug crash H.265 dans go2rtc 1.9.8 (`pkg/h265/rtp.go index out of range`).
+2. **CAUSE #2 (fixée)** — IA utilisait `frame.jpeg` de go2rtc → anti-pattern H.265→JPEG→IA à chaque frame.
+3. **CAUSE #3 (fixée)** — Backend Docker sans `runtime: nvidia` → GPU host invisible au container.
+
+**Fixes appliqués (aucune donnée touchée)** :
+
+**Docker Compose** (`/app/deploy-app/docker-compose.yml`) :
+- Backend `runtime: nvidia` + `NVIDIA_VISIBLE_DEVICES=all` + `NVIDIA_DRIVER_CAPABILITIES=compute,utility,video` (+ `deploy.resources.reservations.devices` avec `capabilities: [gpu, video]` pour NVDEC).
+- go2rtc `alexxit/go2rtc:1.9.9` (upgrade 1.9.8 → fix H.265 crash).
+- go2rtc ports host-mapped : `1984, 8554, 8555 TCP + 8555/udp`.
+- CORS_ORIGINS aligné sur `http://192.168.1.21:3000`.
+- Nouvelles env vars : `MGVMS_AI_HW_ACCEL=auto`, `MGVMS_AI_FRAME_WIDTH=1280`, `MGVMS_AI_FRAME_HEIGHT=720`.
+- `GO2RTC_RTSP=rtsp://go2rtc:8554` exposé au backend pour la source RTSP directe frame_source.
+
+**go2rtc.yaml** (`/app/deploy-app/go2rtc.yaml`) :
+- `rtsp.default_query: "mp4&transport=tcp"` — force TCP transport (évite le crash H.265 UDP + timeouts).
+- `webrtc.candidates: [192.168.1.21:8555]` — LAN direct.
+- `webrtc.ice_servers: [stun:stun.l.google.com:19302]` — WebRTC fonctionne dès qu'un réseau NAT est présent.
+
+**Backend Dockerfile** (`/app/backend/Dockerfile`) :
+- Image de base changée `python:3.11-slim` → `nvidia/cuda:12.4.1-runtime-ubuntu22.04`.
+- Installation Python 3.11 + FFmpeg avec support NVDEC (log au build pour vérifier `hevc_cuvid`/`h264_cuvid`).
+- `NVIDIA_DRIVER_CAPABILITIES=compute,utility,video` env.
+
+**Nouveau module `frame_source.py`** (~280 lignes) :
+- Subprocess FFmpeg persistant PAR CAMÉRA avec `-hwaccel cuda -c:v hevc_cuvid` (ou `h264_cuvid`).
+- Pipe BGR24 raw → numpy zéro-copie (`np.frombuffer(buf).reshape(H,W,3)`).
+- Reader thread garde uniquement la dernière frame (drop oldest) → latence minimale.
+- Restart automatique avec backoff progressif (1.5s → 30s) sur crash upstream.
+- Auto-détection cuvid au boot (`ffmpeg -decoders | grep cuvid`) + fallback CPU propre.
+- API : `start(camera_id, rtsp_url, codec)`, `stop(camera_id)`, `get_latest_frame(camera_id)`, `status()`.
+
+**Refactor `ai_engine.py`** :
+- `_fetch_frame` : GPU-first via `frame_source.get_latest_frame_async` → JPEG encode → `_analyze_frame`.
+- Fallback `frame.jpeg` conservé pour caméras démo (mires go2rtc locales).
+- Nouveau `_sync_frame_source_workers` dans `ai_loop` : start/stop les workers en fonction de `detect_enabled` + `status=online`, en respectant les caméras démo.
+- Résolution du RTSP : `cam.rtsp_url` en base (direct) OU `rtsp://go2rtc:8554/cam_{id}` (via go2rtc, partage session).
+
+**Nouvel endpoint diag** : `GET /api/diagnostics/frame-source` — état de tous les workers ffmpeg (codec, résolution, GPU on/off, restart_count, age dernière frame, erreurs stderr).
+
+**Testé sandbox** :
+- Boucle IA continue à fonctionner (démo → fallback frame.jpeg avec `1 détection [Personne:0.67]` sur `cam_demo-cam-002`).
+- Endpoint `/api/diagnostics/frame-source` répond : `{workers: {}, cuvid_available: false, mode: auto}` (sandbox pas de GPU, comportement attendu).
+- Backend logs propres, aucune régression.
+
+**À valider en prod par vous** :
+1. `docker compose down && docker compose build --no-cache backend && docker compose up -d`
+2. Vérifier `docker exec mgvms-backend ffmpeg -decoders 2>&1 | grep cuvid` → doit lister `hevc_cuvid` + `h264_cuvid`.
+3. Après démarrage, `curl http://192.168.1.21:8001/api/diagnostics/frame-source` doit montrer les workers actifs avec `gpu: true`, `restart_count: 1`, `alive: true`.
+4. Vérifier logs IA : `docker logs mgvms-backend | grep "IA · cycle"` doit montrer les détections en temps réel.
+5. `docker logs mgvms-go2rtc` : plus AUCUN `panic: runtime error: index out of range` H.265.
+
+
 ## Implemented (2026-07-24 · v2.17.0 — Fix ARCHITECTURAL des cycles caméra)
 - ✅ **Root cause analysis + fix du bug historique "caméras déconnectées puis reconnectées"** — présent depuis la v1, indépendant du player (MJPEG/WebRTC/MP4).
 

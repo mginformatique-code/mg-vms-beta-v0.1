@@ -1,26 +1,57 @@
+# MG-VMS — Configuration go2rtc 1.9.9+
+# Doc : https://github.com/AlexxIT/go2rtc
+
+# ─── API HTTP (UI + REST + WebSocket) ──────────────────────────────────
 api:
   listen: ":1984"
 
+# ─── RTSP (client-side pour VLC/autres) ────────────────────────────────
+# Force TCP transport pour tous les inputs RTSP (évite les timeouts UDP
+# et surtout le crash H.265 pkg/h265/rtp.go déclenché par paquets UDP perdus).
 rtsp:
   listen: ":8554"
+  # Applique automatiquement `?rtsp_transport=tcp` à toutes les caméras
+  # ajoutées via API MG-VMS. Réduit drastiquement les crash H.265.
+  default_query: "mp4&transport=tcp"
 
+# ─── WebRTC ────────────────────────────────────────────────────────────
+# CRITIQUE : sans `candidates` explicites, le navigateur ne peut pas atteindre
+# go2rtc. La liste doit contenir l'IP LAN du serveur (mappée par docker-compose
+# ports "8555:8555" + "8555:8555/udp").
+#
+# `ice_servers` avec STUN Google permet à go2rtc de découvrir automatiquement
+# son IP publique si vous ouvrez éventuellement l'accès depuis Internet.
 webrtc:
   listen: ":8555"
+  candidates:
+    - 192.168.1.21:8555      # ← IP LAN de votre serveur (LAN interne uniquement)
+    # - stun:8555            # décommenter si accès WAN via NAT nécessaire
+  ice_servers:
+    - urls: [stun:stun.l.google.com:19302]
 
 log:
   level: info
 
+# ─── Streams ───────────────────────────────────────────────────────────
+# Les caméras réelles sont AJOUTÉES DYNAMIQUEMENT par MG-VMS via l'API
+# `PUT /api/streams` (voir backend/streaming.py::register_camera_stream).
+# Ne PAS déclarer manuellement les caméras réelles ici : elles seraient
+# écrasées par le backend au boot.
+#
+# Ce fichier ne déclare QUE les caméras de démonstration (mires/vidéos loop).
 streams:
   # Caméra démo 1 : mire H.264 réelle générée localement (validation du pipeline)
   cam_demo-cam-001:
     - exec:ffmpeg -re -f lavfi -i testsrc2=size=1280x720:rate=15 -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -g 30 -f rtsp {output}
+  cam_demo-cam-001_hd:
     - ffmpeg:cam_demo-cam-001#video=mjpeg
   cam_demo-cam-001_sd:
     - ffmpeg:cam_demo-cam-001#video=mjpeg#width=640
 
-  # Caméra démo 2 : vidéo trafic réelle en boucle (voitures) -> IA YOLO + LAPI
+  # Caméra démo 2 : scène de rue réelle en boucle → IA YOLO + LAPI
   cam_demo-cam-002:
-    - exec:ffmpeg -stream_loop -1 -re -i /app/media/traffic-demo.mp4 -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -g 30 -an -f rtsp {output}
+    - exec:ffmpeg -stream_loop -1 -re -i /app/media/street-demo.mp4 -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -g 30 -an -f rtsp {output}
+  cam_demo-cam-002_hd:
     - ffmpeg:cam_demo-cam-002#video=mjpeg
   cam_demo-cam-002_sd:
     - ffmpeg:cam_demo-cam-002#video=mjpeg#width=640
