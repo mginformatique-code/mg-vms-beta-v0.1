@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
-import mgLogo from "@/assets/mg-vms-logo.png";
+import Logo from "@/components/Logo";
 import {
   LayoutDashboard, Grid3x3, Cctv, Building2, ScanLine, Car, Bell, Map, Zap,
   ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen,
@@ -122,7 +122,7 @@ export default function Layout({ children }) {
       {/* Sidebar */}
       <aside className="w-60 shrink-0 border-r border-border bg-card flex flex-col" data-testid="sidebar">
         <div className="h-14 flex items-center gap-2.5 px-4 border-b border-border">
-          <img src={mgLogo} alt="MG-VMS" className="w-9 h-9 object-contain shrink-0" data-testid="sidebar-logo" />
+          <Logo size={36} className="w-9 h-9 shrink-0" data-testid="sidebar-logo" />
           <div className="leading-none">
             <div className="font-head font-black text-base tracking-tight">MG-VMS</div>
             <div className="text-[9px] uppercase tracking-[0.2em] text-muted-foreground">MG Informatique</div>

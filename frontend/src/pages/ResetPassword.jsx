@@ -4,7 +4,7 @@ import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import mgLogo from "@/assets/mg-vms-logo.png";
+import Logo from "@/components/Logo";
 
 export default function ResetPassword() {
   const { t } = useApp();
@@ -35,7 +35,7 @@ export default function ResetPassword() {
     <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-6">
       <form onSubmit={submit} className="w-full max-w-sm fade-up" data-testid="reset-form">
         <div className="flex items-center gap-2 mb-6">
-          <img src={mgLogo} alt="MG-VMS" className="w-11 h-11 object-contain" />
+          <Logo size={44} className="w-11 h-11" />
           <div className="font-head font-black text-lg">MG-VMS</div>
         </div>
         <h2 className="font-head font-bold text-2xl tracking-tight mb-1">{t("auth.reset_title")}</h2>

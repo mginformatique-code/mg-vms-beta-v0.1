@@ -1505,6 +1505,8 @@ class UserCreate(BaseModel):
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
+    email: Optional[str] = None
+    password: Optional[str] = None
     role: Optional[str] = None
     active: Optional[bool] = None
     site_ids: Optional[List[str]] = None
@@ -1548,10 +1550,24 @@ async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(requi
         raise HTTPException(400, "Rôle invalide")
     if "permissions" in update:
         update["permissions"] = _clean_permissions(update["permissions"])
+    # Email : normaliser en minuscules + vérifier unicité (si changement effectif)
+    if "email" in update:
+        new_email = update["email"].strip().lower()
+        if not new_email or "@" not in new_email:
+            raise HTTPException(400, "Email invalide")
+        if await db.users.find_one({"email": new_email, "id": {"$ne": user_id}}):
+            raise HTTPException(400, "Email déjà utilisé par un autre utilisateur")
+        update["email"] = new_email
+    # Mot de passe : hasher avant stockage, remplacer 'password' par 'password_hash'
+    if "password" in update:
+        pwd = update.pop("password")
+        if len(pwd) < 8:
+            raise HTTPException(400, "Mot de passe : minimum 8 caractères")
+        update["password_hash"] = hash_password(pwd)
     res = await db.users.update_one({"id": user_id}, {"$set": update})
     if res.matched_count == 0:
         raise HTTPException(404, "Utilisateur introuvable")
-    await log_audit(user, "user_updated", user_id, str(update))
+    await log_audit(user, "user_updated", user_id, ",".join(update.keys()))
     u = await db.users.find_one({"id": user_id}, {"_id": 0})
     return public_user(u)
 

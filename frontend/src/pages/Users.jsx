@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Trash2, UserCog, Loader2, Building2, ShieldCheck } from "lucide-react";
+import { Plus, Trash2, UserCog, Loader2, Building2, ShieldCheck, Pencil, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 
 const ROLES = ["admin", "technician", "client", "readonly", "guest"];
@@ -27,6 +27,11 @@ export default function UsersPage() {
   const [selSites, setSelSites] = useState([]);
   const [permUser, setPermUser] = useState(null);
   const [selPerms, setSelPerms] = useState({});
+  // Édition utilisateur (nom / email / mot de passe optionnel)
+  const [editUser, setEditUser] = useState(null);
+  const [editForm, setEditForm] = useState({ name: "", email: "", password: "" });
+  const [editSaving, setEditSaving] = useState(false);
+  const [showEditPwd, setShowEditPwd] = useState(false);
 
   const load = () => api.get("/users").then((r) => setUsers(r.data)).catch(() => {});
   useEffect(() => { load(); api.get("/sites").then((r) => setSites(r.data)).catch(() => {}); }, []);
@@ -47,6 +52,34 @@ export default function UsersPage() {
   const openPerms = (u) => { setPermUser(u); setSelPerms({ ...(u.permissions || {}) }); };
   const togglePerm = (k) => setSelPerms((p) => ({ ...p, [k]: !p[k] }));
   const savePerms = async () => { await api.put(`/users/${permUser.id}`, { permissions: selPerms }); toast.success("Permissions mises à jour"); setPermUser(null); load(); };
+
+  // ── Édition profil utilisateur ────────────────────────────────────
+  const openEdit = (u) => {
+    setEditUser(u);
+    setEditForm({ name: u.name || "", email: u.email || "", password: "" });
+    setShowEditPwd(false);
+  };
+  const saveEdit = async () => {
+    if (!editForm.name.trim() || !editForm.email.trim()) return toast.error("Nom et email requis");
+    // Construit le payload : ne pas envoyer les champs inchangés
+    const payload = {};
+    if (editForm.name.trim() !== editUser.name) payload.name = editForm.name.trim();
+    if (editForm.email.trim().toLowerCase() !== editUser.email) payload.email = editForm.email.trim();
+    if (editForm.password) {
+      if (editForm.password.length < 8) return toast.error("Mot de passe : minimum 8 caractères");
+      payload.password = editForm.password;
+    }
+    if (Object.keys(payload).length === 0) { setEditUser(null); return toast.info("Aucune modification"); }
+    setEditSaving(true);
+    try {
+      await api.put(`/users/${editUser.id}`, payload);
+      toast.success("Utilisateur modifié");
+      setEditUser(null);
+      load();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e.response?.data?.detail));
+    } finally { setEditSaving(false); }
+  };
 
   const siteLabel = (u) => {
     if (u.role === "admin" || u.role === "technician") return t("users.sites_all");
@@ -82,6 +115,7 @@ export default function UsersPage() {
                 <td className="px-3 py-2"><button onClick={() => toggleActive(u)} disabled={u.id === me.id} className={`text-xs px-2 py-0.5 border ${u.active ? "mg-online border-[#00E676]/40" : "mg-offline border-[#FF3333]/40"}`}>{u.active ? t("common.active") : "Inactif"}</button></td>
                 <td className="px-3 py-2">
                   <div className="flex items-center justify-end gap-1">
+                    <button onClick={() => openEdit(u)} data-testid="edit-user-btn" title="Modifier" className="p-1.5 hover:bg-secondary text-[#00E5FF]"><Pencil size={15} /></button>
                     {u.role !== "admin" && <button onClick={() => openPerms(u)} data-testid="user-perms-btn" title="Permissions" className="p-1.5 hover:bg-secondary text-[#0044FF]"><ShieldCheck size={15} /></button>}
                     {!["admin", "technician"].includes(u.role) && <button onClick={() => openSites(u)} data-testid="user-sites-btn" title={t("users.sites")} className="p-1.5 hover:bg-secondary"><Building2 size={15} /></button>}
                     {u.id !== me.id && <button onClick={() => del(u)} data-testid="delete-user-btn" className="p-1.5 hover:bg-secondary text-[#FF3333]"><Trash2 size={15} /></button>}
@@ -144,6 +178,64 @@ export default function UsersPage() {
           <DialogFooter>
             <button onClick={() => setPermUser(null)} className="px-4 py-2 border border-border text-sm">{t("common.cancel")}</button>
             <button onClick={savePerms} data-testid="user-perms-save" className="px-4 py-2 bg-[#0044FF] text-white text-sm">{t("common.save")}</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog modification utilisateur (nom + email + mot de passe optionnel) */}
+      <Dialog open={!!editUser} onOpenChange={(o) => !o && setEditUser(null)}>
+        <DialogContent className="rounded-none border-border" data-testid="user-edit-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-head flex items-center gap-2">
+              <Pencil size={18} className="text-[#00E5FF]" /> Modifier — {editUser?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground mb-2">
+            Modifiez le nom, l'email ou le mot de passe. Laissez le champ mot de passe vide pour le conserver.
+          </p>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Nom complet</label>
+              <input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                data-testid="user-edit-name"
+                className="w-full px-3 py-2 bg-card border border-input outline-none focus:border-[#00E5FF] text-sm" />
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Email</label>
+              <input type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                data-testid="user-edit-email"
+                className="w-full px-3 py-2 bg-card border border-input outline-none focus:border-[#00E5FF] text-sm mono" />
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                Nouveau mot de passe <span className="text-muted-foreground/60">(optionnel · min. 8 caractères)</span>
+              </label>
+              <div className="relative">
+                <input type={showEditPwd ? "text" : "password"} value={editForm.password}
+                  onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
+                  placeholder="Laisser vide pour ne pas changer"
+                  data-testid="user-edit-password" autoComplete="new-password"
+                  className="w-full px-3 py-2 pr-10 bg-card border border-input outline-none focus:border-[#00E5FF] text-sm" />
+                <button type="button" onClick={() => setShowEditPwd((v) => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
+                  title={showEditPwd ? "Masquer" : "Afficher"} tabIndex={-1}>
+                  {showEditPwd ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            </div>
+            {editUser?.id === me?.id && (
+              <div className="text-[11px] p-2 border border-[#FFB800]/40 bg-[#FFB800]/10 text-[#FFB800]">
+                Vous modifiez votre propre compte. Si vous changez l'email ou le mot de passe, vous devrez vous reconnecter.
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <button onClick={() => setEditUser(null)} className="px-4 py-2 border border-border text-sm">{t("common.cancel")}</button>
+            <button onClick={saveEdit} disabled={editSaving} data-testid="user-edit-save"
+              className="px-4 py-2 bg-[#00E5FF] text-black font-medium text-sm flex items-center gap-2 hover:bg-[#00d4eb] disabled:opacity-60">
+              {editSaving && <Loader2 size={15} className="animate-spin" />}
+              {t("common.save")}
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
