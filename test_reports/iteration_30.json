@@ -1,0 +1,28 @@
+{
+  "summary": "Iteration 30 — Phase 0 (RCA IA post-GPU) + Phase 1 (go2rtc = unique gateway). Backend 16/16 pytest passing (10 iter29 + 6 iter30). Nouveaux : endpoint /api/diagnostics/ai-health exposant l'état exact des modèles (yolo_loaded, alpr_loaded, torch_*, cycles_total, last_cycle_error) — ai_loop ne s'auto-désactive plus JAMAIS silencieusement (fix RCA principal). frame_source.start() refuse désormais toute URL RTSP hors go2rtc (garde-fou architectural) avec bypass allow_direct=True pour tests. Var d'env MGVMS_AI_FORCE_CPU=1 pour isoler une régression GPU sans rebuild.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_iter30_ai_health_and_gateway.py"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ai_engine.ai_loop: plus jamais de 'return' silencieux si _load_models échoue au boot — la boucle retente à chaque cycle.",
+    "ai_engine._load_models: YOLO et fast-alpr chargés indépendamment. _alpr = False n'est plus définitif — retry autorisé.",
+    "ai_engine._analyze_frame: skippe YOLO si _model is None au lieu de crasher.",
+    "frame_source.start: nouvelle garde ValueError sur URLs non-go2rtc — bypass allow_direct=True pour outillage.",
+    "Nouvel endpoint /api/diagnostics/ai-health : 17 champs de diag (yolo/alpr loaded+error, torch version+cuda, cycles_total, force_cpu_env, device_effective).",
+    "Var env MGVMS_AI_FORCE_CPU pour bypass GPU rapide en prod."
+  ],
+  "updated_files": [
+    "/app/backend/ai_engine.py",
+    "/app/backend/frame_source.py",
+    "/app/backend/routers.py",
+    "/app/backend/tests/test_iter30_ai_health_and_gateway.py",
+    "/app/memory/PRD.md"
+  ],
+  "success_rate": {"backend": "100% (16/16)"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "aucun",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phase 0 (RCA IA post-GPU) + Phase 1 (go2rtc gateway strict) livrés. Tag v2.20.0-stable-checkpoint posé. À suivre : Phase 2 (source de vérité unique caméra) en attente de choix utilisateur (statu quo assaini, go2rtc.yaml généré, ou go2rtc.yaml manuel)."
+}

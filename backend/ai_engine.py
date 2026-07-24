@@ -110,6 +110,32 @@ VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle"}
 
 _model = None
 _alpr = None
+# ── Diagnostic IA : traçabilité des chargements de modèles (Phase 0 RCA) ──
+# Exposé via `GET /api/diagnostics/ai-health` — permet de savoir en prod quel
+# composant a échoué (YOLO, ALPR, torch, cuda) sans lire les logs.
+_ai_health: dict = {
+    "yolo_loaded": False,
+    "yolo_error": None,
+    "yolo_load_attempts": 0,
+    "yolo_last_attempt_ts": None,
+    "alpr_loaded": False,
+    "alpr_error": None,
+    "alpr_load_attempts": 0,
+    "alpr_last_attempt_ts": None,
+    "torch_available": None,
+    "torch_cuda_available": None,
+    "torch_version": None,
+    "torch_error": None,
+    "ultralytics_version": None,
+    "fast_alpr_available": None,
+    "device_effective": None,
+    "cycles_total": 0,
+    "cycles_errors_last_hour": 0,
+    "last_cycle_ts": None,
+    "last_cycle_error": None,
+    "loop_alive": False,
+    "loop_disabled_reason": None,
+}
 _cooldowns: dict[str, datetime] = {}
 _prev_gray: dict[str, "object"] = {}
 # Cache LAPI : {(camera_id, plate) -> expiry_datetime}
@@ -124,7 +150,13 @@ _camera_anpr_cfg: dict[str, dict] = {}
 
 
 def _detected_device() -> str:
-    """Détecte la meilleure cible d'inférence : cuda si dispo, sinon cpu."""
+    """Détecte la meilleure cible d'inférence : cuda si dispo, sinon cpu.
+
+    Bypass rapide en prod : `MGVMS_AI_FORCE_CPU=1` force CPU même si CUDA
+    est présent (utile pour isoler une régression GPU sans rebuild).
+    """
+    if os.environ.get("MGVMS_AI_FORCE_CPU", "0") in ("1", "true", "yes"):
+        return "cpu"
     pref = _cfg("device", AI_DEVICE)
     if pref == "cpu":
         return "cpu"
@@ -137,27 +169,109 @@ def _detected_device() -> str:
     return "cpu"
 
 
-def _load_models():
-    """Chargement paresseux (YOLO + ALPR) dans un thread — cible GPU si dispo."""
-    global _model, _alpr
-    device = _detected_device()
-    if _model is None:
-        from ultralytics import YOLO
-        _model = YOLO(os.environ.get("AI_MODEL", "yolo11n.pt"))
+def _capture_torch_info() -> None:
+    """Enregistre les versions/état de torch dans _ai_health (une fois)."""
+    if _ai_health["torch_available"] is not None:
+        return
+    try:
+        import torch
+        _ai_health["torch_available"] = True
+        _ai_health["torch_version"] = getattr(torch, "__version__", "?")
         try:
-            _model.to(device)
-        except Exception:
-            device = "cpu"
-        logger.info("Modèle YOLO chargé (device=%s) : %s", device, os.environ.get("AI_MODEL", "yolo11n.pt"))
-    if _alpr is None:
+            _ai_health["torch_cuda_available"] = bool(torch.cuda.is_available())
+        except Exception as e:
+            _ai_health["torch_cuda_available"] = False
+            _ai_health["torch_error"] = f"cuda.is_available: {e!r}"
+    except Exception as e:
+        _ai_health["torch_available"] = False
+        _ai_health["torch_error"] = f"import torch: {e!r}"
+    try:
+        import ultralytics
+        _ai_health["ultralytics_version"] = getattr(ultralytics, "__version__", "?")
+    except Exception:
+        _ai_health["ultralytics_version"] = None
+    try:
+        import fast_alpr  # noqa: F401
+        _ai_health["fast_alpr_available"] = True
+    except Exception:
+        _ai_health["fast_alpr_available"] = False
+
+
+def _load_models():
+    """Chargement paresseux résilient (YOLO + ALPR) — cible GPU si dispo.
+
+    Contrat Phase 0 (v2.21.0) :
+    - YOLO et ALPR sont chargés INDÉPENDAMMENT : le crash de l'un n'affecte
+      pas l'autre. YOLO reste utilisable même si `fast_alpr` est cassé, et
+      inversement les caméras sans plaques (détection seule) fonctionnent.
+    - Chaque tentative est loguée dans `_ai_health` — l'endpoint
+      `/api/diagnostics/ai-health` expose l'état exact en prod.
+    - Ne throw JAMAIS. Toute erreur est capturée + tracée. L'appelant doit
+      vérifier `_model` / `_alpr` truthiness avant usage.
+    """
+    global _model, _alpr
+    _capture_torch_info()
+    device = _detected_device()
+    _ai_health["device_effective"] = device
+    now = datetime.now(timezone.utc).isoformat()
+
+    # ── YOLO ────────────────────────────────────────────────────────────
+    if _model is None:
+        _ai_health["yolo_load_attempts"] += 1
+        _ai_health["yolo_last_attempt_ts"] = now
+        try:
+            from ultralytics import YOLO
+            model_path = os.environ.get("AI_MODEL", "yolo11n.pt")
+            _model = YOLO(model_path)
+            try:
+                _model.to(device)
+                effective_device = device
+            except Exception as gpu_err:
+                logger.warning("YOLO .to(%s) échec (%s) — fallback CPU", device, gpu_err)
+                try:
+                    _model.to("cpu")
+                    effective_device = "cpu"
+                    _ai_health["device_effective"] = "cpu"
+                except Exception:
+                    effective_device = "cpu"
+            _ai_health["yolo_loaded"] = True
+            _ai_health["yolo_error"] = None
+            logger.info("Modèle YOLO chargé (device=%s) : %s", effective_device, model_path)
+        except Exception as e:
+            _model = None
+            _ai_health["yolo_loaded"] = False
+            _ai_health["yolo_error"] = f"{type(e).__name__}: {str(e)[:240]}"
+            logger.exception("YOLO indisponible — détection d'objets désactivée (essai #%d)",
+                             _ai_health["yolo_load_attempts"])
+
+    # ── ALPR (fast-alpr) ───────────────────────────────────────────────
+    # `_alpr` peut être : None (jamais tenté) | False (échec, retry autorisé) | instance
+    if _alpr is None or _alpr is False:
+        _ai_health["alpr_load_attempts"] += 1
+        _ai_health["alpr_last_attempt_ts"] = now
         try:
             from fast_alpr import ALPR
             _alpr = ALPR(detector_model="yolo-v9-t-384-license-plate-end2end",
                          ocr_model="european-plates-mobile-vit-v2-model")
+            _ai_health["alpr_loaded"] = True
+            _ai_health["alpr_error"] = None
             logger.info("LAPI locale chargée (fast-alpr, CPU-ONNX)")
-        except Exception:
-            logger.exception("fast-alpr indisponible — LAPI désactivée")
+        except Exception as e:
             _alpr = False
+            _ai_health["alpr_loaded"] = False
+            _ai_health["alpr_error"] = f"{type(e).__name__}: {str(e)[:240]}"
+            logger.exception("fast-alpr indisponible — LAPI désactivée (essai #%d)",
+                             _ai_health["alpr_load_attempts"])
+
+
+def get_ai_health() -> dict:
+    """Snapshot état IA — utilisé par `GET /api/diagnostics/ai-health`."""
+    import copy
+    snap = copy.deepcopy(_ai_health)
+    snap["yolo_model"] = os.environ.get("AI_MODEL", "yolo11n.pt")
+    snap["alpr_models"] = _alpr_model_name() if _ai_health["alpr_loaded"] else None
+    snap["force_cpu_env"] = os.environ.get("MGVMS_AI_FORCE_CPU", "0") in ("1", "true", "yes")
+    return snap
 
 
 def _model_name() -> str:
@@ -255,29 +369,37 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
     motion_pct = _detect_motion(camera_id, img)
     t_motion = (time.monotonic() - t1) * 1000
 
-    # ---------- ÉTAPE 1 : YOLO (rapide) ----------
+    # ---------- ÉTAPE 1 : YOLO (rapide) — skippé si modèle indisponible ----------
     t2 = time.monotonic()
-    results = _model.predict(img, conf=_cfg("confidence", AI_CONFIDENCE),
-                             device=_detected_device(), verbose=False)[0]
-    t_yolo = (time.monotonic() - t2) * 1000
     detections, vehicles = [], []
-    for box in results.boxes:
-        cls_name = _model.names[int(box.cls)]
-        if cls_name not in CLASS_FR:
-            continue
-        x1, y1, x2, y2 = (max(0, int(v)) for v in box.xyxy[0])
-        crop = img[y1:y2, x1:x2]
-        is_vehicle = cls_name in VEHICLE_CLASSES
-        det = {
-            "class": cls_name, "label": CLASS_FR[cls_name],
-            "confidence": round(float(box.conf), 2),
-            "thumbnail": _jpeg_data_uri(crop),
-            "vehicle_color": _dominant_color_fr(crop) if is_vehicle else None,
-            "bbox": (x1, y1, x2, y2),
-        }
-        detections.append(det)
-        if is_vehicle:
-            vehicles.append(det)
+    results = None
+    if _model is not None:
+        try:
+            results = _model.predict(img, conf=_cfg("confidence", AI_CONFIDENCE),
+                                     device=_detected_device(), verbose=False)[0]
+        except Exception as yolo_err:
+            _ai_health["last_cycle_error"] = f"yolo.predict: {type(yolo_err).__name__}: {str(yolo_err)[:200]}"
+            logger.exception("YOLO.predict a échoué sur %s — cycle sans détection", camera_id)
+            results = None
+    t_yolo = (time.monotonic() - t2) * 1000
+    if results is not None:
+        for box in results.boxes:
+            cls_name = _model.names[int(box.cls)]
+            if cls_name not in CLASS_FR:
+                continue
+            x1, y1, x2, y2 = (max(0, int(v)) for v in box.xyxy[0])
+            crop = img[y1:y2, x1:x2]
+            is_vehicle = cls_name in VEHICLE_CLASSES
+            det = {
+                "class": cls_name, "label": CLASS_FR[cls_name],
+                "confidence": round(float(box.conf), 2),
+                "thumbnail": _jpeg_data_uri(crop),
+                "vehicle_color": _dominant_color_fr(crop) if is_vehicle else None,
+                "bbox": (x1, y1, x2, y2),
+            }
+            detections.append(det)
+            if is_vehicle:
+                vehicles.append(det)
 
     # ---------- ÉTAPE 2 : ALPR uniquement si véhicule + hors cache ----------
     plates = []
@@ -920,18 +1042,41 @@ async def _sync_frame_source_workers(cams: list[dict]) -> None:
 
 async def ai_loop() -> None:
     """Boucle IA : analyse en parallèle chaque caméra `detect_enabled`.
-    Chaque caméra devient un worker indépendant → une caméra lente ne bloque plus les autres."""
+
+    Contrat Phase 0 (v2.21.0) :
+    - Ne s'auto-désactive JAMAIS. Un échec de `_load_models` au boot est loggé
+      mais la boucle continue à tourner et retente le chargement à chaque cycle.
+      → En prod, si un modèle rate au boot (dépendance manquante, GPU KO, etc.)
+        et est réparé sans redémarrer le backend, l'IA reprend automatiquement.
+    - Le crash d'une caméra ne bloque pas les autres (asyncio.gather return_exceptions).
+    - `_ai_health` est mis à jour à chaque cycle pour l'endpoint `/api/diagnostics/ai-health`.
+    """
     await asyncio.sleep(15)  # laisse les flux démarrer
+    _ai_health["loop_alive"] = True
+    _ai_health["loop_disabled_reason"] = None
+    # Premier essai de chargement — NE PAS quitter en cas d'échec
     try:
         await asyncio.to_thread(_load_models)
-    except Exception:
-        logger.exception("Chargement des modèles IA impossible — boucle IA désactivée")
-        return
+    except Exception as e:
+        logger.exception("Premier chargement des modèles IA a échoué — la boucle continue et retentera à chaque cycle")
+        _ai_health["last_cycle_error"] = f"initial _load_models: {type(e).__name__}: {str(e)[:200]}"
     await load_runtime_config()
-    logger.info("Moteur IA démarré (YOLO+ALPR/caméra en parallèle · device=%s · intervalle=%.1fs)",
-                _detected_device(), _cfg("interval_seconds", AI_INTERVAL))
+    logger.info(
+        "Moteur IA démarré (device=%s · intervalle=%.1fs · yolo=%s · alpr=%s)",
+        _detected_device(), _cfg("interval_seconds", AI_INTERVAL),
+        "ok" if _ai_health["yolo_loaded"] else f"KO ({_ai_health['yolo_error']})",
+        "ok" if _ai_health["alpr_loaded"] else f"KO ({_ai_health['alpr_error']})",
+    )
     while True:
+        _ai_health["cycles_total"] += 1
+        _ai_health["last_cycle_ts"] = datetime.now(timezone.utc).isoformat()
         try:
+            # Retente périodiquement les modèles KO (retry silencieux si déjà chargés)
+            if not _ai_health["yolo_loaded"] or not _ai_health["alpr_loaded"]:
+                try:
+                    await asyncio.to_thread(_load_models)
+                except Exception as reload_err:
+                    logger.debug("Retry _load_models: %s", reload_err)
             await refresh_per_camera_configs()
             await load_runtime_config()  # rafraîchit bytetrack + IA globale
             cams = await db.cameras.find({"detect_enabled": True, "status": "online"}, {"_id": 0}).to_list(200)
@@ -942,6 +1087,7 @@ async def ai_loop() -> None:
                             len(cams), [c["name"] for c in cams])
                 # Workers indépendants : une caméra lente ne bloque pas les autres
                 await asyncio.gather(*[_process_camera(cam) for cam in cams], return_exceptions=True)
-        except Exception:
+        except Exception as e:
+            _ai_health["last_cycle_error"] = f"{type(e).__name__}: {str(e)[:200]}"
             logger.exception("ai_loop : erreur, reprise")
         await asyncio.sleep(float(_cfg("interval_seconds", AI_INTERVAL)))

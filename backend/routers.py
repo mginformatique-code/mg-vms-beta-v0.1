@@ -805,6 +805,27 @@ async def diagnostics_frame_source(user: dict = Depends(require_permission("view
     return status()
 
 
+@api_router.get("/diagnostics/ai-health")
+async def diagnostics_ai_health(user: dict = Depends(require_permission("view_live"))):
+    """État exhaustif du pipeline IA (Phase 0 RCA v2.21.0).
+
+    Utile en prod pour comprendre POURQUOI l'IA ne détecte rien :
+      - `yolo_loaded` / `yolo_error` : YOLO chargé ? sinon message d'erreur
+      - `alpr_loaded` / `alpr_error` : fast-alpr chargé ?
+      - `torch_available` / `torch_cuda_available` / `torch_version` : état PyTorch
+      - `ultralytics_version` : version ultralytics
+      - `device_effective` : GPU ou CPU réellement utilisé
+      - `cycles_total` / `last_cycle_ts` / `last_cycle_error` : la boucle tourne-t-elle ?
+      - `loop_alive` : la coroutine ai_loop est-elle démarrée ?
+      - `force_cpu_env` : la var d'env `MGVMS_AI_FORCE_CPU` est-elle active ?
+
+    Astuce prod : si `yolo_loaded=false` ET `torch_available=true`, l'erreur exacte
+    est dans `yolo_error` (ex. modèle introuvable, incompat CUDA↔driver, VRAM saturée).
+    """
+    from ai_engine import get_ai_health
+    return get_ai_health()
+
+
 @api_router.get("/diagnostics/camera/{camera_id}/logs")
 async def diagnostics_camera_logs(camera_id: str, lines: int = 100,
                                     user: dict = Depends(require_permission("view_live"))):

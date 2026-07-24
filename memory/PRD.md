@@ -1,5 +1,101 @@
 # MG-VMS — Product Requirements Document
 
+## Implemented (2026-07-24 · v2.21.0 — Phase 0 + Phase 1 : IA résiliente + go2rtc = unique gateway)
+
+**Contexte utilisateur** : après le rebuild GPU (v2.18) en prod, plus AUCUNE détection IA / plaque / événement, même en repassant CPU. Sans logs prod, le RCA a été fait sur le code. Livrable = pipeline IA qui **ne peut plus mourir silencieusement** + endpoint de diagnostic exhaustif pour identifier en 1 requête ce qui casse en prod + garde-fou architectural go2rtc.
+
+Tag Git de point de retour : `v2.20.0-stable-checkpoint` (posé avant modifs).
+
+### Phase 0 (P0) — IA résiliente, plus d'auto-suicide silencieux
+**Cause racine identifiée** (`ai_engine.ai_loop:1046-1051` pré-fix) :
+```python
+try:
+    await asyncio.to_thread(_load_models)
+except Exception:
+    logger.exception("Chargement des modèles IA impossible — boucle IA désactivée")
+    return   # ← LA BOUCLE MEURT DÉFINITIVEMENT jusqu'au restart backend
+```
+Un rebuild qui casse un import (torch/onnx/ultralytics), une lib système manquante, un modèle introuvable, un incompat CUDA/driver → `_load_models` throw → **plus jamais d'IA** sans redémarrer le backend. Et même en redémarrant, si la cause n'est pas résolue, ça replante pareil. Explique parfaitement le symptôme "plus rien même en CPU".
+
+**Fixes appliqués `ai_engine.py`** :
+- **`_load_models` résilient par composant** : YOLO et fast-alpr chargés indépendamment. Crash de l'un n'affecte pas l'autre. Chaque tentative logue `_ai_health["yolo_load_attempts"]` / `alpr_load_attempts`.
+- **Retry automatique par cycle** : si `yolo_loaded=false` OU `alpr_loaded=false`, `_load_models` est retenté à chaque itération de `ai_loop`. Plus jamais de suicide définitif.
+- **`ai_loop` ne quitte JAMAIS** : le premier chargement peut échouer, la boucle continue quand même et retente. Un modèle qui devient disponible plus tard (ex. après un `docker cp`) est chargé automatiquement.
+- **`_analyze_frame` résilient** : skippe YOLO si `_model is None` au lieu de crasher. Retourne un résultat vide plutôt qu'une exception.
+- **Bypass CPU rapide** : nouvelle var d'env `MGVMS_AI_FORCE_CPU=1` — force CPU sans rebuild ni changement de config DB (utile pour isoler une régression GPU en prod).
+- **Traçabilité** : nouveau dict `_ai_health` mis à jour en permanence (yolo/alpr loaded+error, torch version + cuda, cycles_total, last_cycle_ts, last_cycle_error).
+
+### Phase 0 (P0) — Nouvel endpoint `/api/diagnostics/ai-health`
+**Objectif** : que l'utilisateur puisse en **1 curl** savoir en prod ce qui cloche.
+
+```
+GET /api/diagnostics/ai-health
+{
+  "yolo_loaded": true|false, "yolo_error": "<type>: <message[:240]>",
+  "yolo_load_attempts": 3, "yolo_last_attempt_ts": "…",
+  "alpr_loaded": true|false, "alpr_error": "…", "alpr_load_attempts": 1,
+  "torch_available": true, "torch_cuda_available": false,
+  "torch_version": "2.12.1+cu130", "torch_error": null,
+  "ultralytics_version": "8.3.0", "fast_alpr_available": true,
+  "device_effective": "cpu"|"cuda:0",
+  "cycles_total": 42, "last_cycle_ts": "…", "last_cycle_error": null,
+  "loop_alive": true, "force_cpu_env": false,
+  "yolo_model": "yolo11n.pt", "alpr_models": "fast-alpr · …"
+}
+```
+Diagnostic prod en 3 questions :
+- `loop_alive=false` → boucle IA jamais démarrée (rare, probablement crash asyncio)
+- `yolo_loaded=false` + `torch_available=true` → l'erreur exacte est dans `yolo_error` (modèle intr., incompat CUDA↔driver, VRAM saturée)
+- `cycles_total` bloqué sur 2 requêtes espacées de 5s → boucle gelée par une caméra (voir `last_cycle_error`)
+
+### Phase 1 (P1) — go2rtc = UNIQUE gateway vidéo
+**Constat** (avant fix) : le recorder utilisait déjà `rtsp://go2rtc:8554/cam_{id}` et `ai_engine._sync_frame_source_workers` idem depuis v2.20. Mais **`frame_source.start()` acceptait n'importe quelle URL** — rien n'empêchait un caller futur (ou un bug de configuration) d'ouvrir une session RTSP directe sur la caméra depuis le backend, brisant l'invariant "1 seule session caméra".
+
+**Fix `frame_source.start()`** : nouveau garde-fou architectural qui REFUSE toute URL RTSP hors go2rtc avec `ValueError` explicite :
+```python
+frame_source.start("cam_1", "rtsp://admin:pass@192.168.1.42:554/live")
+# → ValueError: frame_source.start refuse une URL RTSP hors go2rtc :
+#   rtsp://admin:pass@192.168.1... Phase 1 (go2rtc = unique gateway).
+#   Utilisez rtsp://go2rtc:8554/cam_XXX. Bypass tests : allow_direct=True.
+```
+- Préfixes acceptés : `$GO2RTC_RTSP/`, `rtsp://go2rtc:`, `rtsp://127.0.0.1:8554/`, `rtsp://localhost:8554/`.
+- Bypass explicite : `allow_direct=True` pour outillage/tests, jamais utilisé en production.
+
+**Autres surfaces auditées** :
+- `recorder.py:75` — utilise déjà `rtsp://go2rtc:8554/cam_{id}` ✅
+- `ai_engine._sync_frame_source_workers` — force déjà l'URL go2rtc ✅
+- `streaming.register_camera_stream` — appelle `PUT /api/streams` sur go2rtc. C'est go2rtc qui ouvre la session upstream, pas MG-VMS ✅
+- `streaming._ffprobe` — test ponctuel de validation URL lors de la création d'une caméra. Aucune session persistante. Conservé tel quel.
+
+### Testé (iteration 30 — 16/16 pytest)
+- `/api/diagnostics/ai-health` retourne le contrat de 17 champs attendus ✅
+- Boucle IA vivante : cycles_total 1 → 3+ en 5s (jamais gelée) ✅
+- Événements IA continuent d'être générés sur demo-cam-002 ✅
+- `frame_source.start("cam", "rtsp://cam-ip/live")` → ValueError « hors go2rtc » ✅
+- `frame_source.start("cam", "rtsp://go2rtc:8554/cam_x")` → accepté ✅
+- `frame_source.start(..., allow_direct=True)` → bypass OK pour tests ✅
+- Régression iter29 (probe non-invasif, ONVIF hint, mjpeg, hd frame, real-cam probe) : 10/10 ✅
+
+### À valider par l'utilisateur en PROD
+1. `git pull` puis `docker compose build backend && docker compose up -d backend`
+2. **Test #1 — diag rapide** :
+   ```bash
+   curl http://192.168.1.21:8001/api/diagnostics/ai-health -H "Authorization: Bearer $TOKEN" | jq
+   ```
+   → Copier ce JSON dans le prochain message si l'IA ne repart pas : il contient l'erreur exacte.
+3. **Test #2 — forcer CPU sans rebuild** (isole une régression GPU spécifique) :
+   ```bash
+   docker compose exec backend sh -c 'export MGVMS_AI_FORCE_CPU=1'
+   # OU (plus propre) ajouter dans docker-compose.yml env :
+   #   MGVMS_AI_FORCE_CPU: 1
+   ```
+   Puis redémarrer le backend et re-vérifier `ai-health`. Si `device_effective="cpu"` mais `yolo_loaded=false` → problème indépendant du GPU (ex. modèle non trouvé, torch cassé).
+4. **Test #3 — vérifier le garde-fou** : dans les logs backend, aucun message `frame-source: worker XXX démarré` avec une URL `rtsp://192.168.…` ou `rtsp://admin:…@…` ne doit apparaître — uniquement des URLs `rtsp://go2rtc:8554/cam_XXX`.
+
+### Notes architecture pour la suite (Phase 2 en attente de choix utilisateur)
+Phase 2 = source de vérité unique des credentials caméra (aujourd'hui : MongoDB + push dynamique vers go2rtc via `PUT /api/streams` = duplication). 3 options non-tranchées : (a) DB reste maître, (b) go2rtc.yaml généré par MG-VMS, (c) go2rtc.yaml édité manuellement. Décision à prendre avant d'implémenter.
+
+
 ## Implemented (2026-07-24 · v2.20.0 — Fix production : ONVIF + prévisualisation + déconnexions cycliques)
 
 **Bugs utilisateur (prod)** : (1) ajout ONVIF cassé, (2) prévisualisation jamais correcte, (3) caméras qui se déconnectent trop souvent. 6 causes racines identifiées et corrigées :
