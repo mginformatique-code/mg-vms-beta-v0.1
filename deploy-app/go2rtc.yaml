@@ -56,3 +56,75 @@ streams:
     - ffmpeg:cam_demo-cam-002#video=mjpeg
   cam_demo-cam-002_sd:
     - ffmpeg:cam_demo-cam-002#video=mjpeg#width=640
+  cam_7b475488-cc36-48d0-9d59-9427e444822a:
+    - rtsp://admin:Rlwt29%23%2Bjpf@192.168.1.53:554/h264Preview_01_main
+  cam_7b475488-cc36-48d0-9d59-9427e444822a_hd:
+    - ffmpeg:cam_7b475488-cc36-48d0-9d59-9427e444822a#video=mjpeg#low_latency
+  cam_7b475488-cc36-48d0-9d59-9427e444822a_sd:
+    - ffmpeg:cam_7b475488-cc36-48d0-9d59-9427e444822a#video=mjpeg#width=640#low_latency
+  cam_305a559a-c08d-453d-8cf0-b03389aebb40:
+    - rtsp://admin:Rlwt29%23%2Bjpf@192.168.1.51:554/h264Preview_02_main
+  cam_305a559a-c08d-453d-8cf0-b03389aebb40_hd:
+    - ffmpeg:cam_305a559a-c08d-453d-8cf0-b03389aebb40#video=mjpeg#low_latency
+  cam_305a559a-c08d-453d-8cf0-b03389aebb40_sd:
+    - ffmpeg:cam_305a559a-c08d-453d-8cf0-b03389aebb40#video=mjpeg#width=640#low_latency
+  cam_d1282893-20c0-465a-9851-612754b57d21:
+    - rtsp://admin:Rlwt29%23%2Bjpf@192.168.1.55:554/
+  cam_d1282893-20c0-465a-9851-612754b57d21_hd:
+    - ffmpeg:cam_d1282893-20c0-465a-9851-612754b57d21#video=mjpeg#low_latency
+  cam_d1282893-20c0-465a-9851-612754b57d21_sd:
+    - ffmpeg:cam_d1282893-20c0-465a-9851-612754b57d21#video=mjpeg#width=640#low_latency
+  cam_e3184d06-7cc6-4463-b736-fb05e2889808:
+    - rtsp://admin:Rlwt29%23%2Bjpf@192.168.1.53:554/h264Preview_02_main
+  cam_e3184d06-7cc6-4463-b736-fb05e2889808_hd:
+    - ffmpeg:cam_e3184d06-7cc6-4463-b736-fb05e2889808#video=mjpeg#low_latency
+  cam_e3184d06-7cc6-4463-b736-fb05e2889808_sd:
+    - ffmpeg:cam_e3184d06-7cc6-4463-b736-fb05e2889808#video=mjpeg#width=640#low_latency
+  cam_e3b08115-b1a7-473b-b7cb-0a3a6fd2ff32:
+    - rtsp://admin:Rlwt29%23%2Bjpf@192.168.1.51:554/h264Preview_01_main
+  cam_e3b08115-b1a7-473b-b7cb-0a3a6fd2ff32_hd:
+    - ffmpeg:cam_e3b08115-b1a7-473b-b7cb-0a3a6fd2ff32#video=mjpeg#low_latency
+  cam_e3b08115-b1a7-473b-b7cb-0a3a6fd2ff32_sd:
+    - ffmpeg:cam_e3b08115-b1a7-473b-b7cb-0a3a6fd2ff32#video=mjpeg#width=640#low_latency
+  cam_e8c9ac90-cbc8-4429-914b-e43dcfa96735:
+    - rtsp://admin:Rlwt29%23%2Bjpf@192.168.1.58:554/
+  cam_e8c9ac90-cbc8-4429-914b-e43dcfa96735_hd:
+    - ffmpeg:cam_e8c9ac90-cbc8-4429-914b-e43dcfa96735#video=mjpeg#low_latency
+  cam_e8c9ac90-cbc8-4429-914b-e43dcfa96735_sd:
+    - ffmpeg:cam_e8c9ac90-cbc8-4429-914b-e43dcfa96735#video=mjpeg#width=640#low_latency
+  cam_9e2c3862-3512-4f7b-89ec-07d71dbfcbad:
+    - rtsp://admin:Rlwt29%23%2Bjpf@192.168.1.57:554/
+  cam_9e2c3862-3512-4f7b-89ec-07d71dbfcbad_hd:
+    - ffmpeg:cam_9e2c3862-3512-4f7b-89ec-07d71dbfcbad#video=mjpeg#low_latency
+  cam_9e2c3862-3512-4f7b-89ec-07d71dbfcbad_sd:
+    - ffmpeg:cam_9e2c3862-3512-4f7b-89ec-07d71dbfcbad#video=mjpeg#width=640#low_latency
+  cam_26ff27dd-a00e-477e-a60c-bb7f5f807aea:
+    - rtsp://admin:Rlwt29%23%2Bjpf@192.168.1.57:554/Preview_01_autotrack
+  cam_26ff27dd-a00e-477e-a60c-bb7f5f807aea_hd:
+    - ffmpeg:cam_26ff27dd-a00e-477e-a60c-bb7f5f807aea#video=mjpeg#low_latency
+  cam_26ff27dd-a00e-477e-a60c-bb7f5f807aea_sd:
+    - ffmpeg:cam_26ff27dd-a00e-477e-a60c-bb7f5f807aea#video=mjpeg#width=640#low_latency
+  cam_4ba8ad51-fcdf-4db9-8172-9abf8831dd4b:
+    - rtsp://admin:Rlwt29%23%2Bjpf@192.168.5.201:554/
+  cam_4ba8ad51-fcdf-4db9-8172-9abf8831dd4b_hd:
+    - ffmpeg:cam_4ba8ad51-fcdf-4db9-8172-9abf8831dd4b#video=mjpeg#low_latency
+  cam_4ba8ad51-fcdf-4db9-8172-9abf8831dd4b_sd:
+    - ffmpeg:cam_4ba8ad51-fcdf-4db9-8172-9abf8831dd4b#video=mjpeg#width=640#low_latency
+  cam_df1b46c4-d0aa-4a44-8a7f-eac73007ed82:
+    - rtsp://admin:Rlwt29%23%2Bjpf@192.168.5.202:554/
+  cam_df1b46c4-d0aa-4a44-8a7f-eac73007ed82_hd:
+    - ffmpeg:cam_df1b46c4-d0aa-4a44-8a7f-eac73007ed82#video=mjpeg#low_latency
+  cam_df1b46c4-d0aa-4a44-8a7f-eac73007ed82_sd:
+    - ffmpeg:cam_df1b46c4-d0aa-4a44-8a7f-eac73007ed82#video=mjpeg#width=640#low_latency
+  cam_f1f7d716-75bd-46e9-9a44-8520992b1791:
+    - rtsp://admin:Rlwt29%23%2Bjpf@192.168.5.203:554/
+  cam_f1f7d716-75bd-46e9-9a44-8520992b1791_hd:
+    - ffmpeg:cam_f1f7d716-75bd-46e9-9a44-8520992b1791#video=mjpeg#low_latency
+  cam_f1f7d716-75bd-46e9-9a44-8520992b1791_sd:
+    - ffmpeg:cam_f1f7d716-75bd-46e9-9a44-8520992b1791#video=mjpeg#width=640#low_latency
+  cam_79af295a-b590-4590-a822-d1858f86072e:
+    - rtsp://admin:Rlwt29%23%2Bjpf@192.168.5.205:554/
+  cam_79af295a-b590-4590-a822-d1858f86072e_hd:
+    - ffmpeg:cam_79af295a-b590-4590-a822-d1858f86072e#video=mjpeg#low_latency
+  cam_79af295a-b590-4590-a822-d1858f86072e_sd:
+    - ffmpeg:cam_79af295a-b590-4590-a822-d1858f86072e#video=mjpeg#width=640#low_latency
