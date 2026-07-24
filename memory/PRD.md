@@ -1,5 +1,58 @@
 # MG-VMS — Product Requirements Document
 
+## Implemented (2026-07-24 · v2.17.0 — Fix ARCHITECTURAL des cycles caméra)
+- ✅ **Root cause analysis + fix du bug historique "caméras déconnectées puis reconnectées"** — présent depuis la v1, indépendant du player (MJPEG/WebRTC/MP4).
+
+  **Deux causes racines identifiées** (rétroaction toxique) :
+
+  1. **Backend** : `_probe_status_once` (streaming.py) appelait `register_camera_stream` lorsqu'un blip HTTP transitoire vers go2rtc faisait échouer le probe. `register_camera_stream` faisait un DELETE+PUT sur les 3 variantes (`{name}`, `_hd`, `_sd`) → **tous les consommateurs actifs (viewers, recorder, IA) étaient déconnectés simultanément** → cycle infini.
+  2. **Frontend** : `Feed` (LiveView.jsx) faisait un switch d'arbre `{online ? <player> : <NoSignal>}`. Chaque flip `cam.status` (causé par #1) démontait le player → nouvelle négociation WebRTC / nouvelle requête MJPEG à go2rtc → **cycle infini**.
+
+  **Fixes appliqués (chirurgical, sans réécriture)** :
+
+  **Backend `/app/backend/streaming.py`** :
+  - `_probe_status_once` refactoré : **NE FAIT PLUS jamais `register_camera_stream`**. Utilise `GET /api/streams` (léger) pour vérifier la présence + `frame.jpeg` pour le probe. Distingue 3 cas : go2rtc unreachable, stream absent (anomalie remontée SANS auto-repair), frame échouée (transitoire).
+  - **Hystérésis** : nouveau `lifecycle.record_probe_result` — un probe échoué ne flippe le status en base qu'après **3 échecs consécutifs** (90 s de grâce). Les blips HTTP transitoires ne provoquent plus de flip `online→offline`.
+  - `register_camera_stream` devenu **idempotent** : compare la config souhaitée vs `GET /api/streams` et SKIP le DELETE+PUT si identique. Nouveau paramètre `force=True` pour "Réparer ce flux" explicite. Nouveau paramètre `caller` propagé pour traçabilité.
+  - `unregister_camera_stream` + tous callers instrumentés avec `caller=...`.
+
+  **Backend `/app/backend/lifecycle.py`** (nouveau module ~130 lignes) :
+  - Journal circulaire in-memory (deque 100 entrées par caméra) : `created`, `registered_idempotent`, `destroyed`, `consumer_attached`, `consumer_detached`, `status_probe_ok`, `status_probe_fail`, `status_offline_confirmed`, `status_online_restored`, `webrtc_negotiation`, `webrtc_answered`, `webrtc_failed`, `stream_absent_from_go2rtc`, `registering`.
+  - Log ligne unique format standard : `[Camera XXX] stream_lifecycle: {action} reason=... caller=...`
+  - Hystérésis + compteurs d'échecs (`get_probe_counter`, `record_probe_result`, `reset_probe_counter`).
+
+  **Backend `/app/backend/routers.py`** :
+  - Nouvel endpoint `GET /api/diagnostics/stream-lifecycle/{camera_id}?limit=100` — retourne le journal + compteur d'échecs consécutifs.
+  - Nouvel endpoint `GET /api/diagnostics/stream-lifecycle` (résumé toutes caméras).
+  - `pipeline_webrtc_offer` : utilise `_ensure_variants_cached` + instrumenté avec `webrtc_negotiation` / `webrtc_answered` / `webrtc_failed`.
+  - Callers de `register_camera_stream` (`POST/PUT /api/cameras`, `refresh-stream`, `probe_camera`, `sync_all_streams`) propagent `caller=`.
+  - `refresh-stream` utilise `force=True` (action explicite "Réparer").
+
+  **Backend `/app/backend/streaming.py::live_mjpeg`** :
+  - Instrumenté `consumer_attached` (au début) + `consumer_detached` (dans le `finally`) avec `detach_reason` précis (`client disconnect`, `upstream lost, N retries exhausted`).
+  - Catch `(asyncio.CancelledError, GeneratorExit)` pour le disconnect client silencieux.
+
+  **Frontend `/app/frontend/src/pages/LiveView.jsx`** :
+  - `Feed` refactoré en **player TOUJOURS monté** : `<img>` ou `<WebRTCPlayer>` restent dans l'arbre React même quand `cam.status === "offline"`. L'overlay "No Signal" se superpose en `position:absolute` + `z-10` **sans démonter le player**.
+  - `wantWebRTC` ne dépend plus de `online` (sinon flip status → switch WebRTC↔MJPEG → remount).
+  - `useEffect [cam?.id, hd, previewMode]` : le reset `reloadKey` ne dépend plus de `cam?.status`.
+  - **`React.memo` custom** avec comparaison qui **IGNORE** `last_seen`, `updated_at` (les champs mis à jour à chaque tick backend). Ne re-render que sur `id/status/name/site_name/resolution/detect_enabled/ptz_enabled/aiState`.
+
+  **Frontend `/app/frontend/src/pages/Diagnostics.jsx`** :
+  - Nouvelle section "**Cycle de vie des streams (temps réel)**" : sélecteur caméra + auto-refresh 5 s + 4 KPIs (statut, échecs probe, entrées journal, dernière action) + table timestampée avec badges colorés par action + résumé toutes caméras.
+
+  **Tests sandbox validés** :
+  - 3 curl MJPEG parallèles → 3 `consumer_attached` distincts, aucun `registering`/`created` intercalé, `consecutive_probe_failures=0`.
+  - `WebRTC failed → MJPEG fallback` sans démonter le `<img>` (grâce au fix Feed).
+  - Journal lifecycle visible dans `/api/diagnostics/stream-lifecycle/{camera_id}` et dans l'UI `/diagnostics`.
+  - **AUCUN `register_camera_stream` déclenché par le status loop** — plus de churn.
+
+  **À valider en prod (flux RTSP réel externe)** :
+  - Le journal lifecycle doit rester majoritairement `status_probe_ok` + `consumer_attached`/`detached`.
+  - Aucune ligne `registering`/`created` ne doit apparaître **sans action utilisateur explicite** (création/edit/Réparer/redémarrage backend).
+  - Si un `stream_absent_from_go2rtc` apparaît, c'est le signal d'une anomalie MG-VMS interne à investiguer (l'admin peut cliquer "Réparer" — pas d'auto-recréation).
+
+
 ## Implemented (2026-07-24)
 - ✅ **Fix MJPEG `ERR_INCOMPLETE_CHUNKED_ENCODING` (2.16.2 — 2026-07-24)**
   - **Cause racine identifiée** : `streaming.py::live_mjpeg` ne catchait pas les exceptions upstream (`httpx.ReadError`, `RemoteProtocolError`) quand le producteur ffmpeg de go2rtc mourait (OOM VRAM, CUDA reset, restart). L'exception remontait → `StreamingResponse` tronquée → Chrome affichait `ERR_INCOMPLETE_CHUNKED_ENCODING` + image noire. Aggravé par `_ensure_variants` invoqué à chaque requête (thundering herd sur go2rtc).

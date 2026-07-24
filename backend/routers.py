@@ -275,7 +275,7 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
     await db.cameras.insert_one(dict(doc))
     await log_audit(user, "camera_created", data.name, f"Site: {site['name']} · Mode: {data.mode}")
     from streaming import register_camera_stream
-    registered = await register_camera_stream(doc)
+    registered = await register_camera_stream(doc, caller=f"POST /api/cameras user={user.get('email','?')}")
     if not registered:
         # Si ONVIF a réussi mais go2rtc n'arrive pas à ouvrir le flux, autoriser la création si demandé
         if data.mode == "onvif" and data.allow_rtsp_override:
@@ -365,7 +365,10 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
     await log_audit(user, "camera_updated", data.name, f"Mode: {data.mode}")
     updated = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
     from streaming import register_camera_stream
-    registered = await register_camera_stream(updated)
+    # NOTE: update_camera invoque register_camera_stream qui est désormais idempotent
+    # (skip si config identique). Cela évite de déconnecter les consommateurs actifs
+    # quand l'utilisateur modifie une prop non-streaming (ex : nom, coordonnées lat/lng).
+    registered = await register_camera_stream(updated, caller=f"PUT /api/cameras/{camera_id} user={user.get('email','?')}")
     if not registered and camera_id not in {"demo-cam-001", "demo-cam-002"}:
         raise HTTPException(400, "Impossible de mettre à jour le flux dans go2rtc")
     updated.pop("password", None)
@@ -377,7 +380,7 @@ async def delete_camera(camera_id: str, user: dict = Depends(require_role("techn
     cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
     await db.cameras.delete_one({"id": camera_id})
     from streaming import unregister_camera_stream
-    await unregister_camera_stream(camera_id)
+    await unregister_camera_stream(camera_id, caller=f"DELETE /api/cameras user={user.get('email','?')}")
     await log_audit(user, "camera_deleted", cam["name"] if cam else camera_id)
     return {"ok": True}
 
@@ -701,7 +704,9 @@ async def refresh_camera_stream(camera_id: str, user: dict = Depends(require_rol
     if not cam:
         raise HTTPException(404, "Caméra introuvable")
     from streaming import register_camera_stream, _mask_url_password
-    ok = await register_camera_stream(cam)
+    # force=True car c'est l'action explicite "Réparer" — l'utilisateur veut le DELETE+PUT
+    ok = await register_camera_stream(cam, caller=f"refresh-stream user={user.get('email','?')}",
+                                       force=True)
     if not ok:
         raise HTTPException(502, "Impossible d'enregistrer le flux dans go2rtc")
     await log_audit(user, "camera_stream_refreshed", cam.get("name", camera_id),
@@ -742,6 +747,45 @@ async def diagnostics_camera_summary(camera_id: str, user: dict = Depends(requir
         raise HTTPException(404, "Caméra introuvable")
     from diagnostics import camera_diagnostic_summary
     return await camera_diagnostic_summary(camera_id)
+
+
+@api_router.get("/diagnostics/stream-lifecycle/{camera_id}")
+async def diagnostics_stream_lifecycle(camera_id: str, limit: int = 100,
+                                         user: dict = Depends(require_permission("view_live"))):
+    """Journal circulaire en mémoire du cycle de vie du stream d'une caméra.
+
+    Retourne les N dernières transitions (max 100) avec pour chaque entrée :
+      - ts       : timestamp UTC ISO 8601
+      - action   : created / registered_idempotent / destroyed / consumer_attached /
+                   consumer_detached / status_probe_ok / status_probe_fail /
+                   status_offline_confirmed / status_online_restored /
+                   webrtc_negotiation / variants_ensured / stream_absent_from_go2rtc / ...
+      - reason   : texte libre explicatif
+      - caller   : qui a déclenché l'action (endpoint + user, ou processus interne)
+      - extra    : dict optionnel avec détails structurés
+
+    Utilisé pour diagnostiquer les cycles de déconnexion/reconnexion : si une caméra
+    subit un cycle, ce journal montre EXACTEMENT quel composant démonte/remonte
+    le stream et pourquoi.
+    """
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "id": 1, "name": 1})
+    if not cam:
+        raise HTTPException(404, "Caméra introuvable")
+    from lifecycle import get_journal, get_probe_counter
+    return {
+        "camera_id": camera_id,
+        "camera_name": cam.get("name", ""),
+        "consecutive_probe_failures": get_probe_counter(camera_id),
+        "entries": get_journal(camera_id, limit=limit),
+    }
+
+
+@api_router.get("/diagnostics/stream-lifecycle")
+async def diagnostics_stream_lifecycle_summary(user: dict = Depends(require_permission("view_live"))):
+    """Résumé du journal lifecycle pour toutes les caméras (nb entrées + dernière action).
+    Utile pour repérer d'un coup d'œil les caméras qui subissent un cycle anormal."""
+    from lifecycle import get_all_journal_summary
+    return {"summary": get_all_journal_summary()}
 
 
 @api_router.get("/diagnostics/camera/{camera_id}/logs")
@@ -912,11 +956,15 @@ async def pipeline_webrtc_offer(camera_id: str, offer: WebRTCOfferInput,
     Le média (RTP DTLS-SRTP) est ensuite négocié en direct navigateur↔go2rtc
     via ICE — go2rtc utilise typiquement les ports 8555 (WebRTC) + un range UDP.
     """
-    from streaming import _stream_name, _authorize_camera, GO2RTC_URL, _ensure_variants
+    from streaming import _stream_name, _authorize_camera, GO2RTC_URL, _ensure_variants_cached
     await _authorize_camera(user, camera_id)
     name = _stream_name(camera_id)
-    # Vérifie que le flux source existe côté go2rtc (auto-migration si besoin)
-    await _ensure_variants(name)
+    # Vérifie que le flux source existe côté go2rtc (throttled)
+    await _ensure_variants_cached(name)
+    from lifecycle import record as _lc_record
+    _lc_record(camera_id, "webrtc_negotiation",
+               reason="SDP offer received",
+               caller=f"{user.get('email','?')}")
     import httpx
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -926,7 +974,11 @@ async def pipeline_webrtc_offer(camera_id: str, offer: WebRTCOfferInput,
                 json={"type": offer.type, "sdp": offer.sdp},
             )
         if r.status_code != 200:
+            _lc_record(camera_id, "webrtc_failed",
+                       reason=f"go2rtc HTTP {r.status_code}", caller="webrtc_offer")
             raise HTTPException(502, f"go2rtc WebRTC signaling échec: HTTP {r.status_code} · {r.text[:400]}")
+        _lc_record(camera_id, "webrtc_answered", reason="SDP answer relayed to browser",
+                   caller="webrtc_offer")
         return r.json()
     except httpx.HTTPError as e:
         raise HTTPException(502, f"go2rtc unreachable: {type(e).__name__}: {e}")

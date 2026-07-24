@@ -313,6 +313,199 @@ export default function Diagnostics() {
       </div>
 
       <IncidentDetail item={detail} onClose={() => setDetail(null)} />
+
+      <StreamLifecycleSection />
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Section "Cycle de vie des streams" — journal circulaire en mémoire backend
+// ══════════════════════════════════════════════════════════════════════════
+const LIFECYCLE_ACTION_COLORS = {
+  created: "#00E676",
+  registered_idempotent: "#00E676",
+  destroyed: "#FF3333",
+  register_failed: "#FF3333",
+  consumer_attached: "#00E5FF",
+  consumer_detached: "#B47CFF",
+  status_probe_ok: "#00E676",
+  status_probe_fail: "#FFB800",
+  status_offline_confirmed: "#FF3333",
+  status_online_restored: "#00E676",
+  stream_absent_from_go2rtc: "#FF3333",
+  registering: "#FFB800",
+  webrtc_negotiation: "#00E5FF",
+  webrtc_answered: "#00E676",
+  webrtc_failed: "#FF3333",
+};
+
+function StreamLifecycleSection() {
+  const [cams, setCams] = useState([]);
+  const [selectedId, setSelectedId] = useState("");
+  const [summary, setSummary] = useState({});
+  const [entries, setEntries] = useState([]);
+  const [failureCount, setFailureCount] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+
+  // Charge la liste des caméras + résumé lifecycle
+  useEffect(() => {
+    api.get("/cameras").then((r) => {
+      setCams(r.data || []);
+      if (!selectedId && r.data?.length) setSelectedId(r.data[0].id);
+    }).catch(() => setCams([]));
+    api.get("/diagnostics/stream-lifecycle").then((r) => setSummary(r.data?.summary || {})).catch(() => {});
+  }, []);
+
+  // Charge le journal détaillé de la caméra sélectionnée + auto-refresh
+  useEffect(() => {
+    if (!selectedId) return;
+    let alive = true;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const { data } = await api.get(`/diagnostics/stream-lifecycle/${selectedId}?limit=100`);
+        if (!alive) return;
+        setEntries(data?.entries || []);
+        setFailureCount(data?.consecutive_probe_failures || 0);
+      } catch (e) { if (alive) { setEntries([]); setFailureCount(0); } }
+      finally { if (alive) setLoading(false); }
+    };
+    load();
+    if (!autoRefresh) return;
+    const iv = setInterval(load, 5000);  // rafraîchissement toutes les 5 s
+    return () => { alive = false; clearInterval(iv); };
+  }, [selectedId, autoRefresh]);
+
+  const selectedCam = cams.find((c) => c.id === selectedId);
+
+  return (
+    <div className="mt-8 border border-border bg-card p-4" data-testid="stream-lifecycle-section">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h2 className="font-head font-semibold text-lg flex items-center gap-2">
+            <Activity size={16} className="text-[#00E5FF]" />
+            Cycle de vie des streams (temps réel)
+          </h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            Journal circulaire en mémoire (100 dernières transitions) — trace précisément qui crée, attache, détache ou détruit chaque flux caméra.
+            Utilisez cet écran pour diagnostiquer les cycles de reconnexion.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-xs mono cursor-pointer" data-testid="lifecycle-autorefresh">
+            <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
+            Auto-refresh 5 s
+          </label>
+          <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}
+                  className="px-2 py-1 text-xs bg-background border border-input" data-testid="lifecycle-camera-select">
+            {cams.map((c) => (
+              <option key={c.id} value={c.id}>{c.name} · {c.site_name || "?"}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* KPIs de la caméra sélectionnée */}
+      {selectedCam && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 text-xs">
+          <div className="border border-border bg-background p-2">
+            <div className="text-muted-foreground mono uppercase tracking-wider text-[10px]">Statut actuel</div>
+            <div className={`mono font-bold ${selectedCam.status === "online" ? "text-[#00E676]" : "text-[#FF3333]"}`} data-testid="lifecycle-current-status">
+              {selectedCam.status || "unknown"}
+            </div>
+          </div>
+          <div className="border border-border bg-background p-2">
+            <div className="text-muted-foreground mono uppercase tracking-wider text-[10px]">Échecs probe consécutifs</div>
+            <div className={`mono font-bold ${failureCount === 0 ? "text-[#00E676]" : (failureCount >= 3 ? "text-[#FF3333]" : "text-[#FFB800]")}`} data-testid="lifecycle-fail-count">
+              {failureCount}/3
+              {failureCount > 0 && failureCount < 3 && <span className="text-white/50 text-[10px] ml-1">(hystérésis)</span>}
+            </div>
+          </div>
+          <div className="border border-border bg-background p-2">
+            <div className="text-muted-foreground mono uppercase tracking-wider text-[10px]">Entrées journal</div>
+            <div className="mono font-bold" data-testid="lifecycle-entries-count">{entries.length}</div>
+          </div>
+          <div className="border border-border bg-background p-2">
+            <div className="text-muted-foreground mono uppercase tracking-wider text-[10px]">Dernière action</div>
+            <div className="mono text-[10px] truncate" title={entries[entries.length - 1]?.action}>
+              {entries.length > 0 ? entries[entries.length - 1].action : "—"}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Journal détaillé (chronologique, plus récent en bas) */}
+      <div className="border border-border bg-background max-h-[500px] overflow-y-auto" data-testid="lifecycle-journal">
+        {loading && entries.length === 0 && (
+          <div className="p-4 text-center text-muted-foreground text-sm">
+            <RefreshCw size={14} className="inline animate-spin mr-1" /> Chargement…
+          </div>
+        )}
+        {!loading && entries.length === 0 && (
+          <div className="p-6 text-center text-muted-foreground text-sm">
+            <Info size={14} className="inline mr-1" /> Aucune transition enregistrée pour cette caméra depuis le démarrage du backend.
+          </div>
+        )}
+        {entries.length > 0 && (
+          <table className="w-full text-xs mono">
+            <thead className="sticky top-0 bg-card border-b border-border">
+              <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                <th className="px-2 py-1.5">Timestamp</th>
+                <th className="px-2 py-1.5">Action</th>
+                <th className="px-2 py-1.5">Raison</th>
+                <th className="px-2 py-1.5">Origine</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e, i) => {
+                const dt = e.ts ? new Date(e.ts) : null;
+                const color = LIFECYCLE_ACTION_COLORS[e.action] || "#888";
+                return (
+                  <tr key={i} className="border-b border-border/40 hover:bg-secondary/30" data-testid={`lifecycle-entry-${i}`}>
+                    <td className="px-2 py-1 text-white/60 whitespace-nowrap">
+                      {dt ? dt.toLocaleTimeString("fr-FR", { hour12: false }) : ""}
+                      <span className="text-white/30 ml-1 text-[9px]">
+                        {dt ? "." + String(dt.getMilliseconds()).padStart(3, "0") : ""}
+                      </span>
+                    </td>
+                    <td className="px-2 py-1">
+                      <span className="px-1.5 py-0.5 border font-bold" style={{ borderColor: color, color }}>
+                        {e.action}
+                      </span>
+                    </td>
+                    <td className="px-2 py-1 text-white/80 max-w-xl truncate" title={e.reason}>{e.reason || "—"}</td>
+                    <td className="px-2 py-1 text-white/50 max-w-xs truncate" title={e.caller}>{e.caller || "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Résumé toutes caméras */}
+      {Object.keys(summary).length > 1 && (
+        <div className="mt-4 text-xs">
+          <div className="text-muted-foreground uppercase tracking-wider text-[10px] mb-1">Toutes les caméras (résumé)</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {Object.entries(summary).map(([camId, s]) => {
+              const c = cams.find((x) => x.id === camId);
+              return (
+                <div key={camId} className="border border-border bg-background p-2 flex justify-between items-center cursor-pointer hover:border-[#00E5FF]"
+                     onClick={() => setSelectedId(camId)} data-testid={`lifecycle-summary-${camId}`}>
+                  <div>
+                    <div className="mono font-semibold">{c?.name || camId}</div>
+                    <div className="text-[10px] text-muted-foreground">{s.count} entrées · dernière : {s.last_action}</div>
+                  </div>
+                  <ChevronRight size={14} className="text-muted-foreground" />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

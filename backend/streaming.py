@@ -111,23 +111,56 @@ async def _stream_registered(name: str) -> bool:
         return False
 
 
-async def register_camera_stream(cam: dict) -> bool:
+async def _get_go2rtc_stream_sources(name: str) -> Optional[list[str]]:
+    """Récupère les sources go2rtc actuellement enregistrées pour un stream (via
+    `GET /api/streams`). Retourne None si l'appel HTTP échoue OU si le stream
+    n'existe pas — permet de distinguer les 2 cas côté appelant.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{GO2RTC_URL}/api/streams")
+            if r.status_code != 200:
+                return None
+            data = r.json() or {}
+    except httpx.HTTPError:
+        return None
+    entry = data.get(name)
+    if entry is None:
+        return None
+    # go2rtc renvoie `{name: [sources]}` (v1.9.x) ou `{name: {producers: [...]}}` (nouvelle version)
+    if isinstance(entry, list):
+        return [str(s) for s in entry]
+    if isinstance(entry, dict):
+        prods = entry.get("producers") or entry.get("sources") or []
+        return [str(p.get("url") if isinstance(p, dict) else p) for p in prods]
+    return []
+
+
+async def register_camera_stream(cam: dict, *, caller: str = "unknown",
+                                  force: bool = False) -> bool:
     """Déclare (ou met à jour) le flux d'une caméra dans go2rtc.
-    IMPORTANT : ne pas appeler dans une boucle périodique — la re-registration
-    déconnecte tous les consommateurs (live/recorder/IA). Uniquement sur
-    create / update / réparation ciblée.
+
+    IDEMPOTENT : si les 3 variantes existent déjà avec la MÊME config souhaitée,
+    n'exécute AUCUN DELETE/PUT (pas de churn côté consommateurs).
+
+    `force=True` force la ré-inscription complète (utilisé par le bouton "Réparer
+    ce flux" et par `refresh-stream`). NE PAS UTILISER depuis une boucle périodique.
 
     Enregistre 3 variantes :
       - `{name}`     : source RTSP brute (H.264/H.265) — utilisée par le recorder + IA
       - `{name}_hd`  : ffmpeg → MJPEG à résolution native (aperçu HD)
       - `{name}_sd`  : ffmpeg → MJPEG width=640 (aperçu SD faible bande passante)
     """
+    from lifecycle import record as _lc_record  # import local (évite cycle)
+
     if cam.get("id") in DEMO_IDS:
         return True  # flux de démonstration défini statiquement dans go2rtc.yaml
     rtsp_url = _build_rtsp_url(cam)
     if not rtsp_url.lower().startswith(("rtsp://", "rtmp://", "http://", "https://")):
         return False
     name = _stream_name(cam["id"])
+    cam_id = cam["id"]
+
     # Résolution du pipeline effectif (auto/GPU/CPU) — construit les filtres ffmpeg optimisés
     try:
         from video_engine import resolve_pipeline
@@ -140,6 +173,48 @@ async def register_camera_stream(cam: dict) -> bool:
         logger.warning("video_engine.resolve_pipeline échec (fallback SW) : %s", e)
         hd_filter = "video=mjpeg"
         sd_filter = "video=mjpeg#width=640"
+
+    # Config souhaitée : dict {stream_name: source_string}
+    desired = {
+        name: rtsp_url,
+        f"{name}_hd": f"ffmpeg:{name}#{hd_filter}",
+        f"{name}_sd": f"ffmpeg:{name}#{sd_filter}",
+    }
+
+    # ─── Étape 1 : Diff avec la config existante côté go2rtc (idempotence) ───
+    if not force:
+        try:
+            async with httpx.AsyncClient(timeout=6) as client:
+                r = await client.get(f"{GO2RTC_URL}/api/streams")
+                existing = r.json() if r.status_code == 200 else {}
+        except httpx.HTTPError:
+            existing = {}
+        # Vérifie que les 3 streams existent avec la même source
+        all_match = True
+        for stream_name, wanted_src in desired.items():
+            entry = existing.get(stream_name)
+            if entry is None:
+                all_match = False
+                break
+            actual_srcs: list[str] = []
+            if isinstance(entry, list):
+                actual_srcs = [str(s) for s in entry]
+            elif isinstance(entry, dict):
+                prods = entry.get("producers") or entry.get("sources") or []
+                actual_srcs = [str(p.get("url") if isinstance(p, dict) else p) for p in prods]
+            if wanted_src not in actual_srcs:
+                all_match = False
+                break
+        if all_match:
+            _lc_record(cam_id, "registered_idempotent",
+                       reason="config identical, no go2rtc changes needed",
+                       caller=caller,
+                       extra={"streams": list(desired.keys())})
+            return True
+
+    # ─── Étape 2 : Ré-inscription complète (DELETE + PUT) ───
+    _lc_record(cam_id, "registering", reason=f"force={force}", caller=caller,
+               extra={"rtsp_url_masked": _mask_url_password(rtsp_url)})
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             # Supprime les anciens enregistrements (source + variantes) pour repartir propre
@@ -161,14 +236,21 @@ async def register_camera_stream(cam: dict) -> bool:
             r_sd.raise_for_status()
         if not await _stream_registered(name):
             logger.warning("go2rtc: flux %s introuvable après enregistrement", name)
+            _lc_record(cam_id, "register_failed", reason="not found in go2rtc after PUT",
+                       caller=caller)
             return False
+        _lc_record(cam_id, "created", reason="3 variants PUT to go2rtc", caller=caller,
+                   extra={"streams": list(desired.keys())})
         return True
     except httpx.HTTPError as e:
         logger.warning("go2rtc: échec enregistrement %s : %s", name, e)
+        _lc_record(cam_id, "register_failed", reason=f"HTTP error: {type(e).__name__}",
+                   caller=caller)
         return False
 
 
-async def unregister_camera_stream(camera_id: str) -> None:
+async def unregister_camera_stream(camera_id: str, *, caller: str = "unknown") -> None:
+    from lifecycle import record as _lc_record
     if camera_id in DEMO_IDS:
         return
     name = _stream_name(camera_id)
@@ -176,6 +258,7 @@ async def unregister_camera_stream(camera_id: str) -> None:
         async with httpx.AsyncClient(timeout=5) as client:
             for stream in (name, f"{name}_hd", f"{name}_sd"):
                 await client.delete(f"{GO2RTC_URL}/api/streams", params={"src": stream})
+        _lc_record(camera_id, "destroyed", reason="DELETE from go2rtc", caller=caller)
     except httpx.HTTPError:
         pass
 
@@ -276,7 +359,7 @@ async def sync_all_streams() -> None:
             await _ensure_variants(name)
             n_upgraded += 1
             continue
-        if await register_camera_stream(cam):
+        if await register_camera_stream(cam, caller="sync_all_streams@startup"):
             n_new += 1
     logger.info("go2rtc: %d flux caméra enregistrés (nouveaux) · %d variantes HD/SD garanties (existants)",
                 n_new, n_upgraded)
@@ -576,7 +659,7 @@ def _ffprobe_validate_exact(base_url: str, transport: str,
 
 async def probe_camera(cam: dict) -> dict:
     """Test de connexion réel : frame via go2rtc + ffprobe sur l'URL RTSP."""
-    await register_camera_stream(cam)
+    await register_camera_stream(cam, caller="probe_camera(explicit test)")
     name = _stream_name(cam["id"])
     # Laisse à go2rtc/ffmpeg quelques secondes pour ouvrir le flux
     start = time.monotonic()
@@ -849,57 +932,125 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
 
 
 # ============ Sonde périodique du statut des caméras (online/offline réel) ============
-async def _probe_status_once(cam: dict) -> tuple[str, str]:
-    """Retourne (status, error_text). `error_text` est vide si online.
-    NE JAMAIS re-enregistrer ici (déconnecterait les consommateurs live/recorder/IA)."""
+async def _probe_status_once(cam: dict) -> tuple[str, str, bool]:
+    """Probe non-invasif du statut d'une caméra. NE JAMAIS réenregistrer ici
+    (source du bug historique de cycles déconnexion/reconnexion).
+
+    Retourne `(status, error_text, stream_missing)` :
+      - `status`         : "online" | "offline" (basé sur l'existence go2rtc + probe frame léger)
+      - `error_text`     : raison précise si offline (vide si online)
+      - `stream_missing` : True si go2rtc a PERDU le stream (situation anormale à remonter,
+                            NON auto-réparée — l'admin doit cliquer "Réparer" manuellement)
+
+    Le status offline n'est confirmé qu'après N échecs CONSECUTIFS (hystérésis) —
+    voir `lifecycle.record_probe_result`. Les blips HTTP transitoires n'entraînent
+    plus de flip online→offline.
+    """
+    from lifecycle import record as _lc_record
     name = _stream_name(cam["id"])
-    if cam.get("id") not in DEMO_IDS and not await _stream_registered(name):
-        # Le flux n'existe pas côté go2rtc (probablement effacé par un restart go2rtc) :
-        # une SEULE ré-inscription ciblée, pas de churn.
-        if not await register_camera_stream(cam):
-            return ("offline", "go2rtc: ré-enregistrement échoué (flux introuvable après tentative)")
+    cam_id = cam["id"]
+    is_demo = cam_id in DEMO_IDS
+
+    # ── Étape 1 : vérifier la présence du stream dans go2rtc (léger, pas de decode) ──
+    if not is_demo:
+        sources = await _get_go2rtc_stream_sources(name)
+        if sources is None:
+            # go2rtc lui-même unreachable OU stream absent — impossible de distinguer
+            # via un simple 404. On tente une seconde requête légère pour distinguer :
+            try:
+                async with httpx.AsyncClient(timeout=3) as client:
+                    r = await client.get(f"{GO2RTC_URL}/api/streams")
+                if r.status_code == 200:
+                    # go2rtc répond mais le stream est absent → anomalie MG-VMS interne
+                    _lc_record(cam_id, "stream_absent_from_go2rtc",
+                               reason="go2rtc OK mais stream introuvable — NON auto-réparé, action manuelle requise",
+                               caller="probe")
+                    return ("offline", "stream absent de go2rtc — cliquer Réparer", True)
+                else:
+                    # go2rtc HS
+                    return ("offline", f"go2rtc HTTP {r.status_code}", False)
+            except httpx.HTTPError as e:
+                return ("offline", f"go2rtc unreachable: {type(e).__name__}", False)
+
+    # ── Étape 2 : vérifier qu'une frame récente est disponible (frame.jpeg léger) ──
+    # NOTE : ce probe n'est PAS forcément 100% fiable (H.265, keyframes espacés) —
+    # d'où l'hystérésis à N échecs avant de flipper offline.
     try:
         async with httpx.AsyncClient(timeout=8) as client:
             r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": name})
         if r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff":
-            return ("online", "")
-        return ("offline", f"go2rtc HTTP {r.status_code}: {r.text[:800]}")
+            return ("online", "", False)
+        return ("offline_transient", f"go2rtc frame HTTP {r.status_code}", False)
     except httpx.HTTPError as e:
-        return ("offline", f"HTTP client error: {type(e).__name__}: {e}")
+        return ("offline_transient", f"HTTP client error: {type(e).__name__}", False)
 
 
 async def camera_status_loop() -> None:
     """Sonde périodiquement chaque caméra ; met à jour le statut réel en base +
-    enregistre les transitions online↔offline dans le journal diagnostic."""
+    enregistre les transitions online↔offline dans le journal diagnostic.
+
+    HYSTÉRÉSIS : 3 échecs consécutifs de probe avant de flipper online→offline
+    (évite les faux positifs sur blip HTTP transitoire vers go2rtc).
+
+    NE FAIT PLUS JAMAIS de register_camera_stream — c'était la source du bug
+    historique de churn qui déconnectait tous les consommateurs actifs.
+    """
     from datetime import datetime, timezone
     from diagnostics import record_disconnect, record_reconnect
+    from lifecycle import (
+        record as _lc_record,
+        record_probe_result,
+        reset_probe_counter,
+        get_probe_counter,
+    )
     await asyncio.sleep(15)  # laisser go2rtc / seeding démarrer
-    # Compteur de tentatives par caméra (pour la reconnect chain)
     reconnect_attempts: dict = {}
     while True:
         try:
             cams = await db.cameras.find({}, {"_id": 0}).to_list(1000)
             for cam in cams:
-                status, error_text = await _probe_status_once(cam)
+                cam_id = cam["id"]
+                raw_status, error_text, stream_missing = await _probe_status_once(cam)
+                # Résout le status effectif avec hystérésis
+                probe_ok = (raw_status == "online")
+                should_offline, fail_count = record_probe_result(cam_id, probe_ok, error_text)
+                if probe_ok:
+                    status = "online"
+                    _lc_record(cam_id, "status_probe_ok", reason="frame.jpeg valid",
+                               caller="camera_status_loop")
+                elif should_offline:
+                    status = "offline"
+                    _lc_record(cam_id, "status_offline_confirmed",
+                               reason=f"{fail_count} consecutive probe failures: {error_text}",
+                               caller="camera_status_loop",
+                               extra={"stream_missing": stream_missing})
+                else:
+                    # Blip transitoire — conserve l'ancien status en base
+                    status = cam.get("status", "unknown")
+                    _lc_record(cam_id, "status_probe_fail",
+                               reason=f"attempt {fail_count}/{3}: {error_text}",
+                               caller="camera_status_loop")
                 now = datetime.now(timezone.utc).isoformat()
                 previous = cam.get("status", "unknown")
                 changes = {"status": status}
                 if status == "online":
                     changes["last_seen"] = now
-                await db.cameras.update_one({"id": cam["id"]}, {"$set": changes})
+                await db.cameras.update_one({"id": cam_id}, {"$set": changes})
                 # Détecte les transitions et logue dans le journal diagnostic
                 if previous == "online" and status == "offline":
                     try:
                         await record_disconnect(cam, error_text=error_text, source="camera_status_loop")
-                        reconnect_attempts[cam["id"]] = 0
+                        reconnect_attempts[cam_id] = 0
                     except Exception:
                         logger.exception("record_disconnect a échoué (non bloquant)")
                 elif previous == "offline" and status == "offline":
-                    reconnect_attempts[cam["id"]] = reconnect_attempts.get(cam["id"], 0) + 1
+                    reconnect_attempts[cam_id] = reconnect_attempts.get(cam_id, 0) + 1
                 elif previous == "offline" and status == "online":
                     try:
-                        attempts = reconnect_attempts.pop(cam["id"], 1) or 1
-                        await record_reconnect(cam["id"], attempts=attempts)
+                        attempts = reconnect_attempts.pop(cam_id, 1) or 1
+                        await record_reconnect(cam_id, attempts=attempts)
+                        _lc_record(cam_id, "status_online_restored",
+                                   reason="probe OK after N failures", caller="camera_status_loop")
                     except Exception:
                         logger.exception("record_reconnect a échoué (non bloquant)")
         except Exception:
@@ -1017,12 +1168,19 @@ async def live_mjpeg(camera_id: str, request: Request,
     upstream_content_type = upstream.headers.get(
         "content-type", "multipart/x-mixed-replace;boundary=frame")
     client_ip = (request.client.host if request.client else "?")
+    # Trace du cycle de vie : ce consommateur vient de se connecter
+    from lifecycle import record as _lc_record
+    _lc_record(camera_id, "consumer_attached",
+               reason=f"live.mjpeg?hd={1 if want_hd else 0}",
+               caller=f"{user.get('email','?')}@{client_ip}",
+               extra={"src": src})
 
     async def relay():
         nonlocal client, upstream
         attempt = 0
         total_bytes = 0
         started_at = time.monotonic()
+        detach_reason = "unknown"
         try:
             while True:
                 try:
@@ -1035,8 +1193,9 @@ async def live_mjpeg(camera_id: str, request: Request,
                     logger.info("mjpeg %s: upstream EOF après %d octets (client=%s)",
                                 src, total_bytes, client_ip)
                     raise httpx.RemoteProtocolError("Upstream EOF")
-                except asyncio.CancelledError:
+                except (asyncio.CancelledError, GeneratorExit):
                     # Client browser a fermé la connexion — silencieux, normal.
+                    detach_reason = "client disconnect"
                     logger.debug("mjpeg %s: client %s parti (relayed %d octets en %.1fs)",
                                  src, client_ip, total_bytes, time.monotonic() - started_at)
                     raise
@@ -1046,6 +1205,7 @@ async def live_mjpeg(camera_id: str, request: Request,
                     # Upstream go2rtc/ffmpeg mort. Tenter reconnexion transparente.
                     attempt += 1
                     if attempt > _MJPEG_RECONNECT_MAX_ATTEMPTS:
+                        detach_reason = f"upstream lost, {attempt-1} retries exhausted ({type(exc).__name__})"
                         logger.warning(
                             "mjpeg %s: upstream perdu %d fois, abandon (client=%s, relayed=%d octets, err=%s)",
                             src, attempt, client_ip, total_bytes, type(exc).__name__)
@@ -1084,6 +1244,10 @@ async def live_mjpeg(camera_id: str, request: Request,
                 await client.aclose()
             except Exception:
                 pass
+            _lc_record(camera_id, "consumer_detached", reason=detach_reason,
+                       caller=f"{user.get('email','?')}@{client_ip}",
+                       extra={"bytes_relayed": total_bytes,
+                              "duration_s": round(time.monotonic() - started_at, 1)})
 
     # IMPORTANT : le boundary retourné par go2rtc doit être transmis intact au navigateur
     # (sinon Chrome/Firefox refusent d'afficher le MJPEG). On retransmet donc l'en-tête complet.

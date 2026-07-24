@@ -62,7 +62,7 @@ function OverlayCanvas({ cam, boxes, showOverlay }) {
   return <canvas ref={ref} className="absolute inset-0 w-full h-full pointer-events-none" data-testid="ai-overlay" />;
 }
 
-function Feed({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onToggleFocus, previewMode }) {
+function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onToggleFocus, previewMode }) {
   const [hover, setHover] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [webrtcFailed, setWebrtcFailed] = useState(false);
@@ -72,8 +72,11 @@ function Feed({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onToggleFoc
   //  - previewMode='webrtc' explicite ou 'auto' → tenter WebRTC
   //  - fallback MJPEG si WebRTC échoue (webrtcFailed=true)
   //  - MJPEG direct si l'utilisateur force
-  const wantWebRTC = online && previewMode !== "mjpeg" && !webrtcFailed;
+  const wantWebRTC = previewMode !== "mjpeg" && !webrtcFailed;
   // Reset reloadKey lors d'un changement de caméra OU d'un toggle HD/SD (force le rechargement du <img>).
+  // IMPORTANT : ne PAS dépendre de `online`/`cam?.status` ici — sinon on force un
+  // reload à chaque flip online↔offline, ce qui recrée la connexion MJPEG et
+  // provoque le cycle de reconnexion historique.
   useEffect(() => { setReloadKey((k) => k + 1); setWebrtcFailed(false); }, [cam?.id, hd, previewMode]);
   useEffect(() => () => { if (retryTimer.current) clearTimeout(retryTimer.current); }, []);
   const handleError = () => {
@@ -98,14 +101,16 @@ function Feed({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onToggleFoc
       title={cam ? (focused ? "Cliquez pour revenir à la mosaïque" : "Cliquez pour agrandir") : ""}
       data-testid="video-feed"
     >
-      {online ? (
+      {cam?.id ? (
         <>
+          {/* Player TOUJOURS monté (même si offline) — évite le remount destructeur qui
+             recrée MJPEG/WebRTC à chaque flip cam.status.  L'overlay "No Signal" se superpose. */}
           {usingWebRTC ? (
             <WebRTCPlayer cameraId={cam.id}
                             className="w-full h-full"
                             dataTestId="webrtc-player"
                             onError={(msg) => {
-                              console.warn(`WebRTC fallback → MJPEG (${cam.name}) :`, msg);
+                              console.warn(`[Camera ${cam.id}] player: WebRTC fallback → MJPEG :`, msg);
                               setWebrtcFailed(true);
                             }} />
           ) : (
@@ -116,10 +121,19 @@ function Feed({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onToggleFoc
             />
           )}
           {cam?.detect_enabled && <OverlayCanvas cam={cam} boxes={boxes} showOverlay={showOverlay} />}
+          {/* Overlay No Signal superposé — le player reste monté en dessous */}
+          {!online && (
+            <div className="absolute inset-0 flex items-center justify-center bg-[#0a0a0a]/85 pointer-events-none z-10" data-testid="feed-no-signal-overlay">
+              <div className="text-center">
+                <CamIcon size={24} className="mx-auto text-[#FF3333] mb-1" />
+                <span className="text-[10px] uppercase tracking-wider text-[#FF3333]">No Signal</span>
+              </div>
+            </div>
+          )}
         </>
       ) : (
         <div className="w-full h-full flex items-center justify-center bg-[#0a0a0a]">
-          <div className="text-center"><CamIcon size={24} className="mx-auto text-[#FF3333] mb-1" /><span className="text-[10px] uppercase tracking-wider text-[#FF3333]">{cam ? "No Signal" : "—"}</span></div>
+          <div className="text-center"><CamIcon size={24} className="mx-auto text-white/30 mb-1" /><span className="text-[10px] uppercase tracking-wider text-white/30">—</span></div>
         </div>
       )}
       <div className="absolute top-0 inset-x-0 flex items-center justify-between px-2 py-1 bg-gradient-to-b from-black/70 to-transparent">
@@ -164,6 +178,30 @@ function Feed({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onToggleFoc
     </div>
   );
 }
+
+// React.memo custom : évite les re-renders quand seule une prop non-visuelle change
+// (ex : cam.last_seen mis à jour à chaque tick camera_status_loop → sinon tous les
+// Feed re-render toutes les 20 s à cause du polling `/api/cameras`).
+// On re-render UNIQUEMENT si un champ pertinent pour l'affichage a changé.
+const Feed = React.memo(FeedInner, (prev, next) => {
+  // Comparaison rapide des props scalaires
+  if (prev.idx !== next.idx || prev.canPtz !== next.canPtz || prev.hd !== next.hd
+      || prev.showOverlay !== next.showOverlay || prev.focused !== next.focused
+      || prev.previewMode !== next.previewMode
+      || prev.onToggleFocus !== next.onToggleFocus) return false;
+  // Comparaison des propriétés utiles de la caméra (ignore `last_seen` etc.)
+  const a = prev.cam || {}; const b = next.cam || {};
+  if (a.id !== b.id) return false;
+  if (a.status !== b.status) return false;
+  if (a.name !== b.name) return false;
+  if (a.site_name !== b.site_name) return false;
+  if (a.resolution !== b.resolution) return false;
+  if (a.detect_enabled !== b.detect_enabled) return false;
+  if (a.ptz_enabled !== b.ptz_enabled) return false;
+  // aiState change souvent (2 s) — comparaison par référence suffit
+  if (prev.aiState !== next.aiState) return false;
+  return true;  // égal → skip re-render
+});
 
 function FocusTimeline({ cameraId, onSelect }) {
   const [events, setEvents] = useState([]);
