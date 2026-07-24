@@ -12,10 +12,10 @@ if not BASE_URL:
             if line.startswith('REACT_APP_BACKEND_URL='):
                 BASE_URL = line.split('=', 1)[1].strip().rstrip('/')
 
-ADMIN_EMAIL = "admin@mg-vms.com"
-ADMIN_PASSWORD = "Admin@2026"
-TECH_EMAIL = "tech@mg-vms.com"
-TECH_PASSWORD = "Tech@2026"
+ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "admin@mg-vms.com")
+ADMIN_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "Admin@2026")
+TECH_EMAIL = os.environ.get("TEST_TECH_EMAIL", "tech@mg-vms.com")
+TECH_PASSWORD = os.environ.get("TEST_TECH_PASSWORD", "Tech@2026")
 
 TEST_PLATES = ["TEST-AB123CD", "TEST-XY456ZZ", "TEST-PQ789RS", "TEST-BOM01AA"]
 

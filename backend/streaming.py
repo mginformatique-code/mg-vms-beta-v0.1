@@ -23,6 +23,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
+# ─── MJPEG proxy tuning (fix ERR_INCOMPLETE_CHUNKED_ENCODING) ─────────────
+# Cache _ensure_variants par caméra : évite l'appel HTTP go2rtc + resolve_pipeline
+# à chaque nouveau consommateur (thundering herd sous forte charge).
+_ENSURE_VARIANTS_TTL = 60.0  # secondes
+_ensure_variants_cache: dict[str, float] = {}
+_ensure_variants_locks: dict[str, asyncio.Lock] = {}
+
+# Politique de reconnexion transparente si le producteur ffmpeg go2rtc meurt.
+_MJPEG_RECONNECT_MAX_ATTEMPTS = 5
+_MJPEG_RECONNECT_BACKOFF_SEC = 1.5   # 1.5s, 3s, 4.5s, 6s, 7.5s
+_MJPEG_UPSTREAM_TIMEOUT = httpx.Timeout(15.0, read=None)  # connect=15, read illimité (stream)
+
 from auth import (
     JWT_ALGORITHM, allowed_sites, get_current_user, get_jwt_secret,
     has_permission, log_audit, require_role,
@@ -205,6 +217,26 @@ async def _ensure_variants(name: str) -> None:
                 logger.info("go2rtc: variante SD ajoutée à la volée pour %s (filter=%s)", name, sd_filter)
     except httpx.HTTPError as e:
         logger.warning("go2rtc: échec ensure_variants(%s) : %s", name, e)
+
+
+async def _ensure_variants_cached(name: str) -> None:
+    """Version cachée de `_ensure_variants` — throttle par caméra (TTL 60 s).
+
+    Fix pour `ERR_INCOMPLETE_CHUNKED_ENCODING` sous forte charge : évite d'exécuter
+    resolve_pipeline() + un aller-retour HTTP vers go2rtc à CHAQUE requête MJPEG.
+    Un verrou par caméra empêche N appelants parallèles de faire le même travail.
+    """
+    now = time.monotonic()
+    last = _ensure_variants_cache.get(name, 0.0)
+    if now - last < _ENSURE_VARIANTS_TTL:
+        return
+    lock = _ensure_variants_locks.setdefault(name, asyncio.Lock())
+    async with lock:
+        # Re-check après acquisition du verrou (double-checked locking)
+        if time.monotonic() - _ensure_variants_cache.get(name, 0.0) < _ENSURE_VARIANTS_TTL:
+            return
+        await _ensure_variants(name)
+        _ensure_variants_cache[name] = time.monotonic()
 
 
 async def sync_all_streams() -> None:
@@ -935,6 +967,28 @@ def _mjpeg_stream(camera_id: str, hd: bool = False) -> str:
 
 
 # ============ Proxys de flux authentifiés ============
+def _parse_mjpeg_boundary(content_type: str) -> bytes:
+    """Extrait le boundary MJPEG depuis le header content-type upstream (fallback = 'frame')."""
+    m = re.search(r"boundary=([^;\s]+)", content_type or "", re.IGNORECASE)
+    return (m.group(1) if m else "frame").encode("latin-1")
+
+
+async def _open_mjpeg_upstream(src: str) -> tuple[httpx.AsyncClient, httpx.Response]:
+    """Ouvre une connexion streaming vers go2rtc pour la source MJPEG demandée.
+
+    Retourne `(client, response)`. Le caller est responsable de leur fermeture.
+    Lève `HTTPException(502)` si go2rtc renvoie un statut != 200.
+    """
+    client = httpx.AsyncClient(timeout=_MJPEG_UPSTREAM_TIMEOUT)
+    req = client.build_request("GET", f"{GO2RTC_URL}/api/stream.mjpeg", params={"src": src})
+    upstream = await client.send(req, stream=True)
+    if upstream.status_code != 200:
+        await upstream.aclose()
+        await client.aclose()
+        raise HTTPException(502, "Flux indisponible")
+    return client, upstream
+
+
 @stream_router.get("/stream/{camera_id}/live.mjpeg")
 async def live_mjpeg(camera_id: str, request: Request,
                      hd: int = 0, user: dict = Depends(stream_user)):
@@ -943,35 +997,99 @@ async def live_mjpeg(camera_id: str, request: Request,
     Query param `hd=1` → variante HD (résolution native). Nécessite la permission
     `stream_hd` ; sinon rétrogradation silencieuse vers SD.
 
-    Si la variante demandée n'est pas encore enregistrée dans go2rtc (caméra créée
-    avant l'upgrade v2.13.0), elle est créée à la volée via `_ensure_variants`.
+    Robustesse (fix `ERR_INCOMPLETE_CHUNKED_ENCODING`) :
+    - Cache `_ensure_variants` (throttle 60 s par caméra).
+    - Attrape les erreurs upstream (ffmpeg producer mort, go2rtc restart…) et
+      **reconnecte de façon transparente** au flux go2rtc jusqu'à
+      `_MJPEG_RECONNECT_MAX_ATTEMPTS` tentatives avec backoff progressif.
+    - Termine silencieusement quand le client browser ferme la connexion
+      (`CancelledError`), sans stack trace parasite.
+    - Distingue disconnection client vs upstream mort dans les logs (diagnostic).
     """
     await _authorize_camera(user, camera_id)
     want_hd = bool(int(hd or 0)) and has_permission(user, "stream_hd")
     src = _mjpeg_stream(camera_id, hd=want_hd)
-    # Garantit que la variante HD/SD existe côté go2rtc (auto-migration)
-    await _ensure_variants(_stream_name(camera_id))
-    client = httpx.AsyncClient(timeout=httpx.Timeout(15, read=None))
-    req = client.build_request("GET", f"{GO2RTC_URL}/api/stream.mjpeg", params={"src": src})
-    upstream = await client.send(req, stream=True)
-    if upstream.status_code != 200:
-        await upstream.aclose()
-        await client.aclose()
-        raise HTTPException(502, "Flux indisponible")
+    # Garantit la variante côté go2rtc (throttled → 1 appel par caméra / 60 s)
+    await _ensure_variants_cached(_stream_name(camera_id))
+
+    # Première connexion upstream (peut lever 502 si go2rtc down → réponse propre)
+    client, upstream = await _open_mjpeg_upstream(src)
+    upstream_content_type = upstream.headers.get(
+        "content-type", "multipart/x-mixed-replace;boundary=frame")
+    client_ip = (request.client.host if request.client else "?")
 
     async def relay():
+        nonlocal client, upstream
+        attempt = 0
+        total_bytes = 0
+        started_at = time.monotonic()
         try:
-            async for chunk in upstream.aiter_bytes():
-                yield chunk
+            while True:
+                try:
+                    async for chunk in upstream.aiter_bytes():
+                        total_bytes += len(chunk)
+                        yield chunk
+                    # aiter_bytes est terminé sans exception → upstream a fermé
+                    # proprement (EOF). Tenter une reconnexion : le producer go2rtc
+                    # a peut-être été redémarré.
+                    logger.info("mjpeg %s: upstream EOF après %d octets (client=%s)",
+                                src, total_bytes, client_ip)
+                    raise httpx.RemoteProtocolError("Upstream EOF")
+                except asyncio.CancelledError:
+                    # Client browser a fermé la connexion — silencieux, normal.
+                    logger.debug("mjpeg %s: client %s parti (relayed %d octets en %.1fs)",
+                                 src, client_ip, total_bytes, time.monotonic() - started_at)
+                    raise
+                except (httpx.ReadError, httpx.RemoteProtocolError,
+                        httpx.ReadTimeout, httpx.ConnectError,
+                        httpx.WriteError, ConnectionResetError) as exc:
+                    # Upstream go2rtc/ffmpeg mort. Tenter reconnexion transparente.
+                    attempt += 1
+                    if attempt > _MJPEG_RECONNECT_MAX_ATTEMPTS:
+                        logger.warning(
+                            "mjpeg %s: upstream perdu %d fois, abandon (client=%s, relayed=%d octets, err=%s)",
+                            src, attempt, client_ip, total_bytes, type(exc).__name__)
+                        return
+                    backoff = _MJPEG_RECONNECT_BACKOFF_SEC * attempt
+                    logger.warning(
+                        "mjpeg %s: upstream perdu (%s) — reconnexion #%d dans %.1fs",
+                        src, type(exc).__name__, attempt, backoff)
+                    # Ferme l'ancien couple client/upstream
+                    try:
+                        await upstream.aclose()
+                    except Exception:
+                        pass
+                    try:
+                        await client.aclose()
+                    except Exception:
+                        pass
+                    await asyncio.sleep(backoff)
+                    # Rouvre une nouvelle connexion vers go2rtc
+                    try:
+                        client, upstream = await _open_mjpeg_upstream(src)
+                    except HTTPException as http_exc:
+                        logger.warning(
+                            "mjpeg %s: reconnexion #%d refusée par go2rtc (HTTP %s)",
+                            src, attempt, http_exc.status_code)
+                        continue  # retry (jusqu'à MAX_ATTEMPTS)
+                    # MJPEG frame-based : la concaténation d'un nouveau flux
+                    # est transparente pour le browser (le boundary aligne).
+                    logger.info("mjpeg %s: reconnexion #%d réussie", src, attempt)
         finally:
-            await upstream.aclose()
-            await client.aclose()
+            try:
+                await upstream.aclose()
+            except Exception:
+                pass
+            try:
+                await client.aclose()
+            except Exception:
+                pass
 
     # IMPORTANT : le boundary retourné par go2rtc doit être transmis intact au navigateur
     # (sinon Chrome/Firefox refusent d'afficher le MJPEG). On retransmet donc l'en-tête complet.
-    content_type = upstream.headers.get("content-type", "multipart/x-mixed-replace;boundary=frame")
-    return StreamingResponse(relay(), media_type=content_type,
-                              headers={"Cache-Control": "no-store, no-cache"})
+    return StreamingResponse(relay(), media_type=upstream_content_type,
+                              headers={"Cache-Control": "no-store, no-cache",
+                                       "X-Accel-Buffering": "no"})
 
 
 @stream_router.get("/stream/{camera_id}/frame.jpeg")
@@ -988,8 +1106,8 @@ async def frame_jpeg(camera_id: str, hd: int = 1, user: dict = Depends(stream_us
     await _authorize_camera(user, camera_id)
     want_hd = bool(int(hd or 0)) and has_permission(user, "stream_hd")
     name = _stream_name(camera_id)
-    # Garantit que les variantes HD/SD existent (auto-migration après upgrade)
-    await _ensure_variants(name)
+    # Garantit que les variantes HD/SD existent (auto-migration après upgrade, throttled)
+    await _ensure_variants_cached(name)
     if want_hd:
         # Priorité au flux natif (résolution originale). Fallback sur variante
         # MJPEG HD transcodée, puis SD en dernier recours.

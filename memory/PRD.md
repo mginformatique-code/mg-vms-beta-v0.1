@@ -1,5 +1,24 @@
 # MG-VMS — Product Requirements Document
 
+## Implemented (2026-07-24)
+- ✅ **Fix MJPEG `ERR_INCOMPLETE_CHUNKED_ENCODING` (2.16.2 — 2026-07-24)**
+  - **Cause racine identifiée** : `streaming.py::live_mjpeg` ne catchait pas les exceptions upstream (`httpx.ReadError`, `RemoteProtocolError`) quand le producteur ffmpeg de go2rtc mourait (OOM VRAM, CUDA reset, restart). L'exception remontait → `StreamingResponse` tronquée → Chrome affichait `ERR_INCOMPLETE_CHUNKED_ENCODING` + image noire. Aggravé par `_ensure_variants` invoqué à chaque requête (thundering herd sur go2rtc).
+  - **Fix appliqué (chirurgical, pas de réécriture)** dans `/app/backend/streaming.py` :
+    1. **Cache `_ensure_variants_cached()`** — throttle par caméra (TTL 60 s), lock async par caméra pour éviter la race. Diminue drastiquement les appels HTTP vers go2rtc + les `resolve_pipeline()`.
+    2. **Robustesse `relay()`** — catche explicitement `httpx.ReadError`, `RemoteProtocolError`, `ReadTimeout`, `ConnectError`, `ConnectionResetError`. Distingue `CancelledError` (client parti → log debug silencieux) des erreurs upstream (log warning).
+    3. **Reconnexion transparente au upstream** — si le ffmpeg producer meurt, retry jusqu'à 5x avec backoff progressif (1.5, 3, 4.5, 6, 7.5 s). MJPEG frame-based : la concaténation est transparente pour le browser (boundary auto-aligné).
+    4. **Header `X-Accel-Buffering: no`** ajouté pour désactiver le buffering intermédiaire nginx/proxy.
+  - **Tests sandbox validés** : single-client stream OK (2 fps, boundary + magic JPEG confirmés), 3 requêtes rapides consécutives → 1 seul appel `/api/streams` vers go2rtc (cache OK), client abandonné → cleanup silencieux sans stack trace.
+  - **À valider sur serveur GPU réel** : test 5 clients simultanés + `docker restart go2rtc` (doit reprendre auto) + `pkill ffmpeg cam_XXX` (doit se reconnecter).
+- ✅ **Audit sécurité (2026-07-24) — Rapport "Code Quality" du handoff = faux positifs**
+  - `exec()` allégué dans routers.py:995, recorder.py:81/299 → en réalité `asyncio.create_subprocess_exec()` (args tokenisés, safe).
+  - "Import dynamique" routers.py:1045 → en réalité `data.model_dump()` (Pydantic, safe).
+  - "Dépendance circulaire" auth.py↔notifications.py → import lazy dans une fonction (pattern standard Python).
+  - Anti-pattern `is True/False/const` → aucun trouvé.
+  - Aucun `eval()`, `os.system`, `shell=True` dans `/app/backend/*.py`.
+  - Seule amélioration mineure appliquée : credentials de test `tests/test_iter23_anpr_csv.py` déplacés en env vars (`TEST_ADMIN_EMAIL`, etc.) avec fallback aux valeurs actuelles.
+
+
 ## Implemented (2026-07)
 - ✅ **Phase 4 (suite) — Player WebRTC frontend (2.16.1 — 2026-07-23)**
   - **Objectif** : remplacer l'`<img>` MJPEG par un `<video>` HTML5 recevant du H.264 pass-through via WebRTC — latence 200-500 ms au lieu de 1-2 s, aucun transcodage go2rtc (donc 0 charge CPU/GPU serveur pour l'aperçu), aucun artefact MJPEG.
