@@ -1,5 +1,43 @@
 # MG-VMS — Product Requirements Document
 
+## Implemented (2026-07-24 · v2.20.0 — Fix production : ONVIF + prévisualisation + déconnexions cycliques)
+
+**Bugs utilisateur (prod)** : (1) ajout ONVIF cassé, (2) prévisualisation jamais correcte, (3) caméras qui se déconnectent trop souvent. 6 causes racines identifiées et corrigées :
+
+### A (P0) — Filtres `#hardware=cuda` envoyés à go2rtc sans GPU
+- `video_engine.resolve_pipeline` émettait `#hardware=cuda` dans les filtres des variantes MJPEG `_hd`/`_sd` dès que le **backend** détectait CUDA (depuis le passthrough GPU v2.18). Or ces ffmpeg tournent dans le **conteneur go2rtc** qui n'a ni runtime nvidia ni ffmpeg CUDA → transcodage MJPEG mort → aperçu noir + frame.jpeg KO en prod.
+- Fix : flag gaté derrière env `GO2RTC_FFMPEG_CUDA` (défaut `0`). Documenté dans `docker-compose.yml`.
+
+### B (P0) — frame_source (IA) se connectait DIRECTEMENT à la caméra
+- `ai_engine._sync_frame_source_workers` utilisait `cam.rtsp_url` (stocké **sans identifiants** en base) → boucle 401/restart avec backoff qui martelait la caméra + 2e session RTSP sur la caméra physique (limites de sessions Reolink & co → déconnexion des autres consommateurs).
+- Fix : URL TOUJOURS via le relais go2rtc `rtsp://go2rtc:8554/cam_{id}` (session caméra unique partagée viewers+recorder+IA). Codec lu depuis `cam["codec"]` (le champ `video_codec` n'existait pas).
+
+### C (P0) — Probe de statut invasif (frame.jpeg toutes les 30 s)
+- `_probe_status_once` forçait go2rtc à ouvrir une session RTSP on-demand + décodage H.265 vers la caméra physique toutes les 30 s → churn de sessions caméra + timeouts sous charge → flips online↔offline (« No Signal » cyclique).
+- Fix : probe **non-invasif** — (a) producteur go2rtc actif avec `bytes_recv` croissant → online (coût zéro) ; producteur actif mais bytes figés → échec transitoire (flux gelé) ; (b) producteur idle → simple TCP check `IP:port RTSP` (helper `_camera_tcp_target`, priorité hôte de l'URL RTSP). frame.jpeg conservé UNIQUEMENT pour les 2 caméras démo (générées localement). Hystérésis 3 échecs inchangée.
+
+### D (P1) — ONVIF : timeouts trop courts + erreurs opaques
+- `_onvif_probe` appelle GetStreamUri par profil séquentiellement — les caméras multi-profils dépassaient les timeouts 12/15/20 s → « délai dépassé » systématique. Tous montés à **25 s** (test-connectivity, create, update, auto-detect, onvif-probe).
+- Les messages d'erreur ONVIF n'exposaient que `type(e).__name__` → incluent désormais `str(e)[:160]` (ex. Fault « NotAuthorized », « time check failed ») pour un diagnostic prod réel.
+
+### E (P1) — Découverte WS-Discovery muette en Docker bridge
+- `POST /api/cameras/discover` retourne un champ `hint` quand 0 appareil : le multicast UDP ne traverse pas un réseau Docker bridge → utiliser l'ajout par IP directe ou `network_mode: host`. Affiché en jaune dans le dialog Scan ONVIF (`data-testid="onvif-discover-hint"`).
+
+### F (P1) — go2rtc.yaml `default_query` invalide
+- `"mp4&transport=tcp"` (v2.18) : « mp4 » excluait les pistes audio PCM (pcm_alaw courant sur caméras IP) des enregistrements, et « transport=tcp » n'a AUCUN effet sur les connexions sortantes vers les caméras (contrairement au commentaire). Corrigé → `"video&audio"` (défaut sain) + commentaire exact.
+
+### Testé (testing agent iteration_29 — 100 % backend 10/10 + 100 % frontend, 0 issue)
+- Caméra réelle créée → online en ~30 s via probe non-invasif, 1 seul `registering` (aucun churn), lifecycle `status_probe_ok · probe non-invasif`.
+- Soak 65 s : les démos restent online. MJPEG multipart valide, frame.jpeg OK.
+- `pipeline.mjpeg_filter_hd/sd` sans `hardware=cuda`. Discover hint OK. IA continue à détecter (demo-cam-002).
+
+### À valider en prod par l'utilisateur
+1. `git pull` puis `docker compose down && docker compose build backend frontend && docker compose up -d` (go2rtc relira aussi le nouveau `go2rtc.yaml`).
+2. Vérifier `docker logs mgvms-backend | grep stream_lifecycle` : plus de flips online↔offline cycliques.
+3. Ajout ONVIF : si erreur, le message contient maintenant la cause précise (la copier si besoin de support).
+4. Scan ONVIF : en Docker bridge, utiliser l'ajout par IP directe (le hint l'explique).
+
+
 ## Implemented (2026-07-24 · v2.19.0 — Logo MG-VMS + Reorg Extensions + Diag IA + Persistance journal)
 
 ### P1 — UI "Santé pipeline IA" dans Diagnostics
