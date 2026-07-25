@@ -1,53 +1,68 @@
 """Bootstrap : enregistre les plugins bundle sur le bus au démarrage.
 
-Appelé depuis `server.py` startup. Instancie les wrappers `builtin/` et les
-enregistre sur `plugin_manager.bus`. Idempotent — peut être appelé plusieurs
-fois (recharge chaude en dev).
+Appelé depuis `server.py` startup. Effectue :
+
+  1. **Loader dynamique** : découvre `/app/data/plugins/*/manifest.yaml` et
+     charge chaque plugin conforme (importlib + register sur le bus).
+  2. **Fallback bundle** : si un plugin officiel n'est pas trouvé sur disque
+     (installation minimale), fallback sur les wrappers `builtin/`.
+
+Idempotent — peut être appelé plusieurs fois (reload à chaud dev).
 """
 from __future__ import annotations
 
 import logging
 
 from .bus import bus
-from .context import PluginContext, GPUInfo
+from .context import PluginContext
+from .loader import loader
 from .builtin import YoloDetectionPlugin, FastAlprPlugin
 
 logger = logging.getLogger("plugin_bootstrap")
 
 _bootstrapped = False
 
+# Noms des plugins officiels obligatoires pour la démo v2.30
+REQUIRED_BUNDLE = ("yolo-detection", "fast-alpr")
+
 
 async def bootstrap_bundle():
-    """Enregistre les plugins officiels bundle sur le bus."""
+    """Bootstrap dynamique + fallback bundle."""
     global _bootstrapped
     if _bootstrapped:
         return
 
-    # yolo-detection
-    yolo = YoloDetectionPlugin()
-    yolo_ctx = PluginContext(
-        plugin_name="yolo-detection",
-        version=yolo.version,
-        capabilities=["camera.frame.read", "event.write"],
-    )
+    # 1. Loader dynamique — parse tous les manifests présents
     try:
-        await yolo.on_load(yolo_ctx)
+        await loader.discover_and_load_all()
     except Exception as e:  # pragma: no cover
-        logger.warning("bootstrap yolo on_load err=%s", e)
-    bus.register("yolo-detection", yolo, order=10)
+        logger.warning("bootstrap.loader_error err=%s", e)
 
-    # fast-alpr
-    alpr = FastAlprPlugin()
-    alpr_ctx = PluginContext(
-        plugin_name="fast-alpr",
-        version=alpr.version,
-        capabilities=["camera.frame.read", "event.write"],
-    )
-    try:
-        await alpr.on_load(alpr_ctx)
-    except Exception as e:  # pragma: no cover
-        logger.warning("bootstrap alpr on_load err=%s", e)
-    bus.register("fast-alpr", alpr, order=20)
+    # 2. Fallback pour les plugins officiels absents du filesystem
+    for name in REQUIRED_BUNDLE:
+        if any(e.name == name for e in bus.list_entries()):
+            continue  # déjà chargé par le loader
+        logger.info("bootstrap.fallback_builtin name=%s (manifest absent, wrapper interne)", name)
+        if name == "yolo-detection":
+            inst = YoloDetectionPlugin()
+            order = 10
+        elif name == "fast-alpr":
+            inst = FastAlprPlugin()
+            order = 20
+        else:  # pragma: no cover
+            continue
+        ctx = PluginContext(
+            plugin_name=name,
+            version=inst.version,
+            capabilities=["camera.frame.read", "event.write"],
+        )
+        try:
+            await inst.on_load(ctx)
+        except Exception as e:  # pragma: no cover
+            logger.warning("bootstrap.on_load_error name=%s err=%s", name, e)
+        bus.register(name, inst, order=order)
 
     _bootstrapped = True
-    logger.info("plugin_bootstrap.done registered=%s", [e.name for e in bus.list_entries()])
+    logger.info("plugin_bootstrap.done registered=%s dynamic=%s",
+                [e.name for e in bus.list_entries()],
+                [p["name"] for p in loader.loaded() if p["loaded"]])

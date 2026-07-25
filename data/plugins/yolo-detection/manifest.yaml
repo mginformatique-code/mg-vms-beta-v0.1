@@ -1,0 +1,38 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: yolo-detection
+  displayName: "YOLO Object Detection"
+  version: "1.0.0-preview"
+  description: "Détection d'objets temps-réel via YOLOv11 (CPU/GPU). Wrapper du moteur intégré ai_engine, isolable en plugin autonome en v3.0."
+  author: "MG-VMS Team <plugins@mg-vms.io>"
+  homepage: "https://plugins.mg-vms.io/yolo-detection"
+  license: "MIT"
+  categories: [ai, detection]
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: YoloDetectionPlugin
+  interface: FrameAnalyzer
+  compatibility:
+    mgvms_core: ">=2.30.0,<4.0.0"
+    platforms: [linux/amd64, linux/arm64]
+  capabilities:
+    - camera.frame.read
+    - event.write
+    - config.read
+  resources:
+    cpu_cores: 1
+    ram_mb: 512
+    gpu: optional
+    vram_mb: 1024
+    disk_mb: 200
+  dependencies:
+    plugins: []
+    system: ["ffmpeg>=5.0"]
+  config_schema: config/schema.json
+  cameras:
+    scope: per-camera
+    default_enabled: false
+  bus:
+    order: 10

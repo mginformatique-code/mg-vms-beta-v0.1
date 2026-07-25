@@ -842,31 +842,16 @@ async def diagnostics_ai_health(user: dict = Depends(require_permission("view_li
     return get_ai_health()
 
 
-@api_router.get("/plugins")
-async def list_plugins(user: dict = Depends(require_permission("view_live"))):
-    """Liste des plugins installés (Preview NG v2.30 · roadmap chantier A).
+@api_router.get("/plugins/registry")
+async def list_plugins_registry(user: dict = Depends(require_permission("view_live"))):
+    """Registre déclaratif du bundle NG (Preview NG v2.30 · chantier A).
 
-    Endpoint proof-of-concept de la Plateforme de plugins (chapitre 11).
-    En v2.30 : les 6 plugins officiels bundle sont exposés comme VUES sur le
-    code existant (`ai_engine`, `notifications`), avec état synchronisé depuis
-    `_ai_health`. En v3.0 : chargement dynamique manifest YAML + sandbox.
-
-    Réponse (extrait) :
-    ```json
-    {
-      "plugins": [
-        {"name": "yolo-detection", "state": "running", "interface": "FrameAnalyzer", ...},
-        {"name": "fast-alpr", "state": "running", "interface": "PlateRecognizer", ...},
-        ...
-      ],
-      "core_version": "2.30.0-preview-ng",
-      "plugin_manager_version": "0.1.0"
-    }
-    ```
+    **Note** : différent du legacy `GET /api/plugins` (`plugins.py`) qui liste
+    les plugins actifs de l'ancien modèle. Cet endpoint expose le nouveau
+    catalogue Plugin Manager (chapitre 11) synchronisé avec `_ai_health`.
     """
     from plugin_manager import registry
     from ai_engine import get_ai_health
-    # Sync l'état réel des modèles IA dans les plugins bundle
     registry.sync_from_ai_health(get_ai_health())
     return {
         "plugins": registry.list_plugins(),
@@ -875,13 +860,9 @@ async def list_plugins(user: dict = Depends(require_permission("view_live"))):
     }
 
 
-@api_router.get("/plugins/{name}")
-async def get_plugin(name: str, user: dict = Depends(require_permission("view_live"))):
-    """Détail d'un plugin (Preview NG v2.30).
-
-    Retourne l'info complète du plugin. En v3.0 : + logs, métriques temps-réel,
-    historique installations, dépendances.
-    """
+@api_router.get("/plugins/registry/{name}")
+async def get_plugin_registry(name: str, user: dict = Depends(require_permission("view_live"))):
+    """Détail d'un plugin du registre NG (Preview NG v2.30)."""
     from plugin_manager import registry
     from ai_engine import get_ai_health
     registry.sync_from_ai_health(get_ai_health())

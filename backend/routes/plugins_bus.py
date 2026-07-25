@@ -75,6 +75,35 @@ async def bus_disable(name: str, user: dict = Depends(require_permission("techni
     return {"name": name, "enabled": False}
 
 
+@plugins_bus_router.get("/plugins/loader")
+async def loader_status(user: dict = Depends(require_permission("view_live"))):
+    """Plugins découverts par le loader dynamique (manifest YAML).
+
+    Retourne pour chaque plugin :
+      - `loaded` : true si register() a réussi
+      - `error` : détail si le chargement a échoué (isolation — le core continue)
+      - `has_config_schema` : true si un `config/schema.json` est fourni
+
+    Endpoint utilisé par la page Plugins NG pour distinguer les plugins
+    chargés dynamiquement (avec manifest) des wrappers builtin fallback.
+    """
+    from plugin_manager.loader import loader as pl
+    return {
+        "plugins_dir": str(pl.plugins_dir),
+        "loaded": pl.loaded(),
+    }
+
+
+@plugins_bus_router.get("/plugins/loader/{name}/schema")
+async def loader_config_schema(name: str, user: dict = Depends(require_permission("view_live"))):
+    """Retourne le JSON Schema de configuration d'un plugin chargé dynamiquement."""
+    from plugin_manager.loader import loader as pl
+    schema = pl.get_config_schema(name)
+    if schema is None:
+        raise HTTPException(status_code=404, detail=f"Aucun schéma pour plugin '{name}'")
+    return schema
+
+
 # ─────────────────────── POLICY ───────────────────────
 
 @plugins_bus_router.get("/plugins/policy")

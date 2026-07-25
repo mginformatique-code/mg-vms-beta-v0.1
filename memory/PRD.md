@@ -40,6 +40,12 @@ Refonte de MG-VMS vers une **plateforme plugin-oriented** (style Home Assistant)
 - **[NEW]** Endpoints `/api/v1/plugins/bus/*` + `/policy/*` + `/test/multi-anpr`
 - **[NEW]** Bootstrap plugin bundle au startup (yolo-detection + fast-alpr)
 - **[NEW]** Suite pytest `tests/test_multi_plugin.py` — 11 tests OK
+- **[NEW]** Plugin YOLO isolé `/app/data/plugins/yolo-detection/` avec manifest YAML + config schema JSON + plugin.py + requirements.txt
+- **[NEW]** Loader dynamique `plugin_manager/loader.py` — découverte manifest, validation, import isolé (importlib.util), fallback builtin si absent
+- **[NEW]** Endpoints `/api/plugins/loader` + `/api/plugins/loader/{name}/schema`
+- **[NEW]** Frontend `PluginManagerNG.jsx` intégré dans `/plugins` — bus runtime, politique multi-ANPR, panel test avec mocks injectables
+- **[NEW]** `/api/plugins/registry` (renommage NG registry pour éviter conflit avec legacy `/api/plugins`)
+- **[NEW]** Suite pytest `tests/test_plugin_loader.py` — 4 tests OK
 
 ### CHANGELOG (session précédente)
 - Fix régression IA (retry, découplage YOLO/ALPR, plus de suicide loop)
@@ -51,12 +57,13 @@ Refonte de MG-VMS vers une **plateforme plugin-oriented** (style Home Assistant)
 - URL versioning `/api/v1/` (middleware alias)
 
 ### ROADMAP prioritaire
-- **P0** : ✅ Multi-plugin ANPR/Tracking (fait — cette session)
-- **P1** : Modulariser `routers.py` (1700+ lignes) → `/app/backend/routes/*.py`
-- **P1** : Extraire YOLO de `ai_engine.py` en plugin isolé `/data/plugins/yolo-detection/`
-- **P1** : UI Plugin Manager (Frontend Next Gen — page `/plugins` avec bus status + policy)
+- **P0** : ✅ Multi-plugin ANPR/Tracking (fait — session Feb 2026)
+- **P1** : ✅ Extraire YOLO en plugin isolé `/app/data/plugins/yolo-detection/` (fait — manifest YAML + loader dynamique + config schema)
+- **P1** : ✅ UI Plugin Manager NG (fait — `PluginManagerNG.jsx` intégrée dans `/plugins`)
+- **P1** : Modulariser `routers.py` (1700+ lignes) → `/app/backend/routes/*.py` par domaine
+- **P1** : Extraire fast-alpr, notifications Discord/Telegram/SMTP en plugins isolés `/data/plugins/{fast-alpr,discord-notifier,...}/`
 - **P2** : Mode Installateur (wizard 10-15 min)
 - **P2** : Marketplace ecosystem (site + review process)
 - **P2** : SDK Python (`mgvms-plugin-sdk`) publiable pip
 - **P2** : Sandboxing sub-process + container
-- **P2** : Manifest YAML + loader dynamique
+- **P2** : Auto-form React (react-jsonschema-form) à partir du config_schema JSON exposé par le loader

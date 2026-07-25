@@ -7,6 +7,7 @@ import {
   CheckCircle2, XCircle, AlertTriangle, PowerOff, RefreshCw, Clock,
 } from "lucide-react";
 import { toast } from "sonner";
+import PluginManagerNG from "@/pages/PluginManagerNG";
 
 const ICONS = {
   anpr: ScanLine, ai_detection: Brain, tracking: Activity, face_recognition: ScanFace,
@@ -124,6 +125,9 @@ export default function Plugins() {
           );
         })}
       </div>
+
+      {/* Plugin Manager NG (Preview) — bus, policy multi-ANPR, test panel */}
+      <PluginManagerNG />
     </div>
   );
 }
