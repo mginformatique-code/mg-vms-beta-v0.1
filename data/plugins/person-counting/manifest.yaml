@@ -13,7 +13,7 @@ spec:
   runtime: python
   entrypoint: plugin.py
   className: PersonCountingPlugin
-  interface: FrameAnalyzer
+  interface: PipelineConsumer
   compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
   capabilities: [camera.frame.read, event.write]
   resources: {cpu_cores: 0.5, ram_mb: 128, gpu: none, disk_mb: 20}

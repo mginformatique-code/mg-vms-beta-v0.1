@@ -3,23 +3,10 @@
   "title": "Comptage de véhicules",
   "type": "object",
   "properties": {
-    "enabled_for_demo": {
-      "type": "boolean",
-      "default": false,
-      "title": "Activer la démo"
-    },
-    "sensitivity": {
-      "type": "number",
-      "default": 0.5,
-      "minimum": 0.0,
-      "maximum": 1.0,
-      "title": "Sensibilité de détection"
-    },
-    "min_confidence": {
-      "type": "number",
-      "default": 0.6,
-      "minimum": 0.0,
-      "maximum": 1.0
+    "counting_line": {
+      "type": "array",
+      "title": "Ligne de comptage véhicules",
+      "default": [[0, 300], [640, 300]]
     }
   }
 }

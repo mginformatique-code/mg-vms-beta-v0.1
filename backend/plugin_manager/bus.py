@@ -25,7 +25,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .interfaces import FrameAnalyzer, PlateRecognizer, EventConsumer, Tracker, Segmenter, Frame, MGVMSEvent
+from .interfaces import FrameAnalyzer, PlateRecognizer, EventConsumer, Tracker, Segmenter, PipelineConsumer, Frame, MGVMSEvent, PipelineResult
 
 logger = logging.getLogger("plugin_bus")
 
@@ -89,6 +89,8 @@ class PluginBus:
             iface = "Tracker"
         elif isinstance(instance, Segmenter):
             iface = "Segmenter"
+        elif isinstance(instance, PipelineConsumer):
+            iface = "PipelineConsumer"
         elif isinstance(instance, FrameAnalyzer):
             iface = "FrameAnalyzer"
         elif isinstance(instance, EventConsumer):
@@ -248,6 +250,117 @@ class PluginBus:
             return_exceptions=False,
         )
         return [(e.name, r) for e, r in zip(entries, results)]
+
+    # ── Pipeline chaîné Detector → Tracker → Segmenter → Business ─────
+
+    async def dispatch_pipeline(
+        self,
+        frame: Frame,
+        camera_config: Optional[dict] = None,
+        *,
+        run_segmentation: bool = False,
+        run_business: bool = True,
+        emit_events: bool = False,
+        timeout_s: Optional[float] = None,
+    ) -> PipelineResult:
+        """Enchaîne détection → tracking → segmentation → consommateurs métier.
+
+        Étapes :
+          1. `FrameAnalyzer` en parallèle → agrège toutes les detections
+          2. `Tracker` en parallèle avec les detections → agrège les tracks
+             (chaque tracker maintient son propre état, on garde les tracks
+              du 1er tracker actif comme référence — les autres tournent
+              en shadow mode pour comparaison)
+          3. `Segmenter` en parallèle (optionnel, coûteux)
+          4. `PipelineConsumer` en parallèle avec le résultat pipeline
+          5. Si `emit_events=True`, dispatche les événements produits vers
+             les `EventConsumer` (Telegram, Discord, SMTP...)
+
+        Le résultat est un `PipelineResult` unifié.
+        """
+        cfg = camera_config or {}
+        result = PipelineResult(
+            camera_id=frame.camera_id,
+            timestamp=frame.timestamp,
+        )
+        timing = {}
+
+        # ── 1. Detection ────────────────────────────────
+        t = time.perf_counter()
+        det_results = await self.dispatch_frame(frame, cfg, timeout_s=timeout_s)
+        timing["detection_ms"] = int((time.perf_counter() - t) * 1000)
+        result.plugins_used["detectors"] = [n for n, _ in det_results]
+        for _name, ar in det_results:
+            if ar is not None and hasattr(ar, "detections"):
+                result.detections.extend(ar.detections)
+
+        # ── 2. Tracking ─────────────────────────────────
+        t = time.perf_counter()
+        tracker_entries = self.active("Tracker")
+        result.plugins_used["trackers"] = [e.name for e in tracker_entries]
+        if tracker_entries and result.detections:
+            tr_results = await asyncio.gather(
+                *[self._call_one(e, lambda inst, f=frame, d=result.detections: inst.track(f, d),
+                                 timeout_s) for e in tracker_entries],
+                return_exceptions=False,
+            )
+            # Prend les tracks du 1er tracker (ordre order asc). Les autres
+            # tournent quand même — leur état interne est mis à jour.
+            for r in tr_results:
+                if r is not None and hasattr(r, "tracks") and r.tracks:
+                    result.tracks = r.tracks
+                    break
+        timing["tracking_ms"] = int((time.perf_counter() - t) * 1000)
+
+        # ── 3. Segmentation (opt-in, coûteux) ──────────
+        if run_segmentation:
+            t = time.perf_counter()
+            seg_entries = self.active("Segmenter")
+            result.plugins_used["segmenters"] = [e.name for e in seg_entries]
+            if seg_entries:
+                seg_results = await asyncio.gather(
+                    *[self._call_one(e, lambda inst, f=frame, c=cfg: inst.segment(f, c),
+                                     timeout_s) for e in seg_entries],
+                    return_exceptions=False,
+                )
+                for r in seg_results:
+                    if r is not None and hasattr(r, "masks"):
+                        result.masks.extend(r.masks)
+            timing["segmentation_ms"] = int((time.perf_counter() - t) * 1000)
+
+        # ── 4. Business Consumers ──────────────────────
+        if run_business:
+            t = time.perf_counter()
+            biz_entries = self.active("PipelineConsumer")
+            result.plugins_used["business"] = [e.name for e in biz_entries]
+            if biz_entries:
+                biz_results = await asyncio.gather(
+                    *[self._call_one(e, lambda inst, f=frame, p=result: inst.consume(f, p),
+                                     timeout_s) for e in biz_entries],
+                    return_exceptions=False,
+                )
+                for name, events in zip([e.name for e in biz_entries], biz_results):
+                    if events:
+                        for ev in events:
+                            if isinstance(ev, dict):
+                                ev = {**ev, "source": name}
+                                result.business_events.append(ev)
+            timing["business_ms"] = int((time.perf_counter() - t) * 1000)
+
+        # ── 5. Emit events (optionnel) ─────────────────
+        if emit_events and result.business_events:
+            from .interfaces import MGVMSEvent
+            for be in result.business_events:
+                event = MGVMSEvent(
+                    type=be.get("type", "business.event"),
+                    camera_id=frame.camera_id,
+                    timestamp=frame.timestamp,
+                    data=be,
+                )
+                await self.dispatch_event(event, timeout_s=timeout_s)
+
+        result.timing_ms = timing
+        return result
 
 
 # Singleton

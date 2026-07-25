@@ -185,6 +185,115 @@ async def get_install_status(name: str, user: dict = Depends(require_permission(
     return job
 
 
+# ─────────────────────── PIPELINE (Detector → Tracker → Segmenter → Business) ────
+
+def _serialize_pipeline(pr) -> dict:
+    """Sérialise un PipelineResult pour JSON."""
+    return {
+        "camera_id": pr.camera_id,
+        "timestamp": pr.timestamp,
+        "detections": [
+            {"label": d.label, "label_fr": getattr(d, "label_fr", None),
+             "confidence": d.confidence, "bbox": list(d.bbox),
+             "track_id": getattr(d, "track_id", None)}
+            for d in pr.detections
+        ],
+        "tracks": [
+            {"track_id": t.track_id, "label": t.label,
+             "confidence": t.confidence, "bbox": list(t.bbox),
+             "age": t.age}
+            for t in pr.tracks
+        ],
+        "masks": [
+            {"label": m.label, "confidence": m.confidence,
+             "bbox": list(m.bbox), "area_px": m.area_px}
+            for m in pr.masks
+        ],
+        "business_events": pr.business_events,
+        "timing_ms": pr.timing_ms,
+        "plugins_used": pr.plugins_used,
+    }
+
+
+@plugins_bus_router.post("/plugins/pipeline/test")
+async def pipeline_test(
+    payload: dict = Body(default={}),
+    user: dict = Depends(require_permission("technician")),
+):
+    """Exécute un cycle pipeline complet sur une frame de test.
+
+    Body :
+    ```json
+    {
+      "run_segmentation": false,
+      "run_business": true,
+      "emit_events": false,
+      "detections_seed": [
+        {"label":"person","confidence":0.9,"bbox":[100,100,200,300]},
+        {"label":"car","confidence":0.85,"bbox":[300,150,500,250]}
+      ]
+    }
+    ```
+
+    Si `detections_seed` fourni, il court-circuite les FrameAnalyzers (utile
+    pour tester Tracker+Business sans avoir de modèle YOLO chargé). Sinon
+    utilise la vraie chaîne complète sur une frame noire 640×480.
+    """
+    import numpy as np
+    from datetime import datetime, timezone
+    from plugin_manager import bus, Frame
+    from plugin_manager.interfaces import Detection
+
+    arr = np.zeros((480, 640, 3), dtype=np.uint8)
+    frame = Frame(
+        camera_id=payload.get("camera_id", "test-pipeline"),
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        numpy_bgr=arr, width=640, height=480,
+    )
+
+    seed = payload.get("detections_seed")
+    if seed:
+        # Simule une détection en injectant directement dans le pipeline
+        # via un plugin FrameAnalyzer temporaire.
+        from plugin_manager.interfaces import FrameAnalyzer, AnalysisResult
+        class _SeedAnalyzer(FrameAnalyzer):
+            name = "__pipeline_seed"
+            version = "test"
+            async def analyze(self, frame, camera_config):
+                dets = [Detection(
+                    label=d.get("label", "?"),
+                    label_fr=d.get("label_fr"),
+                    confidence=float(d.get("confidence", 0.0)),
+                    bbox=tuple(d.get("bbox", (0, 0, 0, 0))),
+                ) for d in seed]
+                return AnalysisResult(detections=dets, timing_ms=0)
+        seed_analyzer = _SeedAnalyzer()
+        # Registre temporaire — désactive les vrais detectors pendant le test
+        real_fa = {e.name: e.enabled for e in bus.list_entries("FrameAnalyzer")}
+        for name in real_fa:
+            bus.set_enabled(name, False)
+        bus.register("__pipeline_seed", seed_analyzer, order=1)
+        try:
+            pr = await bus.dispatch_pipeline(
+                frame,
+                run_segmentation=bool(payload.get("run_segmentation", False)),
+                run_business=bool(payload.get("run_business", True)),
+                emit_events=bool(payload.get("emit_events", False)),
+            )
+        finally:
+            bus.unregister("__pipeline_seed")
+            for name, en in real_fa.items():
+                bus.set_enabled(name, en)
+    else:
+        pr = await bus.dispatch_pipeline(
+            frame,
+            run_segmentation=bool(payload.get("run_segmentation", False)),
+            run_business=bool(payload.get("run_business", True)),
+            emit_events=bool(payload.get("emit_events", False)),
+        )
+    return _serialize_pipeline(pr)
+
+
 # ─────────────────────── POLICY ───────────────────────
 
 @plugins_bus_router.get("/plugins/policy")

@@ -166,3 +166,30 @@ class Segmenter(Plugin):
     @abstractmethod
     async def segment(self, frame: Frame, camera_config: dict) -> SegmentationResult:
         ...
+
+
+# ── Pipeline result (session 5) ────────────────────────────────────
+
+@dataclass
+class PipelineResult:
+    """Résultat d'un cycle pipeline complet Detector→Tracker→Segmenter→Business."""
+    camera_id: Optional[str] = None
+    timestamp: Optional[str] = None
+    detections: list = field(default_factory=list)           # list[Detection]
+    tracks: list = field(default_factory=list)               # list[Track]
+    masks: list = field(default_factory=list)                # list[SegmentMask]
+    business_events: list = field(default_factory=list)      # list[dict]
+    timing_ms: dict = field(default_factory=dict)            # {"detection": 12, "tracking": 3, "segmentation": 50}
+    plugins_used: dict = field(default_factory=dict)         # {"detectors": [...], "trackers": [...], ...}
+
+
+class PipelineConsumer(Plugin):
+    """Plugin métier qui consomme le résultat complet d'un pipeline.
+
+    Exemples : person-counting, vehicle-counting, occupancy, fire-detection.
+    Reçoit le PipelineResult déjà rempli avec detections + tracks + masks, et
+    retourne 0..N événements métier (dict JSON-sérialisable).
+    """
+    @abstractmethod
+    async def consume(self, frame: Frame, pipeline: PipelineResult) -> list:
+        """Retourne une liste d'événements métier `{type, severity, message, data}`."""

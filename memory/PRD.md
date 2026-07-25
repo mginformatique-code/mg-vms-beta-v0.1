@@ -33,27 +33,25 @@ Refonte de MG-VMS vers une **plateforme plugin-oriented** (style Home Assistant)
 
 ### CHANGELOG (Feb 2026 — session courante)
 - **[NEW]** PluginBus + 4 politiques fusion ANPR + PolicyStore + loader dynamique
-- **[NEW]** **49 plugins** répartis en **11 catégories** :
-  - `object-detection` (8) — YOLOv11, YOLOv8, YOLO-NAS, RT-DETR, EfficientDet, OpenVINO, ONNX-Runtime, TensorRT
-  - `tracking` (5) — ByteTrack, BoTSORT, DeepSORT, StrongSORT, OCSORT
-  - `segmentation` (3) — SAM2, Detectron2, Mask R-CNN
-  - `anpr` (11) — fast-alpr, plate-recognizer, openalpr, codeproject-ai, azure-vision, google-vision, paddle-ocr, easyocr, tesseract, opencv-ocr, custom-plugin-template
-  - `notifications` (3) — Telegram (impl. réelle), Discord (impl. réelle webhook), SMTP (impl. réelle STARTTLS)
-  - `counting` (3) — Person, Vehicle, Occupancy
-  - `parking` (1) — Parking Manager (libre/occupée/temps)
-  - `security` (5) — Smoke, Fire, Weapon, Fight, Fall
-  - `ppe` (4) — Casque, Gilet, Gants, Lunettes
-  - `commerce` (3) — Heatmap, Files d'attente, Dwell time
-  - `agriculture` (3) — Animaux, Oiseaux, Intrusion
-- **[NEW]** 2 nouvelles interfaces plugin : `Tracker` (méthode `track()`) et `Segmenter` (méthode `segment()`) avec types `Track`/`SegmentMask`/`TrackingResult`/`SegmentationResult`
-- **[NEW]** Bus auto-détecte les 5 interfaces (`FrameAnalyzer`, `PlateRecognizer`, `EventConsumer`, `Tracker`, `Segmenter`)
-- **[NEW]** Frontend `PluginManagerNG` — 11 GROUP_META avec couleurs/descriptions/labels FR
-- **[NEW]** Sort ordonné par catégorie (Object Detection → Tracking → Segmentation → ANPR → Notifications → Counting → Parking → Security → PPE → Commerce → Agriculture)
-- **[NEW]** Notifications avec vraies implémentations HTTP (Telegram Bot API, Discord Webhook, SMTP STARTTLS)
-- **[NEW]** Système d'états `ready`/`not_configured`/`missing_dependency`/`error`/`disabled` + config store persistant + hot reload
-- **[NEW]** Bouton "Installer les deps" + `--no-deps` par défaut (protection env)
-- **[NEW]** Générateurs Python `/tmp/gen_object_detection.py` + `/tmp/gen_all_categories.py`
-- **[NEW]** Suites pytest — **21/21 OK**
+- **[NEW]** **49 plugins** répartis en **11 catégories**
+- **[NEW]** 2 nouvelles interfaces `Tracker` + `Segmenter`
+- **[NEW]** **Pipeline chaîné `bus.dispatch_pipeline()`** : Detector → Tracker → Segmenter → PipelineConsumer → EventConsumer (opt-in)
+- **[NEW]** Interface `PipelineConsumer` avec méthode `consume(frame, PipelineResult) → list[event]`
+- **[NEW]** `PipelineResult` unifié (detections + tracks + masks + business_events + timing par étape + plugins_used)
+- **[NEW]** Endpoint `POST /api/plugins/pipeline/test` avec `detections_seed` (test sans caméra)
+- **[NEW]** **Vraies implémentations Tracker** : ByteTrack + BoT-SORT via `ultralytics.trackers` (BYTETracker/BOTSORT réels)
+- **[NEW]** **Vraie implémentation Segmenter** : Mask R-CNN via `torchvision.models.detection.maskrcnn_resnet50_fpn`
+- **[NEW]** **7 plugins métier réels PipelineConsumer** :
+  - `person-counting` : traversée de ligne + count in/out + occupancy
+  - `vehicle-counting` : par type (car/truck/bus/moto/vélo)
+  - `occupancy` : polygone de zone + capacité max + alerte over-capacity
+  - `fire-detection` : filtre label fire/flame + cooldown alerte
+  - `smoke-detection` : filtre label smoke + cooldown
+  - `weapon-detection` : filtre label knife/gun/pistol/rifle → CRITICAL
+  - `fall-detection` : heuristique aspect ratio + persistance (≥2s allongé) + hystérésis
+- **[NEW]** Bus dispatch pour `Tracker`/`Segmenter`/`PipelineConsumer` en parallèle
+- **[NEW]** Notifications Telegram/Discord/SMTP (vraies impl HTTP)
+- **[NEW]** Suites pytest — **24/24 OK** (test_pipeline_chain.py ajouté, 3 tests pipeline)
 
 ### CHANGELOG (session précédente)
 - Fix régression IA (retry, découplage YOLO/ALPR, plus de suicide loop)

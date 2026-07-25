@@ -1,46 +1,46 @@
-"""Plugin métier — Détection de fumée.
-
-Consomme les frames + détections upstream (via bus) et retourne des
-événements/analyses métier. En v2.30 : squelette. Enable la démo dans
-la config pour tester le pipeline.
-"""
+"""Smoke Detection — écoute les détections upstream avec label ∈ SMOKE_LABELS."""
 from __future__ import annotations
-import time
-from plugin_manager.interfaces import FrameAnalyzer, Frame, AnalysisResult, Detection
+from plugin_manager.interfaces import PipelineConsumer, Frame, PipelineResult
+
+SMOKE_LABELS = {"smoke", "fumée", "fumee"}
 
 
-class SmokeDetectionPlugin(FrameAnalyzer):
+class SmokeDetectionPlugin(PipelineConsumer):
     name = "smoke-detection"
-    version = "1.0.0"
+    version = "2.0.0"
 
     async def on_load(self, ctx) -> None:
         self._ctx = ctx
         cfg = ctx.config or {}
-        if not cfg.get("enabled_for_demo"):
-            ctx.set_state("not_configured", "Activer la démo dans la config ou brancher un modèle propriétaire")
-        else:
-            ctx.set_state("ready")
+        self._min_conf = float(cfg.get("min_confidence", 0.55))
+        self._cooldown_s = float(cfg.get("cooldown_seconds", 60))
+        self._last_alert = 0.0
+        ctx.set_state("ready")
 
     async def on_config_change(self, new_config: dict) -> None:
-        if not (new_config or {}).get("enabled_for_demo"):
-            self._ctx.set_state("not_configured", "Démo désactivée")
-        else:
-            self._ctx.set_state("ready")
+        cfg = new_config or {}
+        self._min_conf = float(cfg.get("min_confidence", 0.55))
+        self._cooldown_s = float(cfg.get("cooldown_seconds", 60))
+        self._ctx.set_state("ready")
 
-    async def analyze(self, frame: Frame, camera_config: dict) -> AnalysisResult:
-        cfg = self._ctx.config or {}
-        if not cfg.get("enabled_for_demo"):
-            return AnalysisResult(detections=[], timing_ms=0)
-        # Démo : retourne une détection fictive pour valider le pipeline
-        return AnalysisResult(
-            detections=[Detection(
-                label="smoke",
-                label_fr="Fumée",
-                confidence=0.75,
-                bbox=(100, 100, 300, 300),
-            )],
-            timing_ms=1,
-        )
+    async def consume(self, frame: Frame, pipeline: PipelineResult) -> list:
+        import time as _t
+        smokes = [d for d in pipeline.detections
+                  if d.label.lower() in SMOKE_LABELS and d.confidence >= self._min_conf]
+        if not smokes:
+            return []
+        now = _t.time()
+        if now - self._last_alert < self._cooldown_s:
+            return []
+        self._last_alert = now
+        return [{
+            "type": "alert.warning",
+            "severity": "warning",
+            "message": f"💨 FUMÉE DÉTECTÉE ({len(smokes)} zone(s))",
+            "data": {"count": len(smokes),
+                     "max_confidence": max(d.confidence for d in smokes),
+                     "camera_id": frame.camera_id},
+        }]
 
     async def on_unload(self) -> None:
         pass

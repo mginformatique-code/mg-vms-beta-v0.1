@@ -13,7 +13,7 @@ spec:
   runtime: python
   entrypoint: plugin.py
   className: FireDetectionPlugin
-  interface: FrameAnalyzer
+  interface: PipelineConsumer
   compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
   capabilities: [camera.frame.read, event.write]
   resources: {cpu_cores: 1, ram_mb: 500, gpu: optional, disk_mb: 200}
