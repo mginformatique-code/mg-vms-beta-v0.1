@@ -36,7 +36,7 @@ Chaque fonctionnalité doit satisfaire **trois critères non-négociables** :
 - **`05-contrats-interfaces.md`** — ✅ **v1 rédigé** (2026-07-24)
 
 ### Partie II — Expérience utilisateur transverse
-- `06-mode-installateur.md` — *à rédiger*
+- **`06-mode-installateur.md`** — ✅ **v1 rédigé** (2026-07-24)
 - `07-home-dashboard.md` — *à rédiger*
 - `08-mur-video.md` — *à rédiger*
 - `09-recherche-unifiee.md` — *à rédiger*
