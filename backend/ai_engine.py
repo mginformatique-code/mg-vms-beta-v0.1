@@ -942,6 +942,65 @@ async def _process_camera(cam: dict) -> None:
             "track_id": det.get("track_id"),
         })
 
+    # ── Plugin Manager NG Pipeline (session 5+) ──────────────────────
+    # Chaque frame déjà décodée avec YOLO passe à travers le pipeline
+    # bus.dispatch_pipeline (Tracker → Segmenter → PipelineConsumer →
+    # EventConsumer). Court-circuite les FrameAnalyzers (détections déjà
+    # calculées par le core ai_engine).
+    try:
+        pipeline_cfg = await db.settings.find_one(
+            {"key": "plugin_manager_pipeline"}, {"_id": 0}
+        )
+        if (pipeline_cfg or {}).get("value", {}).get("enabled", True):
+            from plugin_manager import bus as _plugin_bus, Frame as _Frame
+            from plugin_manager.interfaces import Detection as _Detection
+
+            # Reconstitue les Detection() à partir des dicts YOLO
+            det_objs = []
+            for d in result["detections"]:
+                bb = d.get("bbox") or (0, 0, 0, 0)
+                det_objs.append(_Detection(
+                    label=d.get("label", "?"),
+                    label_fr=d.get("label_fr"),
+                    confidence=float(d.get("confidence", 0.0)),
+                    bbox=tuple(bb),
+                    track_id=d.get("track_id"),
+                ))
+            # Frame minimal (numpy_bgr optionnel — le tracking en a besoin, mais
+            # pour PipelineConsumer c'est facultatif)
+            _frame = _Frame(
+                camera_id=cam["id"],
+                timestamp=now_iso,
+                numpy_bgr=frame,
+                width=int(frame.shape[1]) if frame is not None else 0,
+                height=int(frame.shape[0]) if frame is not None else 0,
+            )
+            _pr = await _plugin_bus.dispatch_pipeline(
+                _frame,
+                camera_config={"camera_id": cam["id"], "site_id": cam.get("site_id")},
+                precomputed_detections=det_objs,
+                run_business=True,
+                run_segmentation=False,  # coûteux, opt-in via settings
+                emit_events=True,        # propage vers Telegram/Discord/SMTP
+                timeout_s=3.0,
+            )
+            # Persistence des événements métier générés
+            for be in _pr.business_events:
+                if not _cooldown_ok(f"{cam['id']}:{be.get('type', 'plugin')}", EVENT_COOLDOWN, now):
+                    continue
+                await db.events.insert_one({
+                    "id": str(uuid.uuid4()), "type": be.get("type", "plugin.event"),
+                    **base,
+                    "confidence": (be.get("data") or {}).get("max_confidence"),
+                    "message": be.get("message"),
+                    "severity": be.get("severity", "info"),
+                    "plugin": be.get("source"),
+                    "thumbnail": _ensure_frame_thumb(result),
+                    "data": be.get("data"),
+                })
+    except Exception:
+        logger.exception("plugin_manager pipeline error")
+
     # Scénarios d'alertes IA (accident, rôdeur, intrusion nocturne, vive allure...)
     await _evaluate_scenarios(cam, result, now)
 

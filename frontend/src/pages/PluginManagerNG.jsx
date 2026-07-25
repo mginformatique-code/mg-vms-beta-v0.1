@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import PluginConfigDialog from "@/pages/PluginConfigDialog";
+import PipelineTestPanel from "@/pages/PipelineTestPanel";
 
 const FUSION_MODES = [
   { id: "cascade", label: "Cascade", desc: "Séquentiel, stop dès confidence ≥ seuil (économise quota cloud)", Icon: GitBranch },
@@ -635,6 +636,9 @@ export default function PluginManagerNG() {
         onOpenChange={(v) => !v && setConfigPlugin(null)}
         onSaved={load}
       />
+
+      {/* Pipeline Test Panel — visualisation graphique bboxes + tracks + events */}
+      <PipelineTestPanel />
     </div>
   );
 }

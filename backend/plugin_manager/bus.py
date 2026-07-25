@@ -262,21 +262,14 @@ class PluginBus:
         run_business: bool = True,
         emit_events: bool = False,
         timeout_s: Optional[float] = None,
+        precomputed_detections: Optional[list] = None,
     ) -> PipelineResult:
         """Enchaîne détection → tracking → segmentation → consommateurs métier.
 
-        Étapes :
-          1. `FrameAnalyzer` en parallèle → agrège toutes les detections
-          2. `Tracker` en parallèle avec les detections → agrège les tracks
-             (chaque tracker maintient son propre état, on garde les tracks
-              du 1er tracker actif comme référence — les autres tournent
-              en shadow mode pour comparaison)
-          3. `Segmenter` en parallèle (optionnel, coûteux)
-          4. `PipelineConsumer` en parallèle avec le résultat pipeline
-          5. Si `emit_events=True`, dispatche les événements produits vers
-             les `EventConsumer` (Telegram, Discord, SMTP...)
-
-        Le résultat est un `PipelineResult` unifié.
+        Si `precomputed_detections` est fourni, l'étape 1 (FrameAnalyzer)
+        est **court-circuitée** et les detections passées sont utilisées
+        directement. Cas d'usage : ai_engine a déjà fait tourner YOLO et
+        veut réutiliser les résultats sans double inférence.
         """
         cfg = camera_config or {}
         result = PipelineResult(
@@ -287,12 +280,16 @@ class PluginBus:
 
         # ── 1. Detection ────────────────────────────────
         t = time.perf_counter()
-        det_results = await self.dispatch_frame(frame, cfg, timeout_s=timeout_s)
+        if precomputed_detections is not None:
+            result.detections = list(precomputed_detections)
+            result.plugins_used["detectors"] = ["precomputed"]
+        else:
+            det_results = await self.dispatch_frame(frame, cfg, timeout_s=timeout_s)
+            result.plugins_used["detectors"] = [n for n, _ in det_results]
+            for _name, ar in det_results:
+                if ar is not None and hasattr(ar, "detections"):
+                    result.detections.extend(ar.detections)
         timing["detection_ms"] = int((time.perf_counter() - t) * 1000)
-        result.plugins_used["detectors"] = [n for n, _ in det_results]
-        for _name, ar in det_results:
-            if ar is not None and hasattr(ar, "detections"):
-                result.detections.extend(ar.detections)
 
         # ── 2. Tracking ─────────────────────────────────
         t = time.perf_counter()
