@@ -27,6 +27,7 @@ from streaming import stream_router, sync_all_streams, camera_status_loop
 from recorder import recorder_loop, stop_all_recorders, sweep_orphan_recorders
 from ai_engine import ai_loop
 from seed import seed
+from routes.plugins_bus import plugins_bus_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("mg-vms")
@@ -58,6 +59,7 @@ app.add_middleware(ApiVersionAliasMiddleware)
 
 app.include_router(auth_router)
 app.include_router(stream_router)
+app.include_router(plugins_bus_router)
 app.include_router(api_router)
 app.include_router(notif_router)
 app.include_router(realtime_router)
@@ -87,6 +89,9 @@ async def on_startup():
     await seed_hardware()
     await seed_plugins()
     await sweep_orphan_recorders()
+    # Bootstrap Plugin Manager NG : enregistre les plugins bundle sur le bus
+    from plugin_manager.bootstrap import bootstrap_bundle
+    await bootstrap_bundle()
     # Re-hydrate le journal lifecycle depuis MongoDB (survit aux redémarrages backend)
     from lifecycle import hydrate_journal_from_db
     await hydrate_journal_from_db()

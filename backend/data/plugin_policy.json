@@ -1,0 +1,11 @@
+{
+  "anpr": {
+    "mode": "cascade",
+    "cascade_threshold": 0.85,
+    "order": []
+  },
+  "frame_analyzer": {
+    "parallel": true,
+    "timeout_s": 5.0
+  }
+}

@@ -28,6 +28,19 @@ from .interfaces import (
 )
 from .context import PluginContext
 from .registry import registry, PluginInfo
+from .bus import bus, PluginBus, BusEntry
+from .fusion import (
+    apply_policy,
+    pick_highest,
+    vote_by_character,
+    MODE_CASCADE,
+    MODE_HIGHEST,
+    MODE_COMPARE,
+    MODE_VOTE,
+    VALID_MODES,
+    DEFAULT_CASCADE_THRESHOLD,
+)
+from .policy import policy, PolicyStore
 
 __all__ = [
     "Plugin",
@@ -43,4 +56,18 @@ __all__ = [
     "PluginContext",
     "registry",
     "PluginInfo",
+    "bus",
+    "PluginBus",
+    "BusEntry",
+    "apply_policy",
+    "pick_highest",
+    "vote_by_character",
+    "MODE_CASCADE",
+    "MODE_HIGHEST",
+    "MODE_COMPARE",
+    "MODE_VOTE",
+    "VALID_MODES",
+    "DEFAULT_CASCADE_THRESHOLD",
+    "policy",
+    "PolicyStore",
 ]
