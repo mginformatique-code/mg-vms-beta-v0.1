@@ -6,6 +6,8 @@
 
 Ce chapitre formalise la **philosophie produit** de MG-VMS Next Generation et la transforme en **règles opposables** — c'est-à-dire des règles qu'un développeur, un PM ou un architecte peut invoquer en revue pour refuser une décision qui les viole. Ces règles ne sont pas des suggestions : ce sont des **contrats internes** qui gouvernent chaque évolution du produit.
 
+**Note sur la version** : la v1.0 de ce chapitre définissait 15 règles. La v1.1 (2026-07-24) ajoute la règle **R16 « Tout est plugin sauf le noyau »** consécutive au pivot architectural documenté au chapitre 11 (Plateforme de plugins). Cette règle refonde la vision produit vers un modèle « Home Assistant / Grafana » : noyau minimal + écosystème de plugins.
+
 ---
 
 ## 2.1 Manifeste
@@ -80,7 +82,7 @@ Ces trois convictions sont opérationnalisées par **trois piliers** et **quinze
 
 ---
 
-## 2.3 Les quinze règles opposables
+## 2.3 Les seize règles opposables
 
 Chaque règle a un identifiant `RXX`, un libellé court, un scope d'application et un **critère de vérification** au review. Une règle enfreinte = PR bloquée.
 
@@ -186,7 +188,15 @@ Chaque règle a un identifiant `RXX`, un libellé court, un scope d'application 
 **Scope** : gouvernance produit.
 **Règle** : les décisions d'architecture, de sécurité ou de compat sont écrites comme ADR (Architecture Decision Record) dans le cahier des charges, avec `Contexte / Décision / Conséquences / Alternatives rejetées`. Un dev qui « prend une décision différente » sans nouvel ADR viole le contrat.
 **Vérification** : chaque chapitre a une section ADR. Chaque changement d'architecture ⇒ nouvel ADR ou révision de l'existant.
-**Exemples actuels** : ADR-01 à ADR-07 du chapitre 4.
+**Exemples actuels** : ADR-01 à ADR-19 (chapitres 4, 5, 6, 11).
+
+### R16 — Tout est plugin sauf le noyau
+
+**Scope** : architecture globale, philosophie produit.
+**Règle** : MG-VMS est une **plateforme** dont le noyau reste volontairement minimal (users, cameras, go2rtc, recorder, player, PTZ base, API, dashboard, Plugin Manager). Toute fonctionnalité avancée — IA, ANPR, notifications, intégrations tierces, stockage non-local, modules métier avancés — est **obligatoirement** un plugin activable/désactivable indépendamment. Un dev qui ajoute une fonctionnalité au noyau doit démontrer qu'elle est essentielle et non substituable.
+**Vérification** : review architecture — toute nouvelle feature > 200 lignes qui n'est pas une fonction core doit être proposée comme plugin. Chapitre `11-plateforme-plugins` documente la frontière core/plugin.
+**Exemple d'application** : v3.0 ⇒ `ai_engine.py` (v2.22.0) devient les plugins `yolo-detection`, `fast-alpr`, etc.
+**Corollaire** : le crash d'un plugin ne fait jamais tomber le noyau (R01 appliqué au plugin).
 
 ---
 
@@ -403,9 +413,11 @@ Chapitres qui approfondissent cette philosophie sur des sujets précis :
 | R13 | Aucune config ne survit à un reset propre | Test CI reset |
 | R14 | Chaque intégration tierce est optionnelle | Test démarrage minimal |
 | R15 | Toute décision structurante est un ADR | Review PR |
+| R16 | Tout est plugin sauf le noyau | Review architecture · chapitre 11 |
 
 ### B. Historique du chapitre
 
 | Version | Date | Auteur | Changements |
 |---|---|---|---|
 | v1.0 | 2026-07-24 | équipe MG-VMS | Rédaction initiale : 3 piliers · 15 règles · 10 anti-patterns · grille d'arbitrage · checklist review · métriques d'adhésion |
+| v1.1 | 2026-07-24 | équipe MG-VMS | Ajout R16 « Tout est plugin sauf le noyau » suite au pivot architectural documenté chapitre 11 (Plateforme de plugins) |

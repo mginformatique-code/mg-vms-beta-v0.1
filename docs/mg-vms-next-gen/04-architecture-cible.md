@@ -6,6 +6,8 @@
 
 Ce chapitre définit l'architecture cible de MG-VMS Next Generation (v3.0). Il fige les **frontières de composants**, les **contrats de communication**, les **modes dégradés** et les **décisions d'architecture (ADR)** qui gouverneront toutes les évolutions ultérieures.
 
+**Note sur la version** : la v1.0 décrivait un backend FastAPI monolithique. La v1.1 (2026-07-24) intègre le pivot architectural fondateur documenté au chapitre 11 : **MG-VMS devient une plateforme dont tout est plugin sauf le noyau** (ADR-15, R16). Les composants « backend » de ce chapitre se lisent maintenant comme « Core + Plugin Manager + plugins officiels ». Voir §4.14 Amendement Plateforme de plugins.
+
 ---
 
 ## 4.1 Vue macro
@@ -616,17 +618,53 @@ Une architecture est *bonne* quand elle satisfait les KPIs suivants :
 - **ONVIF** — Open Network Video Interface Forum (standard SOAP caméras IP).
 - **Bulkhead** — pattern d'isolation de pannes issu de l'architecture navale.
 - **ADR** — Architecture Decision Record.
+- **Core** — noyau MG-VMS, code obligatoire, minimal (v3.0 : ~5000 lignes).
+- **Plugin** — module optionnel activable indépendamment, cf. chapitre 11.
 
-### B. Références externes
+## 4.14 Amendement Plateforme de plugins (v1.1 — 2026-07-24)
 
-- go2rtc — https://github.com/AlexxIT/go2rtc
-- FastAPI — https://fastapi.tiangolo.com/
-- WebRTC — https://webrtc.org/
-- FFmpeg NVDEC — https://developer.nvidia.com/ffmpeg
-- Bulkhead pattern — https://learn.microsoft.com/en-us/azure/architecture/patterns/bulkhead
+Après validation du chapitre 4 v1.0, le chapitre 11 (Plateforme de plugins) a introduit un pivot architectural fondateur qui **précise** ce chapitre sans le contredire. Les composants « backend » et « services asynchrones » du §4.2.2 se lisent désormais comme :
+
+**Backend = Core + Plugin Manager**
+
+Le **Core** (~5000 lignes Python cible) contient :
+- Gestion utilisateurs & permissions (auth, RBAC, audit)
+- Gestion caméras (CRUD, ONVIF, RTSP, PTZ base)
+- Provisionnement go2rtc
+- Recorder (subprocess ffmpeg)
+- Player + timeline
+- API HTTP + WebSocket
+- Dashboard KPIs de base
+- Plugin Manager (loader, sandbox, health)
+
+Les **Plugins** officiels bundlés v3.0 :
+- `yolo-detection` (remplace `ai_engine.py` YOLO)
+- `fast-alpr` (remplace `ai_engine.py` ALPR)
+- `smtp-notifier`, `discord-notifier`, `telegram-notifier`
+- `zone-analytics` (crossline, zones, loitering — remplace scenarios v2.22)
+
+Les **Plugins tiers** (Marketplace) : parking, heatmap, MQTT, Home Assistant, LDAP, OIDC, S3, PaddleOCR, OpenALPR, face recognition, smoke, fire, PPE, counting, weapon detection, animal detection, crowd, pose estimation, KNX, BACnet, Modbus…
+
+Le §4.5 (Principes de robustesse) s'applique désormais **à chaque plugin** : un plugin qui crash ne fait jamais tomber le core (R01 + R16).
+
+Le §4.6 (Modes dégradés) reçoit une ligne supplémentaire :
+
+| Composant | Panne | Comportement système |
+|---|---|---|
+| Un plugin FrameAnalyzer | Crash chargement modèle / analyze() | Plugin en état `crashed`, restart auto (backoff), core inchangé, autres plugins de la caméra continuent |
+| Un plugin EventConsumer | Timeout appel externe | Circuit breaker plugin, retry backoff, alertes accumulées dans plugin queue |
+| Le Plugin Manager | Crash critique | Restart auto (superviseur), plugins in-process rechargés, sub-process/container plugins auto-reconnectés |
+| Signature plugin invalide | Installation bloquée | Refus explicite avec message clair, plugin non installé, aucun impact système |
+
+Le §4.9 (Extensibilité) est simplifié : **ajouter une fonctionnalité = écrire un plugin**. Les procédures actuelles (« ajouter un service backend », « ajouter un module IA », « ajouter une intégration tierce ») sont **fusionnées** en une seule procédure documentée au chapitre 11 (§11.8 SDK multi-langages + §11.7 Marketplace).
+
+Le §4.10 (ADR) accueille ADR-15 → ADR-19 documentés au chapitre 11. Ces ADR ne remplacent pas ADR-01 → ADR-14 mais s'y ajoutent — la modularisation `routes/` (ADR-01) reste valable pour le core lui-même.
+
+Le §4.11 (Écarts avec v2.22.0) reçoit une ligne majeure : **le Plugin Manager n'existe pas en v2.22.0**. Sa création est le chantier structurant v3.0 (cf. chapitre 26 Roadmap).
 
 ### C. Historique du chapitre
 
 | Version | Date | Auteur | Changements |
 |---|---|---|---|
 | v1.0 | 2026-07-24 | équipe MG-VMS | Rédaction initiale |
+| v1.1 | 2026-07-24 | équipe MG-VMS | Amendement Plateforme de plugins (§4.14) suite validation chapitre 11 : refonte Core + Plugin Manager, ADR-15→ADR-19 ajoutés, modes dégradés étendus aux plugins |
