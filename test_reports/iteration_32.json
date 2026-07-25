@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 32 — Preview NG v2.30 · 4 chantiers roadmap livrés. (A) Plugin Manager PoC : /app/backend/plugin_manager/ avec interfaces standardisées (FrameAnalyzer, PlateRecognizer, EventConsumer), PluginContext, Registry avec 6 plugins bundle + endpoints GET /api/plugins et /api/plugins/{name} synchronisés avec _ai_health. (B) Chiffrement Fernet des credentials caméra (R05/ADR-06) : nouveau module crypto_utils.py, chiffrement idempotent au POST/PUT camera, décryptage transparent dans streaming._build_rtsp_url, compat descendante mots de passe legacy. (C) Modularisation routers.py : structure routes/ posée avec plan v3.0 documenté. (D) URL versioning /api/v1/* : middleware ApiVersionAliasMiddleware qui accepte /api/v1/... en parallèle de /api/... avec header X-API-Version-Alias. Backend 29/29 pytest passing (iter29+30+31+32).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_iter32_preview_ng.py"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Plugin Manager PoC : contrat interfaces stable (FrameAnalyzer, PlateRecognizer, EventConsumer) selon chapitre 11. En v3.0 : manifest YAML, sandbox sub-process, Marketplace.",
+    "crypto_utils : Fernet dérivée de MGVMS_ENCRYPTION_KEY ou fallback JWT_SECRET (hash SHA-256 → base64). Prefix gAAAAA détecté pour idempotence + compat legacy.",
+    "URL versioning : middleware Starlette réécrit /api/v1/X → /api/X en amont routing. Aucune route dupliquée. Header X-API-Version-Alias=v1 pour observabilité.",
+    "Fix critique : lors de l'insertion des endpoints /plugins, l'anchor de search_replace avait remplacé le @api_router.get de /diagnostics/streams-sync. Restauré via nouveau search_replace, 29/29 tests OK."
+  ],
+  "updated_files": [
+    "/app/backend/plugin_manager/__init__.py",
+    "/app/backend/plugin_manager/interfaces.py",
+    "/app/backend/plugin_manager/context.py",
+    "/app/backend/plugin_manager/registry.py",
+    "/app/backend/crypto_utils.py",
+    "/app/backend/server.py",
+    "/app/backend/routers.py",
+    "/app/backend/streaming.py",
+    "/app/backend/routes/__init__.py",
+    "/app/backend/tests/test_iter32_preview_ng.py",
+    "/app/docs/mg-vms-next-gen/*.md (28 chapitres)"
+  ],
+  "success_rate": {"backend": "100% (29/29)"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "aucun",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Preview NG v2.30 livrée (chantiers A/B/C/D). Cahier des charges MG-VMS NG complet dans /app/docs/mg-vms-next-gen/ (28 chapitres, ~6985 lignes). Prochains chantiers v3.0 : Plugin Manager complet (manifest YAML, sandbox sub-process, chargement dynamique), Marketplace, SDK Python publié PyPI, extraction complète routes/*.py (~15 domaines), Mode Installateur (chapitre 6), refonte ai_engine.py en plugins réels."
+}

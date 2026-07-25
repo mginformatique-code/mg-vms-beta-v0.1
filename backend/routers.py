@@ -265,6 +265,10 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
             payload["rtsp_transport"] = ffprobe_details.get("transport_used") or data.rtsp_transport
 
     now = datetime.now(timezone.utc).isoformat()
+    # ── Chiffrement Fernet du mot de passe caméra (R05 / ADR-06) ──
+    from crypto_utils import encrypt_secret
+    if payload.get("password"):
+        payload["password"] = encrypt_secret(payload["password"])
     doc = {
         "id": str(uuid.uuid4()), "status": "offline", "last_seen": now, "created_at": now,
         "site_name": site["name"],
@@ -297,6 +301,11 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
     if not existing:
         raise HTTPException(404, "Caméra introuvable")
 
+    # Déchiffre l'ancien mot de passe pour usage interne (ONVIF probe, ffprobe...)
+    # sans jamais le renvoyer au client
+    from crypto_utils import decrypt_secret
+    existing_password_plain = decrypt_secret(existing.get("password", ""))
+
     payload = data.model_dump()
     # Si le mot de passe est vide lors d'un PUT, conserver l'ancien (pratique en édition)
     if not payload.get("password"):
@@ -320,7 +329,7 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
             try:
                 info = await asyncio.wait_for(
                     asyncio.to_thread(_onvif_probe, data.ip, int(data.onvif_port),
-                                      data.username, data.password or existing.get("password", "")),
+                                      data.username, data.password or existing_password_plain),
                     timeout=25,
                 )
                 profiles = info.get("profiles", [])
@@ -335,7 +344,7 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
                 from streaming import _ffprobe_validate_exact
                 working_url, ffprobe_details, _attempts = await asyncio.to_thread(
                     _ffprobe_validate_exact, selected["rtsp_url"],
-                    data.rtsp_transport, data.username, data.password or existing.get("password", ""),
+                    data.rtsp_transport, data.username, data.password or existing_password_plain,
                 )
                 payload["rtsp_url"] = selected["rtsp_url"]
                 payload["profile_token"] = selected.get("token", "")
@@ -360,6 +369,13 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
     else:
         if not (payload.get("rtsp_url") or "").lower().startswith("rtsp://"):
             raise HTTPException(400, "Mode RTSP : l'URL RTSP est obligatoire (rtsp://…)")
+
+    # ── Chiffrement Fernet du mot de passe caméra (R05 / ADR-06) ──
+    # Idempotent : ne re-chiffre pas si déjà chiffré (utile quand payload garde
+    # l'ancien mot de passe existing.password déjà chiffré).
+    from crypto_utils import encrypt_secret
+    if payload.get("password"):
+        payload["password"] = encrypt_secret(payload["password"])
 
     await db.cameras.update_one({"id": camera_id}, {"$set": payload})
     await log_audit(user, "camera_updated", data.name, f"Mode: {data.mode}")
@@ -824,6 +840,55 @@ async def diagnostics_ai_health(user: dict = Depends(require_permission("view_li
     """
     from ai_engine import get_ai_health
     return get_ai_health()
+
+
+@api_router.get("/plugins")
+async def list_plugins(user: dict = Depends(require_permission("view_live"))):
+    """Liste des plugins installés (Preview NG v2.30 · roadmap chantier A).
+
+    Endpoint proof-of-concept de la Plateforme de plugins (chapitre 11).
+    En v2.30 : les 6 plugins officiels bundle sont exposés comme VUES sur le
+    code existant (`ai_engine`, `notifications`), avec état synchronisé depuis
+    `_ai_health`. En v3.0 : chargement dynamique manifest YAML + sandbox.
+
+    Réponse (extrait) :
+    ```json
+    {
+      "plugins": [
+        {"name": "yolo-detection", "state": "running", "interface": "FrameAnalyzer", ...},
+        {"name": "fast-alpr", "state": "running", "interface": "PlateRecognizer", ...},
+        ...
+      ],
+      "core_version": "2.30.0-preview-ng",
+      "plugin_manager_version": "0.1.0"
+    }
+    ```
+    """
+    from plugin_manager import registry
+    from ai_engine import get_ai_health
+    # Sync l'état réel des modèles IA dans les plugins bundle
+    registry.sync_from_ai_health(get_ai_health())
+    return {
+        "plugins": registry.list_plugins(),
+        "core_version": "2.30.0-preview-ng",
+        "plugin_manager_version": "0.1.0",
+    }
+
+
+@api_router.get("/plugins/{name}")
+async def get_plugin(name: str, user: dict = Depends(require_permission("view_live"))):
+    """Détail d'un plugin (Preview NG v2.30).
+
+    Retourne l'info complète du plugin. En v3.0 : + logs, métriques temps-réel,
+    historique installations, dépendances.
+    """
+    from plugin_manager import registry
+    from ai_engine import get_ai_health
+    registry.sync_from_ai_health(get_ai_health())
+    info = registry.get(name)
+    if not info:
+        raise HTTPException(status_code=404, detail=f"Plugin '{name}' introuvable")
+    return info.to_dict()
 
 
 @api_router.get("/diagnostics/streams-sync")

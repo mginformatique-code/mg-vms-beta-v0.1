@@ -76,7 +76,10 @@ def _build_rtsp_url(cam: dict) -> str:
     if not url:
         return ""
     user = (cam.get("username") or "").strip()
-    pwd = cam.get("password") or ""
+    # ── Déchiffrement Fernet du mot de passe (R05 / ADR-06) ──
+    # Compat descendante : si password en clair (legacy), retourné tel quel.
+    from crypto_utils import decrypt_secret
+    pwd = decrypt_secret(cam.get("password") or "")
     if user and url.lower().startswith("rtsp://"):
         # Détection stricte de la présence de credentials dans l'URL (avant le premier /)
         after_scheme = url[7:]

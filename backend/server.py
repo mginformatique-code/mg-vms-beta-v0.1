@@ -31,7 +31,30 @@ from seed import seed
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("mg-vms")
 
-app = FastAPI(title="MG-VMS API", version="1.0.0", description="MG-VMS - Plateforme de vidéosurveillance professionnelle")
+app = FastAPI(title="MG-VMS API", version="2.30.0-preview-ng", description="MG-VMS - Plateforme de vidéosurveillance professionnelle")
+
+# ─── Middleware de compat versioning (ADR-08 · roadmap v2.30 chantier D) ──
+# Objectif : préparer la cible v3.0 où toutes les URLs seront préfixées `/api/v1/*`.
+# En v2.30 (Preview NG) : le backend accepte les DEUX préfixes en parallèle
+# (`/api/*` legacy + `/api/v1/*` cible), sans dupliquer les routes. Un middleware
+# léger réécrit `/api/v1/...` → `/api/...` en amont du routing. Émet un header
+# `X-API-Version-Alias` pour tracer l'usage. Compat 24 mois (chapitre 27).
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response as _Response
+
+class ApiVersionAliasMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        original_path = request.scope.get("path", "")
+        if original_path.startswith("/api/v1/"):
+            # Réécrit le path pour que les routers `/api/*` matchent
+            request.scope["path"] = "/api/" + original_path[len("/api/v1/"):]
+            request.scope["raw_path"] = request.scope["path"].encode()
+            response: _Response = await call_next(request)
+            response.headers["X-API-Version-Alias"] = "v1"
+            return response
+        return await call_next(request)
+
+app.add_middleware(ApiVersionAliasMiddleware)
 
 app.include_router(auth_router)
 app.include_router(stream_router)

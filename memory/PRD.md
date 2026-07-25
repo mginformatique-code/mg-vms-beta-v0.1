@@ -1,5 +1,67 @@
 # MG-VMS — Product Requirements Document
 
+## Implemented (2026-07-24 · v2.30.0-preview-ng — Preview NG · 4 chantiers roadmap)
+
+**Contexte** : après la rédaction complète du cahier des charges MG-VMS Next Generation (28 chapitres, ~7000 lignes dans `/app/docs/mg-vms-next-gen/`), passage au code avec les 4 chantiers de transition v2.30 → v3.0 identifiés par la roadmap (chapitre 26 §26.3). Objectif : rendre l'existant compatible avec la vision plateforme sans breaking.
+
+### Chantier A · Plugin Manager PoC (chapitre 11) — ✅ LIVRÉ
+
+**Fichiers** : `/app/backend/plugin_manager/` (nouveau module)
+- `__init__.py` : exports publics
+- `interfaces.py` : classes abstraites `Plugin`, `FrameAnalyzer`, `PlateRecognizer`, `EventConsumer` + dataclasses `Frame`, `Detection`, `AnalysisResult`, `PlateResult`, `MGVMSEvent`, `ConsumerResult`
+- `context.py` : `PluginContext` injecté par le core (v3.0 = sandbox avec capabilities)
+- `registry.py` : registre en mémoire des 6 plugins bundle avec sync depuis `_ai_health`
+
+**Endpoints ajoutés** :
+- `GET /api/plugins` → liste des 6 plugins bundle + version core `2.30.0-preview-ng`
+- `GET /api/plugins/{name}` → détail plugin
+
+Les plugins `yolo-detection` et `fast-alpr` reflètent l'état runtime réel de `_ai_health` (yolo_loaded, alpr_loaded, load_error, attempts). En v3.0 : refonte complète avec manifest YAML, chargement dynamique depuis `/data/plugins/`, sandbox sub-process.
+
+### Chantier B · Chiffrement Fernet secrets caméra (R05, ADR-06) — ✅ LIVRÉ
+
+**Fichier** : `/app/backend/crypto_utils.py` (nouveau)
+- `encrypt_secret()` idempotent (détection prefix `gAAAAA` évite double-chiffrement)
+- `decrypt_secret()` compat descendante (legacy plaintext → renvoyé tel quel)
+- `is_encrypted()` helper
+- Clé : `MGVMS_ENCRYPTION_KEY` (env) → fallback `JWT_SECRET` (hash SHA-256 → base64)
+
+**Intégration** : POST/PUT `/api/cameras` chiffrent le password avant persistence Mongo. `streaming._build_rtsp_url` déchiffre transparent. Champ `existing_password_plain` pour ONVIF probe / ffprobe validation.
+
+### Chantier C · Modularisation `routers.py` (ADR-01) — PARTIEL (structure posée)
+
+**Fichier** : `/app/backend/routes/__init__.py` (nouveau)
+- Structure du package documentée
+- Plan v3.0 : 14 modules cible (`auth.py`, `cameras.py`, `streams.py`, `events.py`, `plates.py`, `ai_config.py`, `diagnostics.py`, `users.py`, `sites.py`, `plugins.py`, `system.py`, `dashboard.py`, `notifications.py`, `alerts.py`)
+- Ordre de refonte recommandé par risque croissant
+- Chaque extraction sera une PR séparée avec tests d'acceptation
+
+Extraction complète reportée à v3.0 (chapitre 26 roadmap) — trop de risque en un seul sprint. La refonte se fait progressivement, PR par PR.
+
+### Chantier D · URL versioning `/api/v1` en parallèle (ADR-08) — ✅ LIVRÉ
+
+**Fichier** : `/app/backend/server.py` (modifié)
+- Nouveau `ApiVersionAliasMiddleware` (Starlette) qui réécrit `/api/v1/{path}` → `/api/{path}` avant routing
+- Header `X-API-Version-Alias: v1` ajouté aux réponses pour observabilité
+- Aucune route dupliquée, aucun breaking sur `/api/*` legacy
+- Compat 24 mois selon politique dépréciation (chapitre 27)
+
+### Testé (iteration 32 — 29/29 pytest)
+- 10 tests iter29 (probe non-invasif, ONVIF, mjpeg, hd frame, real-cam probe)
+- 6 tests iter30 (ai-health, guardian go2rtc, load_models resilient, cycles)
+- 3 tests iter31 (streams-sync, drift detection, repair)
+- 10 tests iter32 (plugins endpoints, Fernet crypto, URL versioning, legacy compat)
+
+### Cahier des charges MG-VMS Next Generation
+Livré en 28 chapitres dans `/app/docs/mg-vms-next-gen/` (README index + ~6985 lignes). 16 règles opposables · 25 ADR · 6 personas · roadmap v2.30 → v4.0. Statut v0.3.
+
+### À valider par utilisateur en PROD
+1. `git pull && docker compose build backend && docker compose up -d`
+2. Test versioning : `curl -I https://<host>/api/v1/plugins -H "Authorization: Bearer $TOKEN"` → doit retourner header `X-API-Version-Alias: v1`
+3. Test Plugin Manager : `curl https://<host>/api/plugins` → 6 plugins bundle, yolo/alpr en state `running`
+4. Test chiffrement : créer une caméra, vérifier dans DB Mongo que le champ `password` commence par `gAAAAA` (Fernet)
+
+
 ## Implemented (2026-07-24 · v2.22.0 — Phase 2 : DB maître + réconciliation DB ↔ go2rtc)
 
 **Décision produit** : la DB MongoDB reste la **source de vérité unique** pour les caméras (URL RTSP + credentials + toutes les métadonnées VMS : permissions, ANPR config, ROI, whitelist/blacklist, config recorder, etc.). go2rtc est un moteur vidéo _éphémère_ provisionné à la demande via son API HTTP (`PUT /api/streams`). Aucun `go2rtc.yaml` généré, aucune duplication de state en fichier.
