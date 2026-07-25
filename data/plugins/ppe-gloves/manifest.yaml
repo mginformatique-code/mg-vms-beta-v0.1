@@ -1,0 +1,24 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: ppe-gloves
+  displayName: "EPI — Gants"
+  version: "1.0.0"
+  description: "Détection du port des gants de protection."
+  author: "MG-VMS Team"
+  license: "MIT"
+  categories: [ppe]
+  providerGroup: ppe
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: PpeGlovesPlugin
+  interface: FrameAnalyzer
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [camera.frame.read, event.write]
+  resources: {cpu_cores: 1, ram_mb: 500, gpu: optional, disk_mb: 200}
+  dependencies:
+    python: ["ultralytics"]
+  config_schema: config/schema.json
+  bus:
+    order: 102

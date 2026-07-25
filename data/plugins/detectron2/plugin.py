@@ -1,0 +1,31 @@
+"""Plugin Segmentation — Detectron2 (Facebook AI)."""
+from __future__ import annotations
+import time
+from plugin_manager.interfaces import Segmenter, Frame, SegmentationResult
+
+
+class Detectron2Plugin(Segmenter):
+    name = "detectron2"
+    version = "1.0.0"
+
+    async def on_load(self, ctx) -> None:
+        self._ctx = ctx
+        self._evaluate_state()
+
+    def _evaluate_state(self):
+        try:
+            import detectron2
+        except ImportError:
+            self._ctx.set_state("missing_dependency", "pip install detectron2")
+            return
+        self._ctx.set_state("ready")
+
+    async def on_config_change(self, new_config: dict) -> None:
+        self._evaluate_state()
+
+    async def segment(self, frame: Frame, camera_config: dict) -> SegmentationResult:
+        # PoC v2.30 : segmentation vide. Branchement modèle à faire post-install.
+        return SegmentationResult(masks=[], timing_ms=0)
+
+    async def on_unload(self) -> None:
+        pass

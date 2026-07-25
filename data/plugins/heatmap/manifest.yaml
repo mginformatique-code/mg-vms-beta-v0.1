@@ -1,0 +1,24 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: heatmap
+  displayName: "Heatmap (zones chaudes)"
+  version: "1.0.0"
+  description: "Génère une carte de chaleur des zones fréquentées (marketing / merchandising)."
+  author: "MG-VMS Team"
+  license: "MIT"
+  categories: [commerce]
+  providerGroup: commerce
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: HeatmapPlugin
+  interface: FrameAnalyzer
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [camera.frame.read, event.write]
+  resources: {cpu_cores: 0.5, ram_mb: 200, gpu: none, disk_mb: 50}
+  dependencies:
+    python: []
+  config_schema: config/schema.json
+  bus:
+    order: 110

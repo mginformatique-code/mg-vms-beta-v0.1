@@ -34,7 +34,7 @@ logger = logging.getLogger("plugin_loader")
 
 DEFAULT_PLUGINS_DIR = Path("/app/data/plugins")
 
-VALID_INTERFACES = {"FrameAnalyzer", "PlateRecognizer", "EventConsumer"}
+VALID_INTERFACES = {"FrameAnalyzer", "PlateRecognizer", "EventConsumer", "Tracker", "Segmenter"}
 
 
 @dataclass

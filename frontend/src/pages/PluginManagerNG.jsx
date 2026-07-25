@@ -218,12 +218,32 @@ export default function PluginManagerNG() {
               const GROUP_META = {
                 "object-detection": { label: "Object Detection Providers", color: "#0044FF",
                                        desc: "Détecteurs d'objets — activez le provider adapté à votre matériel (CPU / GPU / TensorRT / OpenVINO / ONNX)" },
+                "tracking":         { label: "Tracking Providers", color: "#00E676",
+                                       desc: "Suivi multi-objets avec identité persistante (ByteTrack, BoTSORT, DeepSORT, StrongSORT, OCSORT)" },
+                "segmentation":     { label: "Segmentation Providers", color: "#EA580C",
+                                       desc: "Segmentation d'instances / masques pixel-perfect (SAM2, Detectron2, Mask R-CNN)" },
                 "anpr":             { label: "ANPR Providers", color: "#FFB800",
                                        desc: "Lecture de plaques d'immatriculation — plusieurs moteurs peuvent tourner en fusion (cascade/vote/highest)" },
-                "other":            { label: "Autres", color: "#A855F7", desc: "" },
+                "notifications":    { label: "Notifications", color: "#A855F7",
+                                       desc: "Envoi d'événements vers Telegram, Discord, SMTP, webhooks..." },
+                "counting":         { label: "Comptage", color: "#06B6D4",
+                                       desc: "Compteurs de personnes, véhicules, occupation de zone" },
+                "parking":          { label: "Parking", color: "#0891B2",
+                                       desc: "Gestion des places de parking (libre/occupée/temps)" },
+                "security":         { label: "Sécurité", color: "#DC2626",
+                                       desc: "Détection de fumée, feu, armes, bagarres, chutes" },
+                "ppe":              { label: "EPI (Sécurité industrielle)", color: "#F59E0B",
+                                       desc: "Casque, gilet, gants, lunettes — conformité chantier/industrie" },
+                "commerce":         { label: "Commerce", color: "#EC4899",
+                                       desc: "Heatmap, files d'attente, temps passé — analytics retail" },
+                "agriculture":      { label: "Agriculture", color: "#65A30D",
+                                       desc: "Animaux, oiseaux, intrusion — protection cultures / élevage" },
+                "other":            { label: "Autres", color: "#666", desc: "" },
               };
               const sorted = Object.keys(groups).sort((a, b) => {
-                const order = ["object-detection", "anpr", "other"];
+                const order = ["object-detection", "tracking", "segmentation", "anpr",
+                              "notifications", "counting", "parking", "security", "ppe",
+                              "commerce", "agriculture", "other"];
                 return order.indexOf(a) - order.indexOf(b);
               });
               return sorted.map((g) => {

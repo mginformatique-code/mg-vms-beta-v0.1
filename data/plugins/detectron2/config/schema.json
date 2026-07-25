@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Detectron2 (Facebook AI)",
+  "type": "object",
+  "properties": {
+    "model_path": {
+      "type": "string",
+      "default": "",
+      "title": "Chemin modèle"
+    },
+    "confidence": {
+      "type": "number",
+      "default": 0.5,
+      "minimum": 0.05,
+      "maximum": 0.99
+    },
+    "device": {
+      "type": "string",
+      "enum": [
+        "cpu",
+        "cuda:0"
+      ],
+      "default": "cpu"
+    }
+  }
+}

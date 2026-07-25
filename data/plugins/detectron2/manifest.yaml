@@ -1,0 +1,24 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: detectron2
+  displayName: "Detectron2 (Facebook AI)"
+  version: "1.0.0"
+  description: "Detectron2 — précision maximale, segmentation + détection avancée."
+  author: "MG-VMS Team"
+  license: "MIT"
+  categories: [segmentation]
+  providerGroup: segmentation
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: Detectron2Plugin
+  interface: Segmenter
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [camera.frame.read, event.write]
+  resources: {cpu_cores: 2, ram_mb: 2048, gpu: required, disk_mb: 2000}
+  dependencies:
+    python: ["detectron2"]
+  config_schema: config/schema.json
+  bus:
+    order: 61

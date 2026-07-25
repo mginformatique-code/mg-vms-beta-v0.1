@@ -111,3 +111,58 @@ class EventConsumer(Plugin):
     @abstractmethod
     async def on_event(self, event: MGVMSEvent) -> ConsumerResult:
         ...
+
+
+# ── Interfaces additionnelles (session 4 · Tracking + Segmentation) ───────
+
+@dataclass
+class Track:
+    """Un track produit par un plugin `Tracker`."""
+    track_id: str
+    label: str
+    confidence: float = 0.0
+    bbox: tuple = (0, 0, 0, 0)  # x1, y1, x2, y2
+    age: int = 0                # nb frames depuis la 1ère détection
+    velocity: tuple = (0.0, 0.0)  # (vx, vy) px/frame
+    extra: dict = field(default_factory=dict)
+
+
+@dataclass
+class TrackingResult:
+    tracks: list = field(default_factory=list)
+    timing_ms: int = 0
+
+
+class Tracker(Plugin):
+    """Plugin qui maintient l'identité d'objets à travers les frames.
+    Exemples : ByteTrack, BoTSORT, DeepSORT, StrongSORT, OCSORT.
+    """
+    @abstractmethod
+    async def track(self, frame: Frame, detections: list) -> TrackingResult:
+        """Reçoit les détections courantes (Detection[]) et retourne les tracks."""
+
+
+@dataclass
+class SegmentMask:
+    """Un masque de segmentation produit par un plugin `Segmenter`."""
+    label: str
+    confidence: float = 0.0
+    bbox: tuple = (0, 0, 0, 0)
+    mask_rle: Optional[str] = None  # RLE encodé pour compact JSON
+    area_px: int = 0
+    extra: dict = field(default_factory=dict)
+
+
+@dataclass
+class SegmentationResult:
+    masks: list = field(default_factory=list)
+    timing_ms: int = 0
+
+
+class Segmenter(Plugin):
+    """Plugin qui segmente les objets/zones dans une frame.
+    Exemples : SAM2, Detectron2, Mask R-CNN.
+    """
+    @abstractmethod
+    async def segment(self, frame: Frame, camera_config: dict) -> SegmentationResult:
+        ...

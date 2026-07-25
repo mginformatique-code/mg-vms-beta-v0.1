@@ -25,7 +25,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .interfaces import FrameAnalyzer, PlateRecognizer, EventConsumer, Frame, MGVMSEvent
+from .interfaces import FrameAnalyzer, PlateRecognizer, EventConsumer, Tracker, Segmenter, Frame, MGVMSEvent
 
 logger = logging.getLogger("plugin_bus")
 
@@ -85,6 +85,10 @@ class PluginBus:
         """
         if isinstance(instance, PlateRecognizer):
             iface = "PlateRecognizer"
+        elif isinstance(instance, Tracker):
+            iface = "Tracker"
+        elif isinstance(instance, Segmenter):
+            iface = "Segmenter"
         elif isinstance(instance, FrameAnalyzer):
             iface = "FrameAnalyzer"
         elif isinstance(instance, EventConsumer):

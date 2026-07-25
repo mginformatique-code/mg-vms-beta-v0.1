@@ -1,0 +1,24 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: mask-rcnn
+  displayName: "Mask R-CNN"
+  version: "1.0.0"
+  description: "Mask R-CNN — segmentation d'instances via torchvision."
+  author: "MG-VMS Team"
+  license: "MIT"
+  categories: [segmentation]
+  providerGroup: segmentation
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: MaskRcnnPlugin
+  interface: Segmenter
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [camera.frame.read, event.write]
+  resources: {cpu_cores: 2, ram_mb: 2048, gpu: optional, disk_mb: 500}
+  dependencies:
+    python: ["torchvision"]
+  config_schema: config/schema.json
+  bus:
+    order: 62

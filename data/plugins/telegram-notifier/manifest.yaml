@@ -1,0 +1,24 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: telegram-notifier
+  displayName: "Telegram Notifier"
+  version: "1.0.0"
+  description: "Envoi d'alertes via bot Telegram (event.detected, plate.blacklist, alert.critical)."
+  author: "MG-VMS Team"
+  license: "MIT"
+  categories: [notifications]
+  providerGroup: notifications
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: TelegramNotifierPlugin
+  interface: EventConsumer
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [event.read, network.outbound]
+  resources: {cpu_cores: 0.1, ram_mb: 32, gpu: none, disk_mb: 5}
+  dependencies:
+    python: ["httpx"]
+  config_schema: config/schema.json
+  bus:
+    order: 200

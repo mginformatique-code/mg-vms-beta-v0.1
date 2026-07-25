@@ -1,0 +1,24 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: botsort
+  displayName: "BoT-SORT"
+  version: "1.0.0"
+  description: "BoT-SORT — amélioration de ByteTrack avec compensation caméra + ReID."
+  author: "MG-VMS Team"
+  license: "MIT"
+  categories: [tracking]
+  providerGroup: tracking
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: BotSortPlugin
+  interface: Tracker
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [camera.frame.read, event.write]
+  resources: {cpu_cores: 1, ram_mb: 400, gpu: optional, disk_mb: 100}
+  dependencies:
+    python: ["ultralytics"]
+  config_schema: config/schema.json
+  bus:
+    order: 51

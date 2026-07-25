@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Détection de chute",
+  "type": "object",
+  "properties": {
+    "enabled_for_demo": {
+      "type": "boolean",
+      "default": false,
+      "title": "Activer la démo"
+    },
+    "sensitivity": {
+      "type": "number",
+      "default": 0.5,
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "title": "Sensibilité de détection"
+    },
+    "min_confidence": {
+      "type": "number",
+      "default": 0.6,
+      "minimum": 0.0,
+      "maximum": 1.0
+    }
+  }
+}

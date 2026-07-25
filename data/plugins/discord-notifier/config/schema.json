@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Discord Notifier",
+  "type": "object",
+  "required": ["webhook_url"],
+  "properties": {
+    "webhook_url": {"type": "string", "title": "Webhook URL", "description": "URL du webhook Discord (Serveur → Paramètres → Intégrations → Webhooks)", "format": "password"},
+    "username": {"type": "string", "default": "MG-VMS", "title": "Nom d'affichage"},
+    "event_types": {"type": "array", "items": {"type": "string"}, "default": ["alert.critical", "plate.blacklist"]}
+  }
+}

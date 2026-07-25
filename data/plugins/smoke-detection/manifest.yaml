@@ -1,0 +1,24 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: smoke-detection
+  displayName: "Détection de fumée"
+  version: "1.0.0"
+  description: "Détection de fumée en temps réel — alerte incendie précoce."
+  author: "MG-VMS Team"
+  license: "MIT"
+  categories: [security]
+  providerGroup: security
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: SmokeDetectionPlugin
+  interface: FrameAnalyzer
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [camera.frame.read, event.write]
+  resources: {cpu_cores: 1, ram_mb: 500, gpu: optional, disk_mb: 200}
+  dependencies:
+    python: ["ultralytics"]
+  config_schema: config/schema.json
+  bus:
+    order: 90

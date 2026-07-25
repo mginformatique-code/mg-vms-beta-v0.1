@@ -32,29 +32,28 @@ Refonte de MG-VMS vers une **plateforme plugin-oriented** (style Home Assistant)
 - `GET /api/v1/diagnostics/streams-sync`
 
 ### CHANGELOG (Feb 2026 — session courante)
-- **[NEW]** PluginBus multi-plugin (dispatch parallèle, isolation crash, timeout, métriques)
-- **[NEW]** 4 politiques de fusion ANPR (cascade/highest/compare/vote — ADR-16)
-- **[NEW]** PolicyStore persistant `/app/backend/data/plugin_policy.json`
-- **[NEW]** Wrappers builtin YOLO/ALPR conformes aux interfaces plugin
-- **[NEW]** MockPlatePlugin pour tests unitaires multi-ANPR
-- **[NEW]** Endpoints `/api/v1/plugins/bus/*` + `/policy/*` + `/test/multi-anpr`
-- **[NEW]** Bootstrap plugin bundle au startup (yolo-detection + fast-alpr)
-- **[NEW]** Loader dynamique `plugin_manager/loader.py` (manifests YAML + import isolé)
-- **[NEW]** Frontend `PluginManagerNG.jsx` avec catégorisation par groupe
-- **[NEW]** `/api/plugins/registry` renommé pour éviter conflit legacy
-- **[NEW]** **19 plugins isolés** dans `/app/data/plugins/`:
-  - 11 ANPR (fast-alpr, plate-recognizer, openalpr, codeproject-ai, paddle-ocr, easyocr, tesseract, google-vision, azure-vision, opencv-ocr, custom-plugin-template)
-  - 8 Object Detection (yolo-detection=YOLOv11, yolov8, yolo-nas, rt-detr, efficientdet, openvino-detector, onnx-detector, tensorrt-detector)
-- **[NEW]** Métadonnées `providerGroup` dans manifest + regroupement UI par catégorie
-- **[NEW]** Système d'états plugin (`ready`/`not_configured`/`missing_dependency`/`error`/`disabled`)
-- **[NEW]** Config store persistant + endpoints `GET/PUT /api/plugins/{name}/config` avec masquage secrets + hot reload via `on_config_change`
-- **[NEW]** Frontend `PluginConfigDialog.jsx` — formulaire dynamique depuis JSON Schema
-- **[NEW]** **Bouton "Installer les deps"** dans l'UI pour plugins `missing_dependency`
-  - Endpoints `POST /api/plugins/{name}/install-deps` + `GET /api/plugins/{name}/install-status`
-  - Job background `pip install --no-cache-dir --no-deps <packages>` avec timeout 15min
-  - Flag `--no-deps` par défaut pour éviter d'écraser numpy/opencv (protection env)
-  - Poll toutes les 3s côté frontend + toast + reload auto de l'état plugin
-- **[NEW]** Suites pytest : `test_multi_plugin.py` 11 + `test_plugin_loader.py` 4 + `test_anpr_plugins.py` 6 = **21/21 OK**
+- **[NEW]** PluginBus + 4 politiques fusion ANPR + PolicyStore + loader dynamique
+- **[NEW]** **49 plugins** répartis en **11 catégories** :
+  - `object-detection` (8) — YOLOv11, YOLOv8, YOLO-NAS, RT-DETR, EfficientDet, OpenVINO, ONNX-Runtime, TensorRT
+  - `tracking` (5) — ByteTrack, BoTSORT, DeepSORT, StrongSORT, OCSORT
+  - `segmentation` (3) — SAM2, Detectron2, Mask R-CNN
+  - `anpr` (11) — fast-alpr, plate-recognizer, openalpr, codeproject-ai, azure-vision, google-vision, paddle-ocr, easyocr, tesseract, opencv-ocr, custom-plugin-template
+  - `notifications` (3) — Telegram (impl. réelle), Discord (impl. réelle webhook), SMTP (impl. réelle STARTTLS)
+  - `counting` (3) — Person, Vehicle, Occupancy
+  - `parking` (1) — Parking Manager (libre/occupée/temps)
+  - `security` (5) — Smoke, Fire, Weapon, Fight, Fall
+  - `ppe` (4) — Casque, Gilet, Gants, Lunettes
+  - `commerce` (3) — Heatmap, Files d'attente, Dwell time
+  - `agriculture` (3) — Animaux, Oiseaux, Intrusion
+- **[NEW]** 2 nouvelles interfaces plugin : `Tracker` (méthode `track()`) et `Segmenter` (méthode `segment()`) avec types `Track`/`SegmentMask`/`TrackingResult`/`SegmentationResult`
+- **[NEW]** Bus auto-détecte les 5 interfaces (`FrameAnalyzer`, `PlateRecognizer`, `EventConsumer`, `Tracker`, `Segmenter`)
+- **[NEW]** Frontend `PluginManagerNG` — 11 GROUP_META avec couleurs/descriptions/labels FR
+- **[NEW]** Sort ordonné par catégorie (Object Detection → Tracking → Segmentation → ANPR → Notifications → Counting → Parking → Security → PPE → Commerce → Agriculture)
+- **[NEW]** Notifications avec vraies implémentations HTTP (Telegram Bot API, Discord Webhook, SMTP STARTTLS)
+- **[NEW]** Système d'états `ready`/`not_configured`/`missing_dependency`/`error`/`disabled` + config store persistant + hot reload
+- **[NEW]** Bouton "Installer les deps" + `--no-deps` par défaut (protection env)
+- **[NEW]** Générateurs Python `/tmp/gen_object_detection.py` + `/tmp/gen_all_categories.py`
+- **[NEW]** Suites pytest — **21/21 OK**
 
 ### CHANGELOG (session précédente)
 - Fix régression IA (retry, découplage YOLO/ALPR, plus de suicide loop)
@@ -66,17 +65,15 @@ Refonte de MG-VMS vers une **plateforme plugin-oriented** (style Home Assistant)
 - URL versioning `/api/v1/` (middleware alias)
 
 ### ROADMAP prioritaire
-- **P0** : ✅ Multi-plugin ANPR/Tracking (fait — session Feb 2026)
-- **P0** : ✅ 11 plugins ANPR + 8 providers Object Detection isolés (fait)
-- **P0** : ✅ Bouton "Installer les deps" + configuration UI (fait)
-- **P0** : ✅ Groupement par catégorie dans l'UI (fait)
-- **P1** : Ajouter **catégorie Tracking** (ByteTrack, BoTSORT, DeepSORT, StrongSORT, OCSORT)
-- **P1** : Ajouter **catégorie OCR généraliste** distincte de ANPR (TrOCR, plus détaillé)
-- **P1** : Ajouter **catégorie Segmentation** (SAM2, Detectron2, Mask R-CNN)
-- **P1** : Catégories spécialisées : Comptage / Parking / Sécurité (Smoke, Fire, Weapon, Fight, Fall) / PPE / Commerce / Agriculture
-- **P1** : Notifications Discord/Telegram/SMTP en plugins `EventConsumer` isolés
+- **P0** : ✅ Multi-plugin ANPR/Tracking (fait)
+- **P0** : ✅ 11 plugins ANPR + 8 Object Detection Providers + configuration UI (fait)
+- **P0** : ✅ 5 Tracking + 3 Segmentation + 3 Notifications + 20+ métier (fait)
+- **P0** : ✅ Groupement par catégorie dans l'UI (11 groupes)
+- **P1** : Brancher les vrais moteurs sur les plugins skeleton (currently pass-through) — ex: ByteTrack via Ultralytics, SAM2 via Meta
+- **P1** : Bridge Object Detection → Tracker → Segmenter (pipeline chaîné dans le bus)
 - **P1** : Modulariser `routers.py` → `/app/backend/routes/*.py`
-- **P2** : Chiffrement Fernet des secrets plugin dans le config store
+- **P1** : Chiffrement Fernet des secrets plugin dans config_store
 - **P2** : Marketplace ecosystem + SDK Python publiable pip
 - **P2** : Sandboxing sub-process + container
 - **P2** : Namespace DB isolé par plugin (`db.plugin_data.{name}`)
+- **P2** : Bus dispatch pour Tracker + Segmenter (actuellement seul FrameAnalyzer/PlateRecognizer/EventConsumer dispatchent)

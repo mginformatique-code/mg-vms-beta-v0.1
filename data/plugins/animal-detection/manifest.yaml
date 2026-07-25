@@ -1,0 +1,24 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: animal-detection
+  displayName: "Détection d'animaux"
+  version: "1.0.0"
+  description: "Détection de mammifères en élevage / faune sauvage / intrusion nocturne."
+  author: "MG-VMS Team"
+  license: "MIT"
+  categories: [agriculture]
+  providerGroup: agriculture
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: AnimalDetectionPlugin
+  interface: FrameAnalyzer
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [camera.frame.read, event.write]
+  resources: {cpu_cores: 1, ram_mb: 500, gpu: optional, disk_mb: 200}
+  dependencies:
+    python: ["ultralytics"]
+  config_schema: config/schema.json
+  bus:
+    order: 120

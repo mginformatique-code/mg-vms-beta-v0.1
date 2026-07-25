@@ -1,0 +1,24 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: parking-manager
+  displayName: "Parking Manager"
+  version: "1.0.0"
+  description: "Gestion parking : détection place libre/occupée + temps de stationnement + PMR/VIP."
+  author: "MG-VMS Team"
+  license: "MIT"
+  categories: [parking]
+  providerGroup: parking
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: ParkingManagerPlugin
+  interface: FrameAnalyzer
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [camera.frame.read, event.write]
+  resources: {cpu_cores: 1, ram_mb: 256, gpu: none, disk_mb: 50}
+  dependencies:
+    python: []
+  config_schema: config/schema.json
+  bus:
+    order: 80

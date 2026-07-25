@@ -1,0 +1,24 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: queue-detection
+  displayName: "Files d'attente"
+  version: "1.0.0"
+  description: "Détecte les files d'attente + longueur + temps d'attente moyen."
+  author: "MG-VMS Team"
+  license: "MIT"
+  categories: [commerce]
+  providerGroup: commerce
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: QueueDetectionPlugin
+  interface: FrameAnalyzer
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [camera.frame.read, event.write]
+  resources: {cpu_cores: 0.5, ram_mb: 150, gpu: none, disk_mb: 30}
+  dependencies:
+    python: []
+  config_schema: config/schema.json
+  bus:
+    order: 111

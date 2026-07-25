@@ -1,0 +1,24 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: deepsort
+  displayName: "DeepSORT"
+  version: "1.0.0"
+  description: "DeepSORT classique — ReID via CNN léger + Kalman. Historique référence."
+  author: "MG-VMS Team"
+  license: "MIT"
+  categories: [tracking]
+  providerGroup: tracking
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: DeepSortPlugin
+  interface: Tracker
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [camera.frame.read, event.write]
+  resources: {cpu_cores: 1, ram_mb: 500, gpu: optional, disk_mb: 150}
+  dependencies:
+    python: ["deep-sort-realtime"]
+  config_schema: config/schema.json
+  bus:
+    order: 52
