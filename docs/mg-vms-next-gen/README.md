@@ -70,17 +70,41 @@ Formalisé en 16 règles opposables (R01→R16, chapitre 2).
 - `27-versioning-deprecation.md` — *à rédiger*
 - `28-grille-responsabilites.md` — *à rédiger*
 
-## Chapitres livrés à date
+## Chapitres livrés à date (v0.3 — 2026-07-24)
 
-| # | Titre | Lignes | Statut | Tag Git |
-|---|---|---|---|---|
-| 02 | Philosophie & principes | 411 → 425 | ✅ v1.1 | `docs/chapter-02-v1` (+ amend) |
-| 04 | Architecture cible | 632 → 700+ | ✅ v1.1 | `docs/chapter-04-v1` (+ amend) |
-| 05 | Contrats d'interface | 672 | ✅ v1 | `docs/chapter-05-v1` |
-| 06 | Mode Installateur | 716 | ✅ v1 | `docs/chapter-06-v1` |
-| 11 | **Plateforme de plugins** ⭐ | 700+ | ✅ v1 | `docs/chapter-11-v1` |
+| # | Titre | Lignes | Statut |
+|---|---|---|---|
+| README | Index général | 99 | ✅ |
+| 01 | Vision & positionnement | ~360 | ✅ v1 |
+| 02 | Philosophie & principes (16 règles) | 423 | ✅ v1.1 |
+| 03 | Personas (6) | ~330 | ✅ v1 |
+| 04 | Architecture cible | 670 | ✅ v1.1 |
+| 05 | Contrats d'interface | 672 | ✅ v1 |
+| 06 | Mode Installateur | 716 | ✅ v1 |
+| 07 | Home / Dashboard | ~180 | ✅ v1 |
+| 08 | Mur vidéo | ~85 | ✅ v1 |
+| 09 | Recherche unifiée | ~55 | ✅ v1 |
+| 10 | Assistant ajout caméra | ~70 | ✅ v1 |
+| **11** | **Plateforme de plugins** ⭐ | **892** | ✅ v1 |
+| 12 | Modules IA officiels | ~200 | ✅ v1 |
+| 13 | Plugin Parking | ~180 | ✅ v1 |
+| 14 | PTZ | ~55 | ✅ v1 |
+| 15 | Plugin Automation | ~200 | ✅ v1 |
+| 16 | Storage Manager | ~90 | ✅ v1 |
+| 17 | GPU Manager | ~80 | ✅ v1 |
+| 18 | Snapshots | ~50 | ✅ v1 |
+| 19 | Zones | ~55 | ✅ v1 |
+| 20 | Diagnostics intelligents | ~380 | ✅ v1 |
+| 21 | Rapports | ~75 | ✅ v1 |
+| 22 | Administration & RBAC | ~400 | ✅ v1 |
+| 23 | API publique & SDK | ~85 | ✅ v1 |
+| 24 | Marketplace | ~230 | ✅ v1 |
+| 25 | Intégrations tierces | ~85 | ✅ v1 |
+| 26 | Roadmap | ~330 | ✅ v1 |
+| 27 | Versioning & dépréciation | ~55 | ✅ v1 |
+| 28 | Grille de responsabilités | ~75 | ✅ v1 |
 
-Total livré : **~3200 lignes** sur 5 chapitres fondateurs.
+**Total : 28 chapitres livrés · ~7500 lignes · couverture complète du cahier des charges.**
 
 ## Conventions du document
 
