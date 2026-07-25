@@ -1,0 +1,21 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: fast-alpr
+  displayName: "Fast-ALPR (ONNX local)"
+  version: "1.0.0-preview"
+  description: "ANPR local CPU-ONNX rapide (bundle officiel). Wrapper du moteur intégré ai_engine — sera embarqué autonome en v3.0."
+  author: "MG-VMS Team"
+  license: "MIT"
+  categories: [ai, anpr, local]
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: FastAlprPlugin
+  interface: PlateRecognizer
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [camera.frame.read, event.write]
+  resources: {cpu_cores: 1, ram_mb: 512, gpu: optional, vram_mb: 512, disk_mb: 200}
+  config_schema: config/schema.json
+  bus:
+    order: 20

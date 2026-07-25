@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Google Cloud Vision",
+  "type": "object",
+  "required": ["credentials_json_path"],
+  "properties": {
+    "credentials_json_path": {
+      "type": "string",
+      "title": "Chemin du fichier credentials JSON",
+      "description": "Chemin absolu sur le serveur MG-VMS (généré depuis Google Cloud Console → IAM → Service accounts)"
+    },
+    "min_confidence": {"type": "number", "default": 0.5, "minimum": 0.0, "maximum": 1.0}
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Fast-ALPR (ONNX local)",
+  "type": "object",
+  "properties": {
+    "min_confidence": {"type": "number", "default": 0.4, "minimum": 0.0, "maximum": 1.0}
+  }
+}

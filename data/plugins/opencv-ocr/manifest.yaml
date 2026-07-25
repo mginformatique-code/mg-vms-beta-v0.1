@@ -1,0 +1,21 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: opencv-ocr
+  displayName: "OpenCV OCR (local)"
+  version: "1.0.0"
+  description: "OCR local via OpenCV contrib (EAST + Tesseract intégré). Léger et sans deps IA."
+  author: "MG-VMS Team"
+  license: "Apache-2.0"
+  categories: [ai, anpr, local]
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: OpenCVOCRPlugin
+  interface: PlateRecognizer
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [camera.frame.read, event.write]
+  resources: {cpu_cores: 0.5, ram_mb: 256, gpu: none, disk_mb: 100}
+  config_schema: config/schema.json
+  bus:
+    order: 43

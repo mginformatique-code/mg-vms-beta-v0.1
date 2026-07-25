@@ -1,0 +1,21 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: custom-plugin-template
+  displayName: "Plugin personnalisé (template)"
+  version: "1.0.0"
+  description: "Squelette de plugin ANPR personnalisé. Éditez plugin.py pour brancher votre propre moteur (REST interne, ONNX custom, model TensorFlow...). Sert de démo — retourne une plaque fixe."
+  author: "MG-VMS Team"
+  license: "MIT"
+  categories: [ai, anpr, template]
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: CustomAnprPlugin
+  interface: PlateRecognizer
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [camera.frame.read, event.write]
+  resources: {cpu_cores: 0.1, ram_mb: 32, gpu: none, disk_mb: 5}
+  config_schema: config/schema.json
+  bus:
+    order: 100

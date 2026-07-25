@@ -200,24 +200,64 @@ class PluginLoader:
 
             instance = plugin_cls()
             caps = (spec.get("capabilities") or [])
-            ctx = PluginContext(plugin_name=name, version=version, capabilities=list(caps))
+            # Injecte la config persistée depuis /app/backend/data/plugin_configs.json
+            from .config_store import store as config_store
+            persisted_config = config_store.get(name)
+            ctx = PluginContext(
+                plugin_name=name,
+                version=version,
+                capabilities=list(caps),
+                config=persisted_config,
+            )
             try:
                 await instance.on_load(ctx)
             except Exception as e:  # pragma: no cover
                 logger.warning("plugin_loader.on_load_error name=%s err=%s", name, e)
+                ctx.set_state("error", str(e))
 
             # Retirer une éventuelle instance builtin déjà enregistrée pour ce nom
             bus.unregister(name)
             entry = bus.register(name, instance, order=order)
+            # Reflète l'état déclaré par le plugin dans on_load
+            entry.state = ctx.state
+            entry.state_message = ctx.state_message
+            # Conserve le ctx pour reload à chaud
+            instance._mgvms_ctx = ctx  # type: ignore[attr-defined]
             lp.entry = entry
-            logger.info("plugin_loader.loaded name=%s v=%s interface=%s order=%s",
-                        name, version, interface, order)
+            logger.info("plugin_loader.loaded name=%s v=%s interface=%s state=%s order=%s",
+                        name, version, interface, ctx.state, order)
         except Exception as e:
             lp.error = f"load error: {type(e).__name__}: {e}"
             logger.warning("plugin_loader.load_error name=%s err=%s", name, e)
 
         self._loaded[name] = lp
         return lp
+
+    async def reload_config(self, name: str, new_config: dict) -> Optional[str]:
+        """Persiste la nouvelle config + appelle plugin.on_config_change + met à jour l'état.
+
+        Retourne None si succès, un message d'erreur sinon.
+        """
+        from .config_store import store as config_store
+        entry = bus._entries.get(name) if hasattr(bus, "_entries") else None
+        if entry is None:
+            return f"Plugin '{name}' non enregistré"
+        config_store.set(name, new_config)
+        ctx = getattr(entry.instance, "_mgvms_ctx", None)
+        if ctx is not None:
+            ctx.config = dict(new_config)
+            # Reset state avant nouvelle évaluation
+            ctx.set_state("ready", None)
+        try:
+            await entry.instance.on_config_change(dict(new_config))
+        except Exception as e:  # pragma: no cover
+            logger.warning("plugin_loader.on_config_change_error name=%s err=%s", name, e)
+            if ctx is not None:
+                ctx.set_state("error", str(e))
+        if ctx is not None:
+            entry.state = ctx.state
+            entry.state_message = ctx.state_message
+        return None
 
     async def discover_and_load_all(self) -> list[LoadedPlugin]:
         results = []

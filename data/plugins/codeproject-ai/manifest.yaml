@@ -1,0 +1,21 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: codeproject-ai
+  displayName: "CodeProject.AI (self-hosted)"
+  version: "1.0.0"
+  description: "ANPR via CodeProject.AI Server (auto-hébergé, gratuit). Aucune clé API. Requiert un serveur CodeProject.AI accessible en HTTP."
+  author: "MG-VMS Team"
+  license: "MIT"
+  categories: [ai, anpr, self-hosted]
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: CodeProjectAIPlugin
+  interface: PlateRecognizer
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [camera.frame.read, event.write, network.outbound]
+  resources: {cpu_cores: 0.5, ram_mb: 128, gpu: none, disk_mb: 10}
+  config_schema: config/schema.json
+  bus:
+    order: 32

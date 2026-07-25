@@ -46,6 +46,15 @@ Refonte de MG-VMS vers une **plateforme plugin-oriented** (style Home Assistant)
 - **[NEW]** Frontend `PluginManagerNG.jsx` intégré dans `/plugins` — bus runtime, politique multi-ANPR, panel test avec mocks injectables
 - **[NEW]** `/api/plugins/registry` (renommage NG registry pour éviter conflit avec legacy `/api/plugins`)
 - **[NEW]** Suite pytest `tests/test_plugin_loader.py` — 4 tests OK
+- **[NEW]** **11 plugins ANPR isolés** dans `/app/data/plugins/` (fast-alpr, plate-recognizer, openalpr, codeproject-ai, paddle-ocr, easyocr, tesseract, google-vision, azure-vision, opencv-ocr, custom-plugin-template)
+- **[NEW]** Système d'états plugin (`ready` / `not_configured` / `missing_dependency` / `error` / `disabled`)
+- **[NEW]** Config store persistant `plugin_manager/config_store.py` → `/app/backend/data/plugin_configs.json`
+- **[NEW]** Endpoints `GET/PUT /api/plugins/{name}/config` avec masquage des secrets (api_token, secret_key, subscription_key, password, token) + `"***"` = préservation
+- **[NEW]** Hot reload : `loader.reload_config()` appelle `plugin.on_config_change()` et met à jour l'état du bus sans redémarrage
+- **[NEW]** Frontend `PluginConfigDialog.jsx` — formulaire dynamique depuis JSON Schema (string / password / number / boolean / array / enum)
+- **[NEW]** Badges d'état colorés + bordure gauche colorée + messages d'aide explicites dans l'UI
+- **[NEW]** Bus filtre `active()` sur `state == "ready"` — les plugins non-configurés ne sont jamais dispatchés (aucun waste)
+- **[NEW]** Suite pytest `tests/test_anpr_plugins.py` — 6 tests OK (découverte des 11, interface commune, dispatch filtering, hot reload, config store persistence)
 
 ### CHANGELOG (session précédente)
 - Fix régression IA (retry, découplage YOLO/ALPR, plus de suicide loop)
@@ -58,12 +67,14 @@ Refonte de MG-VMS vers une **plateforme plugin-oriented** (style Home Assistant)
 
 ### ROADMAP prioritaire
 - **P0** : ✅ Multi-plugin ANPR/Tracking (fait — session Feb 2026)
-- **P1** : ✅ Extraire YOLO en plugin isolé `/app/data/plugins/yolo-detection/` (fait — manifest YAML + loader dynamique + config schema)
-- **P1** : ✅ UI Plugin Manager NG (fait — `PluginManagerNG.jsx` intégrée dans `/plugins`)
+- **P0** : ✅ 11 plugins ANPR isolés avec interface commune + config UI + états visibles (fait)
+- **P1** : ✅ Extraire YOLO en plugin isolé `/app/data/plugins/yolo-detection/` (fait)
+- **P1** : ✅ UI Plugin Manager NG avec badges d'état + modal Configurer (fait)
+- **P1** : Extraire notifications Discord/Telegram/SMTP en plugins isolés `EventConsumer`
 - **P1** : Modulariser `routers.py` (1700+ lignes) → `/app/backend/routes/*.py` par domaine
-- **P1** : Extraire fast-alpr, notifications Discord/Telegram/SMTP en plugins isolés `/data/plugins/{fast-alpr,discord-notifier,...}/`
+- **P2** : Installer réellement les deps locales (paddleocr, easyocr, pytesseract) via un flow "Installer" dans l'UI
 - **P2** : Mode Installateur (wizard 10-15 min)
 - **P2** : Marketplace ecosystem (site + review process)
 - **P2** : SDK Python (`mgvms-plugin-sdk`) publiable pip
 - **P2** : Sandboxing sub-process + container
-- **P2** : Auto-form React (react-jsonschema-form) à partir du config_schema JSON exposé par le loader
+- **P2** : Chiffrement Fernet des secrets plugin (api_token, secret_key) dans le config store

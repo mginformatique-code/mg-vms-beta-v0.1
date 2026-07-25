@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OpenALPR (cloud)",
+  "type": "object",
+  "required": ["secret_key"],
+  "properties": {
+    "secret_key": {
+      "type": "string",
+      "title": "Secret Key",
+      "description": "Clé secrète OpenALPR (cloud.openalpr.com)",
+      "format": "password"
+    },
+    "country": {"type": "string", "default": "eu", "title": "Pays", "enum": ["eu", "us", "au", "gb", "kr", "in", "auwide"]},
+    "recognize_vehicle": {"type": "boolean", "default": false, "title": "Reconnaître aussi le véhicule (marque/modèle)"},
+    "endpoint": {"type": "string", "default": "https://api.openalpr.com/v3/recognize_bytes", "title": "Endpoint API"},
+    "timeout_s": {"type": "number", "default": 5.0, "minimum": 1.0, "maximum": 30.0}
+  }
+}

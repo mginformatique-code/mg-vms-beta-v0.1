@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Tesseract OCR (local)",
+  "type": "object",
+  "properties": {
+    "lang": {"type": "string", "default": "eng", "title": "Langue (eng, fra, deu, ...)"},
+    "psm": {"type": "integer", "default": 7, "minimum": 0, "maximum": 13, "title": "Page Segmentation Mode",
+            "description": "7 = single text line (recommandé pour plaques)"},
+    "whitelist": {"type": "string", "default": "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-",
+                  "title": "Caractères autorisés"}
+  }
+}

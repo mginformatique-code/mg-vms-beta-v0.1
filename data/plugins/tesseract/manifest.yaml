@@ -1,0 +1,23 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: tesseract
+  displayName: "Tesseract OCR (local)"
+  version: "1.0.0"
+  description: "OCR local Google Tesseract via pytesseract. Léger, rapide, précision modérée."
+  author: "MG-VMS Team"
+  license: "Apache-2.0"
+  categories: [ai, anpr, local]
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: TesseractPlugin
+  interface: PlateRecognizer
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [camera.frame.read, event.write]
+  resources: {cpu_cores: 0.5, ram_mb: 128, gpu: none, disk_mb: 50}
+  dependencies:
+    system: ["tesseract-ocr"]
+  config_schema: config/schema.json
+  bus:
+    order: 42

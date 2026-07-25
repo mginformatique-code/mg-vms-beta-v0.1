@@ -7,9 +7,10 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import {
   Boxes, Zap, GitBranch, Trophy, Vote, ClipboardList, RefreshCw, PlayCircle,
-  AlertTriangle, CheckCircle2, XCircle, Clock, FileJson, Package,
+  AlertTriangle, CheckCircle2, XCircle, Clock, FileJson, Package, Settings2, PackageX, WrenchIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import PluginConfigDialog from "@/pages/PluginConfigDialog";
 
 const FUSION_MODES = [
   { id: "cascade", label: "Cascade", desc: "Séquentiel, stop dès confidence ≥ seuil (économise quota cloud)", Icon: GitBranch },
@@ -24,12 +25,23 @@ const IFACE_BADGE = {
   EventConsumer:    { color: "#A855F7", label: "EventConsumer" },
 };
 
+const STATE_META = {
+  ready:              { color: "#00E676", label: "READY",       Icon: CheckCircle2, desc: "Prêt à recevoir des frames" },
+  not_configured:    { color: "#FFB800", label: "À CONFIGURER", Icon: Settings2,   desc: "Configuration requise" },
+  missing_dependency:{ color: "#A855F7", label: "DEP MANQUANTE",Icon: PackageX,    desc: "Dépendance Python/système absente" },
+  error:              { color: "#FF3333", label: "ERREUR",       Icon: XCircle,    desc: "Erreur au chargement" },
+  disabled:           { color: "#666",    label: "DÉSACTIVÉ",    Icon: WrenchIcon,   desc: "Désactivé manuellement" },
+};
+
 export default function PluginManagerNG() {
   const [bus, setBus] = useState(null);
   const [policy, setPolicy] = useState(null);
   const [loaderData, setLoaderData] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
+
+  // Config dialog
+  const [configPlugin, setConfigPlugin] = useState(null);
 
   // Multi-ANPR test panel
   const [testMode, setTestMode] = useState("cascade");
@@ -138,11 +150,12 @@ export default function PluginManagerNG() {
             <Zap size={16} className="text-[#00E676]" /> Bus runtime
           </h3>
           {bus && (
-            <div className="text-[11px] text-muted-foreground mono flex items-center gap-3">
+            <div className="text-[11px] text-muted-foreground mono flex items-center gap-3 flex-wrap">
               <span>Total : <b className="text-foreground">{bus.counts.total}</b></span>
               <span>FrameAnalyzer : <b className="text-foreground">{bus.counts.frame_analyzers}</b></span>
               <span>PlateRecognizer : <b className="text-foreground">{bus.counts.plate_recognizers}</b></span>
               <span>Actifs : <b className="text-[#00E676]">{bus.counts.enabled}</b></span>
+              <span>Dispatch : <b className="text-[#00E676]">{bus.entries.filter((e) => e.dispatchable).length}</b></span>
             </div>
           )}
         </div>
@@ -155,11 +168,15 @@ export default function PluginManagerNG() {
           <div className="space-y-2" data-testid="plugin-bus-entries">
             {bus.entries.map((e) => {
               const badge = IFACE_BADGE[e.interface] || { color: "#666", label: e.interface };
+              const state = STATE_META[e.state] || STATE_META.ready;
+              const StateIcon = state.Icon;
               const dyn = dynamicMap[e.name];
+              const hasSchema = dyn?.has_config_schema;
               return (
                 <div
                   key={e.name}
                   className="flex items-center gap-3 p-2.5 border border-border bg-background/60"
+                  style={{ borderLeftColor: state.color, borderLeftWidth: 3 }}
                   data-testid={`bus-row-${e.name}`}
                 >
                   <div className="flex-1 min-w-0">
@@ -171,10 +188,18 @@ export default function PluginManagerNG() {
                       >
                         {badge.label}
                       </span>
+                      <span
+                        className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border flex items-center gap-1"
+                        style={{ borderColor: state.color, color: state.color }}
+                        data-testid={`bus-state-${e.name}`}
+                        title={state.desc}
+                      >
+                        <StateIcon size={9} /> {state.label}
+                      </span>
                       <span className="text-[10px] mono text-muted-foreground">order {e.order}</span>
                       {dyn && dyn.loaded && (
                         <span
-                          className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-[#00E676] text-[#00E676] flex items-center gap-1"
+                          className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-[#00E676]/50 text-[#00E676] flex items-center gap-1"
                           title={dyn.manifest_path}
                         >
                           <FileJson size={9} /> manifest v{dyn.version}
@@ -186,6 +211,11 @@ export default function PluginManagerNG() {
                         </span>
                       )}
                     </div>
+                    {e.state_message && e.state !== "ready" && (
+                      <div className="text-[11px] mt-1 mono" style={{ color: state.color }} data-testid={`bus-state-msg-${e.name}`}>
+                        {e.state_message}
+                      </div>
+                    )}
                     <div className="flex items-center gap-4 mt-1 text-[10px] mono text-muted-foreground">
                       <span>calls: {e.calls}</span>
                       <span className={e.errors > 0 ? "text-[#FF3333]" : ""}>errors: {e.errors}</span>
@@ -198,11 +228,23 @@ export default function PluginManagerNG() {
                       )}
                     </div>
                   </div>
-                  <Switch
-                    checked={e.enabled}
-                    onCheckedChange={(v) => toggleEntry(e.name, v)}
-                    data-testid={`bus-toggle-${e.name}`}
-                  />
+                  <div className="flex items-center gap-2 shrink-0">
+                    {hasSchema && (
+                      <button
+                        onClick={() => setConfigPlugin(e.name)}
+                        className="flex items-center gap-1 px-2 py-1 text-[11px] border border-border hover:border-[#0044FF] hover:text-[#0044FF] transition-colors"
+                        data-testid={`bus-configure-${e.name}`}
+                        title="Configurer ce plugin"
+                      >
+                        <Settings2 size={11} /> Configurer
+                      </button>
+                    )}
+                    <Switch
+                      checked={e.enabled}
+                      onCheckedChange={(v) => toggleEntry(e.name, v)}
+                      data-testid={`bus-toggle-${e.name}`}
+                    />
+                  </div>
                 </div>
               );
             })}
@@ -449,6 +491,14 @@ export default function PluginManagerNG() {
           </div>
         </div>
       </section>
+
+      {/* Config dialog (formulaire dynamique depuis JSON Schema) */}
+      <PluginConfigDialog
+        open={!!configPlugin}
+        pluginName={configPlugin}
+        onOpenChange={(v) => !v && setConfigPlugin(null)}
+        onSaved={load}
+      />
     </div>
   );
 }

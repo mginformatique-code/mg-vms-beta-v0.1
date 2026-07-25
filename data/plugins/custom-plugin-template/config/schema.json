@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Plugin ANPR personnalisé",
+  "type": "object",
+  "properties": {
+    "enabled_for_demo": {
+      "type": "boolean",
+      "default": false,
+      "title": "Activer la démo",
+      "description": "Si activé, retourne une plaque fixe à chaque appel (utile pour tester le pipeline)"
+    },
+    "demo_plate": {
+      "type": "string",
+      "default": "CUSTOM-99",
+      "title": "Plaque de démo"
+    },
+    "demo_confidence": {
+      "type": "number",
+      "default": 0.5,
+      "minimum": 0.0,
+      "maximum": 1.0
+    }
+  }
+}

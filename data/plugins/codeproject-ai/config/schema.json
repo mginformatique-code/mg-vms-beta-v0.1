@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CodeProject.AI (self-hosted)",
+  "type": "object",
+  "required": ["endpoint"],
+  "properties": {
+    "endpoint": {
+      "type": "string",
+      "title": "URL du serveur CodeProject.AI",
+      "description": "Ex: http://127.0.0.1:32168 ou http://ai-server.local:32168",
+      "default": "http://127.0.0.1:32168"
+    },
+    "route": {"type": "string", "default": "/v1/vision/alpr", "title": "Route ALPR"},
+    "min_confidence": {"type": "number", "default": 0.4, "minimum": 0.0, "maximum": 1.0, "title": "Confidence minimum"},
+    "timeout_s": {"type": "number", "default": 8.0, "minimum": 1.0, "maximum": 60.0}
+  }
+}

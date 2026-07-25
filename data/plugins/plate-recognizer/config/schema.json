@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Plate Recognizer (cloud)",
+  "type": "object",
+  "required": ["api_token"],
+  "properties": {
+    "api_token": {
+      "type": "string",
+      "title": "API Token",
+      "description": "Token d'authentification depuis platerecognizer.com/accounts/api-keys/",
+      "format": "password"
+    },
+    "regions": {
+      "type": "array",
+      "items": {"type": "string"},
+      "default": ["fr"],
+      "title": "Régions/pays prioritaires",
+      "description": "Codes pays ISO (ex. fr, us, de). Améliore la précision."
+    },
+    "endpoint": {
+      "type": "string",
+      "default": "https://api.platerecognizer.com/v1/plate-reader/",
+      "title": "Endpoint API",
+      "description": "URL du service (ne changer que pour instance on-premise)"
+    },
+    "timeout_s": {
+      "type": "number",
+      "default": 5.0,
+      "minimum": 1.0,
+      "maximum": 30.0,
+      "title": "Timeout (secondes)"
+    }
+  }
+}

@@ -104,6 +104,54 @@ async def loader_config_schema(name: str, user: dict = Depends(require_permissio
     return schema
 
 
+@plugins_bus_router.get("/plugins/{name}/config")
+async def get_plugin_config(name: str, user: dict = Depends(require_permission("technician"))):
+    """Retourne la config utilisateur persistée du plugin (dict vide si jamais configuré).
+
+    Les valeurs sensibles (api_token, secret_key, api_key) sont masquées en `***`
+    dans le retour — pour reset il faut ré-envoyer la vraie valeur via PUT.
+    """
+    from plugin_manager.config_store import store
+    from plugin_manager.loader import loader as pl
+    cfg = store.get(name)
+    schema = pl.get_config_schema(name)
+    masked = dict(cfg)
+    sensitive_keys = {"api_token", "secret_key", "api_key", "password", "token"}
+    for k in list(masked.keys()):
+        if k in sensitive_keys and masked[k]:
+            masked[k] = "***"
+    return {"name": name, "config": masked, "has_schema": schema is not None,
+            "keys_set": [k for k, v in cfg.items() if v]}
+
+
+@plugins_bus_router.put("/plugins/{name}/config")
+async def set_plugin_config(
+    name: str,
+    payload: dict = Body(...),
+    user: dict = Depends(require_permission("technician")),
+):
+    """Persiste la config d'un plugin et déclenche un reload à chaud.
+
+    Body : le dict de configuration attendu par le schéma du plugin. Les
+    valeurs à `"***"` sont considérées inchangées (préservation des secrets).
+    """
+    from plugin_manager.loader import loader as pl
+    from plugin_manager.config_store import store
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="body doit être un objet")
+    current = store.get(name)
+    # Fusionne : "***" => on garde la valeur existante
+    merged = dict(current)
+    for k, v in payload.items():
+        if isinstance(v, str) and v == "***":
+            continue
+        merged[k] = v
+    err = await pl.reload_config(name, merged)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return {"name": name, "reloaded": True, "keys_set": [k for k, v in merged.items() if v]}
+
+
 # ─────────────────────── POLICY ───────────────────────
 
 @plugins_bus_router.get("/plugins/policy")

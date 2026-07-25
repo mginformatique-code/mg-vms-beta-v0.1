@@ -43,6 +43,13 @@ class BusEntry:
     timeouts: int = 0
     last_ms: float = 0.0
     last_error: Optional[str] = None
+    # État déclaré par le plugin lui-même après on_load / on_config_change
+    state: str = "ready"  # ready | not_configured | missing_dependency | error | disabled
+    state_message: Optional[str] = None
+
+    def is_dispatchable(self) -> bool:
+        """Un plugin est dispatché uniquement s'il est enabled ET ready."""
+        return self.enabled and self.state == "ready"
 
     def summary(self) -> dict:
         return {
@@ -50,6 +57,9 @@ class BusEntry:
             "interface": self.interface,
             "enabled": self.enabled,
             "order": self.order,
+            "state": self.state,
+            "state_message": self.state_message,
+            "dispatchable": self.is_dispatchable(),
             "calls": self.calls,
             "errors": self.errors,
             "timeouts": self.timeouts,
@@ -107,7 +117,17 @@ class PluginBus:
         return entries
 
     def active(self, interface: str) -> list[BusEntry]:
-        return [e for e in self.list_entries(interface) if e.enabled]
+        """Plugins enabled ET state=ready (dispatchable réellement)."""
+        return [e for e in self.list_entries(interface) if e.is_dispatchable()]
+
+    def set_state(self, name: str, state: str, message: Optional[str] = None) -> bool:
+        """Met à jour l'état d'un plugin (typiquement après on_load / reload)."""
+        entry = self._entries.get(name)
+        if not entry:
+            return False
+        entry.state = state
+        entry.state_message = message
+        return True
 
     def summary(self) -> list[dict]:
         return [e.summary() for e in self.list_entries()]
