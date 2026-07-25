@@ -7,7 +7,8 @@ metadata:
   description: "OCR local Baidu PaddleOCR. Précision élevée, illimité. CPU/GPU."
   author: "MG-VMS Team"
   license: "Apache-2.0"
-  categories: [ai, anpr, local]
+  categories: [anpr]
+  providerGroup: anpr
 spec:
   runtime: python
   entrypoint: plugin.py
@@ -16,6 +17,8 @@ spec:
   compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
   capabilities: [camera.frame.read, event.write]
   resources: {cpu_cores: 1, ram_mb: 800, gpu: optional, vram_mb: 1024, disk_mb: 500}
+  dependencies:
+    python: ["paddleocr", "paddlepaddle"]
   config_schema: config/schema.json
   bus:
     order: 40

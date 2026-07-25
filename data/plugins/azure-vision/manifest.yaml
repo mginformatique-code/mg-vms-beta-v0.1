@@ -7,7 +7,8 @@ metadata:
   description: "OCR généraliste Azure Cognitive Services (Read API v3.2). Utilisable comme ANPR sur plaques bien détourées."
   author: "MG-VMS Team"
   license: "MIT"
-  categories: [ai, anpr, cloud]
+  categories: [anpr]
+  providerGroup: anpr
 spec:
   runtime: python
   entrypoint: plugin.py

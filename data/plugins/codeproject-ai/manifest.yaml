@@ -7,7 +7,8 @@ metadata:
   description: "ANPR via CodeProject.AI Server (auto-hébergé, gratuit). Aucune clé API. Requiert un serveur CodeProject.AI accessible en HTTP."
   author: "MG-VMS Team"
   license: "MIT"
-  categories: [ai, anpr, self-hosted]
+  categories: [anpr]
+  providerGroup: anpr
 spec:
   runtime: python
   entrypoint: plugin.py

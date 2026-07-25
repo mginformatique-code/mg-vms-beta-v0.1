@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "model_path": {
+      "type": "string",
+      "title": "Chemin du modèle",
+      "description": "Chemin absolu du fichier modèle (.pt, .onnx, .trt, .engine, .xml selon provider). Optionnel : un modèle par défaut est utilisé si vide.",
+      "default": ""
+    },
+    "confidence": {
+      "type": "number",
+      "default": 0.35,
+      "minimum": 0.05,
+      "maximum": 0.99,
+      "title": "Seuil de confiance"
+    },
+    "device": {
+      "type": "string",
+      "default": "cpu",
+      "enum": [
+        "cpu",
+        "cuda:0",
+        "cuda:1",
+        "vpu"
+      ],
+      "title": "Device d'inférence"
+    },
+    "classes_enabled": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [
+        "person",
+        "car",
+        "truck",
+        "motorcycle",
+        "bicycle",
+        "bus"
+      ],
+      "title": "Classes détectées"
+    }
+  },
+  "title": "RT-DETR (Baidu)"
+}

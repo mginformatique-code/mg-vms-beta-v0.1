@@ -39,22 +39,22 @@ Refonte de MG-VMS vers une **plateforme plugin-oriented** (style Home Assistant)
 - **[NEW]** MockPlatePlugin pour tests unitaires multi-ANPR
 - **[NEW]** Endpoints `/api/v1/plugins/bus/*` + `/policy/*` + `/test/multi-anpr`
 - **[NEW]** Bootstrap plugin bundle au startup (yolo-detection + fast-alpr)
-- **[NEW]** Suite pytest `tests/test_multi_plugin.py` — 11 tests OK
-- **[NEW]** Plugin YOLO isolé `/app/data/plugins/yolo-detection/` avec manifest YAML + config schema JSON + plugin.py + requirements.txt
-- **[NEW]** Loader dynamique `plugin_manager/loader.py` — découverte manifest, validation, import isolé (importlib.util), fallback builtin si absent
-- **[NEW]** Endpoints `/api/plugins/loader` + `/api/plugins/loader/{name}/schema`
-- **[NEW]** Frontend `PluginManagerNG.jsx` intégré dans `/plugins` — bus runtime, politique multi-ANPR, panel test avec mocks injectables
-- **[NEW]** `/api/plugins/registry` (renommage NG registry pour éviter conflit avec legacy `/api/plugins`)
-- **[NEW]** Suite pytest `tests/test_plugin_loader.py` — 4 tests OK
-- **[NEW]** **11 plugins ANPR isolés** dans `/app/data/plugins/` (fast-alpr, plate-recognizer, openalpr, codeproject-ai, paddle-ocr, easyocr, tesseract, google-vision, azure-vision, opencv-ocr, custom-plugin-template)
-- **[NEW]** Système d'états plugin (`ready` / `not_configured` / `missing_dependency` / `error` / `disabled`)
-- **[NEW]** Config store persistant `plugin_manager/config_store.py` → `/app/backend/data/plugin_configs.json`
-- **[NEW]** Endpoints `GET/PUT /api/plugins/{name}/config` avec masquage des secrets (api_token, secret_key, subscription_key, password, token) + `"***"` = préservation
-- **[NEW]** Hot reload : `loader.reload_config()` appelle `plugin.on_config_change()` et met à jour l'état du bus sans redémarrage
-- **[NEW]** Frontend `PluginConfigDialog.jsx` — formulaire dynamique depuis JSON Schema (string / password / number / boolean / array / enum)
-- **[NEW]** Badges d'état colorés + bordure gauche colorée + messages d'aide explicites dans l'UI
-- **[NEW]** Bus filtre `active()` sur `state == "ready"` — les plugins non-configurés ne sont jamais dispatchés (aucun waste)
-- **[NEW]** Suite pytest `tests/test_anpr_plugins.py` — 6 tests OK (découverte des 11, interface commune, dispatch filtering, hot reload, config store persistence)
+- **[NEW]** Loader dynamique `plugin_manager/loader.py` (manifests YAML + import isolé)
+- **[NEW]** Frontend `PluginManagerNG.jsx` avec catégorisation par groupe
+- **[NEW]** `/api/plugins/registry` renommé pour éviter conflit legacy
+- **[NEW]** **19 plugins isolés** dans `/app/data/plugins/`:
+  - 11 ANPR (fast-alpr, plate-recognizer, openalpr, codeproject-ai, paddle-ocr, easyocr, tesseract, google-vision, azure-vision, opencv-ocr, custom-plugin-template)
+  - 8 Object Detection (yolo-detection=YOLOv11, yolov8, yolo-nas, rt-detr, efficientdet, openvino-detector, onnx-detector, tensorrt-detector)
+- **[NEW]** Métadonnées `providerGroup` dans manifest + regroupement UI par catégorie
+- **[NEW]** Système d'états plugin (`ready`/`not_configured`/`missing_dependency`/`error`/`disabled`)
+- **[NEW]** Config store persistant + endpoints `GET/PUT /api/plugins/{name}/config` avec masquage secrets + hot reload via `on_config_change`
+- **[NEW]** Frontend `PluginConfigDialog.jsx` — formulaire dynamique depuis JSON Schema
+- **[NEW]** **Bouton "Installer les deps"** dans l'UI pour plugins `missing_dependency`
+  - Endpoints `POST /api/plugins/{name}/install-deps` + `GET /api/plugins/{name}/install-status`
+  - Job background `pip install --no-cache-dir --no-deps <packages>` avec timeout 15min
+  - Flag `--no-deps` par défaut pour éviter d'écraser numpy/opencv (protection env)
+  - Poll toutes les 3s côté frontend + toast + reload auto de l'état plugin
+- **[NEW]** Suites pytest : `test_multi_plugin.py` 11 + `test_plugin_loader.py` 4 + `test_anpr_plugins.py` 6 = **21/21 OK**
 
 ### CHANGELOG (session précédente)
 - Fix régression IA (retry, découplage YOLO/ALPR, plus de suicide loop)
@@ -67,14 +67,16 @@ Refonte de MG-VMS vers une **plateforme plugin-oriented** (style Home Assistant)
 
 ### ROADMAP prioritaire
 - **P0** : ✅ Multi-plugin ANPR/Tracking (fait — session Feb 2026)
-- **P0** : ✅ 11 plugins ANPR isolés avec interface commune + config UI + états visibles (fait)
-- **P1** : ✅ Extraire YOLO en plugin isolé `/app/data/plugins/yolo-detection/` (fait)
-- **P1** : ✅ UI Plugin Manager NG avec badges d'état + modal Configurer (fait)
-- **P1** : Extraire notifications Discord/Telegram/SMTP en plugins isolés `EventConsumer`
-- **P1** : Modulariser `routers.py` (1700+ lignes) → `/app/backend/routes/*.py` par domaine
-- **P2** : Installer réellement les deps locales (paddleocr, easyocr, pytesseract) via un flow "Installer" dans l'UI
-- **P2** : Mode Installateur (wizard 10-15 min)
-- **P2** : Marketplace ecosystem (site + review process)
-- **P2** : SDK Python (`mgvms-plugin-sdk`) publiable pip
+- **P0** : ✅ 11 plugins ANPR + 8 providers Object Detection isolés (fait)
+- **P0** : ✅ Bouton "Installer les deps" + configuration UI (fait)
+- **P0** : ✅ Groupement par catégorie dans l'UI (fait)
+- **P1** : Ajouter **catégorie Tracking** (ByteTrack, BoTSORT, DeepSORT, StrongSORT, OCSORT)
+- **P1** : Ajouter **catégorie OCR généraliste** distincte de ANPR (TrOCR, plus détaillé)
+- **P1** : Ajouter **catégorie Segmentation** (SAM2, Detectron2, Mask R-CNN)
+- **P1** : Catégories spécialisées : Comptage / Parking / Sécurité (Smoke, Fire, Weapon, Fight, Fall) / PPE / Commerce / Agriculture
+- **P1** : Notifications Discord/Telegram/SMTP en plugins `EventConsumer` isolés
+- **P1** : Modulariser `routers.py` → `/app/backend/routes/*.py`
+- **P2** : Chiffrement Fernet des secrets plugin dans le config store
+- **P2** : Marketplace ecosystem + SDK Python publiable pip
 - **P2** : Sandboxing sub-process + container
-- **P2** : Chiffrement Fernet des secrets plugin (api_token, secret_key) dans le config store
+- **P2** : Namespace DB isolé par plugin (`db.plugin_data.{name}`)

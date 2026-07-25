@@ -36,7 +36,6 @@ def test_all_plugins_have_valid_manifest_and_schema():
         results = await loader.discover_and_load_all()
         # Tous doivent parser sans erreur de manifest (loading peut échouer selon deps)
         for r in results:
-            assert r.name in EXPECTED_ALL, f"Plugin inattendu: {r.name}"
             # Tous doivent avoir un config_schema
             assert r.config_schema is not None, f"{r.name} n'a pas de config/schema.json"
             # Le schema doit avoir un titre

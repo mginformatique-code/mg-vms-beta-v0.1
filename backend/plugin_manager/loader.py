@@ -15,11 +15,13 @@ manifest est exécuté sans restriction. En v3.0 : sandbox sub-process + GPG.
 """
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import logging
+import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -44,6 +46,13 @@ class LoadedPlugin:
     entry: Optional[BusEntry] = None
     error: Optional[str] = None
     config_schema: Optional[dict] = None
+    # Nouvelles métadonnées catégorie & deps (session 3)
+    display_name: str = ""
+    description: str = ""
+    categories: list = field(default_factory=list)
+    provider_group: Optional[str] = None  # ex: "object-detection", "anpr"
+    python_dependencies: list = field(default_factory=list)
+    system_dependencies: list = field(default_factory=list)
 
 
 class PluginLoader:
@@ -58,12 +67,18 @@ class PluginLoader:
         return [
             {
                 "name": p.name,
+                "display_name": p.display_name or p.name,
+                "description": p.description,
                 "version": p.version,
                 "interface": p.interface,
                 "manifest_path": p.manifest_path,
                 "loaded": p.entry is not None,
                 "error": p.error,
                 "has_config_schema": p.config_schema is not None,
+                "categories": p.categories,
+                "provider_group": p.provider_group,
+                "python_dependencies": p.python_dependencies,
+                "system_dependencies": p.system_dependencies,
             }
             for p in self._loaded.values()
         ]
@@ -172,6 +187,12 @@ class PluginLoader:
             name=name, version=version, interface=interface,
             manifest_path=str(manifest_path),
             config_schema=self._load_config_schema(manifest_dir, spec),
+            display_name=str((data.get("metadata") or {}).get("displayName") or name),
+            description=str((data.get("metadata") or {}).get("description") or ""),
+            categories=list((data.get("metadata") or {}).get("categories") or []),
+            provider_group=str((data.get("metadata") or {}).get("providerGroup") or "") or None,
+            python_dependencies=list((spec.get("dependencies") or {}).get("python") or []),
+            system_dependencies=list((spec.get("dependencies") or {}).get("system") or []),
         )
 
         if not entry_file.exists():
@@ -258,6 +279,83 @@ class PluginLoader:
             entry.state = ctx.state
             entry.state_message = ctx.state_message
         return None
+
+    # ── Installation des dépendances Python ──────────────────────────
+
+    _install_jobs: dict = {}  # {plugin_name: {status, log, returncode, started_at, finished_at}}
+
+    async def install_dependencies(self, name: str, allow_upgrade_deps: bool = False) -> dict:
+        """Lance `pip install` en arrière-plan pour les deps Python du plugin.
+
+        Par défaut passe `--no-deps` pour protéger l'environnement (évite
+        d'upgrader numpy/opencv qui casseraient d'autres plugins).
+        Passer `allow_upgrade_deps=True` pour désactiver cette protection.
+
+        Retourne immédiatement un job status. Le job continue en tâche de fond.
+        Poll via `get_install_status(name)`.
+        """
+        from datetime import datetime, timezone
+        lp = self._loaded.get(name)
+        if not lp:
+            return {"status": "error", "error": f"Plugin '{name}' non chargé"}
+        deps = lp.python_dependencies
+        if not deps:
+            return {"status": "error", "error": "Aucune python_dependency déclarée dans le manifest"}
+
+        # Un seul job à la fois par plugin
+        current = self._install_jobs.get(name)
+        if current and current.get("status") == "running":
+            return current
+
+        pip_flags = ["--no-cache-dir"]
+        if not allow_upgrade_deps:
+            pip_flags.append("--no-deps")
+
+        job = {
+            "status": "running",
+            "deps": list(deps),
+            "flags": pip_flags,
+            "log": "",
+            "returncode": None,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": None,
+        }
+        self._install_jobs[name] = job
+
+        async def _run():
+            try:
+                cmd = [sys.executable, "-m", "pip", "install", *pip_flags, *deps]
+                logger.info("plugin_install.start name=%s cmd=%s", name, cmd)
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                )
+                # Timeout 15 min max pour éviter les blocages
+                try:
+                    stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=900)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    job["status"] = "timeout"
+                    job["log"] += "\n[TIMEOUT après 15 minutes]"
+                    return
+                job["log"] = (stdout or b"").decode(errors="replace")[-8000:]  # dernier 8kB
+                job["returncode"] = proc.returncode
+                job["status"] = "success" if proc.returncode == 0 else "failed"
+                logger.info("plugin_install.done name=%s status=%s rc=%s",
+                            name, job["status"], proc.returncode)
+                # Si succès → recharge le plugin pour re-évaluer l'état
+                if job["status"] == "success":
+                    await self.load_one(Path(lp.manifest_path))
+            except Exception as e:  # pragma: no cover
+                job["status"] = "error"
+                job["log"] += f"\n[EXC] {type(e).__name__}: {e}"
+            finally:
+                job["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+        asyncio.create_task(_run())
+        return job
+
+    def get_install_status(self, name: str) -> Optional[dict]:
+        return self._install_jobs.get(name)
 
     async def discover_and_load_all(self) -> list[LoadedPlugin]:
         results = []

@@ -8,6 +8,7 @@ import { Slider } from "@/components/ui/slider";
 import {
   Boxes, Zap, GitBranch, Trophy, Vote, ClipboardList, RefreshCw, PlayCircle,
   AlertTriangle, CheckCircle2, XCircle, Clock, FileJson, Package, Settings2, PackageX, WrenchIcon,
+  Download, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import PluginConfigDialog from "@/pages/PluginConfigDialog";
@@ -42,6 +43,10 @@ export default function PluginManagerNG() {
 
   // Config dialog
   const [configPlugin, setConfigPlugin] = useState(null);
+  // Install deps jobs par plugin
+  const [installJobs, setInstallJobs] = useState({});
+  // Catégories dépliées
+  const [expandedGroups, setExpandedGroups] = useState({ "object-detection": true, "anpr": true });
 
   // Multi-ANPR test panel
   const [testMode, setTestMode] = useState("cascade");
@@ -82,6 +87,42 @@ export default function PluginManagerNG() {
       toast.error(formatApiErrorDetail(e.response?.data?.detail));
     }
   };
+
+  const installDeps = async (name) => {
+    setInstallJobs((prev) => ({ ...prev, [name]: { status: "running", log: "" } }));
+    try {
+      const { data } = await api.post(`/plugins/${name}/install-deps`, {});
+      setInstallJobs((prev) => ({ ...prev, [name]: data }));
+      toast.info(`Installation en cours pour ${name}…`);
+      // Polling
+      const iv = setInterval(async () => {
+        try {
+          const r = await api.get(`/plugins/${name}/install-status`);
+          setInstallJobs((prev) => ({ ...prev, [name]: r.data }));
+          if (r.data.status !== "running") {
+            clearInterval(iv);
+            if (r.data.status === "success") {
+              toast.success(`${name} : dépendances installées · état re-évalué`);
+              load();
+            } else {
+              toast.error(`${name} : installation ${r.data.status} (rc=${r.data.returncode})`);
+            }
+          }
+        } catch (err) {
+          clearInterval(iv);
+        }
+      }, 3000);
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e.response?.data?.detail));
+      setInstallJobs((prev) => {
+        const c = { ...prev };
+        delete c[name];
+        return c;
+      });
+    }
+  };
+
+  const toggleGroup = (g) => setExpandedGroups((prev) => ({ ...prev, [g]: !prev[g] }));
 
   const savePolicy = async (patch) => {
     setSavingPolicy(true);
@@ -165,89 +206,164 @@ export default function PluginManagerNG() {
         ) : bus.entries.length === 0 ? (
           <div className="text-xs text-muted-foreground py-4 text-center">Aucun plugin enregistré sur le bus.</div>
         ) : (
-          <div className="space-y-2" data-testid="plugin-bus-entries">
-            {bus.entries.map((e) => {
-              const badge = IFACE_BADGE[e.interface] || { color: "#666", label: e.interface };
-              const state = STATE_META[e.state] || STATE_META.ready;
-              const StateIcon = state.Icon;
-              const dyn = dynamicMap[e.name];
-              const hasSchema = dyn?.has_config_schema;
-              return (
-                <div
-                  key={e.name}
-                  className="flex items-center gap-3 p-2.5 border border-border bg-background/60"
-                  style={{ borderLeftColor: state.color, borderLeftWidth: 3 }}
-                  data-testid={`bus-row-${e.name}`}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-head font-semibold text-sm">{e.name}</span>
-                      <span
-                        className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border"
-                        style={{ borderColor: badge.color, color: badge.color }}
-                      >
-                        {badge.label}
+          <div className="space-y-3" data-testid="plugin-bus-entries">
+            {(() => {
+              // Groupement par provider_group depuis loaderData
+              const groups = {};
+              for (const e of bus.entries) {
+                const dyn = dynamicMap[e.name];
+                const g = dyn?.provider_group || (dyn?.categories?.[0]) || "other";
+                (groups[g] = groups[g] || []).push(e);
+              }
+              const GROUP_META = {
+                "object-detection": { label: "Object Detection Providers", color: "#0044FF",
+                                       desc: "Détecteurs d'objets — activez le provider adapté à votre matériel (CPU / GPU / TensorRT / OpenVINO / ONNX)" },
+                "anpr":             { label: "ANPR Providers", color: "#FFB800",
+                                       desc: "Lecture de plaques d'immatriculation — plusieurs moteurs peuvent tourner en fusion (cascade/vote/highest)" },
+                "other":            { label: "Autres", color: "#A855F7", desc: "" },
+              };
+              const sorted = Object.keys(groups).sort((a, b) => {
+                const order = ["object-detection", "anpr", "other"];
+                return order.indexOf(a) - order.indexOf(b);
+              });
+              return sorted.map((g) => {
+                const meta = GROUP_META[g] || GROUP_META.other;
+                const opened = expandedGroups[g] !== false;
+                const entries = groups[g];
+                const readyCount = entries.filter((e) => e.state === "ready").length;
+                const Chev = opened ? ChevronDown : ChevronRight;
+                return (
+                  <div key={g} className="border border-border" data-testid={`plugin-group-${g}`}>
+                    <button
+                      onClick={() => toggleGroup(g)}
+                      className="w-full flex items-center gap-2 px-3 py-2 bg-secondary/40 hover:bg-secondary transition-colors"
+                    >
+                      <Chev size={14} />
+                      <span className="font-head font-bold text-sm" style={{ color: meta.color }}>
+                        {meta.label}
                       </span>
-                      <span
-                        className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border flex items-center gap-1"
-                        style={{ borderColor: state.color, color: state.color }}
-                        data-testid={`bus-state-${e.name}`}
-                        title={state.desc}
-                      >
-                        <StateIcon size={9} /> {state.label}
+                      <span className="mono text-[11px] text-muted-foreground">({entries.length})</span>
+                      <span className="ml-auto text-[10px] mono">
+                        <span className="text-[#00E676]">{readyCount} ready</span>
+                        <span className="text-muted-foreground"> · {entries.length - readyCount} pending</span>
                       </span>
-                      <span className="text-[10px] mono text-muted-foreground">order {e.order}</span>
-                      {dyn && dyn.loaded && (
-                        <span
-                          className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-[#00E676]/50 text-[#00E676] flex items-center gap-1"
-                          title={dyn.manifest_path}
-                        >
-                          <FileJson size={9} /> manifest v{dyn.version}
-                        </span>
-                      )}
-                      {!dyn && (
-                        <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-muted-foreground/40 text-muted-foreground">
-                          builtin
-                        </span>
-                      )}
-                    </div>
-                    {e.state_message && e.state !== "ready" && (
-                      <div className="text-[11px] mt-1 mono" style={{ color: state.color }} data-testid={`bus-state-msg-${e.name}`}>
-                        {e.state_message}
+                    </button>
+                    {opened && meta.desc && (
+                      <div className="px-3 py-1.5 text-[11px] text-muted-foreground border-b border-border bg-background/40">
+                        {meta.desc}
                       </div>
                     )}
-                    <div className="flex items-center gap-4 mt-1 text-[10px] mono text-muted-foreground">
-                      <span>calls: {e.calls}</span>
-                      <span className={e.errors > 0 ? "text-[#FF3333]" : ""}>errors: {e.errors}</span>
-                      <span className={e.timeouts > 0 ? "text-[#FFB800]" : ""}>timeouts: {e.timeouts}</span>
-                      <span>last: {e.last_ms.toFixed(1)}ms</span>
-                      {e.last_error && (
-                        <span className="text-[#FF3333] truncate max-w-[280px]" title={e.last_error}>
-                          {e.last_error}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {hasSchema && (
-                      <button
-                        onClick={() => setConfigPlugin(e.name)}
-                        className="flex items-center gap-1 px-2 py-1 text-[11px] border border-border hover:border-[#0044FF] hover:text-[#0044FF] transition-colors"
-                        data-testid={`bus-configure-${e.name}`}
-                        title="Configurer ce plugin"
-                      >
-                        <Settings2 size={11} /> Configurer
-                      </button>
+                    {opened && (
+                      <div className="divide-y divide-border">
+                        {entries.map((e) => {
+                          const badge = IFACE_BADGE[e.interface] || { color: "#666", label: e.interface };
+                          const state = STATE_META[e.state] || STATE_META.ready;
+                          const StateIcon = state.Icon;
+                          const dyn = dynamicMap[e.name];
+                          const hasSchema = dyn?.has_config_schema;
+                          const hasDeps = (dyn?.python_dependencies || []).length > 0;
+                          const canInstall = hasDeps && e.state === "missing_dependency";
+                          const installJob = installJobs[e.name];
+                          const installing = installJob?.status === "running";
+                          return (
+                            <div
+                              key={e.name}
+                              className="flex items-center gap-3 p-2.5"
+                              style={{ borderLeftColor: state.color, borderLeftWidth: 3 }}
+                              data-testid={`bus-row-${e.name}`}
+                            >
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-head font-semibold text-sm">
+                                    {dyn?.display_name || e.name}
+                                  </span>
+                                  <span className="text-[10px] mono text-muted-foreground">{e.name}</span>
+                                  <span
+                                    className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border"
+                                    style={{ borderColor: badge.color, color: badge.color }}
+                                  >
+                                    {badge.label}
+                                  </span>
+                                  <span
+                                    className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border flex items-center gap-1"
+                                    style={{ borderColor: state.color, color: state.color }}
+                                    data-testid={`bus-state-${e.name}`}
+                                    title={state.desc}
+                                  >
+                                    <StateIcon size={9} /> {state.label}
+                                  </span>
+                                  <span className="text-[10px] mono text-muted-foreground">order {e.order}</span>
+                                  {dyn && dyn.loaded && (
+                                    <span
+                                      className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-[#00E676]/50 text-[#00E676] flex items-center gap-1"
+                                      title={dyn.manifest_path}
+                                    >
+                                      <FileJson size={9} /> manifest v{dyn.version}
+                                    </span>
+                                  )}
+                                </div>
+                                {e.state_message && e.state !== "ready" && (
+                                  <div className="text-[11px] mt-1 mono" style={{ color: state.color }} data-testid={`bus-state-msg-${e.name}`}>
+                                    {e.state_message}
+                                  </div>
+                                )}
+                                {installing && (
+                                  <div className="text-[10px] mt-1 text-[#0044FF] flex items-center gap-1">
+                                    <RefreshCw size={10} className="animate-spin" /> Installation pip en cours ({installJob.deps?.join(", ")})…
+                                  </div>
+                                )}
+                                {installJob && installJob.status && installJob.status !== "running" && (
+                                  <details className="mt-1">
+                                    <summary className="text-[10px] cursor-pointer text-muted-foreground">
+                                      Log installation (rc={installJob.returncode}, {installJob.status})
+                                    </summary>
+                                    <pre className="text-[9px] mono bg-black/40 p-2 mt-1 overflow-x-auto max-h-40 whitespace-pre-wrap">{installJob.log || "(vide)"}</pre>
+                                  </details>
+                                )}
+                                <div className="flex items-center gap-4 mt-1 text-[10px] mono text-muted-foreground">
+                                  <span>calls: {e.calls}</span>
+                                  <span className={e.errors > 0 ? "text-[#FF3333]" : ""}>errors: {e.errors}</span>
+                                  <span className={e.timeouts > 0 ? "text-[#FFB800]" : ""}>timeouts: {e.timeouts}</span>
+                                  <span>last: {e.last_ms.toFixed(1)}ms</span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                {canInstall && (
+                                  <button
+                                    onClick={() => installDeps(e.name)}
+                                    disabled={installing}
+                                    className="flex items-center gap-1 px-2 py-1 text-[11px] border border-[#A855F7]/60 text-[#A855F7] hover:bg-[#A855F7]/10 transition-colors disabled:opacity-50"
+                                    data-testid={`bus-install-${e.name}`}
+                                    title={`pip install ${(dyn?.python_dependencies || []).join(' ')}`}
+                                  >
+                                    <Download size={11} /> Installer
+                                  </button>
+                                )}
+                                {hasSchema && (
+                                  <button
+                                    onClick={() => setConfigPlugin(e.name)}
+                                    className="flex items-center gap-1 px-2 py-1 text-[11px] border border-border hover:border-[#0044FF] hover:text-[#0044FF] transition-colors"
+                                    data-testid={`bus-configure-${e.name}`}
+                                    title="Configurer ce plugin"
+                                  >
+                                    <Settings2 size={11} /> Configurer
+                                  </button>
+                                )}
+                                <Switch
+                                  checked={e.enabled}
+                                  onCheckedChange={(v) => toggleEntry(e.name, v)}
+                                  data-testid={`bus-toggle-${e.name}`}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
-                    <Switch
-                      checked={e.enabled}
-                      onCheckedChange={(v) => toggleEntry(e.name, v)}
-                      data-testid={`bus-toggle-${e.name}`}
-                    />
                   </div>
-                </div>
-              );
-            })}
+                );
+              });
+            })()}
           </div>
         )}
 

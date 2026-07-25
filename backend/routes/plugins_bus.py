@@ -152,6 +152,39 @@ async def set_plugin_config(
     return {"name": name, "reloaded": True, "keys_set": [k for k, v in merged.items() if v]}
 
 
+@plugins_bus_router.post("/plugins/{name}/install-deps")
+async def install_plugin_deps(
+    name: str,
+    payload: dict = Body(default={}),
+    user: dict = Depends(require_permission("admin")),
+):
+    """Lance l'installation `pip install` des deps du plugin en arrière-plan.
+
+    Body optionnel : `{"allow_upgrade_deps": true}` pour désactiver `--no-deps`
+    (risqué — peut casser d'autres plugins si upgrade numpy/opencv). Par défaut
+    l'install est protégée (`--no-deps`).
+
+    Retourne immédiatement un `status: running`. Poll via
+    `GET /plugins/{name}/install-status` pour l'avancement.
+    """
+    from plugin_manager.loader import loader as pl
+    allow = bool((payload or {}).get("allow_upgrade_deps", False))
+    job = await pl.install_dependencies(name, allow_upgrade_deps=allow)
+    if job.get("status") == "error":
+        raise HTTPException(status_code=400, detail=job.get("error"))
+    return job
+
+
+@plugins_bus_router.get("/plugins/{name}/install-status")
+async def get_install_status(name: str, user: dict = Depends(require_permission("technician"))):
+    """Retourne le statut du dernier job d'installation des deps du plugin."""
+    from plugin_manager.loader import loader as pl
+    job = pl.get_install_status(name)
+    if job is None:
+        return {"status": "idle", "log": "", "deps": []}
+    return job
+
+
 # ─────────────────────── POLICY ───────────────────────
 
 @plugins_bus_router.get("/plugins/policy")

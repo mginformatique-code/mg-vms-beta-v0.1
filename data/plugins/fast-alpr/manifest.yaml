@@ -7,7 +7,8 @@ metadata:
   description: "ANPR local CPU-ONNX rapide (bundle officiel). Wrapper du moteur intégré ai_engine — sera embarqué autonome en v3.0."
   author: "MG-VMS Team"
   license: "MIT"
-  categories: [ai, anpr, local]
+  categories: [anpr]
+  providerGroup: anpr
 spec:
   runtime: python
   entrypoint: plugin.py

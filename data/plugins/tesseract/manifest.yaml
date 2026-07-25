@@ -7,7 +7,8 @@ metadata:
   description: "OCR local Google Tesseract via pytesseract. Léger, rapide, précision modérée."
   author: "MG-VMS Team"
   license: "Apache-2.0"
-  categories: [ai, anpr, local]
+  categories: [anpr]
+  providerGroup: anpr
 spec:
   runtime: python
   entrypoint: plugin.py
@@ -17,6 +18,7 @@ spec:
   capabilities: [camera.frame.read, event.write]
   resources: {cpu_cores: 0.5, ram_mb: 128, gpu: none, disk_mb: 50}
   dependencies:
+    python: ["pytesseract"]
     system: ["tesseract-ocr"]
   config_schema: config/schema.json
   bus:

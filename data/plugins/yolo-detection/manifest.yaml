@@ -2,13 +2,14 @@ apiVersion: mgvms.io/v1
 kind: Plugin
 metadata:
   name: yolo-detection
-  displayName: "YOLO Object Detection"
+  displayName: "YOLOv11 (Ultralytics)"
   version: "1.0.0-preview"
-  description: "Détection d'objets temps-réel via YOLOv11 (CPU/GPU). Wrapper du moteur intégré ai_engine, isolable en plugin autonome en v3.0."
+  description: "Détection d'objets temps-réel via YOLOv11 (Ultralytics). Wrapper du moteur intégré ai_engine — provider par défaut de la catégorie Object Detection."
   author: "MG-VMS Team <plugins@mg-vms.io>"
   homepage: "https://plugins.mg-vms.io/yolo-detection"
   license: "MIT"
-  categories: [ai, detection]
+  categories: [object-detection]
+  providerGroup: object-detection
 spec:
   runtime: python
   entrypoint: plugin.py

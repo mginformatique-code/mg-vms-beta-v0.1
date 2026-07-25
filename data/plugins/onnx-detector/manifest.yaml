@@ -1,0 +1,24 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: onnx-detector
+  displayName: "ONNX Runtime"
+  version: "1.0.0"
+  description: "ONNX Runtime — runtime universel pour modèles exportés en ONNX. CPU/GPU/CoreML/DirectML."
+  author: "MG-VMS Team"
+  license: "MIT"
+  categories: [object-detection]
+  providerGroup: object-detection
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: OnnxDetectorPlugin
+  interface: FrameAnalyzer
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [camera.frame.read, event.write]
+  resources: {cpu_cores: 1, ram_mb: 800, gpu: optional, vram_mb: 2048, disk_mb: 500}
+  dependencies:
+    python: ["onnxruntime"]
+  config_schema: config/schema.json
+  bus:
+    order: 16

@@ -7,7 +7,8 @@ metadata:
   description: "ANPR cloud OpenALPR (api.openalpr.com). Nécessite secret_key."
   author: "MG-VMS Team"
   license: "MIT"
-  categories: [ai, anpr, cloud]
+  categories: [anpr]
+  providerGroup: anpr
 spec:
   runtime: python
   entrypoint: plugin.py

@@ -7,7 +7,8 @@ metadata:
   description: "Squelette de plugin ANPR personnalisé. Éditez plugin.py pour brancher votre propre moteur (REST interne, ONNX custom, model TensorFlow...). Sert de démo — retourne une plaque fixe."
   author: "MG-VMS Team"
   license: "MIT"
-  categories: [ai, anpr, template]
+  categories: [anpr]
+  providerGroup: anpr
 spec:
   runtime: python
   entrypoint: plugin.py

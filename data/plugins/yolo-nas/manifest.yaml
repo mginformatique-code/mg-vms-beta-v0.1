@@ -1,0 +1,24 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: yolo-nas
+  displayName: "YOLO-NAS (Deci AI)"
+  version: "1.0.0"
+  description: "YOLO-NAS optimisé Neural Architecture Search. Meilleure précision quantization-friendly (INT8)."
+  author: "MG-VMS Team"
+  license: "MIT"
+  categories: [object-detection]
+  providerGroup: object-detection
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: YoloNasPlugin
+  interface: FrameAnalyzer
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [camera.frame.read, event.write]
+  resources: {cpu_cores: 1, ram_mb: 800, gpu: optional, vram_mb: 2048, disk_mb: 500}
+  dependencies:
+    python: ["super-gradients"]
+  config_schema: config/schema.json
+  bus:
+    order: 12

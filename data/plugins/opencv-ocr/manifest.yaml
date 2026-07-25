@@ -7,7 +7,8 @@ metadata:
   description: "OCR local via OpenCV contrib (EAST + Tesseract intégré). Léger et sans deps IA."
   author: "MG-VMS Team"
   license: "Apache-2.0"
-  categories: [ai, anpr, local]
+  categories: [anpr]
+  providerGroup: anpr
 spec:
   runtime: python
   entrypoint: plugin.py
@@ -16,6 +17,8 @@ spec:
   compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
   capabilities: [camera.frame.read, event.write]
   resources: {cpu_cores: 0.5, ram_mb: 256, gpu: none, disk_mb: 100}
+  dependencies:
+    python: ["opencv-contrib-python"]
   config_schema: config/schema.json
   bus:
     order: 43
