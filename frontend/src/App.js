@@ -32,6 +32,7 @@ import Plugins from "@/pages/Plugins";
 import PluginPage from "@/pages/PluginPage";
 import SmartZones from "@/pages/SmartZones";
 import Timeline from "@/pages/Timeline";
+import Workflows from "@/pages/Workflows";
 
 function Protected({ children }) {
   const { user } = useApp();
@@ -56,6 +57,7 @@ function AppRoutes() {
       <Route path="/map" element={<Protected><MapView /></Protected>} />
       <Route path="/anpr" element={<Protected><Anpr /></Protected>} />
       <Route path="/smart-zones" element={<Protected><SmartZones /></Protected>} />
+      <Route path="/workflows" element={<Protected><Workflows /></Protected>} />
       <Route path="/timeline" element={<Protected><Timeline /></Protected>} />
       <Route path="/events" element={<Protected><Events /></Protected>} />
       <Route path="/vehicles" element={<Protected><VehicleSearch /></Protected>} />

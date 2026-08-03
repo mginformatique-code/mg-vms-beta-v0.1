@@ -29,7 +29,8 @@ const NAV = [
     { to: "/vehicles", icon: Car, key: "nav.vehicles", perm: "read_plates" },
     { to: "/alerts", icon: Bell, key: "nav.alerts" },
     { to: "/smart-zones", icon: MapPin, key: "nav.smart_zones" },
-    { to: "/timeline", icon: Clock, key: "nav.timeline" },
+    { to: "/workflows", icon: Zap, key: "nav.workflows" },
+    // Timeline est intégrée dans la LiveView (FocusTimeline) — pas de menu dédié
     // NOTE : ANPR est déplacé dans la section "Extensions" (voir plus bas) pour
     // regrouper logiquement les extensions activables (ANPR, IA détection avancée,
     // reconnaissance faciale, contrôle d'accès, etc.). Cf. plugins.py.
