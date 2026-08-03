@@ -30,6 +30,7 @@ import SettingsPage from "@/pages/Settings";
 import Notifications from "@/pages/Notifications";
 import Plugins from "@/pages/Plugins";
 import PluginPage from "@/pages/PluginPage";
+import SmartZones from "@/pages/SmartZones";
 
 function Protected({ children }) {
   const { user } = useApp();
@@ -53,6 +54,7 @@ function AppRoutes() {
       <Route path="/sites" element={<Protected><Sites /></Protected>} />
       <Route path="/map" element={<Protected><MapView /></Protected>} />
       <Route path="/anpr" element={<Protected><Anpr /></Protected>} />
+      <Route path="/smart-zones" element={<Protected><SmartZones /></Protected>} />
       <Route path="/events" element={<Protected><Events /></Protected>} />
       <Route path="/vehicles" element={<Protected><VehicleSearch /></Protected>} />
       <Route path="/alerts" element={<Protected><Alerts /></Protected>} />

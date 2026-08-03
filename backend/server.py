@@ -34,6 +34,7 @@ from routes.audit import audit_router
 from routes.users import users_router
 from routes.public_status import public_router
 from routes.database_settings import database_router
+from routes.smart_zones import smart_zones_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("mg-vms")
@@ -72,6 +73,7 @@ app.include_router(dashboard_router)
 app.include_router(audit_router)
 app.include_router(users_router)
 app.include_router(database_router)
+app.include_router(smart_zones_router)
 app.include_router(api_router)
 app.include_router(notif_router)
 app.include_router(realtime_router)
