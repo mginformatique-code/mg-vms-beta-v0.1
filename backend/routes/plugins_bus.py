@@ -108,17 +108,17 @@ async def loader_config_schema(name: str, user: dict = Depends(require_permissio
 async def get_plugin_config(name: str, user: dict = Depends(require_permission("technician"))):
     """Retourne la config utilisateur persistée du plugin (dict vide si jamais configuré).
 
-    Les valeurs sensibles (api_token, secret_key, api_key) sont masquées en `***`
-    dans le retour — pour reset il faut ré-envoyer la vraie valeur via PUT.
+    Les valeurs sensibles (contenant `password`, `token`, `secret`, `api_key`,
+    `webhook`, ...) sont masquées en `***`. Pour les mettre à jour il faut
+    renvoyer la vraie valeur via PUT (valeur `"***"` = inchangée).
     """
-    from plugin_manager.config_store import store
+    from plugin_manager.config_store import store, _is_sensitive
     from plugin_manager.loader import loader as pl
-    cfg = store.get(name)
+    cfg = store.get(name)  # secrets déchiffrés
     schema = pl.get_config_schema(name)
     masked = dict(cfg)
-    sensitive_keys = {"api_token", "secret_key", "api_key", "password", "token"}
     for k in list(masked.keys()):
-        if k in sensitive_keys and masked[k]:
+        if _is_sensitive(k) and masked[k]:
             masked[k] = "***"
     return {"name": name, "config": masked, "has_schema": schema is not None,
             "keys_set": [k for k, v in cfg.items() if v]}

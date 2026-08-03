@@ -23,61 +23,7 @@ api_router = APIRouter(prefix="/api", tags=["core"])
 
 
 # ============ DASHBOARD ============
-@api_router.get("/dashboard/stats")
-async def dashboard_stats(user: dict = Depends(get_current_user)):
-    sf = site_scope({}, user)  # {} for admin/tech, {site_id:{$in:[...]}} otherwise
-    allowed = allowed_sites(user)
-    total_cams = await db.cameras.count_documents(sf)
-    online = await db.cameras.count_documents({**sf, "status": "online"})
-    sites = await db.sites.count_documents({} if allowed is None else {"id": {"$in": allowed}})
-    events_today = await db.events.count_documents({
-        **sf, "timestamp": {"$gte": (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()}
-    })
-    alerts_active = await db.alerts.count_documents({**sf, "acknowledged": False})
-    plates_today = await db.plates.count_documents({
-        **sf, "timestamp": {"$gte": (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()}
-    })
-    return {
-        "cameras_total": total_cams,
-        "cameras_online": online,
-        "cameras_offline": total_cams - online,
-        "sites": sites,
-        "events_today": events_today,
-        "alerts_active": alerts_active,
-        "plates_today": plates_today,
-        "system": metrics_snapshot(),
-    }
-
-
-@api_router.get("/dashboard/timeseries")
-async def dashboard_timeseries(user: dict = Depends(get_current_user)):
-    """Séries horaires réelles (agrégation Mongo des dernières 24 h)."""
-    now = datetime.now(timezone.utc)
-    since = (now - timedelta(hours=24)).isoformat()
-
-    async def hourly_counts(coll) -> dict:
-        pipeline = [
-            {"$match": {"timestamp": {"$gte": since}}},
-            {"$group": {"_id": {"$substr": ["$timestamp", 0, 13]}, "count": {"$sum": 1}}},
-        ]
-        return {row["_id"]: row["count"] async for row in coll.aggregate(pipeline)}
-
-    ev, pl, al = await hourly_counts(db.events), await hourly_counts(db.plates), await hourly_counts(db.alerts)
-    points = []
-    for i in range(24):
-        t = now - timedelta(hours=23 - i)
-        key = t.strftime("%Y-%m-%dT%H")
-        points.append({
-            "time": t.strftime("%H:00"),
-            "events": ev.get(key, 0),
-            "plates": pl.get(key, 0),
-            "alerts": al.get(key, 0),
-        })
-    breakdown = []
-    cursor = db.events.aggregate([{"$group": {"_id": "$type", "count": {"$sum": 1}}}])
-    async for row in cursor:
-        breakdown.append({"name": row["_id"], "value": row["count"]})
-    return {"hourly": points, "breakdown": breakdown}
+# → Extrait vers `routes/dashboard.py` (P1 modularisation, Feb 2026)
 
 
 # ============ SITES ============
@@ -1675,99 +1621,11 @@ async def download_export(export_id: str, user: dict = Depends(require_permissio
 
 
 # ============ AUDIT ============
-@api_router.get("/audit")
-async def list_audit(response: Response, limit: int = 100, offset: int = 0, user: dict = Depends(require_role("technician"))):
-    total = await db.audit_logs.count_documents({})
-    response.headers["X-Total-Count"] = str(total)
-    return await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).skip(offset).limit(limit).to_list(limit)
+# → Extrait vers `routes/audit.py`
 
 
 # ============ USERS (admin) ============
-class UserCreate(BaseModel):
-    email: str
-    password: str
-    name: str
-    role: str = "client"
-    site_ids: Optional[List[str]] = None
-    permissions: Optional[Dict[str, bool]] = None
-
-
-class UserUpdate(BaseModel):
-    name: Optional[str] = None
-    email: Optional[str] = None
-    password: Optional[str] = None
-    role: Optional[str] = None
-    active: Optional[bool] = None
-    site_ids: Optional[List[str]] = None
-    permissions: Optional[Dict[str, bool]] = None
-
-
-def _clean_permissions(perms: Optional[Dict[str, bool]]) -> Dict[str, bool]:
-    if not perms:
-        return {}
-    return {k: bool(v) for k, v in perms.items() if k in PERMISSIONS}
-
-
-@api_router.get("/users")
-async def list_users(user: dict = Depends(require_role("admin"))):
-    users = await db.users.find({}, {"_id": 0, "password_hash": 0, "twofa_secret": 0}).to_list(500)
-    return [public_user(u) for u in users]
-
-
-@api_router.post("/users")
-async def create_user(data: UserCreate, user: dict = Depends(require_role("admin"))):
-    email = data.email.lower()
-    if await db.users.find_one({"email": email}):
-        raise HTTPException(400, "Email déjà utilisé")
-    role = data.role if data.role in ROLES else "client"
-    doc = {
-        "id": str(uuid.uuid4()), "email": email, "password_hash": hash_password(data.password),
-        "name": data.name, "role": role, "twofa_enabled": False, "twofa_secret": None,
-        "active": True, "site_ids": data.site_ids or [],
-        "permissions": _clean_permissions(data.permissions),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.users.insert_one(dict(doc))
-    await log_audit(user, "user_created", email, role)
-    return public_user(doc)
-
-
-@api_router.put("/users/{user_id}")
-async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(require_role("admin"))):
-    update = {k: v for k, v in data.model_dump().items() if v is not None}
-    if "role" in update and update["role"] not in ROLES:
-        raise HTTPException(400, "Rôle invalide")
-    if "permissions" in update:
-        update["permissions"] = _clean_permissions(update["permissions"])
-    # Email : normaliser en minuscules + vérifier unicité (si changement effectif)
-    if "email" in update:
-        new_email = update["email"].strip().lower()
-        if not new_email or "@" not in new_email:
-            raise HTTPException(400, "Email invalide")
-        if await db.users.find_one({"email": new_email, "id": {"$ne": user_id}}):
-            raise HTTPException(400, "Email déjà utilisé par un autre utilisateur")
-        update["email"] = new_email
-    # Mot de passe : hasher avant stockage, remplacer 'password' par 'password_hash'
-    if "password" in update:
-        pwd = update.pop("password")
-        if len(pwd) < 8:
-            raise HTTPException(400, "Mot de passe : minimum 8 caractères")
-        update["password_hash"] = hash_password(pwd)
-    res = await db.users.update_one({"id": user_id}, {"$set": update})
-    if res.matched_count == 0:
-        raise HTTPException(404, "Utilisateur introuvable")
-    await log_audit(user, "user_updated", user_id, ",".join(update.keys()))
-    u = await db.users.find_one({"id": user_id}, {"_id": 0})
-    return public_user(u)
-
-
-@api_router.delete("/users/{user_id}")
-async def delete_user(user_id: str, user: dict = Depends(require_role("admin"))):
-    if user_id == user["id"]:
-        raise HTTPException(400, "Impossible de supprimer votre propre compte")
-    await db.users.delete_one({"id": user_id})
-    await log_audit(user, "user_deleted", user_id)
-    return {"ok": True}
+# → Extrait vers `routes/users.py`
 
 
 # ============ AI IMAGE ANALYSIS (ANPR) — LOCAL (fast-alpr), aucune dépendance cloud ============

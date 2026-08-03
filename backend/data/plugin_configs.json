@@ -1,5 +1,12 @@
 {
   "custom-plugin-template": {
     "enabled_for_demo": false
+  },
+  "plate-recognizer": {
+    "api_token": "gAAAAABqcPKsmEjzUVXh4CHz-zTjRQWBvxf49yYuGaz0j9zU8u6otGEleBDep1XYuepilylISPru7ESHnnlN9z3CqkgMRVHvCg==",
+    "regions": [
+      "fr",
+      "de"
+    ]
   }
 }

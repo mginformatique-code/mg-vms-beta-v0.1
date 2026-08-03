@@ -29,6 +29,9 @@ from ai_engine import ai_loop
 from seed import seed
 from routes.plugins_bus import plugins_bus_router
 from routes.health_dashboard import health_dashboard_router
+from routes.dashboard import dashboard_router
+from routes.audit import audit_router
+from routes.users import users_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("mg-vms")
@@ -62,6 +65,9 @@ app.include_router(auth_router)
 app.include_router(stream_router)
 app.include_router(plugins_bus_router)
 app.include_router(health_dashboard_router)
+app.include_router(dashboard_router)
+app.include_router(audit_router)
+app.include_router(users_router)
 app.include_router(api_router)
 app.include_router(notif_router)
 app.include_router(realtime_router)
