@@ -17,10 +17,14 @@ grâce au middleware `ApiVersionAliasMiddleware` de `server.py`) :
 from __future__ import annotations
 
 import logging
+import tarfile
+import tempfile
+import shutil
 from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File
 
 from auth import require_permission
 from plugin_manager import (
@@ -448,3 +452,124 @@ async def test_multi_anpr(
             bus.unregister(m)
         for name, was_enabled in real_states.items():
             bus.set_enabled(name, was_enabled)
+
+
+
+# ============ MARKETPLACE — Upload .mgpkg à chaud (P2 finalisation) ============
+PLUGINS_DIR = Path("/app/data/plugins")
+MAX_MGPKG_SIZE = 50 * 1024 * 1024  # 50 MB
+
+
+def _validate_mgpkg_member(member: tarfile.TarInfo, target_root: Path) -> bool:
+    """Validation stricte pour un tarfile — anti path traversal + type file safe."""
+    if member.islnk() or member.issym():
+        return False
+    if member.isdev():
+        return False
+    # Rejette path absolus, `..`, ou hors de la racine cible
+    name = member.name
+    if name.startswith("/") or ".." in Path(name).parts:
+        return False
+    dest = (target_root / name).resolve()
+    if not str(dest).startswith(str(target_root.resolve()) + "/") and dest != target_root.resolve():
+        return False
+    return True
+
+
+@plugins_bus_router.post("/plugins/marketplace/upload")
+async def marketplace_upload(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_permission("technician")),
+):
+    """Installe un plugin depuis un fichier `.mgpkg` (tar.gz produit par `plugin_sdk.pack`).
+
+    Sécurité :
+      - Taille max 50 MB
+      - Anti path traversal (rejette `..`, chemins absolus, symlinks)
+      - Doit contenir `manifest.yaml` à la racine du dossier
+      - Le nom du plugin est celui du manifest, PAS celui du fichier
+      - Rechargement à chaud via `loader.discover_and_load_all()`
+    """
+    if not (file.filename or "").endswith(".mgpkg"):
+        raise HTTPException(400, "Le fichier doit avoir l'extension .mgpkg")
+
+    content = await file.read()
+    if len(content) > MAX_MGPKG_SIZE:
+        raise HTTPException(400, f"Fichier trop volumineux (max {MAX_MGPKG_SIZE // 1024 // 1024} MB)")
+
+    # Extraction dans un tmpdir pour valider avant install
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_root = Path(tmp)
+        pkg_path = tmp_root / "pkg.mgpkg"
+        pkg_path.write_bytes(content)
+
+        try:
+            with tarfile.open(pkg_path, "r:gz") as tar:
+                members = tar.getmembers()
+                # Détecte le dossier racine unique (le nom du plugin dans le tar)
+                roots = {m.name.split("/", 1)[0] for m in members if m.name and "/" in m.name or m.isdir()}
+                if not roots:
+                    raise HTTPException(400, "Archive vide")
+                plugin_slug = sorted(roots)[0]
+                # Sécurité : valide chaque membre
+                for m in members:
+                    if not _validate_mgpkg_member(m, tmp_root):
+                        raise HTTPException(400, f"Archive rejetée : membre suspect '{m.name}'")
+                tar.extractall(tmp_root)
+        except tarfile.ReadError:
+            raise HTTPException(400, "Archive .mgpkg corrompue ou non-tar.gz")
+
+        plugin_dir = tmp_root / plugin_slug
+        manifest_file = plugin_dir / "manifest.yaml"
+        plugin_file = plugin_dir / "plugin.py"
+        if not manifest_file.is_file():
+            raise HTTPException(400, "manifest.yaml manquant dans le package")
+        if not plugin_file.is_file():
+            raise HTTPException(400, "plugin.py manquant dans le package")
+
+        # Lecture du nom réel dans le manifest
+        try:
+            import yaml
+            manifest = yaml.safe_load(manifest_file.read_text(encoding="utf-8")) or {}
+            real_name = str(manifest.get("metadata", {}).get("name") or plugin_slug)
+            real_version = str(manifest.get("metadata", {}).get("version") or "0.0.0")
+        except Exception as e:
+            raise HTTPException(400, f"manifest.yaml invalide : {e}")
+
+        if not real_name or not all(c.isalnum() or c in "-_" for c in real_name):
+            raise HTTPException(400, f"Nom de plugin invalide : {real_name}")
+
+        # Copie atomique vers /app/data/plugins/{name}
+        target = PLUGINS_DIR / real_name
+        overwritten = target.exists()
+        if overwritten:
+            # Backup avant écrasement
+            backup = PLUGINS_DIR / f".{real_name}.backup"
+            if backup.exists():
+                shutil.rmtree(backup)
+            shutil.move(str(target), str(backup))
+        try:
+            shutil.copytree(plugin_dir, target)
+        except Exception as e:
+            # Rollback
+            if overwritten:
+                shutil.move(str(PLUGINS_DIR / f".{real_name}.backup"), str(target))
+            raise HTTPException(500, f"Échec copie : {e}")
+
+    # Rechargement à chaud
+    from plugin_manager.loader import loader
+    try:
+        await loader.discover_and_load_all()
+    except Exception as e:
+        logger.exception("marketplace.reload_error")
+        raise HTTPException(500, f"Plugin installé mais reload à chaud échoué : {e}")
+
+    logger.info("marketplace.installed name=%s v=%s overwritten=%s by=%s",
+                real_name, real_version, overwritten, user.get("email"))
+    return {
+        "name": real_name,
+        "version": real_version,
+        "overwritten": overwritten,
+        "installed_to": str(target),
+        "reloaded": True,
+    }

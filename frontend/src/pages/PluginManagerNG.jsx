@@ -171,13 +171,43 @@ export default function PluginManagerNG() {
             Plugin Manager NG
             <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 border border-[#0044FF] text-[#0044FF] mono">Preview</span>
           </h2>
-          <button
-            onClick={load}
-            data-testid="plugin-ng-refresh"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-border hover:bg-secondary"
-          >
-            <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} /> Rafraîchir
-          </button>
+          <div className="flex items-center gap-2">
+            <label
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[#00E676] text-[#00E676] hover:bg-[#00E676]/10 cursor-pointer"
+              data-testid="plugin-ng-upload"
+              title="Installer un plugin depuis un fichier .mgpkg"
+            >
+              <Download size={13} /> Installer .mgpkg
+              <input
+                type="file"
+                accept=".mgpkg"
+                className="hidden"
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  if (!f) return;
+                  const fd = new FormData();
+                  fd.append("file", f);
+                  try {
+                    const { data } = await api.post("/plugins/marketplace/upload", fd, {
+                      headers: { "Content-Type": "multipart/form-data" },
+                    });
+                    toast.success(`Plugin ${data.name} v${data.version} installé`);
+                    load();
+                  } catch (err) {
+                    toast.error(formatApiErrorDetail(err.response?.data?.detail) || err.message);
+                  }
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            <button
+              onClick={load}
+              data-testid="plugin-ng-refresh"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-border hover:bg-secondary"
+            >
+              <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} /> Rafraîchir
+            </button>
+          </div>
         </div>
         <p className="text-sm text-muted-foreground">
           Bus multi-plugin conforme au chapitre 11 (§11.6). Chaque frame vidéo est dispatchée en parallèle

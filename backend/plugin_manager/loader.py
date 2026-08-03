@@ -28,7 +28,7 @@ from typing import Optional
 import yaml
 
 from .bus import bus, BusEntry
-from .context import PluginContext
+from .context import PluginContext, PluginDB
 
 logger = logging.getLogger("plugin_loader")
 
@@ -229,6 +229,7 @@ class PluginLoader:
                 version=version,
                 capabilities=list(caps),
                 config=persisted_config,
+                db=PluginDB(name),
             )
             try:
                 await instance.on_load(ctx)
