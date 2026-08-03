@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import WebRTCPlayer from "@/components/WebRTCPlayer";
-import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home } from "lucide-react";
+import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, User, Car, Truck, Bike, PawPrint, ScanLine, Flame, AlertOctagon, HardHat, MapPin, Activity } from "lucide-react";
 
 const LAYOUTS = [1, 4, 9, 16, 25, 36, 49, 64];
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -245,64 +245,210 @@ const Feed = React.memo(FeedInner, (prev, next) => {
   return true;  // égal → skip re-render
 });
 
+// Mapping type/label → icône + libellé + couleur (style Reolink)
+// Icônes lucide-react cohérentes avec le reste de l'app.
+const EVENT_KIND_META = {
+  person:  { icon: User,       label: "Personne", color: "#00E676" },
+  car:     { icon: Car,        label: "Voiture",  color: "#0044FF" },
+  truck:   { icon: Truck,      label: "Camion",   color: "#0088FF" },
+  bus:     { icon: Truck,      label: "Bus",      color: "#0088FF" },
+  bicycle: { icon: Bike,       label: "Vélo",     color: "#66CCFF" },
+  motorbike: { icon: Bike,     label: "Moto",     color: "#66CCFF" },
+  motorcycle: { icon: Bike,    label: "Moto",     color: "#66CCFF" },
+  animal:  { icon: PawPrint,   label: "Animal",   color: "#EA580C" },
+  dog:     { icon: PawPrint,   label: "Chien",    color: "#EA580C" },
+  cat:     { icon: PawPrint,   label: "Chat",     color: "#EA580C" },
+  bird:    { icon: PawPrint,   label: "Oiseau",   color: "#EA580C" },
+  plate:   { icon: ScanLine,   label: "Plaque",   color: "#FFB800" },
+  fire:    { icon: Flame,      label: "Feu",      color: "#FF3333" },
+  smoke:   { icon: Flame,      label: "Fumée",    color: "#FF6600" },
+  weapon:  { icon: AlertOctagon, label: "Arme",   color: "#FF3333" },
+  fight:   { icon: AlertOctagon, label: "Bagarre",color: "#FF3333" },
+  fall:    { icon: AlertOctagon, label: "Chute",  color: "#FF6600" },
+  ppe:     { icon: HardHat,    label: "EPI",      color: "#FFB800" },
+  zone:    { icon: MapPin,     label: "Zone",     color: "#0044FF" },
+  motion:  { icon: Activity,   label: "Mouvement",color: "#00E676" },
+};
+
+function _kindFromEvent(ev) {
+  const raw = String(ev.type || ev.label || ev.class || "").toLowerCase();
+  // Ordre : plus spécifique → plus générique
+  if (ev.plate || raw.includes("plate")) return "plate";
+  if (raw.includes("fire")) return "fire";
+  if (raw.includes("smoke")) return "smoke";
+  if (raw.includes("weapon") || raw.includes("gun") || raw.includes("knife")) return "weapon";
+  if (raw.includes("fight") || raw.includes("violence")) return "fight";
+  if (raw.includes("fall")) return "fall";
+  if (raw.includes("ppe") || raw.includes("helmet") || raw.includes("vest")) return "ppe";
+  if (raw.includes("zone")) return "zone";
+  if (raw.includes("truck") || raw.includes("camion")) return "truck";
+  if (raw.includes("bus")) return "bus";
+  if (raw.includes("bicycle") || raw.includes("velo")) return "bicycle";
+  if (raw.includes("motorcycle") || raw.includes("motorbike") || raw.includes("moto")) return "motorbike";
+  if (raw.includes("dog")) return "dog";
+  if (raw.includes("cat")) return "cat";
+  if (raw.includes("bird")) return "bird";
+  if (raw.includes("animal")) return "animal";
+  if (raw.includes("car") || raw.includes("vehicle") || raw.includes("voiture")) return "car";
+  if (raw.includes("person") || raw.includes("human") || raw.includes("people")) return "person";
+  if (raw.includes("motion")) return "motion";
+  return "motion";
+}
+
+
 function FocusTimeline({ cameraId, onSelect }) {
+  // P5.b · Timeline dans LiveView façon Reolink :
+  //   - fenêtre glissante (défaut 30 min) → scrub visuel + marqueurs par type
+  //   - miniature générée à partir de `thumbnail` OU frame_thumb OU crop_thumb
+  //   - icône par classe (person/car/truck/animal/plate/fire/…)
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [windowMinutes, setWindowMinutes] = useState(30);
+  const [hoverEvent, setHoverEvent] = useState(null);
+
   useEffect(() => {
     if (!cameraId) return;
     let alive = true;
     const load = async () => {
       setLoading(true);
       try {
-        const { data } = await api.get(`/events?camera_id=${cameraId}&limit=10`);
-        if (alive) setEvents(Array.isArray(data) ? data : (data.items || []));
+        const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+        const [ev, pl] = await Promise.all([
+          api.get(`/events?camera_id=${cameraId}&limit=200`),
+          api.get(`/plates?camera_id=${cameraId}&limit=100`),
+        ]);
+        const evArr = Array.isArray(ev.data) ? ev.data : (ev.data.items || []);
+        const plArr = Array.isArray(pl.data) ? pl.data : (pl.data.items || []);
+        // Fusionne events + plaques dans une seule timeline, filtré à la fenêtre
+        const merged = [
+          ...evArr.map((e) => ({ ...e, _kind: _kindFromEvent(e) })),
+          ...plArr.map((p) => ({
+            ...p, type: "plate_recognized", _kind: "plate",
+            label: p.plate, thumbnail: p.plate_crop || p.vehicle_crop || p.frame_thumb,
+          })),
+        ].filter((x) => x.timestamp && new Date(x.timestamp).getTime() >= Date.now() - windowMinutes * 60 * 1000)
+         .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        if (alive) setEvents(merged);
       } catch (e) { if (alive) setEvents([]); }
       finally { if (alive) setLoading(false); }
     };
     load();
-    const iv = setInterval(load, 8000);  // rafraîchissement des 10 derniers événements toutes les 8 s
+    const iv = setInterval(load, 8000);
     return () => { alive = false; clearInterval(iv); };
-  }, [cameraId]);
+  }, [cameraId, windowMinutes]);
 
   if (!cameraId) return null;
+
+  const now = Date.now();
+  const start = now - windowMinutes * 60 * 1000;
+  const posPct = (iso) => {
+    const t = new Date(iso).getTime();
+    return Math.max(0, Math.min(100, ((t - start) / (now - start)) * 100));
+  };
+  // Groupement des events par kind pour la répartition sur des rangées
+  const kinds = Array.from(new Set(events.map((e) => e._kind)));
+  const kindCounts = {};
+  for (const e of events) kindCounts[e._kind] = (kindCounts[e._kind] || 0) + 1;
+
   return (
     <div className="absolute bottom-6 inset-x-2 pointer-events-auto" data-testid="focus-timeline">
-      <div className="bg-black/80 border border-white/10 px-2 py-1.5">
-        <div className="flex items-center justify-between mb-1">
+      <div className="bg-black/85 border border-white/10 px-2 py-2 space-y-1.5">
+        <div className="flex items-center justify-between">
           <span className="text-[9px] uppercase tracking-wider text-white/60 mono">
-            10 derniers événements {loading && <span className="text-[#00E5FF]">…</span>}
+            Timeline — {events.length} événement(s) {loading && <span className="text-[#00E5FF]">…</span>}
           </span>
-          <span className="text-[9px] mono text-white/40">{events.length}</span>
+          <div className="flex items-center gap-1">
+            {[15, 30, 60, 180].map((m) => (
+              <button key={m} onClick={() => setWindowMinutes(m)}
+                      data-testid={`focus-timeline-window-${m}`}
+                      className={`text-[9px] mono px-1 py-0.5 border ${windowMinutes === m ? "border-[#00E5FF] text-[#00E5FF]" : "border-white/10 text-white/50"}`}>
+                {m < 60 ? `${m}m` : `${m / 60}h`}
+              </button>
+            ))}
+          </div>
         </div>
-        {events.length === 0 ? (
-          <div className="text-[10px] text-white/40 py-1">Aucun événement récent pour cette caméra.</div>
-        ) : (
-          <div className="flex gap-1 overflow-x-auto">
-            {events.map((ev) => {
-              const label = ev.type || ev.label || "?";
-              const ts = ev.timestamp ? new Date(ev.timestamp) : null;
-              const time = ts ? ts.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—";
-              const thumb = ev.thumbnail || ev.crop_thumbnail;
+
+        {/* Légende par kind + count */}
+        {kinds.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {kinds.map((k) => {
+              const m = EVENT_KIND_META[k] || { icon: Activity, label: k, color: "#888" };
+              const Ic = m.icon;
               return (
-                <button key={ev.id} onClick={() => onSelect?.(ev)}
-                        data-testid={`timeline-event-${ev.id}`}
-                        className="flex-shrink-0 w-28 border border-white/10 hover:border-[#00E5FF] bg-black/60 text-left group"
-                        title={`${label} · ${time}`}>
-                  {thumb ? (
-                    <img src={thumb} alt={label} className="w-full h-14 object-cover" />
-                  ) : (
-                    <div className="w-full h-14 bg-black/70 flex items-center justify-center text-white/30 text-xs">—</div>
-                  )}
-                  <div className="px-1.5 py-0.5">
-                    <div className="text-[9px] mono text-white truncate">{label}</div>
-                    <div className="text-[8px] mono text-white/50">{time}</div>
-                  </div>
-                </button>
+                <span key={k} className="flex items-center gap-0.5 text-[9px] mono text-white/70"
+                      style={{ color: m.color }}>
+                  <Ic size={9} /> {m.label} <span className="text-white/40">×{kindCounts[k]}</span>
+                </span>
               );
             })}
           </div>
         )}
+
+        {events.length === 0 ? (
+          <div className="text-[10px] text-white/40 py-1">Aucun événement dans la fenêtre.</div>
+        ) : (
+          <>
+            {/* Scrub bar façon Reolink : icônes positionnées sur une frise temporelle */}
+            <div className="relative h-6 bg-white/5" data-testid="focus-timeline-scrub">
+              {events.map((ev, i) => {
+                const m = EVENT_KIND_META[ev._kind] || { icon: Activity, label: ev._kind, color: "#888" };
+                const Ic = m.icon;
+                return (
+                  <button
+                    key={`sc-${ev.id || i}`}
+                    onClick={() => onSelect?.(ev)}
+                    onMouseEnter={() => setHoverEvent(ev)}
+                    onMouseLeave={() => setHoverEvent(null)}
+                    style={{ left: `${posPct(ev.timestamp)}%`, color: m.color }}
+                    data-testid={`focus-timeline-marker-${ev._kind}`}
+                    className="absolute top-0 -translate-x-1/2 h-full w-4 hover:scale-110 transition-transform flex items-center justify-center"
+                    title={`${m.label} · ${new Date(ev.timestamp).toLocaleTimeString("fr-FR")}`}
+                  >
+                    <Ic size={11} strokeWidth={2.5} />
+                  </button>
+                );
+              })}
+              {/* Curseur "now" à droite */}
+              <div className="absolute top-0 right-0 h-full w-px bg-[#00E5FF]" />
+            </div>
+
+            {/* Bande de miniatures façon Reolink — seuls les items avec thumb visible */}
+            <div className="flex gap-1 overflow-x-auto" data-testid="focus-timeline-thumbs">
+              {events.filter((ev) => ev.thumbnail || ev.crop_thumbnail).slice(-12).reverse().map((ev) => {
+                const m = EVENT_KIND_META[ev._kind] || { icon: Activity, label: ev._kind, color: "#888" };
+                const Ic = m.icon;
+                const ts = ev.timestamp ? new Date(ev.timestamp) : null;
+                const time = ts ? ts.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—";
+                const thumb = ev.thumbnail || ev.crop_thumbnail;
+                return (
+                  <button key={`th-${ev.id}`} onClick={() => onSelect?.(ev)}
+                          data-testid={`timeline-event-${ev.id}`}
+                          className="relative flex-shrink-0 w-24 border border-white/10 hover:border-[#00E5FF] bg-black/60 text-left"
+                          title={`${m.label} · ${ev.label || ev.type} · ${time}`}>
+                    <img src={thumb} alt={m.label} className="w-full h-14 object-cover" />
+                    <span className="absolute top-0.5 left-0.5 w-4 h-4 flex items-center justify-center rounded-full"
+                          style={{ background: m.color + "cc" }}>
+                      <Ic size={9} color="#fff" strokeWidth={2.5} />
+                    </span>
+                    <div className="px-1 py-0.5 bg-black/60">
+                      <div className="text-[9px] mono text-white/90 truncate">{ev.label || ev.type}</div>
+                      <div className="text-[8px] mono text-white/50">{time}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
+
+      {/* Tooltip flottant */}
+      {hoverEvent && (
+        <div className="absolute -top-16 left-1/2 -translate-x-1/2 border border-white/20 bg-black/90 px-2 py-1 text-[10px] mono text-white pointer-events-none">
+          {(EVENT_KIND_META[hoverEvent._kind] || {}).label} · {hoverEvent.label || hoverEvent.type}
+          <div className="text-white/60">{new Date(hoverEvent.timestamp).toLocaleString("fr-FR")}</div>
+        </div>
+      )}
     </div>
   );
 }
