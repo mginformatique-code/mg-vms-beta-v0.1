@@ -363,6 +363,18 @@ async def recorder_loop() -> None:
                 active_ids.add(cam["id"])
                 proc = _processes.get(cam["id"])
                 if proc is None or proc.returncode is not None:
+                    # Watchdog FFmpeg (P1) — trace la reprise dans diagnostics_events
+                    if proc is not None and proc.returncode is not None:
+                        try:
+                            from diagnostics import record_disconnect
+                            await record_disconnect(
+                                cam,
+                                f"ffmpeg process died (rc={proc.returncode}) — restart auto",
+                                {"pid": getattr(proc, "pid", None), "returncode": proc.returncode,
+                                 "source": "recorder.watchdog"},
+                            )
+                        except Exception:
+                            logger.exception("recorder.watchdog record_disconnect failed")
                     await _start_ffmpeg(cam)
                 await _index_segments(cam)
             # stoppe les enregistreurs des caméras désactivées/supprimées

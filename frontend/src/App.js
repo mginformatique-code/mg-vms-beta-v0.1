@@ -21,6 +21,7 @@ import VehicleSearch from "@/pages/VehicleSearch";
 import Alerts from "@/pages/Alerts";
 import Audit from "@/pages/Audit";
 import Diagnostics from "@/pages/Diagnostics";
+import HealthDashboard from "@/pages/HealthDashboard";
 import GPUStatus from "@/pages/GPUStatus";
 import AnprBenchmark from "@/pages/AnprBenchmark";
 import PipelineVideo from "@/pages/PipelineVideo";
@@ -57,6 +58,7 @@ function AppRoutes() {
       <Route path="/alerts" element={<Protected><Alerts /></Protected>} />
       <Route path="/audit" element={<Protected><Audit /></Protected>} />
       <Route path="/diagnostics" element={<Protected><Diagnostics /></Protected>} />
+      <Route path="/diagnostics/dashboard" element={<Protected><HealthDashboard /></Protected>} />
       <Route path="/gpu" element={<Protected><GPUStatus /></Protected>} />
       <Route path="/anpr-benchmark" element={<Protected><AnprBenchmark /></Protected>} />
       <Route path="/pipeline" element={<Protected><PipelineVideo /></Protected>} />
