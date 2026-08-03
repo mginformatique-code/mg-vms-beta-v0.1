@@ -1059,13 +1059,47 @@ async def _process_camera(cam: dict) -> None:
     # Scénarios d'alertes IA (accident, rôdeur, intrusion nocturne, vive allure...)
     await _evaluate_scenarios(cam, result, now)
 
-    # Plaques LAPI
+    # Plaques LAPI (fast-alpr local) + fan-out multi-moteurs via plugin_bus.dispatch_plate
     anpr_cfg_cam = _camera_anpr_cfg.get(cam["id"], {}) or {}
     wl_local = set(anpr_cfg_cam.get("whitelist_local", []) or [])
     bl_local = set(anpr_cfg_cam.get("blacklist_local", []) or [])
+
+    # ── Multi-moteur ANPR (P8+ Feb 2026) ────────────────────────────
+    # Le local `fast-alpr` produit `result["plates"]` avec engine="fast-alpr".
+    # On délègue aussi aux PlateRecognizer plugins actifs (plate-recognizer,
+    # openalpr, paddle-ocr, easyocr, azure-vision, google-vision, tesseract…)
+    # et on ajoute leurs résultats à la liste — chacun persisté avec son engine.
+    try:
+        from plugin_manager.bus import bus as _plugin_bus_multi
+        from plugin_manager.interfaces import Frame as _MFrame
+        if _plugin_bus_multi.active("PlateRecognizer"):
+            _multi_frame = _MFrame(
+                camera_id=cam["id"], timestamp=now.isoformat(),
+                numpy_bgr=frame if hasattr(frame, "shape") else None,
+                width=int(frame.shape[1]) if hasattr(frame, "shape") else 0,
+                height=int(frame.shape[0]) if hasattr(frame, "shape") else 0,
+            )
+            _multi_results = await _plugin_bus_multi.dispatch_plate(
+                _multi_frame, vehicle_bbox=None, timeout_s=8.0,
+            )
+            for engine_name, plate_results in _multi_results:
+                if engine_name == "fast-alpr":
+                    continue  # déjà dans result["plates"]
+                for pr in plate_results or []:
+                    result["plates"].append({
+                        "plate": (pr.text or "").upper().strip(),
+                        "confidence": round(float(getattr(pr, "confidence", 0.0)), 2),
+                        "plate_crop": None, "vehicle_crop": None,
+                        "vehicle_type": None, "vehicle_color": None,
+                        "engine": engine_name,
+                    })
+    except Exception:
+        logger.exception("multi_anpr dispatch error")
+
     for p in result["plates"]:
         recent = await db.plates.find_one({
             "plate": p["plate"], "camera_id": cam["id"],
+            "engine": p.get("engine", "fast-alpr"),
             "timestamp": {"$gte": (now - timedelta(seconds=EVENT_COOLDOWN)).isoformat()},
         })
         if recent:

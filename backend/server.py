@@ -36,6 +36,7 @@ from routes.public_status import public_router
 from routes.database_settings import database_router
 from routes.smart_zones import smart_zones_router
 from routes.workflows import workflows_router
+from routes.timeline import timeline_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("mg-vms")
@@ -76,6 +77,7 @@ app.include_router(users_router)
 app.include_router(database_router)
 app.include_router(smart_zones_router)
 app.include_router(workflows_router)
+app.include_router(timeline_router)
 app.include_router(api_router)
 app.include_router(notif_router)
 app.include_router(realtime_router)

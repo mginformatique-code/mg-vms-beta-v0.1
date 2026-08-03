@@ -5,7 +5,7 @@ import api from "@/lib/api";
 import Logo from "@/components/Logo";
 import {
   LayoutDashboard, Grid3x3, Cctv, Building2, ScanLine, Car, Bell, Map, Zap,
-  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin,
+  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock,
 } from "lucide-react";
 
 const PLUGIN_ICON = {
@@ -29,6 +29,7 @@ const NAV = [
     { to: "/vehicles", icon: Car, key: "nav.vehicles", perm: "read_plates" },
     { to: "/alerts", icon: Bell, key: "nav.alerts" },
     { to: "/smart-zones", icon: MapPin, key: "nav.smart_zones" },
+    { to: "/timeline", icon: Clock, key: "nav.timeline" },
     // NOTE : ANPR est déplacé dans la section "Extensions" (voir plus bas) pour
     // regrouper logiquement les extensions activables (ANPR, IA détection avancée,
     // reconnaissance faciale, contrôle d'accès, etc.). Cf. plugins.py.
