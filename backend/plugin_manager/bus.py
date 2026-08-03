@@ -44,11 +44,18 @@ class BusEntry:
     last_ms: float = 0.0
     last_error: Optional[str] = None
     # État déclaré par le plugin lui-même après on_load / on_config_change
-    state: str = "ready"  # ready | not_configured | missing_dependency | error | disabled
+    state: str = "ready"  # ready | not_configured | missing_dependency | error | disabled | quarantined
     state_message: Optional[str] = None
+    # ─── Sandbox comportementale (P2) ────────────────────────────────
+    # Un plugin qui échoue N fois consécutivement est **mis en quarantaine** :
+    # le bus ne l'appelle plus tant que l'admin ne l'a pas réactivé (ou tant qu'un
+    # `on_config_change` réussi n'a pas remis `consecutive_errors = 0`).
+    consecutive_errors: int = 0
+    quarantined_at: Optional[str] = None
+    quarantine_reason: Optional[str] = None
 
     def is_dispatchable(self) -> bool:
-        """Un plugin est dispatché uniquement s'il est enabled ET ready."""
+        """Un plugin est dispatché uniquement s'il est enabled ET ready (pas quarantined)."""
         return self.enabled and self.state == "ready"
 
     def summary(self) -> dict:
@@ -65,15 +72,56 @@ class BusEntry:
             "timeouts": self.timeouts,
             "last_ms": round(self.last_ms, 2),
             "last_error": self.last_error,
+            "consecutive_errors": self.consecutive_errors,
+            "quarantined_at": self.quarantined_at,
+            "quarantine_reason": self.quarantine_reason,
         }
 
 
 class PluginBus:
     """Bus événementiel du Plugin Manager (PoC in-memory v2.30)."""
 
+    # Seuil de quarantine automatique (P2 sandbox) : après N erreurs consécutives,
+    # le plugin est marqué `quarantined` et exclu du dispatch jusqu'à réactivation
+    # explicite par l'admin (ou reset auto sur un succès isolé).
+    QUARANTINE_THRESHOLD = 5
+
     def __init__(self, default_timeout_s: float = 5.0):
         self._entries: dict[str, BusEntry] = {}
         self.default_timeout_s = default_timeout_s
+
+    def _mark_success(self, entry: BusEntry) -> None:
+        """Un appel a réussi → on réinitialise le compteur d'erreurs consécutives."""
+        if entry.consecutive_errors:
+            entry.consecutive_errors = 0
+
+    def _mark_failure(self, entry: BusEntry, reason: str) -> None:
+        """Un appel a échoué → incrémente le compteur et met en quarantine si seuil dépassé."""
+        entry.consecutive_errors += 1
+        if entry.consecutive_errors >= self.QUARANTINE_THRESHOLD and entry.state != "quarantined":
+            from datetime import datetime, timezone
+            entry.state = "quarantined"
+            entry.quarantined_at = datetime.now(timezone.utc).isoformat()
+            entry.quarantine_reason = (
+                f"{entry.consecutive_errors} échecs consécutifs · dernier: {reason}"
+            )[:200]
+            logger.error(
+                "plugin_bus.quarantine name=%s reason=%s",
+                entry.name, entry.quarantine_reason,
+            )
+
+    def unquarantine(self, name: str) -> bool:
+        """Sort un plugin de la quarantine — appelé par l'admin via l'API."""
+        entry = self._entries.get(name)
+        if not entry or entry.state != "quarantined":
+            return False
+        entry.state = "ready"
+        entry.state_message = "réactivé manuellement après quarantine"
+        entry.consecutive_errors = 0
+        entry.quarantined_at = None
+        entry.quarantine_reason = None
+        logger.info("plugin_bus.unquarantine name=%s", name)
+        return True
 
     # ── Enregistrement / suppression ────────────────────────────────────
 
@@ -146,7 +194,7 @@ class PluginBus:
         coro_factory,
         timeout_s: Optional[float] = None,
     ):
-        """Exécute une coroutine plugin avec timeout + capture d'erreur."""
+        """Exécute une coroutine plugin avec timeout + capture d'erreur + quarantine auto."""
         entry.calls += 1
         t0 = time.perf_counter()
         try:
@@ -156,6 +204,7 @@ class PluginBus:
             )
             entry.last_ms = (time.perf_counter() - t0) * 1000
             entry.last_error = None
+            self._mark_success(entry)
             return result
         except asyncio.TimeoutError:
             entry.timeouts += 1
@@ -163,12 +212,14 @@ class PluginBus:
             entry.last_ms = (time.perf_counter() - t0) * 1000
             entry.last_error = "timeout"
             logger.warning("plugin_bus.timeout name=%s after=%.1fms", entry.name, entry.last_ms)
+            self._mark_failure(entry, "timeout")
             return None
         except Exception as e:  # pragma: no cover — isolation crash volontaire
             entry.errors += 1
             entry.last_ms = (time.perf_counter() - t0) * 1000
             entry.last_error = f"{type(e).__name__}: {e}"[:200]
             logger.warning("plugin_bus.error name=%s err=%s", entry.name, entry.last_error)
+            self._mark_failure(entry, entry.last_error)
             return None
 
     async def dispatch_frame(

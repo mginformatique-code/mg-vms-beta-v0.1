@@ -71,22 +71,6 @@ def test_reencrypt_idempotent():
     assert decrypt_secret(twice["api_token"]) == "abc"
 
 
-def test_api_returns_masked_secret():
-    """GET /api/plugins/{name}/config masque les secrets en `***`."""
-    # Set a secret
-    r = httpx.put(f"{BASE}/api/plugins/plate-recognizer/config",
-                   json={"api_token": "SECRET_TEST_123", "regions": ["us"]},
-                   headers=_auth(), timeout=10)
-    assert r.status_code == 200
-
-    r = httpx.get(f"{BASE}/api/plugins/plate-recognizer/config",
-                   headers=_auth(), timeout=10)
-    assert r.status_code == 200
-    d = r.json()
-    assert d["config"]["api_token"] == "***"
-    assert d["config"]["regions"] == ["us"]
-
-
 def test_api_preserves_secret_on_partial_update():
     """PUT avec `api_token: '***'` doit préserver la valeur existante."""
     # Init
@@ -106,3 +90,30 @@ def test_api_preserves_secret_on_partial_update():
     from crypto_utils import decrypt_secret
     on_disk_token = disk["plate-recognizer"]["api_token"]
     assert decrypt_secret(on_disk_token) == "ORIG_TOKEN"
+
+    # Cleanup : reset la config plate-recognizer pour ne pas polluer les autres tests
+    # (qui s'attendent à ce que ce plugin soit non-configuré donc non-dispatchable)
+    httpx.put(f"{BASE}/api/plugins/plate-recognizer/config",
+              json={"api_token": "", "regions": []},
+              headers=_auth(), timeout=10)
+
+
+def test_api_returns_masked_secret():
+    """GET /api/plugins/{name}/config masque les secrets en `***`."""
+    # Set a secret
+    r = httpx.put(f"{BASE}/api/plugins/plate-recognizer/config",
+                   json={"api_token": "SECRET_TEST_123", "regions": ["us"]},
+                   headers=_auth(), timeout=10)
+    assert r.status_code == 200
+
+    r = httpx.get(f"{BASE}/api/plugins/plate-recognizer/config",
+                   headers=_auth(), timeout=10)
+    assert r.status_code == 200
+    d = r.json()
+    assert d["config"]["api_token"] == "***"
+    assert d["config"]["regions"] == ["us"]
+
+    # Cleanup pour ne pas polluer les autres tests
+    httpx.put(f"{BASE}/api/plugins/plate-recognizer/config",
+              json={"api_token": "", "regions": []},
+              headers=_auth(), timeout=10)

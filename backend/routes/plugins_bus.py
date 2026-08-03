@@ -75,6 +75,22 @@ async def bus_disable(name: str, user: dict = Depends(require_permission("techni
     return {"name": name, "enabled": False}
 
 
+@plugins_bus_router.post("/plugins/bus/{name}/unquarantine")
+async def bus_unquarantine(name: str, user: dict = Depends(require_permission("technician"))):
+    """Sort un plugin de la quarantine automatique (P2 sandbox).
+
+    Un plugin est mis en quarantine par le bus lui-même après
+    `QUARANTINE_THRESHOLD` échecs consécutifs. Le core continue de
+    fonctionner, mais le plugin n'est plus dispatché.
+    Ce endpoint est le seul moyen manuel de le réactiver.
+    """
+    if not bus.unquarantine(name):
+        raise HTTPException(status_code=400,
+                            detail=f"Plugin '{name}' n'est pas en quarantine ou inconnu du bus")
+    return {"name": name, "state": "ready", "unquarantined": True}
+
+
+
 @plugins_bus_router.get("/plugins/loader")
 async def loader_status(user: dict = Depends(require_permission("view_live"))):
     """Plugins découverts par le loader dynamique (manifest YAML).
