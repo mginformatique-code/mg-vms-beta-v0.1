@@ -967,13 +967,15 @@ async def _process_camera(cam: dict) -> None:
                     track_id=d.get("track_id"),
                 ))
             # Frame minimal (numpy_bgr optionnel — le tracking en a besoin, mais
-            # pour PipelineConsumer c'est facultatif)
+            # pour PipelineConsumer c'est facultatif). `frame` peut être un ndarray
+            # numpy ou bytes (JPEG) selon le chemin — protège l'accès .shape.
+            _has_shape = frame is not None and hasattr(frame, "shape")
             _frame = _Frame(
                 camera_id=cam["id"],
                 timestamp=now_iso,
-                numpy_bgr=frame,
-                width=int(frame.shape[1]) if frame is not None else 0,
-                height=int(frame.shape[0]) if frame is not None else 0,
+                numpy_bgr=frame if _has_shape else None,
+                width=int(frame.shape[1]) if _has_shape else 0,
+                height=int(frame.shape[0]) if _has_shape else 0,
             )
             _pr = await _plugin_bus.dispatch_pipeline(
                 _frame,
@@ -998,6 +1000,41 @@ async def _process_camera(cam: dict) -> None:
                     "thumbnail": _ensure_frame_thumb(result),
                     "data": be.get("data"),
                 })
+
+            # P3.c — Smart Zones : évaluation temps réel
+            # Convertit tracks/detections en format léger pour le moteur et
+            # déclenche les actions configurées (webhook / MQTT / HA / Tuya / …).
+            try:
+                from smart_zones.engine import engine as _sz_engine
+                _dets = [
+                    {"class": d.label, "confidence": d.confidence,
+                     "bbox": tuple(d.bbox) if hasattr(d, "bbox") else (0, 0, 0, 0)}
+                    for d in (_pr.detections or [])
+                ]
+                _tracks = [
+                    {"track_id": getattr(t, "track_id", None),
+                     "class": getattr(t, "label", None),
+                     "confidence": getattr(t, "confidence", None),
+                     "bbox": tuple(getattr(t, "bbox", (0, 0, 0, 0)))}
+                    for t in (_pr.tracks or [])
+                ]
+                _plates = [
+                    (be.get("data") or {})
+                    for be in _pr.business_events
+                    if be.get("type") == "plate_recognized"
+                ]
+                _sz_events = await _sz_engine.evaluate(cam["id"], _dets, _tracks, _plates)
+                for zev in _sz_events:
+                    await db.events.insert_one({
+                        "id": str(uuid.uuid4()),
+                        "type": zev["type"], "message": zev["message"],
+                        "severity": zev.get("severity", "info"),
+                        **base,
+                        "plugin": "smart-zone",
+                        "data": zev.get("data"),
+                    })
+            except Exception:
+                logger.exception("smart_zones eval error")
     except Exception:
         logger.exception("plugin_manager pipeline error")
 

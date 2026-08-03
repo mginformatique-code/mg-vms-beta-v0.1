@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { useApp } from "@/context/AppContext";
 import { toast } from "sonner";
-import { Plus, Trash2, Edit2, Save, X, Play, MapPin, Loader2 } from "lucide-react";
+import { Plus, Trash2, Edit2, Save, X, Play, MapPin, Loader2, RefreshCw, RotateCcw } from "lucide-react";
 
 const EMPTY_ZONE = {
   name: "",
@@ -292,9 +292,11 @@ function ZoneEditor({ zone, cameras, actuatorTypes, onChange, onSave, onCancel, 
                   ))}
                 </div>
               </div>
-              <div className="text-[11px] text-muted-foreground">
-                Note : l&apos;éditeur de polygone sur image est en développement (P3.b). Pour l&apos;instant, la zone couvre toute l&apos;image.
-              </div>
+              <PolygonEditor
+                cameraId={zone.camera_id}
+                polygon={zone.polygon || []}
+                onChange={(pg) => update({ polygon: pg })}
+              />
             </div>
           </div>
 
@@ -351,6 +353,121 @@ function ZoneEditor({ zone, cameras, actuatorTypes, onChange, onSave, onCancel, 
             Enregistrer
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+function PolygonEditor({ cameraId, polygon, onChange }) {
+  const [snapshotUrl, setSnapshotUrl] = useState(null);
+  const [imgSize, setImgSize] = useState({ w: 640, h: 360 });
+  const canvasRef = React.useRef(null);
+  const imgRef = React.useRef(null);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  // Fetch snapshot une fois par cameraId
+  useEffect(() => {
+    if (!cameraId) { setSnapshotUrl(null); return; }
+    const base = process.env.REACT_APP_BACKEND_URL;
+    const token = localStorage.getItem("mg_token") || "";
+    setSnapshotUrl(`${base}/api/stream/${cameraId}/frame.jpeg?t=${Date.now()}&token=${encodeURIComponent(token)}`);
+  }, [cameraId, refreshTick]);
+
+  // Redessine le polygone
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!polygon || polygon.length === 0) return;
+    ctx.strokeStyle = "#00E676";
+    ctx.fillStyle = "rgba(0,230,118,0.15)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    polygon.forEach(([rx, ry], i) => {
+      const x = rx * canvas.width;
+      const y = ry * canvas.height;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    if (polygon.length >= 3) {
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.stroke();
+    // Dots
+    polygon.forEach(([rx, ry], i) => {
+      const x = rx * canvas.width;
+      const y = ry * canvas.height;
+      ctx.fillStyle = i === 0 ? "#FFB800" : "#00E676";
+      ctx.beginPath();
+      ctx.arc(x, y, 5, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }, [polygon, imgSize]);
+
+  const handleClick = (e) => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    const rx = (e.clientX - rect.left) / rect.width;
+    const ry = (e.clientY - rect.top) / rect.height;
+    onChange([...(polygon || []), [+rx.toFixed(4), +ry.toFixed(4)]]);
+  };
+
+  const undo = () => onChange((polygon || []).slice(0, -1));
+  const clear = () => onChange([]);
+
+  if (!cameraId) {
+    return (
+      <div className="text-[11px] text-muted-foreground border border-dashed border-border p-3 text-center">
+        Sélectionnez une caméra pour dessiner la zone
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <label className="text-xs text-muted-foreground block mb-1 flex items-center justify-between">
+        <span>Polygone de la zone ({(polygon || []).length} points)</span>
+        <span className="flex gap-2">
+          <button type="button" onClick={() => setRefreshTick(t => t + 1)}
+                  data-testid="poly-refresh-snapshot"
+                  className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 border border-border hover:bg-secondary">
+            <RefreshCw size={9} /> Rafraîchir
+          </button>
+          <button type="button" onClick={undo} disabled={(polygon || []).length === 0}
+                  data-testid="poly-undo"
+                  className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 border border-border hover:bg-secondary disabled:opacity-40">
+            <RotateCcw size={9} /> Annuler
+          </button>
+          <button type="button" onClick={clear} disabled={(polygon || []).length === 0}
+                  data-testid="poly-clear"
+                  className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 border border-[#FF3333] text-[#FF3333] hover:bg-[#FF3333]/10 disabled:opacity-40">
+            <Trash2 size={9} /> Effacer
+          </button>
+        </span>
+      </label>
+      <div className="relative border border-border bg-black" style={{ aspectRatio: "16 / 9" }}>
+        {snapshotUrl && (
+          <img ref={imgRef} src={snapshotUrl} alt="snapshot"
+               onLoad={(e) => setImgSize({ w: e.target.naturalWidth, h: e.target.naturalHeight })}
+               onError={() => { /* silencieux */ }}
+               data-testid="poly-snapshot"
+               className="absolute inset-0 w-full h-full object-contain" />
+        )}
+        <canvas
+          ref={canvasRef}
+          width={640}
+          height={360}
+          onClick={handleClick}
+          data-testid="poly-canvas"
+          className="absolute inset-0 w-full h-full cursor-crosshair"
+        />
+      </div>
+      <div className="text-[10px] text-muted-foreground mt-1 mono">
+        Clique sur l&apos;image pour ajouter des points. Le premier point est jaune. Ferme automatiquement à partir de 3 points.
+        {(polygon || []).length === 0 && <span className="ml-1 text-[#FFB800]">— zone vide = couvre tout le frame</span>}
       </div>
     </div>
   );
