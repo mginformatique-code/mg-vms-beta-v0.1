@@ -209,55 +209,99 @@ export default function PluginManagerNG() {
         ) : (
           <div className="space-y-3" data-testid="plugin-bus-entries">
             {(() => {
-              // Groupement par provider_group depuis loaderData
+              // Regroupement par DOMAINE MÉTIER (plus explicite que provider_group brut).
+              // Certaines catégories techniques sont sous-divisées pour l'UX
+              // (ex: security → incendie vs. sûreté active).
+              const _classify = (e) => {
+                const dyn = dynamicMap[e.name];
+                const rawGroup = dyn?.provider_group || dyn?.categories?.[0] || "other";
+                if (rawGroup === "security") {
+                  const n = e.name.toLowerCase();
+                  if (n.includes("fire") || n.includes("smoke")) return "fire";
+                  return "safety";
+                }
+                return rawGroup;
+              };
               const groups = {};
               for (const e of bus.entries) {
-                const dyn = dynamicMap[e.name];
-                const g = dyn?.provider_group || (dyn?.categories?.[0]) || "other";
+                const g = _classify(e);
                 (groups[g] = groups[g] || []).push(e);
               }
               const GROUP_META = {
-                "object-detection": { label: "Object Detection Providers", color: "#0044FF",
-                                       desc: "Détecteurs d'objets — activez le provider adapté à votre matériel (CPU / GPU / TensorRT / OpenVINO / ONNX)" },
-                "tracking":         { label: "Tracking Providers", color: "#00E676",
-                                       desc: "Suivi multi-objets avec identité persistante (ByteTrack, BoTSORT, DeepSORT, StrongSORT, OCSORT)" },
-                "segmentation":     { label: "Segmentation Providers", color: "#EA580C",
-                                       desc: "Segmentation d'instances / masques pixel-perfect (SAM2, Detectron2, Mask R-CNN)" },
-                "anpr":             { label: "ANPR Providers", color: "#FFB800",
-                                       desc: "Lecture de plaques d'immatriculation — plusieurs moteurs peuvent tourner en fusion (cascade/vote/highest)" },
-                "notifications":    { label: "Notifications", color: "#A855F7",
-                                       desc: "Envoi d'événements vers Telegram, Discord, SMTP, webhooks..." },
-                "counting":         { label: "Comptage", color: "#06B6D4",
-                                       desc: "Compteurs de personnes, véhicules, occupation de zone" },
-                "parking":          { label: "Parking", color: "#0891B2",
-                                       desc: "Gestion des places de parking (libre/occupée/temps)" },
-                "security":         { label: "Sécurité", color: "#DC2626",
-                                       desc: "Détection de fumée, feu, armes, bagarres, chutes" },
-                "ppe":              { label: "EPI (Sécurité industrielle)", color: "#F59E0B",
-                                       desc: "Casque, gilet, gants, lunettes — conformité chantier/industrie" },
-                "commerce":         { label: "Commerce", color: "#EC4899",
-                                       desc: "Heatmap, files d'attente, temps passé — analytics retail" },
-                "agriculture":      { label: "Agriculture", color: "#65A30D",
-                                       desc: "Animaux, oiseaux, intrusion — protection cultures / élevage" },
+                "anpr":             { label: "ANPR / LPR — Lecture de plaques", color: "#FFB800",
+                                       desc: "Reconnaissance de plaques d'immatriculation — activez plusieurs moteurs (local + cloud) et combinez-les via cascade / vote / meilleure confidence" },
+                "object-detection": { label: "Détection IA — Objets & personnes", color: "#0044FF",
+                                       desc: "Détecteurs d'objets — activez le provider adapté à votre matériel (YOLO CPU / GPU / TensorRT / OpenVINO / ONNX)" },
+                "tracking":         { label: "Tracking — Suivi multi-objets", color: "#00E676",
+                                       desc: "Suivi avec identité persistante (ByteTrack, BoTSORT, DeepSORT, StrongSORT, OCSORT) — indispensable pour E/P/S ANPR et comptage" },
+                "segmentation":     { label: "Segmentation — Masques pixel-perfect", color: "#EA580C",
+                                       desc: "Segmentation d'instances (SAM2, Detectron2, Mask R-CNN) — utile pour zones intelligentes et intrusion pixel-précise" },
+                "fire":             { label: "Gestion feu — Incendie & fumée", color: "#DC2626",
+                                       desc: "Détection précoce d'incendie et fumée sur flux vidéo — alertes critiques temps réel" },
+                "safety":           { label: "Sûreté active — Violence, chutes, armes", color: "#B91C1C",
+                                       desc: "Détection de bagarres, chutes de personnes, armes visibles — alertes critiques et actions immédiates" },
+                "ppe":              { label: "EPI — Équipements de protection", color: "#F59E0B",
+                                       desc: "Casque, gilet, gants, lunettes — conformité chantier / industrie / atelier" },
+                "counting":         { label: "Comptage — Personnes, véhicules, occupation", color: "#06B6D4",
+                                       desc: "Comptage temps réel + occupation de zones (retail, industrie, événementiel)" },
+                "commerce":         { label: "Retail — Heatmap, files, temps passé", color: "#EC4899",
+                                       desc: "Analytics commerce : heatmaps, files d'attente, dwell time" },
+                "parking":          { label: "Parking — Places & durées", color: "#0891B2",
+                                       desc: "Détection places libres/occupées + calcul durée stationnement" },
+                "agriculture":      { label: "Agriculture — Animaux & intrusion", color: "#65A30D",
+                                       desc: "Détection d'animaux, oiseaux, intrusion parcelle — protection cultures et élevage" },
+                "notifications":    { label: "Notifications — Alertes sortantes", color: "#A855F7",
+                                       desc: "Envoi d'événements vers Telegram, Discord, SMTP, webhooks personnalisés" },
                 "other":            { label: "Autres", color: "#666", desc: "" },
               };
               const sorted = Object.keys(groups).sort((a, b) => {
-                const order = ["object-detection", "tracking", "segmentation", "anpr",
-                              "notifications", "counting", "parking", "security", "ppe",
-                              "commerce", "agriculture", "other"];
+                const order = ["anpr", "object-detection", "tracking", "segmentation",
+                              "fire", "safety", "ppe", "counting", "commerce",
+                              "parking", "agriculture", "notifications", "other"];
                 return order.indexOf(a) - order.indexOf(b);
               });
-              return sorted.map((g) => {
-                const meta = GROUP_META[g] || GROUP_META.other;
-                const opened = expandedGroups[g] !== false;
-                const entries = groups[g];
-                const readyCount = entries.filter((e) => e.state === "ready").length;
-                const Chev = opened ? ChevronDown : ChevronRight;
-                return (
-                  <div key={g} className="border border-border" data-testid={`plugin-group-${g}`}>
-                    <button
-                      onClick={() => toggleGroup(g)}
-                      className="w-full flex items-center gap-2 px-3 py-2 bg-secondary/40 hover:bg-secondary transition-colors"
+              return (
+                <>
+                  {/* Barre de synthèse par domaine */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 mb-4">
+                    {sorted.map((g) => {
+                      const m = GROUP_META[g] || GROUP_META.other;
+                      const e = groups[g];
+                      const ready = e.filter((x) => x.state === "ready").length;
+                      const total = e.length;
+                      const isActive = ready > 0;
+                      return (
+                        <button
+                          key={"sum-" + g}
+                          onClick={() => setExpandedGroups({ ...expandedGroups, [g]: true })}
+                          className="border border-border p-2 text-left hover:border-[#0044FF] transition-colors"
+                          style={{ borderLeftColor: m.color, borderLeftWidth: 3 }}
+                          data-testid={`domain-summary-${g}`}
+                        >
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">
+                            {m.label.split(" — ")[0]}
+                          </div>
+                          <div className="flex items-baseline gap-1 mt-0.5">
+                            <span className="font-head font-bold text-lg" style={{ color: isActive ? "#00E676" : "#FF3333" }}>
+                              {ready}
+                            </span>
+                            <span className="text-xs text-muted-foreground mono">/ {total}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {sorted.map((g) => {
+                    const meta = GROUP_META[g] || GROUP_META.other;
+                    const opened = expandedGroups[g] !== false;
+                    const entries = groups[g];
+                    const readyCount = entries.filter((e) => e.state === "ready").length;
+                    const Chev = opened ? ChevronDown : ChevronRight;
+                    return (
+                      <div key={g} className="border border-border" data-testid={`plugin-group-${g}`}>
+                        <button
+                          onClick={() => toggleGroup(g)}
+                          className="w-full flex items-center gap-2 px-3 py-2 bg-secondary/40 hover:bg-secondary transition-colors"
                     >
                       <Chev size={14} />
                       <span className="font-head font-bold text-sm" style={{ color: meta.color }}>
@@ -383,7 +427,9 @@ export default function PluginManagerNG() {
                     )}
                   </div>
                 );
-              });
+                  })}
+                </>
+              );
             })()}
           </div>
         )}

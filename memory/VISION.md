@@ -100,6 +100,29 @@ Optionnel. JAMAIS d'images/vidéos/plaques/flux/données personnelles. Uniquemen
 ## P17 · Auto-update
 Vérifier version MG-VMS + plugins + correctifs. Afficher changelog. Préparer mises à jour en un clic.
 
+## P18 · Base de données — Portabilité & self-hosting (Feb 2026, demande CEO)
+Actuellement MG-VMS repose sur MongoDB (couplage fort via `motor` async).
+Objectif : permettre à l'utilisateur de **choisir où et comment stocker la BDD** :
+
+**P18.a — Config UI (livré Feb 2026)** ✅
+- Endpoints admin `/api/settings/database` (GET/PUT/test/restart)
+- UI dans Settings : afficher URI courante (masquée), tester une nouvelle URI, enregistrer dans `.env`, redémarrer le backend depuis l'UI
+- Backup automatique de `.env.bak` avant modification
+- Cas d'usage : pointer MG-VMS vers un serveur MongoDB dédié externe plus performant
+
+**P18.b — Support multi-moteur (à faire)** ⚪
+- Layer d'abstraction : `db.cameras.find()` → adaptateur MongoDB **ou** SQL
+- Backends cibles : PostgreSQL (JSONB pour souplesse), MySQL/MariaDB (colonnes classiques)
+- Migrations Alembic-like pour évolution schéma
+- Test suite parallèle pour chaque backend
+- Wizard "Migrer les données" : aspire MongoDB → SQL en un clic
+- Config UI : dropdown moteur (mongodb / postgres / mysql / mariadb)
+
+**P18.c — Read-replica SQL (nice-to-have)** ⚪
+- Job périodique qui réplique les collections lourdes (events, plates, recordings, alerts) vers un SQL externe pour BI/reporting (Power BI, Grafana, Metabase)
+- MongoDB reste la source de vérité
+- Config UI : URI SQL cible + fréquence de réplication
+
 ---
 
 ## Comment interpréter cette roadmap
@@ -108,18 +131,22 @@ Vérifier version MG-VMS + plugins + correctifs. Afficher changelog. Préparer m
 - **P2 est le cœur** : le Plugin Manager conditionne P3/P4/P8/P14. Il progresse en parallèle de P1.
 - **P3–P8** sont les grosses valeurs métier — dans l'ordre.
 - **P9–P17** peuvent s'entrelacer selon la traction commerciale.
+- **P18** ajouté Feb 2026 : DB portable / self-hosting.
 
 ## Ce qui a déjà été fait dans la session Feb 2026
 
-- ✅ **P2 Plugin Manager (60%)** : PluginBus, loader dynamique manifest YAML, 49 plugins × 11 catégories, config store, hot reload, install deps, badges état, config dialog, pipeline chaîné Detector→Tracker→Segmenter→PipelineConsumer→EventConsumer wired dans ai_engine, canvas de test avec bboxes/tracks/events
-- Reste sur P2 : sandbox, marketplace, SDK, Fernet secrets, isolated DB namespace
+- ✅ **P1 Stabilisation** : PTZ ONVIF réel (8 commandes + presets), UI 8-directions, Recorder Health (continuité 24h), Health Dashboard, FFmpeg Watchdog, modularisation routers.py (3 modules), logo dark/light, badges login réels (vert/rouge only)
+- ✅ **P2 Plugin Manager (85%)** : PluginBus, loader dynamique manifest YAML, 49 plugins × 11 catégories, config store, hot reload, install deps, badges état, config dialog, pipeline chaîné Detector→Tracker→Segmenter→PipelineConsumer→EventConsumer wired dans ai_engine, canvas de test, Fernet secrets, Sandbox quarantine auto (5 échecs), Plugin SDK (scaffold + pack .mgpkg), UI regroupée par domaine métier (ANPR/Détection IA/Tracking/Segmentation/Feu/Sûreté/EPI/Comptage/Retail/Parking/Agriculture/Notifications) + barre de synthèse
+- ✅ **P18.a Base de données** : Config UI complète (test/save/restart backend)
+- Reste P2 : marketplace UI upload `.mgpkg`, isolated DB namespace par plugin
 
-## Ordre d'exécution proposé (revised)
+## Ordre d'exécution proposé (revised Feb 2026)
 
-1. **P1 Stabilisation** — priorité absolue, transverse
-2. **P2 finalisation** — sandbox + Fernet + marketplace scaffolding
-3. **P8 ANPR refonte** — cycle Entrée/Présence/Sortie (haute valeur commerciale, utilise déjà notre pipeline)
+1. **P1 Stabilisation** — ✅ complet
+2. **P2 finalisation** — Marketplace UI upload `.mgpkg`
+3. **P8 ANPR refonte** — cycle Entrée/Présence/Sortie (haute valeur commerciale)
 4. **P3 Smart Zones** — permet aux Workflows d'exister
 5. **P4 Workflow Engine** — game-changer produit
-6. **P13 Health Dashboard** — vend le produit aux DSI
-7. Le reste selon traction
+6. **P18.b Multi-moteur SQL** — chantier lourd, à planifier après P8/P3
+7. **P13 Health Dashboard** — améliorations UI
+8. Le reste selon traction
