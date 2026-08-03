@@ -80,16 +80,16 @@ export default function Login() {
           </div>
           <div className="flex gap-6 text-xs text-muted-foreground mono" data-testid="login-status-badges">
             <span data-testid="badge-online">
-              <span className={pub?.cameras_online > 0 ? "mg-online" : "mg-warning"}>●</span>{" "}
+              <span className={pub?.cameras_online > 0 ? "mg-online" : "mg-error"}>●</span>{" "}
               {pub === null ? "…" : `${pub.cameras_online} ONLINE`}
             </span>
             <span data-testid="badge-anpr">
-              <span className={pub?.anpr_active ? "mg-online" : "mg-warning"}>●</span>{" "}
-              ANPR {pub?.anpr_active ? "ACTIVE" : "IDLE"}
+              <span className={pub?.anpr_active ? "mg-online" : "mg-error"}>●</span>{" "}
+              ANPR {pub?.anpr_active ? "ACTIVE" : "OFF"}
             </span>
             <span data-testid="badge-ai">
-              <span className={pub?.ai_engine ? "mg-active" : "mg-warning"}>●</span>{" "}
-              AI ENGINE {pub?.ai_engine ? "" : "OFF"}
+              <span className={pub?.ai_engine ? "mg-online" : "mg-error"}>●</span>{" "}
+              AI ENGINE {pub?.ai_engine ? "ON" : "OFF"}
             </span>
           </div>
         </div>

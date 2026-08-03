@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
-import { Moon, Sun, Languages, ShieldCheck, Monitor, Loader2, HardDrive, Save, Trash2, PlayCircle } from "lucide-react";
+import { Moon, Sun, Languages, ShieldCheck, Monitor, Loader2, HardDrive, Save, Trash2, PlayCircle, Database, RefreshCw, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
 export default function SettingsPage() {
@@ -83,6 +83,7 @@ export default function SettingsPage() {
 
       {user?.role === "admin" && <RetentionCard />}
       {user?.role === "admin" && <StorageCard />}
+      {user?.role === "admin" && <DatabaseCard />}
     </div>
   );
 }
@@ -303,6 +304,196 @@ function StorageCard() {
             {saving && <Loader2 size={11} className="animate-spin" />}<Save size={11} /> Ajouter
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+function DatabaseCard() {
+  const [state, setState] = useState(null);
+  const [form, setForm] = useState({ mongo_url: "", db_name: "" });
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+
+  const load = async () => {
+    try {
+      const { data } = await api.get("/settings/database");
+      setState(data);
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Erreur chargement"); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const test = async () => {
+    if (!form.mongo_url || !form.db_name) {
+      toast.error("URI et nom de base requis");
+      return;
+    }
+    setTesting(true); setTestResult(null);
+    try {
+      const { data } = await api.post("/settings/database/test", form);
+      setTestResult({ ok: true, ...data });
+    } catch (e) {
+      setTestResult({ ok: false, error: formatApiErrorDetail(e.response?.data?.detail) || e.message });
+    } finally { setTesting(false); }
+  };
+
+  const save = async () => {
+    if (!testResult?.ok) {
+      toast.error("Testez d'abord la connexion avec succès avant d'enregistrer");
+      return;
+    }
+    if (!window.confirm(
+      "Confirmer l'enregistrement ?\n\n" +
+      "Le fichier /app/backend/.env sera modifié.\n" +
+      "Le backend devra être redémarré pour appliquer la nouvelle URI."
+    )) return;
+    setSaving(true);
+    try {
+      const { data } = await api.put("/settings/database", form);
+      toast.success("Config sauvegardée — redémarrage requis");
+      load();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e.response?.data?.detail) || e.message);
+    } finally { setSaving(false); }
+  };
+
+  const restart = async () => {
+    if (!window.confirm(
+      "Redémarrer le backend ?\n\n" +
+      "Vous serez déconnecté quelques secondes. Reconnectez-vous ensuite."
+    )) return;
+    setRestarting(true);
+    try {
+      await api.post("/settings/database/restart-backend", { confirm: true });
+      toast.info("Redémarrage en cours…");
+      setTimeout(() => window.location.reload(), 6000);
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e.response?.data?.detail) || e.message);
+      setRestarting(false);
+    }
+  };
+
+  const c = state?.current;
+  return (
+    <div className="bg-card border border-border p-5 mb-3">
+      <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-4">
+        <Database size={15} /> Base de données
+      </div>
+
+      {c && (
+        <div className="border border-border p-3 mb-4 bg-background">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Connexion active</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+            <div>
+              <div className="text-[10px] text-muted-foreground">URI (masqué)</div>
+              <div className="mono text-xs" data-testid="db-current-uri">{c.mongo_url_redacted || "—"}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-muted-foreground">Nom de base</div>
+              <div className="mono text-xs" data-testid="db-current-name">{c.db_name || "—"}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-muted-foreground">Statut</div>
+              <div className="flex items-center gap-1.5 text-xs">
+                {c.status === "ok"
+                  ? <><CheckCircle2 size={12} className="mg-online" /> <span className="mg-online mono">OK</span></>
+                  : <><XCircle size={12} className="mg-error" /> <span className="mg-error mono">{c.status}</span></>}
+                {c.ping_ms !== null && <span className="text-muted-foreground mono">· {c.ping_ms}ms</span>}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] text-muted-foreground">Collections</div>
+              <div className="mono text-xs">{c.collections ?? "—"}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Nouvelle configuration</div>
+      <div className="grid grid-cols-1 gap-2 mb-3">
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1">URI MongoDB</label>
+          <input
+            type="text"
+            placeholder="mongodb://user:password@host:27017 · mongodb+srv://... · mongodb://serveur-dedie:27017"
+            value={form.mongo_url}
+            onChange={(e) => { setForm({ ...form, mongo_url: e.target.value }); setTestResult(null); }}
+            data-testid="db-new-uri"
+            className="w-full px-3 py-2 bg-background border border-input outline-none mono text-xs focus:border-[#0044FF]"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1">Nom de base</label>
+          <input
+            type="text"
+            placeholder="mg_vms_prod"
+            value={form.db_name}
+            onChange={(e) => { setForm({ ...form, db_name: e.target.value }); setTestResult(null); }}
+            data-testid="db-new-name"
+            className="w-full px-3 py-2 bg-background border border-input outline-none mono text-xs focus:border-[#0044FF]"
+          />
+        </div>
+      </div>
+
+      {testResult && (
+        <div className="border p-3 mb-3 text-xs mono"
+             style={{ borderColor: testResult.ok ? "#00E676" : "#FF3333",
+                       background: testResult.ok ? "rgba(0,230,118,0.05)" : "rgba(255,51,51,0.05)" }}
+             data-testid="db-test-result">
+          {testResult.ok ? (
+            <div>
+              <div className="flex items-center gap-1.5 mg-online mb-1">
+                <CheckCircle2 size={12} /> Connexion réussie
+              </div>
+              <div className="text-muted-foreground">
+                Ping : <b>{testResult.ping_ms}ms</b> · Collections : <b>{testResult.collections}</b> · Caméras : <b>{testResult.cameras_count}</b>
+              </div>
+              {testResult.collections_sample?.length > 0 && (
+                <div className="text-[10px] text-muted-foreground mt-1 truncate">
+                  Ex. : {testResult.collections_sample.slice(0, 5).join(", ")}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 mg-error">
+              <XCircle size={12} /> {testResult.error}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2 mb-4">
+        <button onClick={test} disabled={testing || !form.mongo_url || !form.db_name}
+                data-testid="db-test-btn"
+                className="flex items-center gap-2 px-4 py-2 border border-[#0044FF] text-[#0044FF] text-sm hover:bg-[#0044FF]/10 disabled:opacity-40">
+          {testing ? <Loader2 size={13} className="animate-spin" /> : <PlayCircle size={13} />}
+          Tester la connexion
+        </button>
+        <button onClick={save} disabled={saving || !testResult?.ok}
+                data-testid="db-save-btn"
+                className="flex items-center gap-2 px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40">
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+          Enregistrer
+        </button>
+        <button onClick={restart} disabled={restarting}
+                data-testid="db-restart-btn"
+                className="flex items-center gap-2 px-4 py-2 border border-[#FF3333] text-[#FF3333] text-sm hover:bg-[#FF3333]/10 disabled:opacity-40">
+          {restarting ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+          Redémarrer backend
+        </button>
+      </div>
+
+      <div className="text-[11px] text-muted-foreground border-t border-border pt-3 flex items-start gap-1.5">
+        <AlertTriangle size={12} className="mg-warning flex-shrink-0 mt-0.5" />
+        <span>
+          Le changement d&apos;URI nécessite un <b>redémarrage du backend</b>. Testez toujours la connexion
+          avant d&apos;enregistrer. Un backup <code className="mono">/app/backend/.env.bak</code> est créé
+          automatiquement. Moteurs supportés : <b>{(state?.supported_engines || ["mongodb"]).join(", ")}</b> —
+          support SQL/MariaDB prévu roadmap.
+        </span>
       </div>
     </div>
   );

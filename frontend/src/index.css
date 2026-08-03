@@ -64,6 +64,7 @@
 
 .mg-online { color: #00E676; }
 .mg-offline { color: #FF3333; }
+.mg-error { color: #FF3333; }
 .mg-warning { color: #FFB800; }
 .mg-active { color: #0044FF; }
 
