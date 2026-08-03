@@ -1,0 +1,35 @@
+{
+  "type": "object",
+  "title": "ANPR — Cycle Entrée/Présence/Sortie",
+  "properties": {
+    "exit_threshold_seconds": {
+      "type": "integer",
+      "title": "Seuil de sortie (secondes)",
+      "description": "Une plaque non revue depuis N secondes est considérée comme partie",
+      "default": 30,
+      "minimum": 5,
+      "maximum": 3600
+    },
+    "min_confidence": {
+      "type": "number",
+      "title": "Confidence minimum de la plaque",
+      "default": 0.65,
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "emit_presence_heartbeats": {
+      "type": "boolean",
+      "title": "Émettre un 'heartbeat' toutes les N minutes",
+      "description": "Pour audit : confirme périodiquement qu'une plaque est toujours présente",
+      "default": false
+    },
+    "heartbeat_minutes": {
+      "type": "integer",
+      "title": "Fréquence heartbeat (minutes)",
+      "default": 15,
+      "minimum": 1,
+      "maximum": 1440
+    }
+  },
+  "required": []
+}

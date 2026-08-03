@@ -55,7 +55,14 @@ Corriger définitivement :
 **Statut Feb 2026 : 60% fait — 49 plugins × 11 catégories, pipeline chaîné actif. Reste sandbox + marketplace + SDK.**
 
 ## P3 · Smart Zones (zones intelligentes)
-Chaque zone devient un objet capable de détecter (personne/véhicule/animal/objet/mouvement/plaque/visage), mesurer (présence/durée/nombre/occupation/entrée/sortie) et déclencher (plugin/MQTT/HTTP/Email/Telegram/Discord/PTZ/lumière/sirène/relais/audio/API/scripts).
+Chaque zone devient un objet capable de :
+- **Détecter** : personne / véhicule / animal / objet / mouvement / plaque / visage / arme / feu / fumée
+- **Mesurer** : présence / durée / nombre / occupation / entrée / sortie / distance / vitesse
+- **Déclencher** :
+  - **Plugins** : appeler un plugin (notification, ANPR ciblée, tracking ciblé…)
+  - **Actionneurs caméra** : projecteur / IR / éclairage / relais / GPIO / haut-parleur (audio ONVIF) / micro (talk bidirectionnel) / sirène intégrée / PTZ preset
+  - **Actionneurs externes** : Home Assistant (services `light.turn_on`, `switch.turn_on`, `notify.*`, `automation.trigger`), Tuya (Cloud API + LAN), MQTT (topic + payload), Zigbee2MQTT, Node-RED, webhooks HTTP, appels API tiers, scripts shell, TTS Google/Azure/OpenAI, appels téléphoniques (Twilio), SMS, emails
+- **Chaîner** : une zone peut déclencher une autre zone, un workflow, ou faire des actions séquentielles avec délais (SI → attendre 10s → SI encore présent → escalade)
 
 ## P4 · Workflow Engine
 Moteur graphique d'automatisation inspiré Home Assistant + Node-RED. Tous les plugins doivent pouvoir être utilisés comme déclencheurs ou actions.
