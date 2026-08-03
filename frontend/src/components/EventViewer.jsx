@@ -114,13 +114,31 @@ export default function EventViewer({ items, index, onClose, onIndex, kind = "ev
     } finally { setRecLoading(false); }
   };
 
-  const meta = useMemo(() => item ? [
-    { icon: CamIcon,     label: "Caméra",     value: item.camera_name || "—" },
-    { icon: MapPin,      label: "Site",       value: item.site_name || "—" },
-    { icon: Clock,       label: "Horodatage", value: new Date(item.timestamp).toLocaleString("fr-FR") },
-    { icon: Puzzle,      label: "Plugin",     value: item.plugin || (kind === "plate" ? "ANPR (fast-alpr)" : item._bbox ? "YOLO" : "Détection") },
-    { icon: ShieldAlert, label: "Type",       value: item.type || item.label || (item.plate ? "Plaque" : "—") },
-  ] : [], [item, kind]);
+  const meta = useMemo(() => {
+    if (!item) return [];
+    // Traçabilité moteurs (P8+ CEO Feb 2026) : afficher les moteurs utilisés
+    // (ANPR + détecteurs + trackers + segmenters). Les événements pipeline
+    // exposent `detectors`, `trackers`, `segmenters` (listes) ; les plaques
+    // exposent `engine` (moteur ANPR).
+    const engineParts = [];
+    if (kind === "plate" || item.plate) {
+      engineParts.push(`ANPR: ${item.engine || "fast-alpr"}`);
+    }
+    if (item.detectors?.length) engineParts.push(`Détection: ${item.detectors.join(", ")}`);
+    if (item.trackers?.length)  engineParts.push(`Tracking: ${item.trackers.join(", ")}`);
+    if (item.segmenters?.length) engineParts.push(`Segmentation: ${item.segmenters.join(", ")}`);
+    const pluginValue = engineParts.length
+      ? engineParts.join(" · ")
+      : (item.plugin || (kind === "plate" ? "ANPR (fast-alpr)" : item._bbox ? "YOLO" : "Détection"));
+    return [
+      { icon: CamIcon,     label: "Caméra",     value: item.camera_name || "—" },
+      { icon: MapPin,      label: "Site",       value: item.site_name || "—" },
+      { icon: Clock,       label: "Horodatage", value: new Date(item.timestamp).toLocaleString("fr-FR") },
+      { icon: Puzzle,      label: "Moteurs",    value: pluginValue,
+        testid: "viewer-engines" },
+      { icon: ShieldAlert, label: "Type",       value: item.type || item.label || (item.plate ? "Plaque" : "—") },
+    ];
+  }, [item, kind]);
 
   if (!item) return null;
 

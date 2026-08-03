@@ -22,3 +22,8 @@ async def create_indexes():
     # Journal lifecycle des streams (persistance des transitions notables)
     await db.stream_lifecycle_journal.create_index([("camera_id", 1), ("ts", -1)])
     await db.stream_lifecycle_journal.create_index("ts")
+    # Traçabilité moteurs (P8+, demande CEO Feb 2026) — backfill léger pour que le
+    # frontend puisse afficher "reconnu par fast-alpr" sur toutes les plaques.
+    await db.plates.update_many({"engine": {"$exists": False}},
+                                 {"$set": {"engine": "fast-alpr"}})
+

@@ -32,13 +32,16 @@ export default function Anpr() {
 
   // Hybridation ANPR : scène HD complète (frame_thumb) en visuel principal
   // + plate_crop + vehicle_crop en insets nets dans EventViewer.
+  // Affichage du moteur ANPR utilisé (P8+ Feb 2026) : chaque plaque expose
+  // maintenant `engine` (fast-alpr / plate-recognizer / paddle-ocr / …).
   const viewerItems = plates.map((p) => ({
     ...p,
     thumbnail: p.frame_thumb || p.vehicle_crop || p.plate_crop || p.thumbnail,
     plate_crop: p.plate_crop,
     vehicle_crop: p.vehicle_crop,
     type: "Plaque détectée",
-    plugin: "ANPR (fast-alpr)",
+    plugin: `ANPR (${p.engine || "fast-alpr"})`,
+    engine: p.engine || "fast-alpr",
   }));
 
   const load = async (reset = true) => {
@@ -103,6 +106,7 @@ export default function Anpr() {
               <thead><tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted-foreground">
                 <th className="px-3 py-2">{t("anpr.plate")}</th><th className="px-3 py-2">{t("common.date")}</th><th className="px-3 py-2">{t("veh.make")}</th>
                 <th className="px-3 py-2">{t("veh.color")}</th><th className="px-3 py-2">{t("common.camera")}</th><th className="px-3 py-2">{t("anpr.direction")}</th><th className="px-3 py-2">{t("common.confidence")}</th>
+                <th className="px-3 py-2">Moteur</th>
               </tr></thead>
               <tbody>
                 {plates.map((p, i) => (
@@ -114,6 +118,7 @@ export default function Anpr() {
                     <td className="px-3 py-2 text-muted-foreground text-xs">{p.camera_name}</td>
                     <td className="px-3 py-2 text-xs">{p.direction}</td>
                     <td className="px-3 py-2 mono text-xs" style={{ color: p.confidence > 0.9 ? "#00E676" : "#FFB800" }}>{(p.confidence * 100).toFixed(0)}%</td>
+                    <td className="px-3 py-2 mono text-[10px] text-[#0044FF]" data-testid={`plate-engine-${p.id}`}>{p.engine || "fast-alpr"}</td>
                   </tr>
                 ))}
               </tbody>

@@ -460,6 +460,8 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
                     "vehicle_crop": _jpeg_data_uri(img[vy1:vy2, vx1:vx2]),
                     "vehicle_type": owner["label"],
                     "vehicle_color": owner["vehicle_color"],
+                    # P8+ traçabilité : quel moteur a reconnu la plaque
+                    "engine": "fast-alpr",
                 })
                 plate_debug.append({"plate": plate_text, "confidence": round(float(r.ocr.confidence), 2),
                                      "size": f"{pw}x{ph}", "kept": True})
@@ -997,6 +999,13 @@ async def _process_camera(cam: dict) -> None:
                     "message": be.get("message"),
                     "severity": be.get("severity", "info"),
                     "plugin": be.get("source"),
+                    # Traçabilité pipeline complète (P8+ / demande CEO) : quels plugins
+                    # ont été utilisés pour produire cet événement ? Utile quand on
+                    # combine plusieurs détecteurs (YOLO + YOLOv8 + RT-DETR + …),
+                    # trackers (ByteTrack, BoTSORT, DeepSORT, …) et segmenters.
+                    "detectors": (_pr.plugins_used or {}).get("detectors", []),
+                    "trackers": (_pr.plugins_used or {}).get("trackers", []),
+                    "segmenters": (_pr.plugins_used or {}).get("segmenters", []),
                     "thumbnail": _ensure_frame_thumb(result),
                     "data": be.get("data"),
                 })
@@ -1033,6 +1042,15 @@ async def _process_camera(cam: dict) -> None:
                         "plugin": "smart-zone",
                         "data": zev.get("data"),
                     })
+                    # P4 · Workflow Engine — chaque event de zone déclenche les workflows
+                    try:
+                        from workflow_engine import engine as _wf_engine
+                        await _wf_engine.on_event({
+                            "type": zev["type"], "camera_id": cam["id"],
+                            "timestamp": now.isoformat(), "data": zev.get("data"),
+                        })
+                    except Exception:
+                        logger.exception("workflow_engine dispatch error")
             except Exception:
                 logger.exception("smart_zones eval error")
     except Exception:
@@ -1074,6 +1092,10 @@ async def _process_camera(cam: dict) -> None:
             # Hybridation : scène HD complète (contexte visuel) — le frontend affiche
             # la scène en fond avec plate_crop/vehicle_crop en insets pour la lisibilité OCR.
             "frame_thumb": _ensure_frame_thumb(result),
+            # Traçabilité moteur (P8+ / demande CEO Feb 2026) : quel moteur ANPR a
+            # reconnu cette plaque ? Utile pour le multi-moteurs (fast-alpr, plate-recognizer,
+            # openalpr, paddle-ocr, easyocr, azure-vision, google-vision…).
+            "engine": p.get("engine", "fast-alpr"),
         }
         await db.plates.insert_one(dict(doc))
         doc.pop("_id", None)
