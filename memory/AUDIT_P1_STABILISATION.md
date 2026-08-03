@@ -30,3 +30,19 @@
 3. Créer `GET /api/diagnostics/recorder-health` — par cam : ffmpeg vivant ? dernier segment ? gap détecté ?
 4. Ajouter un **watchdog FFmpeg** dans `recorder.recorder_loop` : si PID mort et cam active → restart auto + log dans diagnostics
 5. Créer une page `/diagnostics/dashboard` (frontend) qui appelle l'endpoint agrégé, refresh 5s
+
+### ✅ Fixes P1 appliqués (Feb 2026, session actuelle)
+| # | Fix | Fichier | Détail |
+|---|-----|---------|--------|
+| A | **PTZ ONVIF réel** | `routers.py` + `streaming.py` | Endpoint `/api/cameras/{id}/ptz` ne renvoyait qu'un no-op `{"ok": true}`. Réécriture complète : `ContinuousMove` + `Stop` via `onvif_zeep`. 8 commandes supportées (pan/tilt/zoom + home + stop). Nouveaux endpoints `GET /ptz/presets` et `POST /ptz/preset/{token}`. |
+| B | **UI PTZ 8-directions** | `LiveView.jsx` | Ancien : 3 boutons (zoom in/home/zoom out). Nouveau : croix directionnelle complète + colonne zoom + testids `ptz-up/down/left/right/home/zoom-in/zoom-out`. |
+| C | **Recorder health endpoint** | `recorder.py` + `routes/health_dashboard.py` | Nouvelle fonction `get_recorder_health()` : ffmpeg alive, PID OS vivant, dernier segment, âge, gap détecté, continuité 24h (couverture % + trous listés). Exposé via `GET /api/diagnostics/recorder-health` et intégré dans le dashboard agrégé. |
+| D | **Health dashboard UI** | `HealthDashboard.jsx` | Section Recorder refaite : indicateur FFmpeg alive (couleur rouge si mort), PID, âge du dernier segment, couverture 24h en %, count des gaps. |
+| E | **Logo dark/light** | `Logo.jsx` + assets | Chargement des vrais assets `mg-vms-logo-light.png` / `mg-vms-logo-dark.png`. Retire le hack "backdrop blanc" du fallback. |
+| F | **Tests régression** | `tests/test_ptz_and_recorder_health.py` | 7 tests couvrant PTZ (validation, rejets 400/404) et Recorder Health (shape endpoint, filtre par caméra, inclusion dans dashboard). 12/12 tests passent (avec pipeline + health existants). |
+
+### ⏭️ Restant P1
+- ONVIF audit : ok déjà robuste (`_onvif_probe` + probe séquentielle profils, gestion timeouts, `allow_rtsp_override`). Pas de bug reproductible identifié dans le code.
+- Watchdog FFmpeg : ✅ déjà en place (`recorder.recorder_loop` + `record_disconnect` sur restart).
+- Modularisation `routers.py` : reste 1810 lignes → à faire quand P1 stable.
+

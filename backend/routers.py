@@ -425,13 +425,92 @@ async def snapshot_camera(camera_id: str, user: dict = Depends(require_permissio
 
 
 @api_router.post("/cameras/{camera_id}/ptz")
-async def ptz_command(camera_id: str, command: str = Query(...), user: dict = Depends(require_permission("ptz_control"))):
+async def ptz_command(camera_id: str,
+                      command: str = Query(...),
+                      speed: float = Query(0.5, ge=0.0, le=1.0),
+                      duration: float = Query(0.5, ge=0.0, le=3.0),
+                      user: dict = Depends(require_permission("ptz_control"))):
+    """Pilotage PTZ ONVIF **réel**.
+
+    Commandes : pan_left, pan_right, tilt_up, tilt_down, zoom_in, zoom_out, stop, home.
+    - `speed` [0..1] : vitesse relative
+    - `duration` [0..3] : durée en secondes du mouvement continu avant `Stop`
+    """
     cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
     if not cam:
         raise HTTPException(404, "Caméra introuvable")
     if not cam.get("ptz_enabled"):
         raise HTTPException(400, "PTZ non supporté sur cette caméra")
-    return {"ok": True, "command": command}
+    if (cam.get("mode") or "rtsp") != "onvif" or not cam.get("ip"):
+        raise HTTPException(400, "PTZ nécessite une caméra en mode ONVIF avec IP configurée")
+
+    from crypto_utils import decrypt_secret
+    from streaming import _ptz_execute
+    pwd = decrypt_secret(cam.get("password", ""))
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                _ptz_execute,
+                cam["ip"], int(cam.get("onvif_port") or 80),
+                cam.get("username", ""), pwd,
+                command, speed, duration,
+            ),
+            timeout=15,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "Timeout PTZ : caméra ne répond pas")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"Échec PTZ : {type(e).__name__}: {str(e)[:160]}")
+
+    await log_audit(user, "ptz_command", cam.get("name", camera_id), command)
+    return result
+
+
+@api_router.get("/cameras/{camera_id}/ptz/presets")
+async def ptz_list_presets(camera_id: str, user: dict = Depends(require_permission("ptz_control"))):
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
+    if not cam:
+        raise HTTPException(404, "Caméra introuvable")
+    if not cam.get("ptz_enabled") or (cam.get("mode") or "rtsp") != "onvif":
+        raise HTTPException(400, "PTZ ONVIF requis")
+    from crypto_utils import decrypt_secret
+    from streaming import _ptz_list_presets
+    pwd = decrypt_secret(cam.get("password", ""))
+    try:
+        presets = await asyncio.wait_for(
+            asyncio.to_thread(_ptz_list_presets, cam["ip"], int(cam.get("onvif_port") or 80),
+                              cam.get("username", ""), pwd),
+            timeout=10,
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Échec ONVIF: {type(e).__name__}: {str(e)[:160]}")
+    return {"presets": presets}
+
+
+@api_router.post("/cameras/{camera_id}/ptz/preset/{preset_token}")
+async def ptz_goto_preset(camera_id: str, preset_token: str,
+                          speed: float = Query(0.6, ge=0.0, le=1.0),
+                          user: dict = Depends(require_permission("ptz_control"))):
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
+    if not cam:
+        raise HTTPException(404, "Caméra introuvable")
+    if not cam.get("ptz_enabled") or (cam.get("mode") or "rtsp") != "onvif":
+        raise HTTPException(400, "PTZ ONVIF requis")
+    from crypto_utils import decrypt_secret
+    from streaming import _ptz_goto_preset
+    pwd = decrypt_secret(cam.get("password", ""))
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(_ptz_goto_preset, cam["ip"], int(cam.get("onvif_port") or 80),
+                              cam.get("username", ""), pwd, preset_token, speed),
+            timeout=15,
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Échec PTZ preset: {type(e).__name__}: {str(e)[:160]}")
+    await log_audit(user, "ptz_goto_preset", cam.get("name", camera_id), preset_token)
+    return result
 
 
 @api_router.get("/cameras/{camera_id}/stream")

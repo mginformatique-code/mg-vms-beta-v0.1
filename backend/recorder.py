@@ -277,6 +277,114 @@ async def get_retention_status() -> dict:
     }
 
 
+async def get_recorder_health(camera_id: str | None = None) -> dict:
+    """Retourne l'état des enregistreurs par caméra (P1 stabilisation).
+
+    Pour chaque caméra `record_enabled`:
+      - ffmpeg_alive: bool (PID vivant ?)
+      - pid: int | None
+      - last_segment_at: ISO du dernier segment indexé
+      - last_segment_age_sec: secondes écoulées
+      - expected_segment_sec: durée attendue d'un segment (config)
+      - gap_detected: True si aucun segment depuis 3× la durée attendue
+      - continuity_24h: analyse des trous des 24 dernières heures
+    """
+    q = {"record_enabled": True}
+    if camera_id:
+        q["id"] = camera_id
+    cams = await db.cameras.find(q, {"_id": 0}).to_list(500)
+    now = datetime.now(timezone.utc)
+    since_24h = (now - timedelta(hours=24)).isoformat()
+    results = []
+    for cam in cams:
+        cid = cam["id"]
+        proc = _processes.get(cid)
+        pid = getattr(proc, "pid", None) if proc else None
+        alive = bool(proc and proc.returncode is None)
+
+        # PID vivant côté OS ?
+        pid_alive_os = False
+        if pid:
+            try:
+                os.kill(pid, 0)
+                pid_alive_os = True
+            except (OSError, ProcessLookupError):
+                pid_alive_os = False
+
+        # Dernier segment indexé
+        last = await db.recordings.find_one(
+            {"camera_id": cid}, {"_id": 0, "start": 1, "end": 1},
+            sort=[("start", -1)],
+        )
+        last_start = last.get("start") if last else None
+        last_end = last.get("end") if last else None
+        age_sec = None
+        if last_end:
+            try:
+                dt_end = datetime.fromisoformat(last_end.replace("Z", "+00:00"))
+                age_sec = int((now - dt_end).total_seconds())
+            except Exception:
+                age_sec = None
+
+        # Gap détecté : si record_mode continu, on attend un segment toutes les ~SEGMENT_SECONDS.
+        # Si aucun segment depuis 3× cette durée alors qu'un ffmpeg tourne, alerte.
+        record_mode = cam.get("record_mode", "continuous")
+        gap_detected = False
+        if record_mode == "continuous" and age_sec is not None:
+            gap_detected = age_sec > (3 * SEGMENT_SECONDS)
+
+        # Analyse continuité 24h (nombre de segments + couverture temporelle)
+        segs = await db.recordings.find(
+            {"camera_id": cid, "start": {"$gte": since_24h}},
+            {"_id": 0, "start": 1, "end": 1, "duration_sec": 1},
+        ).sort("start", 1).to_list(2000)
+        total_duration = sum(s.get("duration_sec", 0) or 0 for s in segs)
+        # Détection des trous > 2× SEGMENT_SECONDS entre segments consécutifs
+        gaps = []
+        for i in range(1, len(segs)):
+            try:
+                prev_end = datetime.fromisoformat(segs[i - 1]["end"].replace("Z", "+00:00"))
+                cur_start = datetime.fromisoformat(segs[i]["start"].replace("Z", "+00:00"))
+                gap = (cur_start - prev_end).total_seconds()
+                if gap > 2 * SEGMENT_SECONDS:
+                    gaps.append({
+                        "start": segs[i - 1]["end"],
+                        "end": segs[i]["start"],
+                        "duration_sec": int(gap),
+                    })
+            except Exception:
+                continue
+        coverage_pct = round(100.0 * total_duration / (24 * 3600), 1) if record_mode == "continuous" else None
+
+        results.append({
+            "camera_id": cid,
+            "camera_name": cam.get("name"),
+            "record_enabled": True,
+            "record_mode": record_mode,
+            "ffmpeg_alive": alive,
+            "pid_alive_os": pid_alive_os,
+            "pid": pid,
+            "last_segment_start": last_start,
+            "last_segment_end": last_end,
+            "last_segment_age_sec": age_sec,
+            "expected_segment_sec": SEGMENT_SECONDS,
+            "gap_detected": gap_detected,
+            "continuity_24h": {
+                "segments": len(segs),
+                "recorded_seconds": total_duration,
+                "coverage_pct": coverage_pct,
+                "gaps": gaps[:20],
+                "gap_count": len(gaps),
+            },
+        })
+    return {
+        "cameras": results,
+        "generated_at": now.isoformat(),
+        "segment_seconds": SEGMENT_SECONDS,
+    }
+
+
+
 async def stop_all_recorders() -> None:
     """Termine proprement tous les ffmpeg enregistreurs (utilisé au shutdown)."""
     for cam_id, proc in list(_processes.items()):

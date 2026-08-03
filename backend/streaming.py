@@ -1668,3 +1668,122 @@ async def onvif_probe(body: OnvifProbeInput, user: dict = Depends(require_role("
         raise HTTPException(502, f"Échec ONVIF : {type(e).__name__}: {str(e)[:160]} — vérifiez IP/port/identifiants")
     await log_audit(user, "onvif_probe", target=body.ip)
     return result
+
+
+# ============ PTZ ONVIF (RÉEL) ============
+# Commandes supportées côté client :
+#   pan_left, pan_right, tilt_up, tilt_down,
+#   zoom_in, zoom_out, stop,
+#   home (goto home preset si dispo)
+_PTZ_VECTORS = {
+    "pan_left":   (-0.5, 0.0, 0.0),
+    "pan_right":  (0.5,  0.0, 0.0),
+    "tilt_up":    (0.0,  0.5, 0.0),
+    "tilt_down":  (0.0, -0.5, 0.0),
+    "zoom_in":    (0.0,  0.0, 0.5),
+    "zoom_out":   (0.0,  0.0, -0.5),
+}
+
+
+def _ptz_execute(ip: str, port: int, username: str, password: str,
+                 command: str, speed: float = 0.5, duration: float = 0.5) -> dict:
+    """Exécute une commande PTZ ONVIF réelle (bloquant, à appeler via to_thread).
+
+    Utilise ContinuousMove + attente `duration` + Stop, ce qui donne un déplacement
+    court et prévisible depuis un simple clic UI. Pour `stop` on n'attend pas.
+    """
+    from onvif import ONVIFCamera
+    cmd = (command or "").strip().lower()
+    if cmd not in _PTZ_VECTORS and cmd not in ("stop", "home"):
+        raise ValueError(f"Commande PTZ inconnue: {command}")
+
+    cam = ONVIFCamera(ip, port, username, password)
+    media = cam.create_media_service()
+    ptz = cam.create_ptz_service()
+    profiles = media.GetProfiles()
+    if not profiles:
+        raise RuntimeError("Aucun profil média ONVIF disponible")
+    # Choisir le premier profil ayant une PTZConfiguration
+    profile = None
+    for p in profiles:
+        if getattr(p, "PTZConfiguration", None):
+            profile = p
+            break
+    if profile is None:
+        raise RuntimeError("Aucun profil ONVIF n'expose de PTZConfiguration")
+    token = profile.token
+
+    if cmd == "stop":
+        req = ptz.create_type("Stop")
+        req.ProfileToken = token
+        req.PanTilt = True
+        req.Zoom = True
+        ptz.Stop(req)
+        return {"ok": True, "command": cmd}
+
+    if cmd == "home":
+        try:
+            req = ptz.create_type("GotoHomePosition")
+            req.ProfileToken = token
+            ptz.GotoHomePosition(req)
+            return {"ok": True, "command": cmd}
+        except Exception as e:
+            raise RuntimeError(f"GotoHomePosition non supporté: {type(e).__name__}: {e}")
+
+    dx, dy, dz = _PTZ_VECTORS[cmd]
+    s = max(0.0, min(1.0, float(speed)))
+    req = ptz.create_type("ContinuousMove")
+    req.ProfileToken = token
+    req.Velocity = {
+        "PanTilt": {"x": dx * s, "y": dy * s},
+        "Zoom":    {"x": dz * s},
+    }
+    ptz.ContinuousMove(req)
+    # Bref déplacement puis stop pour éviter que la caméra parte à l'infini
+    if duration and duration > 0:
+        time.sleep(min(float(duration), 3.0))
+    stop_req = ptz.create_type("Stop")
+    stop_req.ProfileToken = token
+    stop_req.PanTilt = True
+    stop_req.Zoom = True
+    try:
+        ptz.Stop(stop_req)
+    except Exception:
+        pass
+    return {"ok": True, "command": cmd, "duration": duration}
+
+
+def _ptz_goto_preset(ip: str, port: int, username: str, password: str,
+                     preset_token: str, speed: float = 0.6) -> dict:
+    """Déplace la caméra vers un preset ONVIF."""
+    from onvif import ONVIFCamera
+    cam = ONVIFCamera(ip, port, username, password)
+    media = cam.create_media_service()
+    ptz = cam.create_ptz_service()
+    profiles = media.GetProfiles()
+    profile = next((p for p in profiles if getattr(p, "PTZConfiguration", None)), None)
+    if profile is None:
+        raise RuntimeError("Aucun profil ONVIF PTZ")
+    req = ptz.create_type("GotoPreset")
+    req.ProfileToken = profile.token
+    req.PresetToken = preset_token
+    s = max(0.1, min(1.0, float(speed)))
+    req.Speed = {"PanTilt": {"x": s, "y": s}, "Zoom": {"x": s}}
+    ptz.GotoPreset(req)
+    return {"ok": True, "preset": preset_token}
+
+
+def _ptz_list_presets(ip: str, port: int, username: str, password: str) -> list:
+    from onvif import ONVIFCamera
+    cam = ONVIFCamera(ip, port, username, password)
+    media = cam.create_media_service()
+    ptz = cam.create_ptz_service()
+    profiles = media.GetProfiles()
+    profile = next((p for p in profiles if getattr(p, "PTZConfiguration", None)), None)
+    if profile is None:
+        return []
+    presets = ptz.GetPresets({"ProfileToken": profile.token}) or []
+    return [
+        {"token": str(getattr(p, "token", "")), "name": str(getattr(p, "Name", ""))}
+        for p in presets
+    ]

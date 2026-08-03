@@ -213,7 +213,7 @@ export default function HealthDashboard() {
       {/* Recorder */}
       <section>
         <h2 className="font-head font-semibold text-sm mb-2 flex items-center gap-1.5">
-          <HardDrive size={14} className="text-[#A855F7]" /> Recorder ({rec.ffmpeg_processes?.length || 0} FFmpeg vivants)
+          <HardDrive size={14} className="text-[#A855F7]" /> Recorder ({(rec.cameras || []).filter(c => c.ffmpeg_alive).length}/{(rec.cameras || []).length} FFmpeg vivants)
         </h2>
         {(rec.cameras || []).length === 0 ? (
           <div className="text-xs text-muted-foreground py-2 text-center border border-border">
@@ -222,21 +222,37 @@ export default function HealthDashboard() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
             {rec.cameras.map((c) => {
-              const gapWarn = c.gap_warning;
+              const gapWarn = c.gap_detected;
+              const notAlive = !c.ffmpeg_alive;
+              const bad = gapWarn || notAlive;
+              const cov = c.continuity_24h?.coverage_pct;
+              const gapCount = c.continuity_24h?.gap_count || 0;
               return (
                 <div key={c.camera_id}
                      className="border p-2 text-[11px]"
-                     style={{ borderColor: gapWarn ? WARN : "hsl(var(--border))",
-                              borderLeftColor: gapWarn ? WARN : "hsl(var(--border))", borderLeftWidth: 3 }}
+                     style={{ borderColor: bad ? (notAlive ? ERR : WARN) : "hsl(var(--border))",
+                              borderLeftColor: bad ? (notAlive ? ERR : WARN) : OK, borderLeftWidth: 3 }}
                      data-testid={`recorder-${c.camera_id}`}>
-                  <div className="font-semibold">{c.name}</div>
-                  <div className="mono text-[10px] text-muted-foreground">
-                    Dernier : {c.last_segment_end || "—"}
+                  <div className="font-semibold">{c.camera_name || c.name}</div>
+                  <div className="flex items-center gap-2 mt-0.5 mono text-[10px]">
+                    <span style={{ color: c.ffmpeg_alive ? OK : ERR }}>
+                      {c.ffmpeg_alive ? "● FFmpeg actif" : "● FFmpeg mort"}
+                    </span>
+                    {c.pid && <span className="text-muted-foreground">pid={c.pid}</span>}
+                  </div>
+                  <div className="mono text-[10px] text-muted-foreground mt-0.5">
+                    Dernier segment : {c.last_segment_end?.slice(0, 19).replace("T", " ") || "—"}
+                    {c.last_segment_age_sec !== null && ` (${c.last_segment_age_sec}s)`}
                   </div>
                   <div className="mono text-[10px]" style={{ color: gapWarn ? WARN : OK }}>
-                    Gap : {c.gap_seconds !== null ? `${Math.round(c.gap_seconds)}s` : "—"}
-                    {gapWarn && <span className="ml-1"><AlertTriangle size={9} className="inline" /> alerte gap</span>}
+                    {gapWarn ? (<><AlertTriangle size={9} className="inline" /> Gap détecté</>) : "Continuité OK"}
                   </div>
+                  {c.record_mode === "continuous" && (
+                    <div className="mono text-[10px] text-muted-foreground mt-0.5">
+                      Couverture 24h : {cov !== null && cov !== undefined ? `${cov}%` : "—"}
+                      {gapCount > 0 && <span className="ml-1 text-[#FFB800]">· {gapCount} trous</span>}
+                    </div>
+                  )}
                 </div>
               );
             })}

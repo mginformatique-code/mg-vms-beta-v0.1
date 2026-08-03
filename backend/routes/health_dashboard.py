@@ -116,51 +116,15 @@ async def _ai_gpu_health() -> dict:
         return {"error": str(e)}
 
 
-async def _recorder_health() -> list:
-    """Par caméra : ffmpeg PID vivant ? dernier segment vieux ? gap ?"""
+async def _recorder_health() -> dict:
+    """Par caméra : ffmpeg vivant ? dernier segment ? gaps 24h ?
+    Utilise `recorder.get_recorder_health` qui lit les vrais processus tracks
+    (`recorder._processes`) et les vrais champs de collection `recordings`."""
     try:
-        import psutil
-    except ImportError:
-        psutil = None
-    out = []
-    try:
-        from recorder import _load_pools  # noqa
-    except Exception:
-        pass
-    # On lit les processus ffmpeg actifs
-    ffmpeg_pids = []
-    if psutil:
-        for p in psutil.process_iter(["name", "pid", "cmdline"]):
-            try:
-                if "ffmpeg" in (p.info.get("name") or ""):
-                    ffmpeg_pids.append({
-                        "pid": p.info["pid"],
-                        "cmd_snippet": " ".join((p.info.get("cmdline") or [])[:4])[:120],
-                    })
-            except Exception:
-                pass
-    now = datetime.now(timezone.utc)
-    async for cam in db.cameras.find({"enabled": True}, {"_id": 0, "id": 1, "name": 1}):
-        last = await db.recordings.find_one(
-            {"camera_id": cam["id"]}, sort=[("end_ts", -1)],
-            projection={"_id": 0, "end_ts": 1, "duration_s": 1, "path": 1}
-        )
-        gap_s = None
-        if last and last.get("end_ts"):
-            try:
-                end_dt = datetime.fromisoformat(last["end_ts"].replace("Z", "+00:00"))
-                gap_s = (now - end_dt).total_seconds()
-            except Exception:
-                pass
-        out.append({
-            "camera_id": cam["id"],
-            "name": cam.get("name"),
-            "last_segment_end": last.get("end_ts") if last else None,
-            "gap_seconds": gap_s,
-            "gap_warning": gap_s is not None and gap_s > 120,
-            "last_duration_s": last.get("duration_s") if last else None,
-        })
-    return {"cameras": out, "ffmpeg_processes": ffmpeg_pids}
+        from recorder import get_recorder_health
+        return await get_recorder_health()
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
 
 
 @health_dashboard_router.get("/diagnostics/health-dashboard")
@@ -205,3 +169,19 @@ async def camera_diagnostic_events(
         projection={"_id": 0},
     ).to_list(None)
     return {"camera_id": camera_id, "count": len(docs), "events": docs}
+
+
+
+@health_dashboard_router.get("/diagnostics/recorder-health")
+async def diagnostics_recorder_health(
+    camera_id: str | None = None,
+    user: dict = Depends(require_permission("view_live")),
+):
+    """État détaillé des enregistreurs (ffmpeg + continuité 24h) par caméra.
+
+    Utile pour la page maintenance : sait si un ffmpeg est mort silencieusement,
+    combien de trous d'enregistrement dans les dernières 24h, et le taux de
+    couverture (en mode continuous).
+    """
+    from recorder import get_recorder_health
+    return await get_recorder_health(camera_id)
