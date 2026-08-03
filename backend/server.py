@@ -32,6 +32,7 @@ from routes.health_dashboard import health_dashboard_router
 from routes.dashboard import dashboard_router
 from routes.audit import audit_router
 from routes.users import users_router
+from routes.public_status import public_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("mg-vms")
@@ -62,6 +63,7 @@ class ApiVersionAliasMiddleware(BaseHTTPMiddleware):
 app.add_middleware(ApiVersionAliasMiddleware)
 
 app.include_router(auth_router)
+app.include_router(public_router)
 app.include_router(stream_router)
 app.include_router(plugins_bus_router)
 app.include_router(health_dashboard_router)

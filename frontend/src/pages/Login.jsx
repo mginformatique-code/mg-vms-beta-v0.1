@@ -17,8 +17,22 @@ export default function Login() {
   const [error, setError] = useState("");
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
+  const [pub, setPub] = useState(null);
 
   useEffect(() => { if (user) navigate("/"); }, [user, navigate]);
+
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      try {
+        const r = await api.get("/system/public-status");
+        if (mounted) setPub(r.data);
+      } catch (_) { /* silencieux — badge en fallback */ }
+    };
+    load();
+    const t = setInterval(load, 15000);
+    return () => { mounted = false; clearInterval(t); };
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -64,10 +78,19 @@ export default function Login() {
             </h1>
             <p className="text-muted-foreground text-sm max-w-md">{t("app.tagline")} — gérez des centaines de caméras, ANPR, alertes intelligentes et multi-sites depuis une plateforme unique.</p>
           </div>
-          <div className="flex gap-6 text-xs text-muted-foreground mono">
-            <span><span className="mg-online">●</span> 18 ONLINE</span>
-            <span><span className="mg-warning">●</span> ANPR ACTIVE</span>
-            <span><span className="mg-active">●</span> AI ENGINE</span>
+          <div className="flex gap-6 text-xs text-muted-foreground mono" data-testid="login-status-badges">
+            <span data-testid="badge-online">
+              <span className={pub?.cameras_online > 0 ? "mg-online" : "mg-warning"}>●</span>{" "}
+              {pub === null ? "…" : `${pub.cameras_online} ONLINE`}
+            </span>
+            <span data-testid="badge-anpr">
+              <span className={pub?.anpr_active ? "mg-online" : "mg-warning"}>●</span>{" "}
+              ANPR {pub?.anpr_active ? "ACTIVE" : "IDLE"}
+            </span>
+            <span data-testid="badge-ai">
+              <span className={pub?.ai_engine ? "mg-active" : "mg-warning"}>●</span>{" "}
+              AI ENGINE {pub?.ai_engine ? "" : "OFF"}
+            </span>
           </div>
         </div>
       </div>
