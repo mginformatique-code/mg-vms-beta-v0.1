@@ -212,3 +212,60 @@ async def diagnostics_pipeline_metrics(user: dict = Depends(require_permission("
         counts = {}
     return {"cameras": snap, "plugins_dispatchable": counts}
 
+
+@health_dashboard_router.get("/diagnostics/anpr-tracker")
+async def diagnostics_anpr_tracker(user: dict = Depends(require_permission("view_live"))):
+    """v0.3 · ANPR Tracker — état des véhicules suivis par caméra.
+
+    Retourne pour chaque caméra :
+      - Config actuelle (min_readings, lost_cycles, min_confidence)
+      - Liste des véhicules trackés : track_id, state (ENTERED/PRESENT/LEFT),
+        nb de lectures OCR accumulées, timestamps first/last_seen, meilleure
+        plaque consensuelle.
+
+    Permet de valider en live que :
+      - Les véhicules stationnés génèrent **1 seul événement**.
+      - Les véhicules en mouvement bénéficient de **plusieurs OCR** avant émission.
+    """
+    from anpr_tracker import anpr_tracker
+    return anpr_tracker.snapshot()
+
+
+@health_dashboard_router.get("/diagnostics/streaming-metrics")
+async def diagnostics_streaming_metrics(user: dict = Depends(require_permission("view_live"))):
+    """v0.3 · Métriques streaming (go2rtc) — séparées du pipeline IA.
+
+    Interroge go2rtc pour obtenir : nb de clients WebRTC, débit, uptime par
+    caméra. Le pipeline IA et le streaming sont désormais **indépendants**.
+    """
+    import os
+    import httpx
+
+    go2rtc_url = os.environ.get("GO2RTC_URL", "http://localhost:1984")
+    result = {"streams": {}, "go2rtc_reachable": False}
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            r = await client.get(f"{go2rtc_url}/api/streams")
+            if r.status_code == 200:
+                result["go2rtc_reachable"] = True
+                streams = r.json() or {}
+                for name, info in streams.items():
+                    if not name.startswith("cam_"):
+                        continue
+                    cam_id = name[4:]
+                    producers = info.get("producers", []) or []
+                    consumers = info.get("consumers", []) or []
+                    result["streams"][cam_id] = {
+                        "producers": len(producers),
+                        "consumers": len(consumers),
+                        "clients_webrtc": sum(
+                            1 for c in consumers
+                            if isinstance(c, dict) and "webrtc" in str(c.get("format", "")).lower()
+                        ),
+                        "url": info.get("url", ""),
+                    }
+    except Exception as e:
+        logger.debug("streaming-metrics: go2rtc unreachable (%s)", e)
+    return result
+
+

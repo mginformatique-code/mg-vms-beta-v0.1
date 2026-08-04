@@ -1,0 +1,35 @@
+{
+  "summary": "Backend v0.3 (séparation IA/streaming + accumulateur ANPR) validé end-to-end. 9 tests unitaires (AnprTracker + découplage pipeline + shape endpoints) + 10 tests HTTP sur l'URL publique — 19/19 PASSED.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_v03_ai_streaming_decoupling.py",
+    "/app/backend/tests/test_v03_endpoints_http.py",
+    "/app/test_reports/pytest/v03_http.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "anpr_tracker.py: bien structuré, machine à états claire (ENTERED/PRESENT/LEFT), consensus par Counter + confidence — code propre.",
+    "health_dashboard.py L253: filtre `name.startswith('cam_')` sur streams go2rtc — hypothèse fragile si convention de nommage change (tests OK avec streams vides sur env preview).",
+    "routers.py CameraInput: nouveau champ ai_rtsp_url présent avec default '' — modèle correct, persistance vérifiée via POST + GET /api/cameras/{id}.",
+    "Non-régression confirmée: /api/plugins/bus retourne bien counts.total=50 (format {entries:[...], counts:{...}}), /api/plugins/tracking/config → enabled=true.",
+    "Les 3 endpoints /api/diagnostics/{anpr-tracker,streaming-metrics,pipeline-metrics} exigent bien un Bearer (403 sans, 200 avec)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_v03_endpoints_http.py (nouveau — tests HTTP e2e)"
+  ],
+  "success_rate": {"backend": "100% (19/19)", "frontend": "not tested (per request)"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (login OK, access_token retourné)",
+  "seed_data_creation": "Camera 'TEST_v03_*' créée sur site principal (id 4de57356...) puis supprimée en cleanup. Utilise allow_rtsp_override=True pour bypass probe RTSP sur IP fictive.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Tests HTTP v0.3 dans /app/backend/tests/test_v03_endpoints_http.py — utilise REACT_APP_BACKEND_URL du .env frontend. Ignorer pytest.ini xdist si run direct (use -o addopts=''). Site principal id récupéré dynamiquement via GET /api/sites. Camera creation requiert allow_rtsp_override=True quand IP fictive.",
+  "rca_of_the_issue": "N/A — pas de bug détecté. Tous les livrables v0.3 fonctionnent: (1) anpr_tracker singleton avec machine à états et consensus best_reading, (2) CameraInput.ai_rtsp_url persisté correctement, (3) endpoints diagnostics (anpr-tracker, streaming-metrics, pipeline-metrics) exposés, protégés par auth, shape conforme, (4) non-régression plugins/bus (50 total) et plugins/tracking/config confirmée."
+}

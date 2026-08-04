@@ -464,6 +464,9 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
                     "vehicle_color": owner["vehicle_color"],
                     # P8+ traçabilité : quel moteur a reconnu la plaque
                     "engine": "fast-alpr",
+                    # v0.3 : bbox du véhicule owner pour recouper avec ByteTrack
+                    # ensuite (l'accumulateur ANPR utilise le track_id du owner).
+                    "_owner_bbox": (vx1, vy1, vx2, vy2),
                 })
                 plate_debug.append({"plate": plate_text, "confidence": round(float(r.ocr.confidence), 2),
                                      "size": f"{pw}x{ph}", "kept": True})
@@ -550,6 +553,40 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
     t_tracking = (time.monotonic() - t_track_start) * 1000
     timings["tracking_ms"] = round(t_tracking, 1)
 
+    # ---------- ÉTAPE 4 : ANPR Tracker (v0.3) — accumulateur par track_id ----------
+    # Chaque plaque lue est associée à son véhicule via bbox owner, dont on
+    # récupère le track_id ByteTrack. On l'ajoute à l'accumulateur qui décide
+    # si un événement doit être émis (première lecture consensuelle) ou pas.
+    # Anti-doublons pour véhicules stationnés + retente pour véhicules mobiles.
+    try:
+        from anpr_tracker import anpr_tracker, PlateReading
+        # Pour chaque plate détectée, retrouver son owner et son track_id
+        for p in plates:
+            owner = None
+            if "_owner_bbox" in p:
+                ob = p["_owner_bbox"]
+                for d in detections:
+                    if d.get("_bbox") == ob:
+                        owner = d
+                        break
+            tid = owner.get("track_id") if owner else None
+            reading = PlateReading(
+                plate=p["plate"], confidence=float(p["confidence"]),
+                ts=time.time(), plate_crop=p.get("plate_crop") or "",
+                vehicle_crop=p.get("vehicle_crop") or "",
+                vehicle_type=p.get("vehicle_type") or "",
+                vehicle_color=p.get("vehicle_color") or "",
+                engine=p.get("engine") or "fast-alpr",
+            )
+            emit = anpr_tracker.record_reading(camera_id, tid, reading)
+            p["_emit"] = emit          # signal au downstream : émettre l'event ?
+            p["track_id"] = tid
+        # Marque les tracks non revus (déclenche EXIT si dépassement seuil)
+        seen_tids = {d.get("track_id") for d in detections if d.get("track_id") is not None}
+        anpr_tracker.tick_missing(camera_id, seen_tids)
+    except Exception:
+        logger.exception("anpr_tracker: erreur")
+
     # NOTE performance ANPR : `frame_thumb` n'est PLUS encodé ici.
     # L'image numpy `img` (BGR) est retournée à la place et encodée LAZILY
     # (via `_ensure_frame_thumb`) uniquement quand un événement est effectivement
@@ -626,17 +663,18 @@ def analyze_image_local(image_bytes: bytes) -> dict:
 async def _fetch_frame(camera_id: str) -> bytes | None:
     """Récupère la frame la plus récente d'une caméra pour analyse IA.
 
-    Pipeline (nouveau, GPU-first) :
-      1. **frame_source** : subprocess ffmpeg persistant avec NVDEC (H.265→BGR CUDA→CPU direct).
-         Aucun transit MJPEG. 1 décodage GPU permanent partagé par YOLO + ANPR.
-         → Retourne la frame numpy encodée en JPEG (compressée en RAM pour compatibilité avec
-         `_analyze_frame` qui fait cv2.imdecode).
-      2. **Fallback go2rtc /api/frame.jpeg** : si frame_source n'est pas prêt (worker qui vient
-         de démarrer, config manquante) — conserve la compatibilité avec la démo mire go2rtc
-         (`cam_demo-cam-XXX` sont générés par go2rtc, pas par une caméra RTSP externe).
+    **Architecture v0.3 (Feb 2026)** — moteur IA découplé de go2rtc :
+      1. **frame_source** (RTSP direct persistant) : subprocess ffmpeg lit
+         directement le flux RTSP natif de la caméra. Cette source est
+         alimentée par un worker permanent → la frame est TOUJOURS en mémoire,
+         `get_latest_frame_async` retourne instantanément (<5 ms typique).
+      2. **Fallback go2rtc HTTP frame.jpeg** : UNIQUEMENT pour caméras démo
+         (mires testsrc2 générées par go2rtc, pas de flux RTSP externe) ou
+         caméras sans URL RTSP renseignée. Le fallback est **désactivé** en
+         prod pour les caméras réelles via ``MGVMS_AI_DIRECT_RTSP=1`` (défaut).
     """
     import cv2  # local import (cv2 chargé après _load_models)
-    # ── Chemin GPU-first : frame_source worker ─────────────────────────
+    # ── Chemin direct : frame_source worker (RTSP natif, ffmpeg persistant) ─
     try:
         from frame_source import get_latest_frame_async
         frame = await get_latest_frame_async(camera_id, max_age_sec=5.0, wait_timeout=0.5)
@@ -646,8 +684,10 @@ async def _fetch_frame(camera_id: str) -> bytes | None:
             if ok:
                 return buf.tobytes()
     except Exception as e:
-        logger.debug("_fetch_frame: frame_source indispo pour %s (%s) — fallback go2rtc", camera_id, e)
-    # ── Fallback : go2rtc frame.jpeg (compat démo + caméras non-encore-workerisées) ──
+        logger.debug("_fetch_frame: frame_source indispo pour %s (%s)", camera_id, e)
+    # ── Fallback go2rtc frame.jpeg : uniquement pour démos ou caméras non-workerisées ─
+    # Note : on garde ce fallback pour ne pas casser les démos ; en prod avec
+    # RTSP natif configuré, on n'y arrive jamais.
     try:
         async with httpx.AsyncClient(timeout=12) as client:
             r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": f"cam_{camera_id}"})
@@ -1195,6 +1235,12 @@ async def _do_downstream_work(cam: dict, frame, result: dict) -> None:
         logger.exception("multi_anpr dispatch error")
 
     for p in result["plates"]:
+        # v0.3 : filtrage par ANPR Tracker — n'émet la plaque que si le
+        # tracker le signale (première lecture consensuelle du véhicule
+        # tracké). Pour les plaques venues des multi-moteurs (pas de
+        # `_emit` set) on retombe sur le comportement historique.
+        if "_emit" in p and not p["_emit"]:
+            continue
         recent = await db.plates.find_one({
             "plate": p["plate"], "camera_id": cam["id"],
             "engine": p.get("engine", "fast-alpr"),
@@ -1231,6 +1277,9 @@ async def _do_downstream_work(cam: dict, frame, result: dict) -> None:
         }
         await db.plates.insert_one(dict(doc))
         doc.pop("_id", None)
+        # v0.3 : purge des champs internes du tracker
+        for k in ("_emit", "_owner_bbox"):
+            p.pop(k, None)
         if list_status == "black":
             await _raise_blacklist_alert(cam, doc, (wl or {}).get("reason", ""))
 
@@ -1241,35 +1290,51 @@ async def _get_global_anpr_country() -> str | None:
 
 
 async def _sync_frame_source_workers(cams: list[dict]) -> None:
-    """Synchronise les workers ffmpeg-CUDA persistants avec la liste des caméras actives.
+    """Synchronise les workers ffmpeg persistants avec la liste des caméras actives.
 
-    - Démarre un worker pour chaque caméra `detect_enabled` + `status=online` réelle.
-    - Ne démarre PAS pour les caméras démo (id commence par `demo-`) : celles-ci
-      sont fournies par go2rtc en local (mire testsrc2 ou boucle mp4) → on utilise
-      le fallback `frame.jpeg` qui est très léger dans ce cas (source déjà H.264 SW).
-    - Arrête les workers dont la caméra a été désactivée ou supprimée.
+    **Architecture v0.3 (Feb 2026)** — SÉPARATION STRICTE moteur IA / streaming :
+      - Le pipeline IA ouvre sa **propre connexion RTSP native** sur la caméra
+        (via ffmpeg subprocess persistant, NVDEC si dispo).
+      - go2rtc ne sert **plus** à alimenter l'IA — il ne s'occupe QUE du live
+        WebRTC / diffusion RTSP aux clients.
+      - Résultat : le fetch_ms tombe à quelques millisecondes (frame déjà
+        décodée en mémoire), et l'IA n'est plus polluée par le transcodage
+        MJPEG intermédiaire.
 
-    Résolution des URL RTSP :
-      - TOUJOURS via go2rtc : `rtsp://go2rtc:8554/cam_{id}`.
-        Raisons : (1) `cam.rtsp_url` en base est stocké SANS identifiants →
-        connexion directe = 401 en boucle qui martèle la caméra ; (2) la connexion
-        directe ouvrait une 2e session RTSP sur la caméra physique (beaucoup de
-        caméras limitent les sessions simultanées → déconnexions des autres
-        consommateurs). Via go2rtc, la session caméra reste UNIQUE et partagée
-        (viewers + recorder + IA).
+    Résolution de l'URL RTSP pour l'IA (par priorité) :
+      1. ``camera.ai_rtsp_url``   → URL dédiée IA (flux principal HD recommandé)
+      2. ``camera.rtsp_url``      → URL principale existante
+      3. Fallback go2rtc         → uniquement si aucune URL native trouvée
+                                    (compat démo mires + caméras non configurées)
+
+    Skip explicite pour :
+      - Caméras démo (``id`` commence par ``demo-``) → mires go2rtc.
+      - Caméras sans URL RTSP renseignée.
     """
     import frame_source
     go2rtc_rtsp = os.environ.get("GO2RTC_RTSP", "rtsp://go2rtc:8554")
+    use_direct = os.environ.get("MGVMS_AI_DIRECT_RTSP", "1").lower() not in ("0", "false", "no")
 
     active_ids = set()
     for cam in cams:
         cam_id = cam["id"]
-        # Skip démos : elles n'ont pas d'URL RTSP externe, elles sont générées par go2rtc local
+        # Skip démos : elles n'ont pas d'URL RTSP externe
         if cam_id.startswith("demo-") or cam_id.startswith("demo_"):
             continue
+        # Résolution source RTSP pour l'IA
+        ai_url = (cam.get("ai_rtsp_url") or "").strip()
+        native_url = (cam.get("rtsp_url") or "").strip()
+        if use_direct and ai_url:
+            rtsp_url = ai_url
+            source_type = "direct-ai"
+        elif use_direct and native_url:
+            rtsp_url = native_url
+            source_type = "direct-native"
+        else:
+            # Fallback go2rtc : pas d'URL native OU direct désactivé via env
+            rtsp_url = f"{go2rtc_rtsp}/cam_{cam_id}"
+            source_type = "go2rtc-relay"
         active_ids.add(cam_id)
-        # Source RTSP : TOUJOURS le relais go2rtc (session caméra unique partagée)
-        rtsp_url = f"{go2rtc_rtsp}/cam_{cam_id}"
         codec = (cam.get("codec") or "auto").lower()
         if codec not in ("h264", "h265", "hevc", "auto"):
             codec = "auto"
@@ -1278,6 +1343,8 @@ async def _sync_frame_source_workers(cams: list[dict]) -> None:
         # Résolution IA : 1280×720 par défaut (bon compromis YOLOv11 précision/vitesse)
         try:
             frame_source.start(cam_id, rtsp_url, codec=codec, width=1280, height=720)
+            logger.info("frame_source.start %s src=%s codec=%s (%s)",
+                        cam_id, source_type, codec, rtsp_url[:60] + ("…" if len(rtsp_url) > 60 else ""))
         except Exception as e:
             logger.warning("frame_source.start(%s) échec: %s", cam_id, e)
 

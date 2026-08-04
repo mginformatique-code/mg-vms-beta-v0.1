@@ -195,15 +195,21 @@ export default function AIPipelineMonitor() {
   const [saving, setSaving] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null);
+  const [streaming, setStreaming] = useState({ streams: {}, go2rtc_reachable: false });
+  const [anprTracker, setAnprTracker] = useState({ cameras: {}, config: {} });
 
   const load = async () => {
     try {
-      const [m, c] = await Promise.all([
+      const [m, c, s, a] = await Promise.all([
         api.get("/diagnostics/pipeline-metrics"),
         api.get("/cameras"),
+        api.get("/diagnostics/streaming-metrics").catch(() => ({ data: {} })),
+        api.get("/diagnostics/anpr-tracker").catch(() => ({ data: {} })),
       ]);
       setMetrics(m.data?.cameras || m.data || {});
       setCams(c.data || []);
+      setStreaming(s.data || { streams: {}, go2rtc_reachable: false });
+      setAnprTracker(a.data || { cameras: {}, config: {} });
       setLastUpdate(new Date());
     } catch (e) {
       // silent
@@ -345,6 +351,62 @@ export default function AIPipelineMonitor() {
         {/* Right side: ByteTrack tuner */}
         <div className="space-y-3" data-testid="right-panel">
           {btLoaded && <ByteTrackTuner cfg={bt} onChange={setBt} onSave={saveBt} saving={saving} />}
+
+          <div className="border border-border p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Radar size={14} className="text-[#00B0FF]" />
+              <span className="text-xs font-medium">Streaming go2rtc <span className="text-[10px] text-muted-foreground">(indépendant IA)</span></span>
+            </div>
+            {!streaming.go2rtc_reachable ? (
+              <div className="text-[11px] text-muted-foreground">go2rtc injoignable</div>
+            ) : (
+              <div className="space-y-1 max-h-56 overflow-y-auto" data-testid="streaming-panel">
+                {Object.entries(streaming.streams || {}).slice(0, 20).map(([sid, s]) => (
+                  <div key={sid} className="flex items-center justify-between text-[10px] mono border-b border-border/40 pb-1">
+                    <span className="truncate max-w-[120px]" title={sid}>{sid}</span>
+                    <span className="text-muted-foreground">
+                      <span style={{ color: s.producers > 0 ? "#00E676" : "#FF3333" }}>P{s.producers}</span>
+                      <span className="mx-1">·</span>
+                      <span>C{s.consumers}</span>
+                      {s.clients_webrtc > 0 && <>
+                        <span className="mx-1">·</span>
+                        <span style={{ color: "#00B0FF" }}>WebRTC{s.clients_webrtc}</span>
+                      </>}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="border border-border p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Boxes size={14} className="text-[#B085FF]" />
+              <span className="text-xs font-medium">ANPR Tracker · véhicules suivis</span>
+            </div>
+            <div className="text-[10px] text-muted-foreground mb-1.5">
+              min_readings={anprTracker.config?.min_readings ?? "-"} · lost_cycles={anprTracker.config?.lost_cycles ?? "-"} · min_conf={anprTracker.config?.min_confidence ?? "-"}
+            </div>
+            {Object.keys(anprTracker.cameras || {}).length === 0 ? (
+              <div className="text-[10px] text-muted-foreground" data-testid="anpr-tracker-panel">Aucun véhicule suivi</div>
+            ) : (
+              <div className="space-y-1.5 max-h-56 overflow-y-auto" data-testid="anpr-tracker-panel">
+                {Object.entries(anprTracker.cameras || {}).map(([cid, list]) => (
+                  <div key={cid}>
+                    <div className="text-[10px] font-medium truncate">{camMap[cid]?.name || cid}</div>
+                    {list.map((tv, i) => (
+                      <div key={i} className="flex items-center justify-between text-[10px] mono pl-2 border-l border-border/40">
+                        <span>#{tv.track_id}</span>
+                        <span style={{ color: tv.state === "ENTERED" ? "#FFB800" : tv.state === "PRESENT" ? "#00E676" : "#B085FF" }}>{tv.state}</span>
+                        <span className="text-muted-foreground">{tv.readings}rd</span>
+                        <span className="truncate max-w-[80px]" title={tv.best_plate || ""}>{tv.best_plate || "-"}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           <div className="border border-border p-3">
             <div className="flex items-center gap-2 mb-2">

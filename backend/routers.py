@@ -86,6 +86,11 @@ class CameraInput(BaseModel):
     manufacturer: str = ""
     firmware: str = ""
     rtsp_url: str = ""
+    # Refonte v0.3 (Feb 2026) : URL RTSP dédiée à l'IA (flux principal HD).
+    # Permet d'utiliser un flux différent pour l'IA (haute résolution / faible
+    # compression pour meilleure détection & ANPR) et un sous-flux pour le
+    # streaming go2rtc (léger, temps réel). Vide → l'IA utilise `rtsp_url`.
+    ai_rtsp_url: str = ""
     username: str = ""
     password: str = ""
     # Champs profil (mode ONVIF)
