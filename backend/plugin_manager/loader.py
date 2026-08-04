@@ -19,6 +19,7 @@ import asyncio
 import importlib.util
 import json
 import logging
+import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -32,7 +33,41 @@ from .context import PluginContext, PluginDB
 
 logger = logging.getLogger("plugin_loader")
 
-DEFAULT_PLUGINS_DIR = Path("/app/data/plugins")
+
+def _resolve_plugins_dir() -> Path:
+    """Résout le répertoire des plugins de manière portable (dev, docker, prod).
+
+    Ordre de priorité (le premier chemin qui existe et contient des manifests
+    gagne, sinon le dernier candidat par défaut) :
+
+      1. Variable d'env ``MGVMS_PLUGINS_DIR`` (override explicite).
+      2. Chemin relatif au repo : ``<repo>/data/plugins`` (résolu depuis le
+         fichier de ce loader, remonte 3 niveaux : plugin_manager → backend
+         → repo). Fonctionne quelle que soit la racine du déploiement
+         (Railway, Vercel, Docker, ``git push`` …).
+      3. Chemin absolu dev-container ``/app/data/plugins``.
+      4. Chemin relatif au CWD ``./data/plugins`` (fallback minimal).
+    """
+    env = os.environ.get("MGVMS_PLUGINS_DIR")
+    if env:
+        return Path(env)
+    candidates: list[Path] = [
+        Path(__file__).resolve().parent.parent.parent / "data" / "plugins",
+        Path("/app/data/plugins"),
+        Path.cwd() / "data" / "plugins",
+    ]
+    for c in candidates:
+        try:
+            if c.exists() and any(c.iterdir()):
+                return c
+        except OSError:  # permission denied etc.
+            continue
+    # Aucun candidat trouvé : on retourne le premier (échec explicite au
+    # discover() qui logge un warning clair).
+    return candidates[0]
+
+
+DEFAULT_PLUGINS_DIR = _resolve_plugins_dir()
 
 VALID_INTERFACES = {"FrameAnalyzer", "PlateRecognizer", "EventConsumer", "Tracker", "Segmenter", "PipelineConsumer"}
 
@@ -92,6 +127,12 @@ class PluginLoader:
     def discover(self) -> list[Path]:
         """Retourne la liste des dossiers plugin qui contiennent un manifest.yaml."""
         if not self.plugins_dir.exists():
+            logger.warning(
+                "plugin_loader.discover: répertoire absent %s (aucun plugin dynamique — "
+                "seuls les 2 built-in fallback seront chargés). "
+                "Corrigez avec MGVMS_PLUGINS_DIR=<chemin> si nécessaire.",
+                self.plugins_dir,
+            )
             return []
         manifests = []
         for entry in sorted(self.plugins_dir.iterdir()):
@@ -100,6 +141,8 @@ class PluginLoader:
             m = entry / "manifest.yaml"
             if m.exists():
                 manifests.append(m)
+        logger.info("plugin_loader.discover: %d manifest(s) trouvé(s) dans %s",
+                    len(manifests), self.plugins_dir)
         return manifests
 
     # ── Chargement d'un plugin ──────────────────────────────────────────
