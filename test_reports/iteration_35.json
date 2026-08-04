@@ -1,0 +1,38 @@
+{
+  "summary": "Backend v0.3 · Config Camera Modulaire (enabled_plugins par caméra + /api/plugins/catalog) validé end-to-end. 13 tests HTTP e2e (nouveau fichier test_v03_modular_camera_http.py) + 36 tests unitaires locaux (modular_config, audit_fix_v03, decoupling, pipeline_realtime, plugin_loader) = 49/49 PASSED.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_v03_modular_camera_http.py",
+    "/app/test_reports/pytest/v03_modular_http.xml",
+    "/app/backend/tests/test_camera_modular_config.py"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "GET /api/plugins/catalog: bien protégé par require_permission('view_live'), 401 sans token. Retourne total=50, available=50, 9 groupes (ANPR / LPR, Tracking, Segmentation, EPI, Comptage, etc.).",
+    "Structure plugin dans catalog conforme: name, display_name, description, interface, categories, primary_category, icon (lucide-react), loaded, available. Somme groups.plugins == total (invariant respecté).",
+    "CameraInput.enabled_plugins: list[str] = [] (default vide) — présent et accepte list[str] arbitraire. Persistance vérifiée via POST puis PUT+GET /api/cameras/{id}.",
+    "PUT /api/cameras/{id} exige le modèle CameraInput complet (name+ip+site_id obligatoires) — normal, cohérent avec l'endpoint POST. enabled_plugins=[] et enabled_plugins=['yolo-detection',...] tous deux acceptés et persistés.",
+    "dispatch_pipeline (plugin_manager/bus.py) filtre bien par enabled_plugins whitelist quand non-vide, sinon dispatch tous les plugins (fallback legacy) — vérifié par introspection code + tests unitaires.",
+    "ai_engine._do_downstream_work injecte enabled_plugins=cam.get('enabled_plugins') dans camera_config passé à dispatch_pipeline — chaîne complète OK.",
+    "Non-régression confirmée: /api/plugins/bus counts.total=50, /api/plugins/tracking/config enabled=true, /api/diagnostics/frame-source et /api/diagnostics/pipeline-metrics répondent 200 avec Bearer.",
+    "Note mineure: sur cet env preview, pipeline-metrics ne montre pas alpr_ms>0 dans avg/max (aucune caméra active traitant des plaques) — endpoint OK, mesure activée dès qu'un flux tourne. Idem demo-cam-002 non forcément alive selon les workers courants — non-bloquant."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_v03_modular_camera_http.py (nouveau — 13 tests HTTP e2e)"
+  ],
+  "success_rate": {"backend": "100% (49/49 — 13 HTTP e2e + 36 unit)", "frontend": "not tested (per request)"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (login OK, access_token retourné)",
+  "seed_data_creation": "Camera 'TEST_modular_*' créée dans le site principal, PUT enabled_plugins testé, cleanup DELETE en teardown de fixture pytest.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Tests HTTP e2e v0.3 modular camera dans /app/backend/tests/test_v03_modular_camera_http.py. PUT /api/cameras/{id} exige le body CameraInput complet (name, ip, site_id) — récupérer d'abord via GET pour compléter le payload. allow_rtsp_override=True nécessaire pour bypass RTSP probe sur IPs fictives.",
+  "rca_of_the_issue": "N/A — pas de bug. Livrables v0.3 modular config caméra validés: (1) endpoint GET /api/plugins/catalog protégé, structure conforme, 50 plugins dans 9 groupes; (2) CameraInput.enabled_plugins default []; (3) PUT accepte list vide (fallback legacy) et list non-vide, persistance GET OK; (4) non-régression /diagnostics/{frame-source,pipeline-metrics} et /plugins/{bus,tracking/config} confirmée."
+}

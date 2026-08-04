@@ -1136,7 +1136,13 @@ async def _do_downstream_work(cam: dict, frame, result: dict) -> None:
             try:
                 _pr = await _plugin_bus.dispatch_pipeline(
                     _frame,
-                    camera_config={"camera_id": cam["id"], "site_id": cam.get("site_id")},
+                    camera_config={
+                        "camera_id": cam["id"],
+                        "site_id": cam.get("site_id"),
+                        # v0.3 · Config caméra modulaire : liste blanche des plugins
+                        # IA activés pour cette caméra (vide = tous les plugins actifs)
+                        "enabled_plugins": cam.get("enabled_plugins") or [],
+                    },
                     precomputed_detections=det_objs,
                     run_business=True,
                     run_segmentation=False,

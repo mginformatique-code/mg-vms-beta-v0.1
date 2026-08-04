@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import CameraPluginsConfig from "@/pages/CameraPluginsConfig";
 import {
   Plus, Wifi, WifiOff, Camera as CamIcon, Trash2, Activity, Loader2, Radar,
   CheckCircle2, XCircle, AlertTriangle, Pencil, Wand2, ChevronRight, BrainCircuit,
@@ -16,6 +17,7 @@ const EMPTY_FORM = {
   profile_token: "", profile_name: "",
   resolution: "", fps: null, bitrate: null,
   ptz_enabled: false, record_enabled: true, detect_enabled: false,
+  enabled_plugins: [],
   record_mode: "continuous", storage_pool_id: "", storage_max_size_gb: 0,
   rtsp_transport: "tcp", preferred_codec: "auto",
   // Assistant RTSP
@@ -68,6 +70,7 @@ export default function Cameras() {
       profile_token: c.profile_token || "", profile_name: c.profile_name || "",
       resolution: c.resolution || "", fps: c.fps || null, bitrate: c.bitrate || null,
       ptz_enabled: !!c.ptz_enabled, record_enabled: c.record_enabled !== false, detect_enabled: !!c.detect_enabled,
+      enabled_plugins: Array.isArray(c.enabled_plugins) ? c.enabled_plugins : [],
       record_mode: c.record_mode || "continuous",
       storage_pool_id: c.storage_pool_id || "",
       storage_max_size_gb: c.storage_max_size_gb || 0,
@@ -440,8 +443,22 @@ export default function Cameras() {
             <div className="col-span-2 flex items-center gap-5 flex-wrap">
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.ptz_enabled} onChange={(e) => setForm({ ...form, ptz_enabled: e.target.checked })} /> PTZ</label>
               <label className="flex items-center gap-2 text-sm" data-testid="record-toggle"><input type="checkbox" checked={form.record_enabled} onChange={(e) => setForm({ ...form, record_enabled: e.target.checked })} /> Enregistrement activé</label>
-              <label className="flex items-center gap-2 text-sm" data-testid="detect-toggle"><input type="checkbox" checked={form.detect_enabled} onChange={(e) => setForm({ ...form, detect_enabled: e.target.checked })} /> Détection IA (YOLO + LAPI)</label>
+              <label className="flex items-center gap-2 text-sm" data-testid="detect-toggle">
+                <input type="checkbox" checked={form.detect_enabled} onChange={(e) => setForm({ ...form, detect_enabled: e.target.checked })} />
+                Analyse IA activée
+                <span className="text-[10px] text-muted-foreground">(kill-switch global caméra)</span>
+              </label>
             </div>
+
+            {/* v0.3 · Config IA modulaire — 50 plugins activables individuellement */}
+            {form.detect_enabled && (
+              <div className="col-span-2">
+                <CameraPluginsConfig
+                  value={form.enabled_plugins}
+                  onChange={(next) => setForm({ ...form, enabled_plugins: next })}
+                />
+              </div>
+            )}
 
             {/* Transport RTSP + codec préféré */}
             <div className="col-span-2 grid grid-cols-2 md:grid-cols-3 gap-3 border border-border p-3 bg-secondary/30">

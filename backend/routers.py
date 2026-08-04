@@ -104,6 +104,13 @@ class CameraInput(BaseModel):
     ptz_enabled: bool = False
     record_enabled: bool = True
     detect_enabled: bool = False
+    # v0.3 · Config caméra modulaire : liste des plugins IA activés sur cette
+    # caméra. Vide → comportement legacy (piloté par detect_enabled). Chaque
+    # entrée est un ``name`` de plugin enregistré sur le Plugin Bus (ex :
+    # ``["yolo-detection", "bytetrack", "fast-alpr", "fire-detection"]``).
+    # 0 → aucune analyse ; 1..N → uniquement les plugins listés seront exécutés
+    # pour cette caméra dans ``dispatch_pipeline``.
+    enabled_plugins: list[str] = []
     # Transport RTSP + codec préféré (P0 finalisation)
     rtsp_transport: str = "tcp"  # tcp | udp
     preferred_codec: str = "auto"  # auto | h264 | h265

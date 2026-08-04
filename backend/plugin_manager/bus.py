@@ -323,6 +323,16 @@ class PluginBus:
         veut réutiliser les résultats sans double inférence.
         """
         cfg = camera_config or {}
+        # v0.3 · Config caméra modulaire : si la caméra a une liste
+        # ``enabled_plugins`` non vide, on ne dispatche qu'aux plugins listés
+        # (par name). Liste vide → comportement legacy (tous les plugins actifs).
+        enabled = set((cfg.get("enabled_plugins") or []))
+
+        def _filter(entries):
+            if not enabled:
+                return entries
+            return [e for e in entries if e.name in enabled]
+
         result = PipelineResult(
             camera_id=frame.camera_id,
             timestamp=frame.timestamp,
@@ -336,6 +346,9 @@ class PluginBus:
             result.plugins_used["detectors"] = ["precomputed"]
         else:
             det_results = await self.dispatch_frame(frame, cfg, timeout_s=timeout_s)
+            # Filtrer les résultats si enabled_plugins configuré
+            if enabled:
+                det_results = [(n, r) for n, r in det_results if n in enabled]
             result.plugins_used["detectors"] = [n for n, _ in det_results]
             for _name, ar in det_results:
                 if ar is not None and hasattr(ar, "detections"):
@@ -344,7 +357,7 @@ class PluginBus:
 
         # ── 2. Tracking ─────────────────────────────────
         t = time.perf_counter()
-        tracker_entries = self.active("Tracker")
+        tracker_entries = _filter(self.active("Tracker"))
         result.plugins_used["trackers"] = [e.name for e in tracker_entries]
         if tracker_entries and result.detections:
             tr_results = await asyncio.gather(
@@ -363,7 +376,7 @@ class PluginBus:
         # ── 3. Segmentation (opt-in, coûteux) ──────────
         if run_segmentation:
             t = time.perf_counter()
-            seg_entries = self.active("Segmenter")
+            seg_entries = _filter(self.active("Segmenter"))
             result.plugins_used["segmenters"] = [e.name for e in seg_entries]
             if seg_entries:
                 seg_results = await asyncio.gather(
@@ -379,7 +392,7 @@ class PluginBus:
         # ── 4. Business Consumers ──────────────────────
         if run_business:
             t = time.perf_counter()
-            biz_entries = self.active("PipelineConsumer")
+            biz_entries = _filter(self.active("PipelineConsumer"))
             result.plugins_used["business"] = [e.name for e in biz_entries]
             if biz_entries:
                 biz_results = await asyncio.gather(

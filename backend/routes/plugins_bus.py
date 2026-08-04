@@ -43,6 +43,104 @@ plugins_bus_router = APIRouter(prefix="/api", tags=["plugins-ng"])
 
 # ─────────────────────────── BUS ────────────────────────────
 
+@plugins_bus_router.get("/plugins/catalog")
+async def plugins_catalog(user: dict = Depends(require_permission("view_live"))):
+    """v0.3 · Catalogue des plugins IA activables **par caméra**.
+
+    Retourne la liste complète des plugins installés, regroupés par
+    catégorie et enrichis avec les infos utiles à l'UI de config caméra
+    modulaire :
+
+      - name / display_name / description / icon / category / interface
+      - loaded : true si le plugin est chargé et prêt à être dispatché
+      - available : true si le plugin peut être activé par caméra
+        (loaded=true ET pas en erreur)
+
+    Utilisé par le nouveau composant ``CameraPluginsConfig`` du formulaire
+    caméra pour construire la liste des toggles regroupés par domaine.
+    """
+    from plugin_manager.loader import loader as pl
+
+    # Icones par catégorie pour l'UI (lucide-react)
+    CATEGORY_ICONS = {
+        "detection": "ScanSearch", "detector": "ScanSearch", "vision": "Eye",
+        "tracking": "MousePointerClick", "tracker": "MousePointerClick",
+        "segmentation": "Layers", "segmenter": "Layers",
+        "anpr": "Car", "lpr": "Car", "plate": "Car",
+        "fire": "Flame", "smoke": "Wind",
+        "weapon": "Shield", "safety": "ShieldAlert", "ppe": "HardHat",
+        "counting": "Hash", "retail": "ShoppingBag",
+        "parking": "ParkingCircle", "agriculture": "Trees",
+        "notification": "Bell", "notifier": "Bell",
+        "fall": "AlertTriangle", "intrusion": "DoorOpen",
+    }
+
+    def _icon_for(cats: list[str]) -> str:
+        for c in cats or []:
+            key = str(c).lower()
+            for k, v in CATEGORY_ICONS.items():
+                if k in key:
+                    return v
+        return "Puzzle"
+
+    def _primary_category(entry: dict) -> str:
+        """Regroupement principal pour l'UI (12 domaines)."""
+        cats = [str(c).lower() for c in (entry.get("categories") or [])]
+        if any("anpr" in c or "lpr" in c or "plate" in c for c in cats):
+            return "ANPR / LPR"
+        if any("track" in c for c in cats):
+            return "Tracking"
+        if any("segment" in c for c in cats):
+            return "Segmentation"
+        if any("fire" in c or "smoke" in c for c in cats):
+            return "Feu / Fumée"
+        if any("weapon" in c or "gun" in c for c in cats):
+            return "Sûreté active"
+        if any("ppe" in c or "helmet" in c or "vest" in c for c in cats):
+            return "EPI"
+        if any("count" in c for c in cats):
+            return "Comptage"
+        if any("retail" in c or "shop" in c for c in cats):
+            return "Retail"
+        if any("park" in c for c in cats):
+            return "Parking"
+        if any("agri" in c or "livestock" in c for c in cats):
+            return "Agriculture"
+        if any("notif" in c or "alert" in c for c in cats):
+            return "Notifications"
+        if any("fall" in c or "intrusion" in c for c in cats):
+            return "Événements"
+        return "Détection IA"
+
+    entries = []
+    for p in pl.loaded():
+        cats = p.get("categories") or []
+        entries.append({
+            "name": p["name"],
+            "display_name": p.get("display_name") or p["name"],
+            "description": p.get("description") or "",
+            "version": p.get("version") or "",
+            "interface": p.get("interface") or "",
+            "categories": cats,
+            "primary_category": _primary_category(p),
+            "icon": _icon_for(cats),
+            "loaded": p.get("loaded", False),
+            "available": bool(p.get("loaded")) and not p.get("error"),
+            "provider_group": p.get("provider_group") or "",
+        })
+
+    # Regroupe par primary_category, ordre stable
+    groups: dict[str, list[dict]] = {}
+    for e in entries:
+        groups.setdefault(e["primary_category"], []).append(e)
+    return {
+        "total": len(entries),
+        "available": sum(1 for e in entries if e["available"]),
+        "groups": [{"category": cat, "plugins": sorted(plist, key=lambda x: x["name"])}
+                    for cat, plist in sorted(groups.items())],
+    }
+
+
 @plugins_bus_router.get("/plugins/bus")
 async def bus_status(user: dict = Depends(require_permission("view_live"))):
     """État du bus multi-plugin (chapitre 11 §11.4.1).
