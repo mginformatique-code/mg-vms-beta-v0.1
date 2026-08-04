@@ -45,7 +45,9 @@ RUN ffmpeg -hide_banner -hwaccels 2>&1 | tee /tmp/ffmpeg_hwaccels.log \
        echo "⚠️  ffmpeg sans cuvid détecté. Pour NVDEC complet, envisager 'jrottenberg/ffmpeg:6-nvidia' comme base ou compiler ffmpeg avec --enable-cuda-nvcc."
 
 # ─── Étape 3 : dépendances Python (torch cu124 en premier pour éviter conflits) ──
-COPY requirements.txt .
+# Build context = racine du repo (voir docker-compose.yml). Les chemins sont
+# donc relatifs au repo : ``backend/requirements.txt``, ``backend/``, ``data/plugins/``…
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ─── Étape 4 : code applicatif ────────────────────────────────────────────
@@ -53,15 +55,25 @@ RUN pip install --no-cache-dir -r requirements.txt
 # rendre la découverte ONVIF opérationnelle out-of-the-box, sans dépendre
 # des fichiers internes du package Python `onvif-zeep-async` (dont les
 # distributions PyPI récentes ne bundlent plus les WSDL). Voir wsdl_path.py.
-COPY wsdl/ ./wsdl/
-COPY . .
+COPY backend/wsdl/ ./wsdl/
+COPY backend/ .
 
-# Vérification build-time des WSDL essentiels (échoue le build si un fichier manque)
+# v0.4 · Plugins bundle : copie explicite du dossier data/plugins/ depuis la
+# racine du repo → /app/data/plugins/. Sans cette étape, le PluginLoader ne
+# trouve que les 2 fallbacks built-in (au lieu des 50 plugins). Cf. audit v0.4.
+COPY data/plugins/ ./data/plugins/
+
+# Vérification build-time des ressources essentielles (échoue le build si un
+# fichier manque — évite les régressions "prod avec 2 plugins")
 RUN test -f /app/wsdl/devicemgmt.wsdl && test -f /app/wsdl/media.wsdl && \
     test -f /app/wsdl/ptz.wsdl && test -f /app/wsdl/events.wsdl && \
     test -f /app/wsdl/imaging.wsdl && test -f /app/wsdl/deviceio.wsdl && \
     test -f /app/wsdl/media2.wsdl && \
     echo "WSDL check OK ($(ls /app/wsdl/*.wsdl | wc -l) WSDL, $(ls /app/wsdl/*.xsd | wc -l) XSD)"
+RUN plugin_count=$(ls -d /app/data/plugins/*/ 2>/dev/null | wc -l) && \
+    test $plugin_count -ge 40 && \
+    echo "Plugins check OK ($plugin_count plugins présents)" || \
+    (echo "❌ Seulement $plugin_count plugins trouvés (attendu >= 40). Build échoué." && exit 1)
 
 EXPOSE 8001
 HEALTHCHECK --interval=30s --timeout=5s --retries=5 \

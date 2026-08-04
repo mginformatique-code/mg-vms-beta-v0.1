@@ -310,6 +310,14 @@ async def tracking_config_put(data: ByteTrackConfig, user: dict = Depends(requir
     data.id_persist_seconds = max(5, min(600, data.id_persist_seconds))
     await db.settings.update_one({"key": "bytetrack_config"},
                                  {"$set": {"key": "bytetrack_config", "value": data.model_dump()}}, upsert=True)
+    # v0.4 · Sync runtime — recharge immédiatement _bytetrack_cfg dans ai_engine
+    # sinon le PUT met à jour la DB mais le pipeline continue avec l'ancienne
+    # config (bug remonté par audit : "ByteTrack=False dans le monitoring").
+    try:
+        from ai_engine import load_runtime_config
+        await load_runtime_config()
+    except Exception:
+        pass
     await log_audit(user, "bytetrack_config_updated",
                     f"enabled={data.enabled} thresh={data.track_thresh}")
     return data.model_dump()

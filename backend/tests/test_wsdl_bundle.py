@@ -81,6 +81,6 @@ class TestDockerfileHasWsdlCopy:
     def test_dockerfile_copies_wsdl_explicitly(self):
         """Le Dockerfile doit copier wsdl/ AVANT `COPY . .` (defensive)."""
         df = Path("/app/backend/Dockerfile").read_text()
-        assert "COPY wsdl/" in df
+        assert "COPY backend/wsdl/" in df  # v0.4 · context = repo root
         # Check du build-time (garde l'image cohérente)
         assert "/app/wsdl/devicemgmt.wsdl" in df

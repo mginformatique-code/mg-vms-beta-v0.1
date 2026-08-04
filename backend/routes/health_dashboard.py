@@ -210,7 +210,27 @@ async def diagnostics_pipeline_metrics(user: dict = Depends(require_permission("
         }
     except Exception:
         counts = {}
-    return {"cameras": snap, "plugins_dispatchable": counts}
+    # v0.4 · Runtime state réellement appliqué au moteur IA (fix bug
+    # "ByteTrack=False dans le monitoring alors qu'il est activé en config")
+    runtime: dict = {}
+    try:
+        import ai_engine as _ae
+        runtime["bytetrack"] = (dict(_ae._bytetrack_cfg) if _ae._bytetrack_cfg
+                                 else {"enabled": True, "source": "defaults"})
+        runtime["ai_config"] = dict(_ae._runtime_config) if _ae._runtime_config else {}
+    except Exception:
+        pass
+    try:
+        import torch
+        runtime["gpu"] = {
+            "torch": torch.__version__,
+            "cuda_available": torch.cuda.is_available(),
+            "cuda_version": torch.version.cuda,
+            "device_name": (torch.cuda.get_device_name(0) if torch.cuda.is_available() else None),
+        }
+    except Exception:
+        runtime["gpu"] = {"error": "torch unavailable"}
+    return {"cameras": snap, "plugins_dispatchable": counts, "runtime": runtime}
 
 
 @health_dashboard_router.get("/diagnostics/frame-source")

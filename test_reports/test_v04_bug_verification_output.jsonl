@@ -1,0 +1,245 @@
+[PASS] admin login returns access_token: status=200, token_present=True
+[PASS] GET /api/plugins/bus has 50 entries: status=200, entries=50, counts.total=50
+[PASS] plugins bus is not fallback-only: unique_names=50, contains_required=True
+[PASS] plugins bus entries are all enabled (not fallback-only): enabled=50, states={'ready': 15, 'missing_dependency': 13, 'error': 1, 'not_configured': 21}
+[PASS] GET /api/plugins/loader has 50 loaded=true and no errors: status=200, loaded=50, failed=0, dir=/app/data/plugins
+[PASS] GET /api/plugins/catalog total=50 available=50 groups>=9: status=200, total=50, available=50, groups=9
+[PASS] GET /api/diagnostics/wsdl ok true with 7 required found: status=200, ok=True, found=7, missing_required=[]
+[PASS] GET /api/diagnostics/pipeline-metrics exposes runtime.bytetrack enabled: status=200, bytetrack={'enabled': True, 'track_thresh': 0.3, 'match_thresh': 0.85, 'track_buffer': 60, 'min_box_area': 100, 'id_persist_seconds': 120}
+[PASS] GET /api/diagnostics/pipeline-metrics exposes runtime.gpu torch/cuda fields: gpu={'torch': '2.12.1+cu130', 'cuda_available': False, 'cuda_version': '13.0', 'device_name': None}
+[PASS] GET /api/diagnostics/ai-health has no sys.get_int_max_str_digits/CUDA crash: status=200, torch=2.12.1+cu130, yolo_loaded=True, alpr_loaded=True, last_cycle_error=None
+[PASS] PUT /api/plugins/tracking/config syncs runtime immediately: put_status=200, get_status=200, runtime.bytetrack={'enabled': True, 'track_thresh': 0.3, 'match_thresh': 0.85, 'track_buffer': 60, 'min_box_area': 100, 'id_persist_seconds': 120}
+[PASS] GET /api/diagnostics/frame-source demo-cam-002 worker alive: status=200, demo-cam-002={'codec': 'h264', 'resolution': '1280x720', 'gpu': False, 'restart_count': 1, 'last_frame_age_s': 0.1, 'alive': True, 'last_error': ''}
+{
+  "base_url": "https://video-command-6.preview.emergentagent.com",
+  "checks": [
+    {
+      "name": "admin login returns access_token",
+      "ok": true,
+      "detail": "status=200, token_present=True"
+    },
+    {
+      "name": "GET /api/plugins/bus has 50 entries",
+      "ok": true,
+      "detail": "status=200, entries=50, counts.total=50"
+    },
+    {
+      "name": "plugins bus is not fallback-only",
+      "ok": true,
+      "detail": "unique_names=50, contains_required=True"
+    },
+    {
+      "name": "plugins bus entries are all enabled (not fallback-only)",
+      "ok": true,
+      "detail": "enabled=50, states={'ready': 15, 'missing_dependency': 13, 'error': 1, 'not_configured': 21}"
+    },
+    {
+      "name": "GET /api/plugins/loader has 50 loaded=true and no errors",
+      "ok": true,
+      "detail": "status=200, loaded=50, failed=0, dir=/app/data/plugins"
+    },
+    {
+      "name": "GET /api/plugins/catalog total=50 available=50 groups>=9",
+      "ok": true,
+      "detail": "status=200, total=50, available=50, groups=9"
+    },
+    {
+      "name": "GET /api/diagnostics/wsdl ok true with 7 required found",
+      "ok": true,
+      "detail": "status=200, ok=True, found=7, missing_required=[]"
+    },
+    {
+      "name": "GET /api/diagnostics/pipeline-metrics exposes runtime.bytetrack enabled",
+      "ok": true,
+      "detail": "status=200, bytetrack={'enabled': True, 'track_thresh': 0.3, 'match_thresh': 0.85, 'track_buffer': 60, 'min_box_area': 100, 'id_persist_seconds': 120}"
+    },
+    {
+      "name": "GET /api/diagnostics/pipeline-metrics exposes runtime.gpu torch/cuda fields",
+      "ok": true,
+      "detail": "gpu={'torch': '2.12.1+cu130', 'cuda_available': False, 'cuda_version': '13.0', 'device_name': None}"
+    },
+    {
+      "name": "GET /api/diagnostics/ai-health has no sys.get_int_max_str_digits/CUDA crash",
+      "ok": true,
+      "detail": "status=200, torch=2.12.1+cu130, yolo_loaded=True, alpr_loaded=True, last_cycle_error=None"
+    },
+    {
+      "name": "PUT /api/plugins/tracking/config syncs runtime immediately",
+      "ok": true,
+      "detail": "put_status=200, get_status=200, runtime.bytetrack={'enabled': True, 'track_thresh': 0.3, 'match_thresh': 0.85, 'track_buffer': 60, 'min_box_area': 100, 'id_persist_seconds': 120}"
+    },
+    {
+      "name": "GET /api/diagnostics/frame-source demo-cam-002 worker alive",
+      "ok": true,
+      "detail": "status=200, demo-cam-002={'codec': 'h264', 'resolution': '1280x720', 'gpu': False, 'restart_count': 1, 'last_frame_age_s': 0.1, 'alive': True, 'last_error': ''}"
+    }
+  ],
+  "raw": {
+    "login": {
+      "status": 200,
+      "body_keys": [
+        "access_token",
+        "refresh_token",
+        "user"
+      ]
+    },
+    "plugins_bus": {
+      "status": 200,
+      "count": 50,
+      "counts": {
+        "total": 50,
+        "frame_analyzers": 20,
+        "plate_recognizers": 11,
+        "event_consumers": 3,
+        "enabled": 50
+      },
+      "names_sample": [
+        "yolo-detection",
+        "yolov8",
+        "yolo-nas",
+        "rt-detr",
+        "efficientdet",
+        "openvino-detector",
+        "onnx-detector",
+        "tensorrt-detector",
+        "fast-alpr",
+        "plate-recognizer"
+      ]
+    },
+    "plugins_loader": {
+      "status": 200,
+      "plugins_dir": "/app/data/plugins",
+      "count": 50,
+      "failed": []
+    },
+    "plugins_catalog": {
+      "status": 200,
+      "total": 50,
+      "available": 50,
+      "group_count": 9,
+      "groups": [
+        "ANPR / LPR",
+        "Agriculture",
+        "Comptage",
+        "Détection IA",
+        "EPI",
+        "Notifications",
+        "Parking",
+        "Segmentation",
+        "Tracking"
+      ]
+    },
+    "wsdl": {
+      "status": 200,
+      "body": {
+        "ok": true,
+        "path": "/app/backend/wsdl",
+        "found": 7,
+        "missing_required": [],
+        "missing_optional": []
+      }
+    },
+    "pipeline_before": {
+      "status": 200,
+      "runtime": {
+        "bytetrack": {
+          "enabled": true,
+          "track_thresh": 0.3,
+          "match_thresh": 0.85,
+          "track_buffer": 60,
+          "min_box_area": 100,
+          "id_persist_seconds": 120
+        },
+        "ai_config": {
+          "interval_seconds": 2.0,
+          "confidence": 0.5,
+          "min_plate_px": 20,
+          "plate_cache_seconds": 10,
+          "device": "auto"
+        },
+        "gpu": {
+          "torch": "2.12.1+cu130",
+          "cuda_available": false,
+          "cuda_version": "13.0",
+          "device_name": null
+        }
+      }
+    },
+    "ai_health": {
+      "status": 200,
+      "body": {
+        "yolo_loaded": true,
+        "yolo_error": null,
+        "yolo_load_attempts": 1,
+        "yolo_last_attempt_ts": "2026-08-04T14:35:24.607091+00:00",
+        "alpr_loaded": true,
+        "alpr_error": null,
+        "alpr_load_attempts": 1,
+        "alpr_last_attempt_ts": "2026-08-04T14:35:24.607091+00:00",
+        "torch_available": true,
+        "torch_cuda_available": false,
+        "torch_version": "2.12.1+cu130",
+        "torch_error": null,
+        "ultralytics_version": "8.3.0",
+        "fast_alpr_available": true,
+        "device_effective": "cpu",
+        "cycles_total": 186,
+        "cycles_errors_last_hour": 0,
+        "last_cycle_ts": "2026-08-04T14:42:17.767002+00:00",
+        "last_cycle_error": null,
+        "loop_alive": true,
+        "loop_disabled_reason": null,
+        "yolo_model": "yolo11n.pt",
+        "alpr_models": "fast-alpr · yolo-v9-t-384-license-plate-end2end + european-plates-mobile-vit-v2-model",
+        "force_cpu_env": false
+      }
+    },
+    "tracking_config_before": {
+      "status": 200,
+      "body": {
+        "enabled": true,
+        "track_thresh": 0.3,
+        "match_thresh": 0.85,
+        "track_buffer": 60,
+        "min_box_area": 100,
+        "id_persist_seconds": 120
+      }
+    },
+    "tracking_update": {
+      "put_status": 200,
+      "put_body": {
+        "enabled": true,
+        "track_thresh": 0.3,
+        "match_thresh": 0.85,
+        "track_buffer": 60,
+        "min_box_area": 100,
+        "id_persist_seconds": 120
+      },
+      "get_status": 200,
+      "bytetrack_after": {
+        "enabled": true,
+        "track_thresh": 0.3,
+        "match_thresh": 0.85,
+        "track_buffer": 60,
+        "min_box_area": 100,
+        "id_persist_seconds": 120
+      }
+    },
+    "frame_source": {
+      "status": 200,
+      "demo-cam-002": {
+        "codec": "h264",
+        "resolution": "1280x720",
+        "gpu": false,
+        "restart_count": 1,
+        "last_frame_age_s": 0.1,
+        "alive": true,
+        "last_error": ""
+      },
+      "worker_keys": [
+        "demo-cam-002"
+      ]
+    }
+  },
+  "summary": "12/12 checks passed"
+}

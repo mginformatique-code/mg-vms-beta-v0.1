@@ -45,7 +45,8 @@ services:
   # Le container voit le RTX A2000 12GB → PyTorch YOLO tourne en CUDA + ffmpeg NVDEC.
   backend:
     build:
-      context: ../backend
+      context: ..                     # ← racine du repo (contient backend/, data/, media/, ...)
+      dockerfile: backend/Dockerfile   # ← Dockerfile dans le sous-dossier backend/
     restart: unless-stopped
     runtime: nvidia   # ← passthrough GPU host → container (nvidia-container-toolkit)
     environment:

@@ -1,0 +1,39 @@
+{
+  "verdict": "fixed",
+  "user_reported_bug": "MG-VMS v0.4 — Sprint de stabilisation (Correctifs uniquement). 8 points d'audit : (1) Plugin Loader charge 50 plugins en dev preview mais SEULEMENT 2 (fallback yolo-detection + fast-alpr) dans Docker : logs 'plugin_loader.discover répertoire absent /data/plugins → plugin_loader.done total=0 → bootstrap.fallback_builtin'. Les 50 plugins sont pourtant présents dans data/plugins du repo. (2) ONVIF : devicemgmt.wsdl / media.wsdl / ptz.wsdl / events.wsdl absents → toutes les calls ONVIF échouent. (3) Erreur pile IA 'module sys has no attribute get_int_max_str_digits' + incompatibilités CUDA. (4) Vérifier réellement l'utilisation du GPU torch.cuda.is_available() et logger versions. (5) Monitoring affiche ByteTrack=False alors qu'il est activé dans la config → sync UI/runtime cassé. (6) Faux messages 'identifiants incorrects' quand le vrai problème est WSDL absent. (7) Docker doit contenir plugins + WSDL + FFmpeg + modèles IA. (8) Validation : 50 plugins chargés, aucun fallback, ONVIF fonctionne, ByteTrack réellement activé.",
+  "summary": "No relevant testing skill found. Focused backend verification passed: 12/12 live API checks and 17/17 targeted pytest checks passed. Verified login, plugin bus/loader/catalog show 50 plugins (not fallback-only), WSDL diagnostics show all 7 required WSDL present, pipeline metrics expose ByteTrack enabled and GPU/Torch fields, PUT tracking config immediately syncs runtime track_thresh=0.3, AI health has no sys.get_int_max_str_digits/CUDA crash, and demo-cam-002 frame-source worker is alive. Backend logs show recent plugin_loader.done total=50 ok=50 errors=0, GPU version logging, WSDL 7/7, and no recent bootstrap.fallback_builtin.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/test_v04_bug_verification.py",
+    "/app/test_reports/test_v04_bug_verification_output.jsonl",
+    "/app/test_reports/bug_verification_36.json",
+    "/app/test_reports/iteration_36.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "No physical ONVIF camera was available in preview, so actual hardware handshake was not performed; the original WSDL root cause was verified via /api/diagnostics/wsdl, bundled files, unit tests, and onvif_camera factory/code review."
+  ],
+  "updated_files": [
+    "/app/test_reports/test_v04_bug_verification.py",
+    "/app/test_reports/test_v04_bug_verification_output.jsonl",
+    "/app/test_reports/bug_verification_36.json",
+    "/app/test_reports/iteration_36.json"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12 focused live API checks; 17/17 targeted pytest with PYTHONPATH=/app/backend)",
+    "frontend": "N/A (backend-only request)"
+  },
+  "seed_data_creation": "No seed data created. Per requested validation, PUT /api/plugins/tracking/config set/confirmed ByteTrack enabled=true and track_thresh=0.3 in runtime config.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Use /app/test_reports/test_v04_bug_verification.py against REACT_APP_BACKEND_URL. Python urllib needs User-Agent curl/8.5.0 in this preview to avoid Cloudflare blocking. Targeted pytest command that passes: PYTHONPATH=/app/backend pytest -q tests/test_v04_stabilization.py tests/test_wsdl_bundle.py from /app/backend.",
+  "rca_of_the_issue": "Focused reproduction evidence: current /api/plugins/bus returns 50 entries/counts.total=50/enabled=50; /api/plugins/loader returns 50 loaded=true and failed=0 from /app/data/plugins; /api/plugins/catalog returns total=50 available=50 with 9 groups; /api/diagnostics/wsdl returns ok=true found=7 missing_required=[]; /api/diagnostics/pipeline-metrics runtime.bytetrack.enabled=true and runtime.gpu includes torch/cuda fields; /api/diagnostics/ai-health reports yolo_loaded=true, alpr_loaded=true, torch_available=true, torch_error=null, last_cycle_error=null; login returns access_token. Docker/resource review shows Dockerfile copies backend/wsdl and data/plugins from repo root with build-time assertions; local preview has 50 plugin manifests, 21 WSDL files, ffmpeg installed, and yolo11n.pt model present. No APIs were mocked."
+}

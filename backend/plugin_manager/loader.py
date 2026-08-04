@@ -41,29 +41,42 @@ def _resolve_plugins_dir() -> Path:
     gagne, sinon le dernier candidat par défaut) :
 
       1. Variable d'env ``MGVMS_PLUGINS_DIR`` (override explicite).
-      2. Chemin relatif au repo : ``<repo>/data/plugins`` (résolu depuis le
-         fichier de ce loader, remonte 3 niveaux : plugin_manager → backend
-         → repo). Fonctionne quelle que soit la racine du déploiement
-         (Railway, Vercel, Docker, ``git push`` …).
-      3. Chemin absolu dev-container ``/app/data/plugins``.
-      4. Chemin relatif au CWD ``./data/plugins`` (fallback minimal).
+      2. ``<backend>/data/plugins`` — chemin bundle Docker v0.4+
+         (le Dockerfile copie ``data/plugins/`` sous ``/app/data/plugins/``).
+      3. ``<repo>/data/plugins`` — chemin dev (loader remonte 2 niveaux :
+         plugin_manager → backend → repo dev container).
+      4. ``/app/data/plugins`` — chemin absolu dev-container Kubernetes.
+      5. ``./data/plugins`` (fallback CWD minimal).
     """
     env = os.environ.get("MGVMS_PLUGINS_DIR")
     if env:
-        return Path(env)
+        p = Path(env)
+        logger.info("plugins_dir: MGVMS_PLUGINS_DIR=%s (env override)", p)
+        return p
+    # __file__ = <backend>/plugin_manager/loader.py
+    backend_dir = Path(__file__).resolve().parent.parent    # <backend>
+    repo_dir = backend_dir.parent                            # <repo>
     candidates: list[Path] = [
-        Path(__file__).resolve().parent.parent.parent / "data" / "plugins",
+        backend_dir / "data" / "plugins",     # v0.4 · Docker bundle canonical path
+        repo_dir / "data" / "plugins",        # dev container mono-repo
         Path("/app/data/plugins"),
+        Path("/data/plugins"),                # legacy Docker path (fallback historique)
         Path.cwd() / "data" / "plugins",
     ]
     for c in candidates:
         try:
             if c.exists() and any(c.iterdir()):
+                logger.info("plugins_dir: %s (contient %d entrées)",
+                            c, sum(1 for _ in c.iterdir()))
                 return c
-        except OSError:  # permission denied etc.
+        except OSError:
             continue
-    # Aucun candidat trouvé : on retourne le premier (échec explicite au
-    # discover() qui logge un warning clair).
+    logger.error(
+        "plugins_dir: AUCUN candidat trouvé. Tentés : %s. Le loader utilisera "
+        "%s (n'existe pas) — vérifiez que backend/data/plugins/ est bien copié "
+        "dans l'image Docker (voir Dockerfile étape 4).",
+        [str(c) for c in candidates], candidates[0],
+    )
     return candidates[0]
 
 

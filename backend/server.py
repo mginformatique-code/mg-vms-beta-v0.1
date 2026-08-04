@@ -111,6 +111,34 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def on_startup():
+    # ─── v0.4 · Boot info : versions Torch/CUDA/GPU + WSDL ────────────────
+    try:
+        import torch
+        cuda_ok = torch.cuda.is_available()
+        gpu_line = "aucun (mode CPU)"
+        gpu_mem = ""
+        if cuda_ok:
+            try:
+                gpu_line = torch.cuda.get_device_name(0)
+                props = torch.cuda.get_device_properties(0)
+                gpu_mem = f" · {props.total_memory / (1024**3):.1f} GB"
+            except Exception:
+                pass
+        try:
+            import torchvision
+            tv = torchvision.__version__
+        except Exception:
+            tv = "n/a"
+        logger.info(
+            "GPU · Torch=%s TorchVision=%s CUDA=%s (v%s) · Device=%s%s",
+            torch.__version__, tv,
+            "OK" if cuda_ok else "INDISPONIBLE",
+            torch.version.cuda or "n/a",
+            gpu_line, gpu_mem,
+        )
+    except Exception as e:
+        logger.warning("GPU · impossible de logger l'état Torch/CUDA : %s", e)
+
     await create_indexes()
     await seed()
     await seed_hardware()

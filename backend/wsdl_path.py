@@ -109,6 +109,31 @@ def onvif_camera(ip: str, port: int, user: str, password: str, **kw):
 
     Utilisez cette fonction plutôt que d'appeler ``ONVIFCamera(...)``
     directement afin de garantir la portabilité (dev/Docker/prod).
+
+    v0.4 · Messages d'erreur clairs : si un fichier WSDL essentiel est
+    manquant, remonte une ``FileNotFoundError`` explicite plutôt que le
+    message générique "identifiants incorrects" (source de confusion pour
+    les utilisateurs quand le vrai problème est le bundle WSDL).
     """
     from onvif import ONVIFCamera  # local import (charge zeep tardivement)
-    return ONVIFCamera(ip, port, user, password, wsdl_dir=WSDL_DIR, **kw)
+    # Pre-flight check : vérifie que le fichier devicemgmt.wsdl est là AVANT
+    # d'essayer la connexion réseau. Sinon zeep lève des erreurs opaques que
+    # les callers interprètent (à tort) comme des erreurs d'authentification.
+    from pathlib import Path as _P
+    if not (_P(WSDL_DIR) / "devicemgmt.wsdl").is_file():
+        raise FileNotFoundError(
+            f"WSDL ONVIF manquants dans {WSDL_DIR}. "
+            f"L'erreur suivante n'est PAS un problème d'identifiants — "
+            f"le dossier backend/wsdl/ n'a pas été correctement embarqué dans "
+            f"l'image. Vérifiez `docker compose build` ou définissez "
+            f"MGVMS_WSDL_DIR=<chemin> vers un bundle WSDL valide."
+        )
+    try:
+        return ONVIFCamera(ip, port, user, password, wsdl_dir=WSDL_DIR, **kw)
+    except FileNotFoundError as e:
+        # Attrape aussi les XSD manquants (b-2, xmlmime, envelope, etc.)
+        raise FileNotFoundError(
+            f"WSDL/XSD ONVIF partiellement manquants dans {WSDL_DIR} : {e}. "
+            f"Ce n'est PAS un problème d'identifiants. Reconstruisez l'image "
+            f"Docker pour restaurer le bundle WSDL complet."
+        ) from e
