@@ -1617,8 +1617,8 @@ class OnvifProbeInput(BaseModel):
 
 def _onvif_probe(ip: str, port: int, username: str, password: str) -> dict:
     """Interroge un appareil ONVIF : infos + profils + URI RTSP (bloquant)."""
-    from onvif import ONVIFCamera
-    cam = ONVIFCamera(ip, port, username, password)
+    from wsdl_path import onvif_camera
+    cam = onvif_camera(ip, port, username, password)
     device = cam.create_devicemgmt_service()
     info = device.GetDeviceInformation()
     media = cam.create_media_service()
@@ -1692,12 +1692,12 @@ def _ptz_execute(ip: str, port: int, username: str, password: str,
     Utilise ContinuousMove + attente `duration` + Stop, ce qui donne un déplacement
     court et prévisible depuis un simple clic UI. Pour `stop` on n'attend pas.
     """
-    from onvif import ONVIFCamera
+    from wsdl_path import onvif_camera
     cmd = (command or "").strip().lower()
     if cmd not in _PTZ_VECTORS and cmd not in ("stop", "home"):
         raise ValueError(f"Commande PTZ inconnue: {command}")
 
-    cam = ONVIFCamera(ip, port, username, password)
+    cam = onvif_camera(ip, port, username, password)
     media = cam.create_media_service()
     ptz = cam.create_ptz_service()
     profiles = media.GetProfiles()
@@ -1756,8 +1756,8 @@ def _ptz_execute(ip: str, port: int, username: str, password: str,
 def _ptz_goto_preset(ip: str, port: int, username: str, password: str,
                      preset_token: str, speed: float = 0.6) -> dict:
     """Déplace la caméra vers un preset ONVIF."""
-    from onvif import ONVIFCamera
-    cam = ONVIFCamera(ip, port, username, password)
+    from wsdl_path import onvif_camera
+    cam = onvif_camera(ip, port, username, password)
     media = cam.create_media_service()
     ptz = cam.create_ptz_service()
     profiles = media.GetProfiles()
@@ -1774,8 +1774,8 @@ def _ptz_goto_preset(ip: str, port: int, username: str, password: str,
 
 
 def _ptz_list_presets(ip: str, port: int, username: str, password: str) -> list:
-    from onvif import ONVIFCamera
-    cam = ONVIFCamera(ip, port, username, password)
+    from wsdl_path import onvif_camera
+    cam = onvif_camera(ip, port, username, password)
     media = cam.create_media_service()
     ptz = cam.create_ptz_service()
     profiles = media.GetProfiles()

@@ -49,7 +49,19 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ─── Étape 4 : code applicatif ────────────────────────────────────────────
+# WSDL ONVIF embarqués : le dossier `wsdl/` est copié explicitement pour
+# rendre la découverte ONVIF opérationnelle out-of-the-box, sans dépendre
+# des fichiers internes du package Python `onvif-zeep-async` (dont les
+# distributions PyPI récentes ne bundlent plus les WSDL). Voir wsdl_path.py.
+COPY wsdl/ ./wsdl/
 COPY . .
+
+# Vérification build-time des WSDL essentiels (échoue le build si un fichier manque)
+RUN test -f /app/wsdl/devicemgmt.wsdl && test -f /app/wsdl/media.wsdl && \
+    test -f /app/wsdl/ptz.wsdl && test -f /app/wsdl/events.wsdl && \
+    test -f /app/wsdl/imaging.wsdl && test -f /app/wsdl/deviceio.wsdl && \
+    test -f /app/wsdl/media2.wsdl && \
+    echo "WSDL check OK ($(ls /app/wsdl/*.wsdl | wc -l) WSDL, $(ls /app/wsdl/*.xsd | wc -l) XSD)"
 
 EXPOSE 8001
 HEALTHCHECK --interval=30s --timeout=5s --retries=5 \

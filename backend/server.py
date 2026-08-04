@@ -38,9 +38,16 @@ from routes.smart_zones import smart_zones_router
 from routes.workflows import workflows_router
 from routes.timeline import timeline_router
 from routes.camera_control import camera_control_router
+from wsdl_path import validate_wsdl_dir
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("mg-vms")
+
+# ─── Validation WSDL au démarrage ─────────────────────────────────────
+# Vérifie que les fichiers WSDL essentiels ONVIF sont présents dans
+# backend/wsdl/ pour rendre la découverte ONVIF opérationnelle sans
+# dépendre du package Python (voir wsdl_path.py).
+_wsdl_status = validate_wsdl_dir()
 
 app = FastAPI(title="MG-VMS API", version="2.30.0-preview-ng", description="MG-VMS - Plateforme de vidéosurveillance professionnelle")
 

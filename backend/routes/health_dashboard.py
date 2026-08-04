@@ -286,3 +286,16 @@ async def diagnostics_streaming_metrics(user: dict = Depends(require_permission(
     return result
 
 
+
+
+@health_dashboard_router.get("/diagnostics/wsdl")
+async def diagnostics_wsdl(user: dict = Depends(require_permission("view_live"))):
+    """État des fichiers WSDL ONVIF embarqués dans MG-VMS.
+
+    Retourne ``{ok, path, found, missing_required[], missing_optional[]}``.
+    Utilisé par l'UI Diagnostics pour signaler visuellement si les WSDL
+    sont manquants dans l'image Docker.
+    """
+    from wsdl_path import validate_wsdl_dir
+    return validate_wsdl_dir()
+

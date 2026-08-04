@@ -37,8 +37,8 @@ async def _get_cam_credentials(camera_id: str):
 
 
 def _onvif_device_info(ip, port, user, pwd) -> dict:
-    from onvif import ONVIFCamera
-    cam = ONVIFCamera(ip, port, user, pwd)
+    from wsdl_path import onvif_camera
+    cam = onvif_camera(ip, port, user, pwd)
     dev = cam.create_devicemgmt_service()
     info = dev.GetDeviceInformation()
     return {
@@ -51,8 +51,8 @@ def _onvif_device_info(ip, port, user, pwd) -> dict:
 
 
 def _onvif_capabilities(ip, port, user, pwd) -> dict:
-    from onvif import ONVIFCamera
-    cam = ONVIFCamera(ip, port, user, pwd)
+    from wsdl_path import onvif_camera
+    cam = onvif_camera(ip, port, user, pwd)
     dev = cam.create_devicemgmt_service()
     caps = dev.GetCapabilities({"Category": "All"})
     out = {}
@@ -74,8 +74,8 @@ def _onvif_capabilities(ip, port, user, pwd) -> dict:
 
 def _onvif_ir_cut(ip, port, user, pwd, on: bool) -> dict:
     """Bascule le filtre IR de la caméra."""
-    from onvif import ONVIFCamera
-    cam = ONVIFCamera(ip, port, user, pwd)
+    from wsdl_path import onvif_camera
+    cam = onvif_camera(ip, port, user, pwd)
     media = cam.create_media_service()
     img = cam.create_imaging_service()
     src = media.GetVideoSources()[0]
@@ -88,8 +88,8 @@ def _onvif_ir_cut(ip, port, user, pwd, on: bool) -> dict:
 
 
 def _onvif_reboot(ip, port, user, pwd) -> dict:
-    from onvif import ONVIFCamera
-    cam = ONVIFCamera(ip, port, user, pwd)
+    from wsdl_path import onvif_camera
+    cam = onvif_camera(ip, port, user, pwd)
     dev = cam.create_devicemgmt_service()
     result = dev.SystemReboot()
     return {"ok": True, "message": str(result)}
@@ -97,8 +97,8 @@ def _onvif_reboot(ip, port, user, pwd) -> dict:
 
 def _onvif_set_relay(ip, port, user, pwd, relay_token: str, state: bool) -> dict:
     """Active/désactive un relais ONVIF (projecteur, sirène, gyrophare, GPIO…)."""
-    from onvif import ONVIFCamera
-    cam = ONVIFCamera(ip, port, user, pwd)
+    from wsdl_path import onvif_camera
+    cam = onvif_camera(ip, port, user, pwd)
     dev = cam.create_devicemgmt_service()
     dev.SetRelayOutputState({"RelayOutputToken": relay_token,
                               "LogicalState": "active" if state else "inactive"})
@@ -106,8 +106,8 @@ def _onvif_set_relay(ip, port, user, pwd, relay_token: str, state: bool) -> dict
 
 
 def _onvif_list_relays(ip, port, user, pwd) -> list:
-    from onvif import ONVIFCamera
-    cam = ONVIFCamera(ip, port, user, pwd)
+    from wsdl_path import onvif_camera
+    cam = onvif_camera(ip, port, user, pwd)
     dev = cam.create_devicemgmt_service()
     try:
         outs = dev.GetRelayOutputs() or []
