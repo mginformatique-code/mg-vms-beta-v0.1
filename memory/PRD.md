@@ -48,6 +48,21 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 - ✅ Health Dashboard UI mis à jour pour la nouvelle forme recorder
 - ✅ Suite pytest : 12/12 (health + pipeline + PTZ/recorder) — voir `tests/test_ptz_and_recorder_health.py`
 
+**Session 9 (Feb 2026)** — v0.3 · Séparation moteur IA / moteur Streaming :
+- 🎯 **Découplage go2rtc / IA** : `_sync_frame_source_workers` lit désormais l'URL RTSP native de la caméra (`camera.ai_rtsp_url` prioritaire → `camera.rtsp_url` → fallback go2rtc uniquement pour démos). Env `MGVMS_AI_DIRECT_RTSP=1` (défaut) active le mode direct. go2rtc = streaming/WebRTC uniquement.
+- ✅ **Nouveau champ** `Camera.ai_rtsp_url` : URL dédiée IA (flux principal HD) permettant d'utiliser un flux différent que celui exposé aux clients WebRTC.
+- ✅ **Module `anpr_tracker.py`** : accumulateur par `track_id` ByteTrack avec machine à états `ENTERED → PRESENT → LEFT` :
+  - `record_reading(camera_id, track_id, PlateReading)` — accumule OCR par track
+  - `tick_missing(camera_id, seen_tids)` — marque tracks disparus, émet EXIT après `lost_cycles`
+  - `best_reading()` — consensus par texte + confiance max
+  - Anti-doublons stationnés (1 seul ENTRY) + retente véhicules mobiles (multi-OCR)
+- ✅ **Intégration `_analyze_frame`** : chaque plate détectée est routée via anpr_tracker (flag `_emit`) ; downstream ne persiste que les plates avec `_emit=True`.
+- ✅ **Nouveaux endpoints diagnostics** :
+  - `GET /api/diagnostics/anpr-tracker` — config + véhicules trackés par caméra
+  - `GET /api/diagnostics/streaming-metrics` — go2rtc streams (producers/consumers/WebRTC clients) — **séparé** du pipeline IA
+- ✅ **Frontend `/pipeline-monitor` enrichi** : panneau Streaming go2rtc (streams live) + panneau ANPR Tracker (véhicules suivis, états, meilleure plaque)
+- ✅ **Tests** : 9 unitaires (`test_v03_ai_streaming_decoupling.py`) + 10 HTTP (testing_agent) = **19/19 OK**
+
 **Session 8 (Feb 2026)** — P0 · Pipeline IA temps réel non-bloquant :
 - 🔴 Bug fatal réparé : SyntaxError dans `ai_engine.py` (bloc `if _pipeline_ok and _pr:` mal indenté) qui empêchait le backend de démarrer
 - ✅ **Refactor `_process_camera`** en Phase A (SYNC ≤200ms) / Phase B (fire-and-forget) :
