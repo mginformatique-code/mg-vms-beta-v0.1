@@ -1,0 +1,34 @@
+{
+  "summary": "P0 pipeline realtime refactor backend testing. Ran the pre-existing 11 unit tests in test_pipeline_realtime.py (all PASSED) + wrote and executed 9 new HTTP integration tests against the external REACT_APP_BACKEND_URL covering: JWT login (access_token), /api/diagnostics/pipeline-metrics auth-guard + structure, /api/plugins/tracking/config GET returns ByteTrack defaults (proving router ordering is correct — no interception by generic /plugins/{name}/config), PUT persists and re-reads, PUT clamps out-of-bounds values (track_thresh→0.9, match_thresh→0.5, track_buffer→300, id_persist_seconds→600), and static introspection that _process_camera uses asyncio.create_task + _process_downstream. Total: 20/20 tests passing (100%).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_pipeline_realtime.py",
+    "/app/backend/tests/test_pipeline_realtime_http.py",
+    "/app/test_reports/pytest/pipeline_realtime.xml",
+    "/app/test_reports/pytest/pipeline_realtime_http.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Router ordering in server.py L70-91 is correct — plugin_config_router precedes plugins_bus_router and plugins_router as required. Verified via HTTP: GET /api/plugins/tracking/config returns ByteTrack schema (enabled, track_thresh, match_thresh, track_buffer, min_box_area, id_persist_seconds), not a generic empty plugin config.",
+    "Clamping in tracking_config_put (plugin_config.py L307-310) works correctly, but note: no bound enforced for min_box_area (any positive int accepted). Consider adding a sanity max (e.g. 1e6) for defence-in-depth. Non-blocking.",
+    "_process_camera contains 'asyncio.create_task' and '_process_downstream' as required — Phase A/Phase B split verified via inspect.getsource introspection.",
+    "PipelineMetrics.record_stage properly ignores unknown stages, computes fps_5s from realtime_ms samples, tracks drops_5s, and enforces a 100-sample sliding window (deque maxlen). p95 requires ≥5 samples — well designed."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_pipeline_realtime_http.py (new file)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "N/A (skipped per request)"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 — login OK, returns access_token",
+  "seed_data_creation": "Restored ByteTrack config to defaults (enabled=True, track_thresh=0.25, match_thresh=0.85, track_buffer=60, min_box_area=100, id_persist_seconds=120) at the end of the test suite to leave the system in a clean state.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All 20 backend tests (11 unit + 9 HTTP integration) for the P0 pipeline realtime refactor pass on the external URL. The pipeline_metrics endpoint structure is validated via optional-shape checks (may be empty if no cameras are running — tolerated). ByteTrack /tracking/config GET/PUT with clamping is fully functional. Router order not intercepted. Frontend /pipeline-monitor page was NOT tested per E1's explicit instruction (backend only)."
+}

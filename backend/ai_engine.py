@@ -507,16 +507,20 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
 
     # ---------- ÉTAPE 3 : ByteTrack (tracking persistant si activé) ----------
     tracks_map: dict = {}
-    if _bytetrack_cfg.get("enabled") and detections:
+    t_track_start = time.monotonic()
+    # Défaut activé (P0 Feb 2026) : ByteTrack ON par défaut, params sains.
+    # Override via /api/ai/bytetrack POST { enabled, track_thresh, track_buffer, match_thresh }
+    _bt_enabled = _bytetrack_cfg.get("enabled", True)
+    if _bt_enabled and detections:
         try:
             import supervision as sv
             import numpy as np
             tracker = _trackers.get(camera_id)
             if tracker is None:
                 tracker = sv.ByteTrack(
-                    track_activation_threshold=float(_bytetrack_cfg.get("track_thresh", 0.5)),
-                    lost_track_buffer=int(_bytetrack_cfg.get("track_buffer", 30)),
-                    minimum_matching_threshold=float(_bytetrack_cfg.get("match_thresh", 0.8)),
+                    track_activation_threshold=float(_bytetrack_cfg.get("track_thresh", 0.25)),
+                    lost_track_buffer=int(_bytetrack_cfg.get("track_buffer", 60)),
+                    minimum_matching_threshold=float(_bytetrack_cfg.get("match_thresh", 0.85)),
                 )
                 _trackers[camera_id] = tracker
             # Construit Detections à partir des bboxes YOLO
@@ -543,6 +547,8 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
     for i, d in enumerate(detections):
         if i < len(overlay_boxes):
             overlay_boxes[i]["track_id"] = d.get("track_id")
+    t_tracking = (time.monotonic() - t_track_start) * 1000
+    timings["tracking_ms"] = round(t_tracking, 1)
 
     # NOTE performance ANPR : `frame_thumb` n'est PLUS encodé ici.
     # L'image numpy `img` (BGR) est retournée à la place et encodée LAZILY
@@ -840,23 +846,37 @@ async def _evaluate_scenarios(cam: dict, result: dict, now: datetime) -> None:
                                         "silhouette de petite taille détectée près de véhicules", thumb())
 
 
+# ============================================================================
+# P0 · Pipeline temps réel — architecture worker séparés (Feb 2026)
+# ----------------------------------------------------------------------------
+# La boucle vidéo _process_camera doit rester rapide (< 200 ms) :
+#   Phase A (SYNC per-frame): fetch → YOLO + ByteTrack → broadcast overlay → return
+#   Phase B (fire-and-forget): ANPR multi-moteurs, Smart Zones, Workflows,
+#                              Plugin bus, event persistence.
+# Backpressure: max 2 tâches downstream en vol par caméra. Sinon on drop
+# (frame trop récente prise en compte à la place — priorité au live).
+# ============================================================================
+_downstream_inflight: dict[str, int] = {}
+_MAX_DOWNSTREAM_INFLIGHT = int(os.environ.get("AI_MAX_DOWNSTREAM_INFLIGHT", "2"))
+
+
 async def _process_camera(cam: dict) -> None:
+    """Phase A: pipeline temps réel non-bloquant. YOLO + tracking + broadcast."""
+    t_start = time.perf_counter()
     frame = await _fetch_frame(cam["id"])
     if frame is None:
         logger.info("IA · %s (%s) : frame indisponible (flux offline)", cam["name"], cam["id"])
         return
+    t_fetch_ms = (time.perf_counter() - t_start) * 1000
+
+    t_ai = time.perf_counter()
     result = await asyncio.to_thread(_analyze_frame, cam["id"], frame)
+    t_ai_ms = (time.perf_counter() - t_ai) * 1000
     dets = result.get("detections", [])
     plates = result.get("plates", [])
     tim = result.get("timings", {})
-    logger.info(
-        "IA · %s (%s) : %d détection(s) [%s] · mouvement=%.1f%% · %d plaque(s) · yolo=%.0fms alpr=%.0fms",
-        cam["name"], cam["id"], len(dets),
-        ",".join(f"{d['label']}:{d['confidence']}" for d in dets) or "aucune",
-        result.get("motion_pct", 0.0), len(plates),
-        tim.get("yolo_ms", 0), tim.get("alpr_ms", 0),
-    )
-    # Diffuse l'overlay au frontend (Live View)
+
+    # Broadcast overlay (léger, <5 ms — reste synchrone pour cohérence UI)
     try:
         from realtime import broadcast_ai_detections
         await broadcast_ai_detections(cam["id"], cam.get("site_id", ""), {
@@ -867,6 +887,65 @@ async def _process_camera(cam: dict) -> None:
         })
     except Exception:
         logger.exception("broadcast_ai_detections error")
+
+    t_frontier_ms = (time.perf_counter() - t_start) * 1000
+    # Enregistre les métriques de la phase temps réel (sync)
+    pipeline_metrics.record_stage(cam["id"], "fetch_ms", t_fetch_ms)
+    pipeline_metrics.record_stage(cam["id"], "yolo_ms", tim.get("yolo_ms", 0))
+    pipeline_metrics.record_stage(cam["id"], "tracking_ms", tim.get("tracking_ms", 0))
+    pipeline_metrics.record_stage(cam["id"], "realtime_ms", t_frontier_ms)
+
+    logger.info(
+        "IA · %s (%s) : %d détection(s) [%s] · mouvement=%.1f%% · %d plaque(s) · "
+        "fetch=%.0fms yolo=%.0fms tracking=%.0fms alpr=%.0fms rt=%.0fms",
+        cam["name"], cam["id"], len(dets),
+        ",".join(f"{d['label']}:{d['confidence']}" for d in dets) or "aucune",
+        result.get("motion_pct", 0.0), len(plates),
+        t_fetch_ms, tim.get("yolo_ms", 0), tim.get("tracking_ms", 0),
+        tim.get("alpr_ms", 0), t_frontier_ms,
+    )
+
+    # Phase B : downstream work en fire-and-forget (backpressure via compteur)
+    inflight = _downstream_inflight.get(cam["id"], 0)
+    if inflight >= _MAX_DOWNSTREAM_INFLIGHT:
+        pipeline_metrics.record_drop(cam["id"])
+        logger.warning(
+            "IA · %s : downstream saturé (%d en vol) — frame IA droppée pour préserver le live",
+            cam["name"], inflight,
+        )
+        return
+    _downstream_inflight[cam["id"]] = inflight + 1
+    asyncio.create_task(_process_downstream(cam, frame, result))
+
+
+async def _process_downstream(cam: dict, frame, result: dict) -> None:
+    """Phase B: workers indépendants — plugins + zones + workflows + events.
+
+    Cette fonction tourne en arrière-plan via asyncio.create_task. Elle peut
+    prendre plusieurs secondes sans bloquer le pipeline vidéo temps réel.
+    """
+    t_down = time.perf_counter()
+    try:
+        await _do_downstream_work(cam, frame, result)
+        t_down_ms = (time.perf_counter() - t_down) * 1000
+        pipeline_metrics.record_stage(cam["id"], "downstream_ms", t_down_ms)
+    except Exception:
+        logger.exception("_process_downstream error for %s", cam.get("id"))
+    finally:
+        _downstream_inflight[cam["id"]] = max(0, _downstream_inflight.get(cam["id"], 1) - 1)
+
+
+async def _do_downstream_work(cam: dict, frame, result: dict) -> None:
+    """Corps du worker downstream — extrait de l'ancien _process_camera.
+
+    Fait TOUT le travail lourd hors chemin critique vidéo :
+      - Persistence événements Mouvement/YOLO/Face
+      - Plugin Manager NG dispatch_pipeline (2s timeout)
+      - Smart Zones + Workflow Engine
+      - Multi-moteurs ANPR (dispatch_plate)
+      - Persistence plaques + alertes liste noire
+      - Scénarios IA (rôdeur, intrusion, collision, …)
+    """
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
     base = {
@@ -1007,71 +1086,71 @@ async def _process_camera(cam: dict) -> None:
                 _pr = None
 
             if _pipeline_ok and _pr:
-            # Persistence des événements métier générés
-            for be in _pr.business_events:
-                if not _cooldown_ok(f"{cam['id']}:{be.get('type', 'plugin')}", EVENT_COOLDOWN, now):
-                    continue
-                await db.events.insert_one({
-                    "id": str(uuid.uuid4()), "type": be.get("type", "plugin.event"),
-                    **base,
-                    "confidence": (be.get("data") or {}).get("max_confidence"),
-                    "message": be.get("message"),
-                    "severity": be.get("severity", "info"),
-                    "plugin": be.get("source"),
-                    # Traçabilité pipeline complète (P8+ / demande CEO) : quels plugins
-                    # ont été utilisés pour produire cet événement ? Utile quand on
-                    # combine plusieurs détecteurs (YOLO + YOLOv8 + RT-DETR + …),
-                    # trackers (ByteTrack, BoTSORT, DeepSORT, …) et segmenters.
-                    "detectors": (_pr.plugins_used or {}).get("detectors", []),
-                    "trackers": (_pr.plugins_used or {}).get("trackers", []),
-                    "segmenters": (_pr.plugins_used or {}).get("segmenters", []),
-                    "thumbnail": _ensure_frame_thumb(result),
-                    "data": be.get("data"),
-                })
-
-            # P3.c — Smart Zones : évaluation temps réel
-            # Convertit tracks/detections en format léger pour le moteur et
-            # déclenche les actions configurées (webhook / MQTT / HA / Tuya / …).
-            try:
-                from smart_zones.engine import engine as _sz_engine
-                _dets = [
-                    {"class": d.label, "confidence": d.confidence,
-                     "bbox": tuple(d.bbox) if hasattr(d, "bbox") else (0, 0, 0, 0)}
-                    for d in (_pr.detections or [])
-                ]
-                _tracks = [
-                    {"track_id": getattr(t, "track_id", None),
-                     "class": getattr(t, "label", None),
-                     "confidence": getattr(t, "confidence", None),
-                     "bbox": tuple(getattr(t, "bbox", (0, 0, 0, 0)))}
-                    for t in (_pr.tracks or [])
-                ]
-                _plates = [
-                    (be.get("data") or {})
-                    for be in _pr.business_events
-                    if be.get("type") == "plate_recognized"
-                ]
-                _sz_events = await _sz_engine.evaluate(cam["id"], _dets, _tracks, _plates)
-                for zev in _sz_events:
+                # Persistence des événements métier générés
+                for be in _pr.business_events:
+                    if not _cooldown_ok(f"{cam['id']}:{be.get('type', 'plugin')}", EVENT_COOLDOWN, now):
+                        continue
                     await db.events.insert_one({
-                        "id": str(uuid.uuid4()),
-                        "type": zev["type"], "message": zev["message"],
-                        "severity": zev.get("severity", "info"),
+                        "id": str(uuid.uuid4()), "type": be.get("type", "plugin.event"),
                         **base,
-                        "plugin": "smart-zone",
-                        "data": zev.get("data"),
+                        "confidence": (be.get("data") or {}).get("max_confidence"),
+                        "message": be.get("message"),
+                        "severity": be.get("severity", "info"),
+                        "plugin": be.get("source"),
+                        # Traçabilité pipeline complète (P8+ / demande CEO) : quels plugins
+                        # ont été utilisés pour produire cet événement ? Utile quand on
+                        # combine plusieurs détecteurs (YOLO + YOLOv8 + RT-DETR + …),
+                        # trackers (ByteTrack, BoTSORT, DeepSORT, …) et segmenters.
+                        "detectors": (_pr.plugins_used or {}).get("detectors", []),
+                        "trackers": (_pr.plugins_used or {}).get("trackers", []),
+                        "segmenters": (_pr.plugins_used or {}).get("segmenters", []),
+                        "thumbnail": _ensure_frame_thumb(result),
+                        "data": be.get("data"),
                     })
-                    # P4 · Workflow Engine — chaque event de zone déclenche les workflows
-                    try:
-                        from workflow_engine import engine as _wf_engine
-                        await _wf_engine.on_event({
-                            "type": zev["type"], "camera_id": cam["id"],
-                            "timestamp": now.isoformat(), "data": zev.get("data"),
+
+                # P3.c — Smart Zones : évaluation temps réel
+                # Convertit tracks/detections en format léger pour le moteur et
+                # déclenche les actions configurées (webhook / MQTT / HA / Tuya / …).
+                try:
+                    from smart_zones.engine import engine as _sz_engine
+                    _dets = [
+                        {"class": d.label, "confidence": d.confidence,
+                         "bbox": tuple(d.bbox) if hasattr(d, "bbox") else (0, 0, 0, 0)}
+                        for d in (_pr.detections or [])
+                    ]
+                    _tracks = [
+                        {"track_id": getattr(t, "track_id", None),
+                         "class": getattr(t, "label", None),
+                         "confidence": getattr(t, "confidence", None),
+                         "bbox": tuple(getattr(t, "bbox", (0, 0, 0, 0)))}
+                        for t in (_pr.tracks or [])
+                    ]
+                    _plates = [
+                        (be.get("data") or {})
+                        for be in _pr.business_events
+                        if be.get("type") == "plate_recognized"
+                    ]
+                    _sz_events = await _sz_engine.evaluate(cam["id"], _dets, _tracks, _plates)
+                    for zev in _sz_events:
+                        await db.events.insert_one({
+                            "id": str(uuid.uuid4()),
+                            "type": zev["type"], "message": zev["message"],
+                            "severity": zev.get("severity", "info"),
+                            **base,
+                            "plugin": "smart-zone",
+                            "data": zev.get("data"),
                         })
-                    except Exception:
-                        logger.exception("workflow_engine dispatch error")
-            except Exception:
-                logger.exception("smart_zones eval error")
+                        # P4 · Workflow Engine — chaque event de zone déclenche les workflows
+                        try:
+                            from workflow_engine import engine as _wf_engine
+                            await _wf_engine.on_event({
+                                "type": zev["type"], "camera_id": cam["id"],
+                                "timestamp": now.isoformat(), "data": zev.get("data"),
+                            })
+                        except Exception:
+                            logger.exception("workflow_engine dispatch error")
+                except Exception:
+                    logger.exception("smart_zones eval error")
     except Exception:
         logger.exception("plugin_manager pipeline error")
 

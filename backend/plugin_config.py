@@ -287,12 +287,12 @@ async def anpr_camera_lists_export(camera_id: str,
 # Tracking (ByteTrack)
 # ═══════════════════════════════════════════════════════════════════
 class ByteTrackConfig(BaseModel):
-    enabled: bool = False
-    track_thresh: float = 0.5  # 0.1-0.9
-    match_thresh: float = 0.8  # 0.5-0.95
-    track_buffer: int = 30  # frames — durée max avant de perdre un ID (30 = ~15s à 2 FPS)
+    enabled: bool = True
+    track_thresh: float = 0.25  # 0.1-0.9 — bas = accepte plus de détections faibles pour maintenir l'ID
+    match_thresh: float = 0.85  # 0.5-0.95 — haut = matching plus strict, moins de swap d'IDs
+    track_buffer: int = 60  # frames avant perte d'ID (60 = ~30s à 2 FPS)
     min_box_area: int = 100  # pixels²
-    id_persist_seconds: int = 60  # combien de temps garder un ID en mémoire après disparition
+    id_persist_seconds: int = 120  # combien de temps garder un ID en mémoire après disparition
 
 
 @plugin_config_router.get("/tracking/config")
