@@ -48,6 +48,29 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 - ✅ Health Dashboard UI mis à jour pour la nouvelle forme recorder
 - ✅ Suite pytest : 12/12 (health + pipeline + PTZ/recorder) — voir `tests/test_ptz_and_recorder_health.py`
 
+**Session 10 (Feb 2026)** — v0.3 · Correctif final audit RTSP/ANPR :
+- 🧹 **Garde-fou supprimé** dans `frame_source.start()` — plus de refus d'URL non-go2rtc (audit v0.3)
+- 🐧 **ffmpeg 5.1.9 installé** dans le container (`apt-get install -y ffmpeg`)
+- 🔀 **Workers démos** : `_sync_frame_source_workers` démarre aussi un worker persistant pour les caméras démo (via `rtsp://127.0.0.1:8554/cam_XXX` — go2rtc en local) au lieu de skipper
+- ⚙️ **GO2RTC_RTSP=rtsp://127.0.0.1:8554** ajouté à `.env` (résolution hostname `localhost`→`::1` refusée par ffmpeg dans le container Kubernetes)
+- 📊 **Métrique alpr_ms** : maintenant enregistrée dans `pipeline_metrics.record_stage()` — visible dans le dashboard
+- 🎯 **ANPR par crop véhicule** : `_alpr.predict(vehicle_crop)` remplace `_alpr.predict(img)` — meilleure précision, associations plate↔owner naturelles (audit)
+- 🔍 **Nouvel endpoint** `/api/diagnostics/frame-source` — état runtime des workers ffmpeg (alive/last_frame_age/restart_count)
+- 📉 **Cache _plate_cache raccourci à 1s** — laisse anpr_tracker gérer les doublons via track_id, permet multi-OCR par véhicule mobile
+
+### Résultats mesurés (avant → après)
+| Métrique      | Avant   | Après (p95) | Gain     |
+|---------------|---------|-------------|----------|
+| fetch_ms      | 2720 ms | **3-4 ms**  | **~700×** |
+| yolo_ms       | 128 ms  | 138 ms      | idem     |
+| tracking_ms   | 2 ms    | 1 ms        | idem     |
+| alpr_ms       | 0 (non affiché) | **36 ms** | affiché ✓ |
+| realtime_ms   | 2895 ms | 260 ms avg  | **11×**  |
+| downstream_ms | 9 ms    | 13 ms       | idem     |
+| Workers actifs | 0       | **1** (demo-cam-002)   | ✓       |
+
+- ✅ Tests : 6 unitaires audit + 23 régression = **29/29 OK**
+
 **Session 9 (Feb 2026)** — v0.3 · Séparation moteur IA / moteur Streaming :
 - 🎯 **Découplage go2rtc / IA** : `_sync_frame_source_workers` lit désormais l'URL RTSP native de la caméra (`camera.ai_rtsp_url` prioritaire → `camera.rtsp_url` → fallback go2rtc uniquement pour démos). Env `MGVMS_AI_DIRECT_RTSP=1` (défaut) active le mode direct. go2rtc = streaming/WebRTC uniquement.
 - ✅ **Nouveau champ** `Camera.ai_rtsp_url` : URL dédiée IA (flux principal HD) permettant d'utiliser un flux différent que celui exposé aux clients WebRTC.

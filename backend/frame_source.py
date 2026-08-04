@@ -266,39 +266,24 @@ def _drain_stderr(w: _Worker):
 # ══════════════════════════════════════════════════════════════════════════
 
 def start(camera_id: str, rtsp_url: str, codec: str = "auto",
-          width: int = 0, height: int = 0, allow_direct: bool = False) -> None:
+          width: int = 0, height: int = 0, allow_direct: bool = True) -> None:
     """Démarre (ou redémarre) un worker FFmpeg persistant pour une caméra.
 
-    Phase 1 (go2rtc = unique gateway) :
-      Refuse les URLs RTSP directes vers une caméra IP par défaut. Toutes les
-      sessions RTSP doivent passer par go2rtc pour garantir 1 seule connexion
-      caméra ↔ NVR (partagée viewers/recorder/IA). Bypass explicite via
-      `allow_direct=True` uniquement pour outillage/tests hors production.
+    **v0.3 (Feb 2026)** — SÉPARATION IA/streaming : le worker peut désormais
+    consommer **n'importe quelle URL RTSP** (native caméra IP, sous-flux dédié
+    IA, ou relais go2rtc). Le garde-fou "go2rtc-only" de Phase 1 a été retiré
+    car il empêchait le moteur IA d'accéder au flux RTSP natif (audit v0.3).
 
     Args:
         camera_id : identifiant unique (utilisé pour get_latest_frame).
-        rtsp_url  : URL RTSP DOIT commencer par `rtsp://go2rtc:` ou `rtsp://127.0.0.1:8554/`
-                    (ou pointer sur `$GO2RTC_RTSP`). Sinon → ValueError.
+        rtsp_url  : URL RTSP arbitraire (``rtsp://user:pass@cam-ip:554/...`` ou
+                    ``rtsp://go2rtc:8554/cam_XXX``). En prod on privilégie le
+                    flux natif ; go2rtc reste utilisable pour les démos.
         codec     : 'h264' | 'h265' | 'auto' (auto-détection ffmpeg).
-        width, height : forcer la taille de sortie (0 = natif). Recommandé
-                        640×360 pour YOLO YOLOv11s = compromis vitesse/qualité.
-        allow_direct : bypass la garde go2rtc (usage tests uniquement).
+        width, height : forcer la taille de sortie (0 = natif). Défaut 1280×720.
+        allow_direct : conservé pour compat rétro-API — sans effet depuis v0.3.
     """
-    # ── Garde-fou Phase 1 : go2rtc-only ─────────────────────────────────
-    if not allow_direct:
-        go2rtc_prefix = os.environ.get("GO2RTC_RTSP", "rtsp://go2rtc:8554").rstrip("/")
-        allowed_prefixes = (
-            go2rtc_prefix + "/",
-            "rtsp://go2rtc:",
-            "rtsp://127.0.0.1:8554/",
-            "rtsp://localhost:8554/",
-        )
-        if not any(rtsp_url.startswith(p) for p in allowed_prefixes):
-            raise ValueError(
-                f"frame_source.start refuse une URL RTSP hors go2rtc : {rtsp_url[:60]}... "
-                "Phase 1 (go2rtc = unique gateway) — utilisez rtsp://go2rtc:8554/cam_XXX. "
-                "Pour bypass en test : passer allow_direct=True."
-            )
+    _ = allow_direct  # rétro-compat : plus de garde-fou
     # Défaut résolution : 1280×720 pour YOLO
     if width == 0 or height == 0:
         width = _FRAME_WIDTH or 1280

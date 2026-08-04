@@ -420,58 +420,85 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
         # Confiance minimum spécifique à cette caméra
         min_conf = float(anpr_cfg.get("min_confidence", 0.0) or 0.0)
         t3 = time.monotonic()
+        # v0.3 · OCR par crop véhicule (audit) — au lieu de balayer toute
+        # l'image, on limite fast-alpr aux ROI véhicules détectées par
+        # YOLO. Bénéfices : moins de faux positifs (ex : texte sur
+        # panneaux/pubs), meilleure lecture véhicules éloignés (plus de
+        # pixels utiles par pixel de plaque), et surtout, on associe
+        # naturellement chaque plate à son ``owner`` véhicule.
         try:
-            for r in _alpr.predict(img):
-                if not r.ocr or not r.ocr.text:
-                    continue
-                bb = r.detection.bounding_box
-                pw, ph = bb.x2 - bb.x1, bb.y2 - bb.y1
-                if pw < min_side or ph < min_side:
-                    plate_debug.append({"plate": r.ocr.text.upper(), "skipped": "trop petit",
-                                         "size": f"{pw}x{ph}"})
-                    continue
-                # ROI polygonale (test sur le centre de la plaque en coords normalisées)
-                cx_norm = ((bb.x1 + bb.x2) / 2) / w
-                cy_norm = ((bb.y1 + bb.y2) / 2) / h
-                if roi and not _point_in_polygon(cx_norm, cy_norm, roi):
-                    plate_debug.append({"plate": r.ocr.text.upper(), "skipped": "hors ROI",
-                                         "size": f"{pw}x{ph}"})
-                    continue
-                if float(r.ocr.confidence) < min_conf:
-                    plate_debug.append({"plate": r.ocr.text.upper(), "skipped": "conf<seuil",
-                                         "size": f"{pw}x{ph}", "conf": round(float(r.ocr.confidence), 2)})
-                    continue
-                plate_text = r.ocr.text.upper().strip()
-                if not plate_text:
-                    continue
-                if (camera_id, plate_text) in _plate_cache:
-                    plate_debug.append({"plate": plate_text, "skipped": "cache",
-                                         "expires_in": int((_plate_cache[(camera_id, plate_text)] - now).total_seconds())})
-                    continue
-                _plate_cache[(camera_id, plate_text)] = now + timedelta(seconds=cache_ttl)
-                px, py = (bb.x1 + bb.x2) / 2, (bb.y1 + bb.y2) / 2
-                owner = next((v for v in vehicles
-                              if v["bbox"][0] <= px <= v["bbox"][2] and v["bbox"][1] <= py <= v["bbox"][3]),
-                             max(vehicles, key=lambda v: (v["bbox"][2]-v["bbox"][0])*(v["bbox"][3]-v["bbox"][1])))
+            for owner in vehicles:
                 vx1, vy1, vx2, vy2 = owner["bbox"]
-                plate_crop = img[max(0, bb.y1):bb.y2, max(0, bb.x1):bb.x2]
-                plates.append({
-                    "plate": plate_text,
-                    "confidence": round(float(r.ocr.confidence), 2),
-                    "plate_crop": _jpeg_data_uri(plate_crop, 240),
-                    "vehicle_crop": _jpeg_data_uri(img[vy1:vy2, vx1:vx2]),
-                    "vehicle_type": owner["label"],
-                    "vehicle_color": owner["vehicle_color"],
-                    # P8+ traçabilité : quel moteur a reconnu la plaque
-                    "engine": "fast-alpr",
-                    # v0.3 : bbox du véhicule owner pour recouper avec ByteTrack
-                    # ensuite (l'accumulateur ANPR utilise le track_id du owner).
-                    "_owner_bbox": (vx1, vy1, vx2, vy2),
-                })
-                plate_debug.append({"plate": plate_text, "confidence": round(float(r.ocr.confidence), 2),
-                                     "size": f"{pw}x{ph}", "kept": True})
+                # Marge de sécurité +8% autour du véhicule (les plaques
+                # dépassent souvent légèrement des bbox YOLO strictes).
+                pad_x = int((vx2 - vx1) * 0.08)
+                pad_y = int((vy2 - vy1) * 0.08)
+                cx1 = max(0, vx1 - pad_x)
+                cy1 = max(0, vy1 - pad_y)
+                cx2 = min(w, vx2 + pad_x)
+                cy2 = min(h, vy2 + pad_y)
+                if cx2 - cx1 < 40 or cy2 - cy1 < 40:
+                    continue  # crop trop petit
+                vehicle_crop = img[cy1:cy2, cx1:cx2]
+                try:
+                    alpr_results = list(_alpr.predict(vehicle_crop))
+                except Exception:
+                    logger.exception("fast-alpr predict sur crop véhicule")
+                    continue
+                for r in alpr_results:
+                    if not r.ocr or not r.ocr.text:
+                        continue
+                    bb = r.detection.bounding_box
+                    # Coord dans le crop → coord dans l'image entière
+                    abs_x1 = cx1 + bb.x1
+                    abs_y1 = cy1 + bb.y1
+                    abs_x2 = cx1 + bb.x2
+                    abs_y2 = cy1 + bb.y2
+                    pw, ph = abs_x2 - abs_x1, abs_y2 - abs_y1
+                    if pw < min_side or ph < min_side:
+                        plate_debug.append({"plate": r.ocr.text.upper(), "skipped": "trop petit",
+                                             "size": f"{pw}x{ph}"})
+                        continue
+                    # ROI polygonale (test sur le centre de la plaque en coords normalisées)
+                    cx_norm = ((abs_x1 + abs_x2) / 2) / w
+                    cy_norm = ((abs_y1 + abs_y2) / 2) / h
+                    if roi and not _point_in_polygon(cx_norm, cy_norm, roi):
+                        plate_debug.append({"plate": r.ocr.text.upper(), "skipped": "hors ROI",
+                                             "size": f"{pw}x{ph}"})
+                        continue
+                    if float(r.ocr.confidence) < min_conf:
+                        plate_debug.append({"plate": r.ocr.text.upper(), "skipped": "conf<seuil",
+                                             "size": f"{pw}x{ph}", "conf": round(float(r.ocr.confidence), 2)})
+                        continue
+                    plate_text = r.ocr.text.upper().strip()
+                    if not plate_text:
+                        continue
+                    if (camera_id, plate_text) in _plate_cache:
+                        # v0.3 · Cache court (1s max recommandé) : évite juste
+                        # le triple-append sur une même frame. L'anti-doublons
+                        # long-terme est géré par ``anpr_tracker`` via track_id
+                        # → plusieurs lectures OCR pour un même véhicule mobile
+                        # doivent être laissées passer pour construire le consensus.
+                        plate_debug.append({"plate": plate_text, "skipped": "cache",
+                                             "expires_in": int((_plate_cache[(camera_id, plate_text)] - now).total_seconds())})
+                        continue
+                    _plate_cache[(camera_id, plate_text)] = now + timedelta(seconds=min(cache_ttl, 1))
+                    plate_crop = img[max(0, abs_y1):abs_y2, max(0, abs_x1):abs_x2]
+                    plates.append({
+                        "plate": plate_text,
+                        "confidence": round(float(r.ocr.confidence), 2),
+                        "plate_crop": _jpeg_data_uri(plate_crop, 240),
+                        "vehicle_crop": _jpeg_data_uri(vehicle_crop),
+                        "vehicle_type": owner["label"],
+                        "vehicle_color": owner["vehicle_color"],
+                        "engine": "fast-alpr",
+                        # v0.3 : bbox du véhicule owner pour recouper avec ByteTrack ensuite
+                        "_owner_bbox": (vx1, vy1, vx2, vy2),
+                    })
+                    plate_debug.append({"plate": plate_text, "confidence": round(float(r.ocr.confidence), 2),
+                                         "size": f"{pw}x{ph}", "kept": True})
         except Exception:
-            logger.exception("Erreur LAPI")
+            logger.exception("Erreur LAPI (crop véhicule)")
         t_alpr = (time.monotonic() - t3) * 1000
     for d in detections:
         d["_bbox"] = d.pop("bbox", None)
@@ -933,6 +960,7 @@ async def _process_camera(cam: dict) -> None:
     pipeline_metrics.record_stage(cam["id"], "fetch_ms", t_fetch_ms)
     pipeline_metrics.record_stage(cam["id"], "yolo_ms", tim.get("yolo_ms", 0))
     pipeline_metrics.record_stage(cam["id"], "tracking_ms", tim.get("tracking_ms", 0))
+    pipeline_metrics.record_stage(cam["id"], "alpr_ms", tim.get("alpr_ms", 0))
     pipeline_metrics.record_stage(cam["id"], "realtime_ms", t_frontier_ms)
 
     logger.info(
@@ -1318,22 +1346,33 @@ async def _sync_frame_source_workers(cams: list[dict]) -> None:
     active_ids = set()
     for cam in cams:
         cam_id = cam["id"]
-        # Skip démos : elles n'ont pas d'URL RTSP externe
-        if cam_id.startswith("demo-") or cam_id.startswith("demo_"):
-            continue
-        # Résolution source RTSP pour l'IA
+        # Résolution source RTSP pour l'IA (v0.3)
         ai_url = (cam.get("ai_rtsp_url") or "").strip()
         native_url = (cam.get("rtsp_url") or "").strip()
-        if use_direct and ai_url:
+        is_demo = cam_id.startswith("demo-") or cam_id.startswith("demo_")
+
+        if is_demo:
+            # Caméras démo : go2rtc génère localement la mire testsrc2.
+            # On lance quand même un worker persistant qui pointe vers le
+            # relais go2rtc RTSP → une seule connexion, tenue en permanence,
+            # au lieu du fallback HTTP /api/frame.jpeg qui prend 2-3 s.
+            rtsp_url = f"{go2rtc_rtsp}/cam_{cam_id}"
+            source_type = "demo-go2rtc-relay"
+        elif use_direct and ai_url:
             rtsp_url = ai_url
             source_type = "direct-ai"
         elif use_direct and native_url:
             rtsp_url = native_url
             source_type = "direct-native"
-        else:
-            # Fallback go2rtc : pas d'URL native OU direct désactivé via env
+        elif native_url or ai_url:
+            # Fallback go2rtc relay uniquement si direct explicitement désactivé
             rtsp_url = f"{go2rtc_rtsp}/cam_{cam_id}"
             source_type = "go2rtc-relay"
+        else:
+            # Caméra sans URL RTSP → on skip (impossible de grabber)
+            logger.warning("frame_source: skip %s (aucune URL RTSP configurée)", cam_id)
+            continue
+
         active_ids.add(cam_id)
         codec = (cam.get("codec") or "auto").lower()
         if codec not in ("h264", "h265", "hevc", "auto"):

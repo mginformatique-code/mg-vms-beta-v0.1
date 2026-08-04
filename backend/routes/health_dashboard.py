@@ -213,6 +213,23 @@ async def diagnostics_pipeline_metrics(user: dict = Depends(require_permission("
     return {"cameras": snap, "plugins_dispatchable": counts}
 
 
+@health_dashboard_router.get("/diagnostics/frame-source")
+async def diagnostics_frame_source(user: dict = Depends(require_permission("view_live"))):
+    """v0.3 · Frame Grabber — état des workers ffmpeg persistants.
+
+    Retourne :
+      - workers : dict par camera_id avec codec, resolution, gpu, restart_count,
+        last_frame_age_s, alive, last_error
+      - cuvid_available : NVDEC dispo (H.265 GPU decode)
+      - mode : GPU / auto / CPU
+
+    Un ``last_frame_age_s`` < 2s = worker actif et alimente le pipeline IA
+    en RTSP direct (plus de fallback go2rtc HTTP).
+    """
+    import frame_source
+    return frame_source.status()
+
+
 @health_dashboard_router.get("/diagnostics/anpr-tracker")
 async def diagnostics_anpr_tracker(user: dict = Depends(require_permission("view_live"))):
     """v0.3 · ANPR Tracker — état des véhicules suivis par caméra.
