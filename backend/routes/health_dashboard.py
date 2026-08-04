@@ -185,3 +185,30 @@ async def diagnostics_recorder_health(
     """
     from recorder import get_recorder_health
     return await get_recorder_health(camera_id)
+
+
+@health_dashboard_router.get("/diagnostics/pipeline-metrics")
+async def diagnostics_pipeline_metrics(user: dict = Depends(require_permission("view_live"))):
+    """P9+ Monitoring IA temps réel — FPS + latence par caméra + plugins utilisés.
+
+    Utile pour identifier quel plugin ralentit le pipeline (bug fix Feb 2026).
+    Retourne pour chaque caméra active :
+      - `fps_5s`            : FPS moyen sur les 5 dernières secondes
+      - `pipeline_ms_avg/max/p95` : latence du dispatch pipeline
+      - `success_count / error_count` : compteurs cumulés
+      - `last_plugins`      : {detectors, trackers, segmenters, business, notifiers}
+    """
+    from pipeline_metrics import pipeline_metrics
+    snap = pipeline_metrics.snapshot()
+    # Enrichit avec état du bus (nombre de plugins par interface)
+    try:
+        from plugin_manager.bus import bus
+        counts = {
+            iface: sum(1 for e in bus.list_entries(iface) if e.is_dispatchable())
+            for iface in ("FrameAnalyzer", "Tracker", "Segmenter",
+                          "PlateRecognizer", "PipelineConsumer", "EventConsumer")
+        }
+    except Exception:
+        counts = {}
+    return {"cameras": snap, "plugins_dispatchable": counts}
+

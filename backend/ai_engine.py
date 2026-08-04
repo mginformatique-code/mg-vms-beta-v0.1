@@ -13,12 +13,14 @@ import asyncio
 import base64
 import logging
 import os
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import httpx
 
 from database import db
+from pipeline_metrics import pipeline_metrics
 from realtime import broadcast_alert
 
 logger = logging.getLogger("ai-engine")
@@ -979,15 +981,32 @@ async def _process_camera(cam: dict) -> None:
                 width=int(frame.shape[1]) if _has_shape else 0,
                 height=int(frame.shape[0]) if _has_shape else 0,
             )
-            _pr = await _plugin_bus.dispatch_pipeline(
-                _frame,
-                camera_config={"camera_id": cam["id"], "site_id": cam.get("site_id")},
-                precomputed_detections=det_objs,
-                run_business=True,
-                run_segmentation=False,  # coûteux, opt-in via settings
-                emit_events=True,        # propage vers Telegram/Discord/SMTP
-                timeout_s=3.0,
-            )
+            # P9+ · Réactivité temps réel — le dispatch pipeline reste await mais
+            # avec un timeout resserré (2s max) pour ne pas bloquer la boucle vidéo.
+            # Métriques accumulées dans `pipeline_metrics` pour /api/diagnostics/pipeline-metrics.
+            _pipeline_t0 = time.perf_counter()
+            _pipeline_ok = True
+            try:
+                _pr = await _plugin_bus.dispatch_pipeline(
+                    _frame,
+                    camera_config={"camera_id": cam["id"], "site_id": cam.get("site_id")},
+                    precomputed_detections=det_objs,
+                    run_business=True,
+                    run_segmentation=False,
+                    emit_events=True,
+                    timeout_s=2.0,
+                )
+                _pipeline_ms = (time.perf_counter() - _pipeline_t0) * 1000
+                pipeline_metrics.record(cam["id"], _pipeline_ms,
+                                         plugins_used=_pr.plugins_used or {})
+            except Exception:
+                _pipeline_ms = (time.perf_counter() - _pipeline_t0) * 1000
+                pipeline_metrics.record_error(cam["id"], _pipeline_ms)
+                logger.exception("dispatch_pipeline error — skip plugin block")
+                _pipeline_ok = False
+                _pr = None
+
+            if _pipeline_ok and _pr:
             # Persistence des événements métier générés
             for be in _pr.business_events:
                 if not _cooldown_ok(f"{cam['id']}:{be.get('type', 'plugin')}", EVENT_COOLDOWN, now):
