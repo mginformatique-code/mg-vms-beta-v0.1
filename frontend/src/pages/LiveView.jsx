@@ -2,7 +2,9 @@ import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import WebRTCPlayer from "@/components/WebRTCPlayer";
-import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, User, Car, Truck, Bike, PawPrint, ScanLine, Flame, AlertOctagon, HardHat, MapPin, Activity } from "lucide-react";
+import CameraControlOverlay from "@/pages/CameraControlOverlay";
+import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, User, Car, Truck, Bike, PawPrint, ScanLine, Flame, AlertOctagon, HardHat, MapPin, Activity, Lightbulb, Moon, Siren, Volume2, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 
 const LAYOUTS = [1, 4, 9, 16, 25, 36, 49, 64];
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -166,6 +168,10 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
         <span className="text-[9px] mono text-white/70">{cam?.site_name || ""}</span>
         <span className="text-[9px] mono text-white/70">{new Date().toLocaleTimeString()}</span>
       </div>
+      {/* v0.4 · Overlay contrôles caméra (Projecteur, IR, Sirène, TTS, Reboot) */}
+      {online && cam?.id && hover && (
+        <CameraControlOverlay cam={cam} />
+      )}
       {hover && online && cam?.ptz_enabled && canPtz && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/30" data-testid="ptz-controls">
           <div className="flex items-center gap-3">

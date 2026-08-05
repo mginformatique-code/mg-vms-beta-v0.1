@@ -48,6 +48,14 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 - ✅ Health Dashboard UI mis à jour pour la nouvelle forme recorder
 - ✅ Suite pytest : 12/12 (health + pipeline + PTZ/recorder) — voir `tests/test_ptz_and_recorder_health.py`
 
+**Session 15 (Feb 2026)** — Pipeline v2 · Provider natif YOLO + Designer + Overlay caméra :
+- 🎯 **YoloDetectionProvider natif** (`pipeline_v2/providers/yolo_provider.py`) — implémente `DetectionProvider` v2, réutilise `ai_engine._model` (aucune duplication modèle), gère fallback si YOLO pas chargé
+- 🧩 **Pipeline Designer UI** (`/pipeline-designer`) — assemble Camera → Detector → Tracker → ANPR → Fusion → Consumer, catalogue de plugins filtré par interface, sélection multi-providers, 6 stratégies fusion configurables, config JSON compilée en preview. Remplacera à terme le Plugin Manager.
+- 🎛️ **CameraControlOverlay** (`/pages/CameraControlOverlay.jsx`) intégré à LiveView — 5 boutons overlay (Projecteur / IR / Sirène / TTS / Reboot) apparaissent au hover sur chaque tuile caméra, actions via `POST /cameras/{id}/relay/{token}/{on|off}`, `POST /cameras/{id}/audio/tts`, `POST /cameras/{id}/reboot`
+- 🧭 **Menu** enrichi avec "Pipeline Designer" (section technicien)
+- ✅ Tests : 6 nouveaux `test_yolo_provider_and_ui.py` + 69 régression = **75/75 OK**
+- 📸 Screenshots validés : Pipeline Designer affiche 12 detectors dans le picker (YOLOv11, YOLOv8, ONNX, TensorRT, OpenVINO, RT-DETR, YOLO-NAS...), LiveView montre les 5 boutons overlay en bas-gauche de chaque tuile
+
 **Session 14 (Feb 2026)** — Pipeline Engine v2 · Refonte architecture IA :
 - 🏗️ **Bascule majeure** : le **Pipeline Engine** devient le chef d'orchestre au lieu du Plugin Manager. Les plugins ne pilotent plus, ils **fournissent** (providers) ou **consomment** (consumers).
 - 📦 **Nouveau package** `/app/backend/pipeline_v2/` (6 modules, ~1100 lignes) : interfaces (Protocols DetectionProvider/TrackingProvider/PlateRecognitionProvider/PipelineConsumer + dataclasses Frame/BBox/Detection/Track/PlateResult), fusion (6 stratégies configurables par caméra), stages (5 étapes avec timeout+timing), engine (build_default + stats + describe), scheduler (multi-caméra FPS/priorité/backpressure), adapter (compat rétro v1)

@@ -26,6 +26,7 @@ import GPUStatus from "@/pages/GPUStatus";
 import AnprBenchmark from "@/pages/AnprBenchmark";
 import PipelineVideo from "@/pages/PipelineVideo";
 import AIPipelineMonitor from "@/pages/AIPipelineMonitor";
+import PipelineDesigner from "@/pages/PipelineDesigner";
 import UsersPage from "@/pages/Users";
 import SettingsPage from "@/pages/Settings";
 import Notifications from "@/pages/Notifications";
@@ -70,6 +71,7 @@ function AppRoutes() {
       <Route path="/anpr-benchmark" element={<Protected><AnprBenchmark /></Protected>} />
       <Route path="/pipeline" element={<Protected><PipelineVideo /></Protected>} />
       <Route path="/pipeline-monitor" element={<Protected><AIPipelineMonitor /></Protected>} />
+      <Route path="/pipeline-designer" element={<Protected><PipelineDesigner /></Protected>} />
       <Route path="/users" element={<Protected><UsersPage /></Protected>} />
       <Route path="/notifications" element={<Protected><Notifications /></Protected>} />
       <Route path="/plugins" element={<Protected><Plugins /></Protected>} />
