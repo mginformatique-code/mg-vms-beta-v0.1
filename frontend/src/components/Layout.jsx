@@ -5,7 +5,7 @@ import api from "@/lib/api";
 import Logo from "@/components/Logo";
 import {
   LayoutDashboard, Grid3x3, Cctv, Building2, ScanLine, Car, Bell, Map, Zap,
-  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock, Layers, ChevronDown, ChevronRight, LineChart, Sparkles,
+  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock, Layers, ChevronDown, ChevronRight, LineChart, Sparkles, ShieldCheck,
 } from "lucide-react";
 
 const PLUGIN_ICON = {
@@ -40,6 +40,7 @@ const NAV = [
   ]},
   { group: "nav.admin", items: [
     { to: "/pipeline-center", icon: LineChart, key: "nav.pipeline_center", role: "technician" },
+    { to: "/security-center", icon: ShieldCheck, key: "nav.security_center", role: "admin" },
     { to: "/network", icon: Network, key: "nav.network", role: "client" },
     { to: "/plugins", icon: Puzzle, key: "nav.plugins", role: "admin" },
     { to: "/users", icon: Users, key: "nav.users", role: "admin" },

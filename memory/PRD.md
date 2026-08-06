@@ -25,6 +25,15 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 
 ### État Feb 2026 — sessions successives
 
+**Session 48 (Feb 2026)** — v0.5.4-B · Security Center + Security Score :
+- 🛡️ Nouvelle page `/security-center` avec ring score 0-100 + grade A-E.
+- 📋 10 critères pondérés (HTTPS, JWT env, mots de passe, MFA, backups,
+  sandbox plugins, firmware caméras, mongo auth, disque, certs TLS).
+- 💡 Conseil actionnable par critère non conforme + poids visible (+10).
+- 🔗 Bloc "Actions rapides" (Sessions/Utilisateurs/Audit/Caméras).
+- 🌐 Sidebar Administration : entrée Centre de sécurité, i18n FR/EN.
+- 📊 8/8 tests v0.5.4 verts (score + auth requise).
+
 **Session 47 (Feb 2026)** — v0.5.4-A · Session Manager + timeout :
 - 🔐 Sessions tracquées serveur (collection `sessions` Mongo) avec JWT
   enrichi d'un `jti` unique, révocation immédiate, timeout configurable.

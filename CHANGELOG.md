@@ -7,6 +7,37 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
 
+## [v0.5.4-B] — 2026-02 — Security Center + Security Score (Session 48)
+
+### Added (backend)
+- `GET /api/security/score` — analyse **10 critères pondérés** :
+  * `https` (URL publique en `https://`)
+  * `jwt_env` (JWT_SECRET défini, ≥ 24 car., non par défaut)
+  * `strong_passwords` (tous les users en bcrypt)
+  * `mfa` (tous les admins avec `twofa_enabled=true`)
+  * `backups` (dernière < 48 h)
+  * `plugin_sandbox` (allow-list stricte v0.4.3)
+  * `camera_firmware` (≥ 70 % des caméras avec `firmware`)
+  * `mongo_auth` (URL Mongo avec `@` ou local trusté)
+  * `disk` (`psutil.disk_usage` < 80 %)
+  * `certs` (certificat TLS expirant dans > 15 j — connexion SSL réelle)
+- Réponse : `{score, grade (A-E), checks: {id: {ok, detail, advice?, label, weight}}}`.
+
+### Added (frontend)
+- Nouvelle page **`/security-center`** (route protégée admin).
+- Composants : `ScoreRing` (SVG animé, gradient de couleur), grille 10 critères
+  avec icônes lucide (Lock/Key/ShieldCheck/Cloud/Zap/Camera/Database/HardDrive/
+  Server), badge poids `+10`, conseil actionnable en jaune si non-conforme.
+- Bloc "Actions rapides" avec navigation vers Sessions / Utilisateurs /
+  Journal d'audit / Caméras.
+- Sidebar Administration : entrée **Centre de sécurité** entre Suivi des
+  performances et Supervision réseau (i18n FR/EN).
+
+### Tests
+- 2 nouveaux tests backend : structure du score + auth requise.
+- 8/8 tests v0.5.4 verts (Phase A + B).
+
+
 ## [v0.5.4-A] — 2026-02 — Session Manager + timeout configurable (Session 47)
 
 ### Contexte

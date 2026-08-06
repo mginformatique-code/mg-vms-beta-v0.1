@@ -18,6 +18,7 @@ import Sites from "@/pages/Sites";
 import MapView from "@/pages/MapView";
 import MapCenter from "@/pages/MapCenter";
 import SessionExpiryWatcher from "@/components/SessionExpiryWatcher";
+import SecurityCenter from "@/pages/SecurityCenter";
 import Anpr from "@/pages/Anpr";
 import Events from "@/pages/Events";
 import VehicleSearch from "@/pages/VehicleSearch";
@@ -65,6 +66,7 @@ function AppRoutes() {
       <Route path="/cameras" element={<Protected><Cameras /></Protected>} />
       <Route path="/sites" element={<Protected><Sites /></Protected>} />
       <Route path="/map" element={<Protected><MapCenter /></Protected>} />
+      <Route path="/security-center" element={<Protected><SecurityCenter /></Protected>} />
       <Route path="/map-legacy" element={<Protected><MapView /></Protected>} />
       <Route path="/anpr" element={<Protected><Anpr /></Protected>} />
       <Route path="/smart-zones" element={<Protected><SmartZones /></Protected>} />

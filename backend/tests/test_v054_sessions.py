@@ -92,3 +92,23 @@ def test_security_endpoints_require_auth():
     for path in ("/api/security/sessions", "/api/security/timeout"):
         r = requests.get(f"{BASE_URL}{path}", timeout=6)
         assert r.status_code in (401, 403)
+
+
+def test_security_score_endpoint():
+    """Phase B — /api/security/score renvoie un score 0-100 + 10 critères."""
+    t = _login()
+    r = requests.get(f"{BASE_URL}/api/security/score", headers=_auth(t), timeout=10)
+    assert r.status_code == 200
+    d = r.json()
+    assert 0 <= d["score"] <= 100
+    assert d["grade"] in ("A", "B", "C", "D", "E")
+    expected = {"https", "jwt_env", "strong_passwords", "mfa", "backups",
+                 "plugin_sandbox", "camera_firmware", "mongo_auth", "disk", "certs"}
+    assert expected.issubset(set(d["checks"].keys()))
+    for k, v in d["checks"].items():
+        assert "ok" in v and "label" in v and "weight" in v and "detail" in v
+
+
+def test_security_score_requires_auth():
+    r = requests.get(f"{BASE_URL}/api/security/score", timeout=6)
+    assert r.status_code in (401, 403)
