@@ -7,6 +7,63 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
 
+## [v0.5.2.c] — 2026-02 — Map Center · Phases 2, 3 et 4 (Session 45)
+
+### Contexte
+Livraison combinée des 3 phases restantes du Map Center comme demandé par
+l'utilisateur : cônes de couverture colorés + badges IA (Phase 2), Mode
+Audit + photos par caméra + couches on/off (Phase 3), outils de mesure +
+exports PNG/PDF/CSV (Phase 4).
+
+### Added (frontend — MapCenter.jsx)
+
+**Phase 2 — Cônes colorés + Badges IA**
+- Heuristique `coverageQuality(pos)` → vert (couverture correcte) / jaune
+  (moyenne) / rouge (limite) selon (angle_h, range_m, height_m). Le wedge
+  FOV est teinté et le cerclé de la caméra reprend la même couleur.
+- Détection automatique des rôles caméra (`detectCameraRoles`) : ANPR
+  (plugin), PTZ (driver/model/is_ptz), Thermal (model/plugin), IA (detect
+  enabled), REC (record enabled). Badges rendus sous l'icône caméra avec
+  contre-rotation (toujours lisibles).
+
+**Phase 3 — Mode Audit + Photos + Layers**
+- Fonction `auditCamera(cam)` détectant les caméras "incomplètes" :
+  offline, sans photo, sans hauteur, sans angle, non positionnée, sans
+  driver, firmware absent.
+- Bouton **Audit** dans la toolbar (highlight jaune, compteur global).
+- Panneau **Audit — Synthèse** (top-droit) : décompte par flag + liste
+  cliquable des caméras avec problèmes (`map-audit-cam-*`).
+- Halo pointillé jaune autour des caméras en défaut audit.
+- Panneau caméra : bandeau audit (avec badges de flags) + section
+  **Photos** (grille 3 colonnes, types réelle/install/câblage/armoire/env,
+  upload FileReader → dataURI, max 4 MB, suppression au survol).
+- Couches on/off (`map-layer-fov`, `-name`, `-badges`, `-status`) —
+  toggle instantané sur toutes les caméras.
+
+**Phase 4 — Outils de mesure + Exports**
+- Composant `MeasureLayer` : distance (2 clics → segment + longueur en m),
+  surface (polygone + double-clic pour finir → aire en m²), rayon (centre
+  + bord → cercle et R en m). Utilise `scale_m_per_px` du plan si défini
+  (fallback 5 cm/px).
+- Toolbar mesures (`D` / `S` / `R`) + bouton de reset (`Trash2`).
+- Exports :
+  * **PNG** (canvas Konva → dataURL x2 pixel ratio)
+  * **PDF** (nouvelle fenêtre imprimable avec image + tableau caméras)
+  * **CSV** (Nom, IP, Statut, Driver, Modèle, Hauteur, Angle H, Portée,
+    Rotation, Objectif, Technicien, N° série, Date, Notes)
+  * **AUDIT CSV** (mode audit uniquement, liste des caméras en défaut)
+
+### Added (backend)
+- `MapPositionInput.photos: Optional[list]` — le champ `photos` peut
+  maintenant être persisté dans `map_position.photos` (list de
+  `{type, data_uri, uploaded_at}`).
+
+### Tests
+- 1 nouveau test backend : `test_camera_position_accepts_photos` (upload
+  + retrieve).
+- 102/102 tests critiques verts v0.4.x/v0.5.x, zéro régression.
+
+
 ## [v0.5.2.b] — 2026-02 — Sidebar sous-menus + renommages FR (Session 44)
 
 ### Contexte

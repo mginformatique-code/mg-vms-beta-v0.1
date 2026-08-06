@@ -25,6 +25,21 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 
 ### État Feb 2026 — sessions successives
 
+**Session 45 (Feb 2026)** — v0.5.2.c · **Map Center Phases 2/3/4** :
+- 🎨 Phase 2 : cônes de couverture colorés vert/jaune/rouge (heuristique
+  angle+portée+hauteur), badges IA (ANPR/PTZ/TH/IA/REC) sous l'icône
+  caméra avec contre-rotation.
+- 📋 Phase 3 : Mode Audit (halo jaune sur caméras en défaut + panneau
+  synthèse + liste cliquable), photos par caméra (upload dataURI 5 types
+  réelle/install/câble/armoire/env, max 4 MB), toggles couches
+  (FOV/Noms/IA/Statut).
+- 📐 Phase 4 : outils mesure Distance/Surface/Rayon (utilise
+  `scale_m_per_px` du plan), exports PNG (canvas Konva x2), PDF
+  (fenêtre imprimable avec image + tableau caméras), CSV caméras,
+  CSV audit.
+- 🗄️ Backend : `MapPositionInput.photos: list` (persistance photos).
+- 📊 Tests : 1 nouveau backend (photos) + 102/102 critiques verts.
+
 **Session 44 (Feb 2026)** — v0.5.2.b · Sidebar sous-menus + renommages :
 - 📂 Sous-menus dépliables : **Accueil** (Welcome Center + Tableau de bord)
   et **Événements** (Événements + Alertes + Recherche véhicule).

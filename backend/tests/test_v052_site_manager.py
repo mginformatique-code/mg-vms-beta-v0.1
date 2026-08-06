@@ -178,3 +178,30 @@ def test_map_endpoints_require_auth():
     assert r.status_code in (401, 403)
     r2 = requests.get(f"{BASE_URL}/api/site-manager/plans", timeout=6)
     assert r2.status_code in (401, 403)
+
+
+def test_camera_position_accepts_photos(token, site_id):
+    """v0.5.2.c · Phase 3 — le champ photos est persisté dans map_position."""
+    p = requests.post(f"{BASE_URL}/api/site-manager/plans", headers=_auth(token),
+                       json={"site_id": site_id, "name": "PhotoPlan", "type": "rdc",
+                              "image_data_uri": IMG}, timeout=8).json()
+    pid = p["id"]
+    cams = requests.get(f"{BASE_URL}/api/cameras", headers=_auth(token), timeout=8).json()
+    cam = next((c for c in cams if c.get("site_id") == site_id), None)
+    if not cam:
+        pytest.skip("Pas de caméra")
+    cid = cam["id"]
+    photos = [
+        {"type": "install", "data_uri": IMG, "uploaded_at": "2026-02-01T10:00:00Z"},
+        {"type": "cable", "data_uri": IMG, "uploaded_at": "2026-02-01T10:05:00Z"},
+    ]
+    r = requests.put(f"{BASE_URL}/api/site-manager/cameras/{cid}/position",
+                      headers=_auth(token),
+                      json={"plan_id": pid, "x": 10, "y": 10, "photos": photos},
+                      timeout=8)
+    assert r.status_code == 200
+    saved = r.json()["map_position"]
+    assert len(saved.get("photos", [])) == 2
+    assert saved["photos"][0]["type"] == "install"
+    # cleanup
+    requests.delete(f"{BASE_URL}/api/site-manager/plans/{pid}", headers=_auth(token), timeout=8)

@@ -118,6 +118,9 @@ class MapPositionInput(BaseModel):
     real_height_m: Optional[float] = None
     real_angle: Optional[float] = None
     install_direction: Optional[str] = None
+    # v0.5.2.c · Phase 3 — photos d'installation embarquées dans map_position
+    # (chaque item {type, data_uri, uploaded_at}, taille validée côté frontend).
+    photos: Optional[list] = None
 
 
 # ═══════════════════════════════════════════════════════════════════

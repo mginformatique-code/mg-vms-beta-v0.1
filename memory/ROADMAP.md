@@ -53,6 +53,8 @@ Toute nouvelle page appartient à EXACTEMENT un Center. Un Center = un domaine, 
 Objectif : socle client pilote sécurisé + expérience d'accueil pro.
 
 - ✅ v0.5.1.b · HTTPS + Nginx + docker-compose.prod + audit sécurité *(livré)*
+- ✅ v0.5.2.c · **Map Center Phases 2 + 3 + 4** — cônes colorés + badges IA + Mode Audit + photos + couches + mesures + exports PNG/PDF/CSV *(livré Feb 2026)*
+- ✅ v0.5.2.b · Sidebar sous-menus dépliables (Accueil/Événements) + renommages FR *(livré Feb 2026)*
 - ✅ v0.5.2 · **Map Center Phase 1** — Site Designer (Konva, hiérarchie complète, drag&drop, panneau install) *(livré Feb 2026)*
 - ✅ v0.5.1.d · Réorganisation menu + Plugin Manager NG unifié + tabs Hardware/GPU dans Pipeline Center *(livré Feb 2026)*
 - ✅ v0.5.1.c · Multi-plugin events + Recherche véhicule enrichie (frame+crops+badges) *(livré Feb 2026)*
