@@ -7,6 +7,40 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
 
+## [v0.5.5.c] — 2026-02 — Désactivation MFA à distance par un admin
+
+### Added (backend)
+- Nouveau endpoint **`DELETE /api/users/{user_id}/mfa`** (admin only) :
+  * Efface `twofa_enabled`, `twofa_secret` et purge les
+    `twofa_recovery_hashes` de l'utilisateur cible.
+  * Retourne `400` si l'admin cible son propre compte (redirection
+    explicite vers `/security-center/mfa`).
+  * Retourne `404` si utilisateur introuvable, `400` si MFA déjà off.
+  * Audit trail : action `user_mfa_disabled_by_admin` avec l'email
+    admin + l'email cible.
+
+### Added (frontend)
+- Nouvelle colonne **MFA** dans la table Gestion des utilisateurs :
+  badge vert « ACTIVÉE » avec icône ShieldCheck si l'utilisateur a
+  activé la MFA, `—` sinon.
+- Nouveau bouton d'action **ShieldOff** (orange) dans la ligne des
+  utilisateurs ayant la MFA activée : ouvre une confirmation puis
+  appelle `DELETE /users/{id}/mfa`. L'utilisateur pourra ensuite se
+  reconnecter sans code TOTP et refaire un enrollement propre.
+- Le bouton n'apparaît **pas** pour son propre compte (protection
+  anti-lockout).
+
+### Tests
+- `test_v055c_admin_disable_mfa.py` — 5/5 verts :
+  * Auth requise (401)
+  * Impossible sur son propre compte (400)
+  * User inconnu (404)
+  * MFA déjà off (400)
+  * Happy path : reset côté API + purge côté DB (twofa_enabled=False,
+    twofa_secret=None, twofa_recovery_hashes=[])
+
+---
+
 ## [v0.5.5.b] — 2026-02 — MFA & Sessions actives : pages dédiées
 
 ### Added (frontend)

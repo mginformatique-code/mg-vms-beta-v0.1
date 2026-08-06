@@ -102,3 +102,42 @@ async def delete_user(user_id: str, user: dict = Depends(require_role("admin")))
     await db.users.delete_one({"id": user_id})
     await log_audit(user, "user_deleted", user_id)
     return {"ok": True}
+
+
+@users_router.delete("/users/{user_id}/mfa")
+async def admin_disable_mfa(user_id: str,
+                             user: dict = Depends(require_role("admin"))):
+    """Désactive la MFA d'un utilisateur (usage : perte du téléphone).
+
+    Efface ``twofa_enabled``, ``twofa_secret`` et les hashes des codes de
+    récupération, permettant à l'utilisateur de se reconnecter avec son
+    seul mot de passe et de refaire un enrollment complet.
+
+    Réservé aux admins. Ne peut pas s'appliquer sur son propre compte
+    depuis cet endpoint (on utilise `/auth/2fa/disable` pour se
+    désactiver soi-même — flux avec confirmation dédiée).
+    """
+    if user_id == user["id"]:
+        raise HTTPException(
+            400,
+            "Utilisez la page MFA (Centre de sécurité → MFA) pour "
+            "désactiver la MFA de votre propre compte.",
+        )
+    target = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(404, "Utilisateur introuvable")
+    if not target.get("twofa_enabled"):
+        raise HTTPException(400, "La MFA n'est pas activée pour cet utilisateur")
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {
+            "twofa_enabled": False,
+            "twofa_secret": None,
+            "twofa_recovery_hashes": [],
+        }},
+    )
+    await log_audit(
+        user, "user_mfa_disabled_by_admin", target.get("email", user_id),
+        f"admin={user.get('email')}"
+    )
+    return {"ok": True, "user_id": user_id, "email": target.get("email")}

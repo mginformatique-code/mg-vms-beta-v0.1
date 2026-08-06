@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Trash2, UserCog, Loader2, Building2, ShieldCheck, Pencil, Eye, EyeOff } from "lucide-react";
+import { Plus, Trash2, UserCog, Loader2, Building2, ShieldCheck, ShieldOff, Pencil, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 
 const ROLES = ["admin", "technician", "client", "readonly", "guest"];
@@ -45,6 +45,14 @@ export default function UsersPage() {
   const changeRole = async (u, role) => { await api.put(`/users/${u.id}`, { role }); toast.success("Rôle modifié"); load(); };
   const toggleActive = async (u) => { await api.put(`/users/${u.id}`, { active: !u.active }); load(); };
   const del = async (u) => { if (!window.confirm(`Supprimer ${u.email} ?`)) return; try { await api.delete(`/users/${u.id}`); toast.success("Supprimé"); load(); } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); } };
+  const disableMfa = async (u) => {
+    if (!window.confirm(`Désactiver la MFA de ${u.email} ?\n\nL'utilisateur pourra se reconnecter avec son seul mot de passe et devra refaire un enrollement MFA depuis son compte.`)) return;
+    try {
+      await api.delete(`/users/${u.id}/mfa`);
+      toast.success(`MFA désactivée pour ${u.email}`);
+      load();
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
   const openSites = (u) => { setSiteUser(u); setSelSites(u.site_ids || []); };
   const toggleSite = (id) => setSelSites((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]);
   const saveSites = async () => { await api.put(`/users/${siteUser.id}`, { site_ids: selSites }); toast.success(t("users.sites")); setSiteUser(null); load(); };
@@ -98,7 +106,7 @@ export default function UsersPage() {
       <div className="border border-border bg-card overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-            <th className="px-3 py-2">{t("common.name")}</th><th className="px-3 py-2">{t("common.email")}</th><th className="px-3 py-2">{t("common.role")}</th><th className="px-3 py-2">{t("users.sites")}</th><th className="px-3 py-2">{t("common.status")}</th><th className="px-3 py-2 text-right">{t("common.actions")}</th>
+            <th className="px-3 py-2">{t("common.name")}</th><th className="px-3 py-2">{t("common.email")}</th><th className="px-3 py-2">{t("common.role")}</th><th className="px-3 py-2">{t("users.sites")}</th><th className="px-3 py-2">MFA</th><th className="px-3 py-2">{t("common.status")}</th><th className="px-3 py-2 text-right">{t("common.actions")}</th>
           </tr></thead>
           <tbody>
             {users.map((u) => (
@@ -112,12 +120,26 @@ export default function UsersPage() {
                   </select>
                 </td>
                 <td className="px-3 py-2 text-xs text-muted-foreground max-w-[180px] truncate" title={siteLabel(u)}>{siteLabel(u)}</td>
+                <td className="px-3 py-2">
+                  {u.twofa_enabled ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] mono uppercase tracking-wider px-1.5 py-0.5 bg-[#00E676]/15 text-[#00E676] border border-[#00E676]/40" data-testid={`user-mfa-${u.id}`}>
+                      <ShieldCheck size={10} /> Activée
+                    </span>
+                  ) : (
+                    <span className="text-[10px] mono uppercase tracking-wider text-muted-foreground" data-testid={`user-mfa-${u.id}`}>—</span>
+                  )}
+                </td>
                 <td className="px-3 py-2"><button onClick={() => toggleActive(u)} disabled={u.id === me.id} className={`text-xs px-2 py-0.5 border ${u.active ? "mg-online border-[#00E676]/40" : "mg-offline border-[#FF3333]/40"}`}>{u.active ? t("common.active") : "Inactif"}</button></td>
                 <td className="px-3 py-2">
                   <div className="flex items-center justify-end gap-1">
                     <button onClick={() => openEdit(u)} data-testid="edit-user-btn" title="Modifier" className="p-1.5 hover:bg-secondary text-[#00E5FF]"><Pencil size={15} /></button>
                     {u.role !== "admin" && <button onClick={() => openPerms(u)} data-testid="user-perms-btn" title="Permissions" className="p-1.5 hover:bg-secondary text-[#0044FF]"><ShieldCheck size={15} /></button>}
                     {!["admin", "technician"].includes(u.role) && <button onClick={() => openSites(u)} data-testid="user-sites-btn" title={t("users.sites")} className="p-1.5 hover:bg-secondary"><Building2 size={15} /></button>}
+                    {u.twofa_enabled && u.id !== me.id && (
+                      <button onClick={() => disableMfa(u)} data-testid={`user-disable-mfa-${u.id}`} title="Désactiver la MFA (perte du téléphone)" className="p-1.5 hover:bg-secondary text-[#FFB800]">
+                        <ShieldOff size={15} />
+                      </button>
+                    )}
                     {u.id !== me.id && <button onClick={() => del(u)} data-testid="delete-user-btn" className="p-1.5 hover:bg-secondary text-[#FF3333]"><Trash2 size={15} /></button>}
                   </div>
                 </td>
@@ -191,7 +213,7 @@ export default function UsersPage() {
             </DialogTitle>
           </DialogHeader>
           <p className="text-xs text-muted-foreground mb-2">
-            Modifiez le nom, l'email ou le mot de passe. Laissez le champ mot de passe vide pour le conserver.
+            Modifiez le nom, l&apos;email ou le mot de passe. Laissez le champ mot de passe vide pour le conserver.
           </p>
           <div className="space-y-3">
             <div>
@@ -225,7 +247,7 @@ export default function UsersPage() {
             </div>
             {editUser?.id === me?.id && (
               <div className="text-[11px] p-2 border border-[#FFB800]/40 bg-[#FFB800]/10 text-[#FFB800]">
-                Vous modifiez votre propre compte. Si vous changez l'email ou le mot de passe, vous devrez vous reconnecter.
+                Vous modifiez votre propre compte. Si vous changez l&apos;email ou le mot de passe, vous devrez vous reconnecter.
               </div>
             )}
           </div>
