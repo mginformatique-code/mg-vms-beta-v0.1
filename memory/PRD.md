@@ -25,6 +25,25 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 
 ### État Feb 2026 — sessions successives
 
+**Session 43 (Feb 2026)** — v0.5.2 · **Map Center Phase 1** (Site Designer) :
+- 🗺️ Refonte `/map` en Map Center basé sur **Konva.js / react-konva**
+  (moteur canvas 2D évolutif : zoom, pan, drag, rotation, layers, mesures).
+- 🏗️ Hiérarchie complète : Client → Site → Bâtiment → Niveau → Plan → Caméras.
+- 🗄️ Nouveau modèle Mongo : collections `buildings`, `site_plans`, extension
+  `cameras.map_position` avec tous les paramètres d'installation (rotation,
+  hauteur, angle H/V, portée, objectif, fixation mur/plafond/mât, technicien,
+  N° série, date d'installation, notes).
+- 🎨 Composants : SiteTree, PlanBackground, CameraNode (FOV wedge coloré +
+  statut + halo sélection), CameraPanel droit avec toutes les infos et
+  bouton "Voir dans Camera Center" (bidi navigation).
+- ⚡ Auto-save position debounced (400 ms), zoom molette centré curseur.
+- 🛡️ Sécurité : scope `allowed_sites`, rôle `technician` pour écriture,
+  cascade cohérente (delete plan ⇒ désassocie caméras).
+- 📊 Tests : 7 nouveaux backend (CRUD, cascade, merge partiel, validation
+  image, sites enrichis, auth). Total : 87/87 critiques verts.
+- 🚀 Architecture pensée pour Phase 2+ : câbles, switches, NVR, baies,
+  Wi-Fi, portes, zones intrusion — pas de refactor requis.
+
 **Session 42 (Feb 2026)** — v0.5.1.d · Réorganisation menu final + Plugin Manager unifié :
 - 🧩 Route `/plugins` = **PluginManagerNG** directement (fin du split
   cards + NG). Bouton **Benchmark** ajouté sur chaque plugin d'interface

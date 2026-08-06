@@ -33,6 +33,12 @@ class SiteInput(BaseModel):
     address: str = ""
     lat: float = 45.764
     lng: float = 4.8357
+    # v0.5.2 · Map Center — infos enrichies pour préparation d'installation
+    # et audit. Tous ces champs sont optionnels et n'impactent pas l'existant.
+    client_name: str = ""
+    phone: str = ""
+    contact_name: str = ""
+    notes: str = ""
 
 
 @api_router.get("/sites")

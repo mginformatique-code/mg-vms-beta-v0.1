@@ -16,6 +16,7 @@ import Hardware from "@/pages/Hardware";
 import Cameras from "@/pages/Cameras";
 import Sites from "@/pages/Sites";
 import MapView from "@/pages/MapView";
+import MapCenter from "@/pages/MapCenter";
 import Anpr from "@/pages/Anpr";
 import Events from "@/pages/Events";
 import VehicleSearch from "@/pages/VehicleSearch";
@@ -62,7 +63,8 @@ function AppRoutes() {
       <Route path="/hardware" element={<Protected><Hardware /></Protected>} />
       <Route path="/cameras" element={<Protected><Cameras /></Protected>} />
       <Route path="/sites" element={<Protected><Sites /></Protected>} />
-      <Route path="/map" element={<Protected><MapView /></Protected>} />
+      <Route path="/map" element={<Protected><MapCenter /></Protected>} />
+      <Route path="/map-legacy" element={<Protected><MapView /></Protected>} />
       <Route path="/anpr" element={<Protected><Anpr /></Protected>} />
       <Route path="/smart-zones" element={<Protected><SmartZones /></Protected>} />
       <Route path="/workflows" element={<Protected><Workflows /></Protected>} />

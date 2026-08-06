@@ -7,6 +7,77 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
 
+## [v0.5.2] — 2026-02 — Map Center · Phase 1 · Site Designer (Session 43)
+
+### Contexte
+Le menu "Carte" devient un vrai **Map Center**, chaînon manquant pour la
+préparation d'installation, la documentation et l'audit d'un système. Phase 1
+livrée avec l'architecture évolutive convenue (Client → Site → Bâtiment →
+Niveau → Plan → Caméras → Zones), moteur **Konva.js / react-konva**.
+
+### Added (backend)
+- Nouveau module `backend/routes/site_manager.py` (préfixe `/api/site-manager/`).
+- Nouvelle collection Mongo **`buildings`** : `{id, site_id, name, order, notes}`.
+- Nouvelle collection Mongo **`site_plans`** : `{id, site_id, building_id?,
+  level_name?, name, type, image_data_uri, scale_m_per_px?,
+  orientation_deg?, unit, order, width, height}` — types :
+  `satellite|rdc|etage|parking|entrepot|exterieur|drone|autre`.
+- Extension champ **`map_position`** sur `cameras` (merge partiel) :
+  `{plan_id, x, y, rotation, height_m, angle_h, angle_v, range_m,
+    color, fixture, lens_mm, install_notes, technician, serial,
+    install_date, real_height_m, real_angle, install_direction}`.
+- Extension `SiteInput` : `client_name`, `phone`, `contact_name`, `notes`.
+- Endpoints :
+  * `GET/POST/PUT/DELETE /api/site-manager/buildings`
+  * `GET/POST/PUT/DELETE /api/site-manager/plans` (list sans image par défaut,
+    GET single avec image, validation `data:image/*` + limite 22 MB)
+  * `GET /api/site-manager/cameras` (filtre `plan_id` ou `site_id`)
+  * `PUT /api/site-manager/cameras/{id}/position` (merge partiel)
+  * `DELETE /api/site-manager/cameras/{id}/position` (clear)
+- Sécurité : scope `allowed_sites(user)` respecté à chaque route, écriture
+  = rôle `technician`.
+- Cascade : delete plan ⇒ désassocie automatiquement les caméras positionnées ;
+  delete bâtiment ⇒ détache ses plans (garde-fou).
+
+### Added (frontend)
+- **Nouvelle page `MapCenter.jsx`** (route `/map`, ancien MapView reste
+  disponible sur `/map-legacy`).
+- Dépendances : `konva@10.3.0`, `react-konva@19.2.5`, `use-image@1.1.4`.
+- Composants :
+  * `SiteTree` — arbre Sites > Bâtiments > Plans, avec recherche, boutons
+    "+ Bâtiment" et "+ Plan", compteurs de caméras par plan.
+  * `PlanBackground` (`react-konva Image`) — précharge async.
+  * `CameraNode` (`Konva Group`) — icône caméra + wedge FOV coloré (angle
+    horizontal + portée), poignée drag&drop, statut visuel (dot vert/
+    jaune/rouge), halo si sélectionné, double-clic → `/cameras?focus=id`.
+  * `CameraPanel` (droite) — infos identité + position/FOV (rotation,
+    portée, angle H/V, hauteur, objectif, fixation) + installation
+    (technicien, N° série, date, notes) + badges plugins actifs +
+    bouton "Voir dans Camera Center".
+  * Toolbar canvas : Zoom in/out (molette centrée curseur), pan glisser,
+    recentrer. Bornes `[0.15, 5]`.
+  * Barre "Caméras à placer" (bas gauche) — placer une caméra du site
+    au centre du plan en 1 clic. Auto-save de position (debounced 400 ms).
+
+### Tests
+- `tests/test_v052_site_manager.py` — **7 tests** :
+  * CRUD bâtiments (create/list/patch/delete).
+  * Lifecycle plans + projection MongoDB (list sans `image_data_uri`, GET
+    single avec image).
+  * Rejet image invalide (400).
+  * Merge partiel `map_position` (patch `x` conserve `height_m`).
+  * Delete plan cascade → caméras désassociées.
+  * `SiteInput` accepte les nouveaux champs enrichis.
+  * Authentification requise sur toutes les routes.
+- 87/87 tests critiques v0.4.x/v0.5.x verts, zéro régression.
+
+### Vision Phase 2+ (documentée dans MapCenter.jsx header)
+Cônes FOV colorés (vert/jaune/rouge selon angle+portée), overlays câbles /
+switches / NVR / baies / Wi-Fi / portes / zones intrusion / trajets, outils
+de mesure (distance/surface/rayon), mode audit, export PDF/PNG, layers
+on/off, overlay temps réel FPS/latence.
+
+
 ## [v0.5.1.d] — 2026-02 — Réorganisation menu + unification Plugin Manager (Session 42)
 
 ### Contexte

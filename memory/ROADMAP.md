@@ -53,7 +53,13 @@ Toute nouvelle page appartient à EXACTEMENT un Center. Un Center = un domaine, 
 Objectif : socle client pilote sécurisé + expérience d'accueil pro.
 
 - ✅ v0.5.1.b · HTTPS + Nginx + docker-compose.prod + audit sécurité *(livré)*
+- ✅ v0.5.2 · **Map Center Phase 1** — Site Designer (Konva, hiérarchie complète, drag&drop, panneau install) *(livré Feb 2026)*
+- ✅ v0.5.1.d · Réorganisation menu + Plugin Manager NG unifié + tabs Hardware/GPU dans Pipeline Center *(livré Feb 2026)*
+- ✅ v0.5.1.c · Multi-plugin events + Recherche véhicule enrichie (frame+crops+badges) *(livré Feb 2026)*
 - ✅ v0.5.1.a · Welcome Center + TESTING=1 bypass rate-limit *(livré Feb 2026)*
+- ⏳ v0.5.2.b · **Map Center Phase 2** — Cônes FOV colorés (vert/jaune/rouge), badges IA sur plan, panneau caméra enrichi (firmware/MAC/FPS/codec/dernière comm)
+- ⏳ v0.5.2.c · **Map Center Phase 3** — Mode Audit, photos par caméra, layers on/off, recherche instantanée, overlays temps réel
+- ⏳ v0.5.2.d · **Map Center Phase 4** — Outils mesure (distance/surface/rayon), export PDF/PNG/CSV, rapport d'audit
 - ⏳ v0.5.1.c · **Documentation d'architecture minimale** (ADR pour décisions v0.4.3/v0.4.6, guide install, README refondu)
 - ⏳ v0.5.1.d · Health backend endpoints (`mongo_ok`, `go2rtc_ok`, `gpu_percent`, `vram_percent`) pour alimenter le HealthBanner v0.5.0.b
 
