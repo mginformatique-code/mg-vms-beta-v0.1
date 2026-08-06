@@ -7,6 +7,51 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
 
+## [v0.5.5.b] — 2026-02 — MFA & Sessions actives : pages dédiées
+
+### Added (frontend)
+- Nouvelle page **`/security-center/mfa`** (`MfaCenter.jsx`) :
+  * Header avec icône bouclier et description
+  * Card statut coloré (vert si MFA activée, orange sinon)
+  * Assistant d'activation 3 étapes : install app → scan QR → saisie code
+  * QR code + secret TOTP en clair avec bouton **Copier**
+  * Champ TOTP 6 chiffres numérique avec focus auto
+  * 3 blocs pédagogiques : « Pourquoi activer », « Perte du téléphone »,
+    « Bonnes pratiques »
+  * Liste d'apps recommandées (Google/Microsoft Authenticator, Authy,
+    1Password, Bitwarden)
+- Nouvelle page **`/security-center/sessions`** (`SessionsCenter.jsx`) :
+  * Header avec bouton Actualiser (icône RefreshCw animée)
+  * Grille de **4 KPIs colorés** : Sessions actives, IP uniques,
+    Timeout actuel, Session courante (navigateur)
+  * Panneau timeout admin avec 7 valeurs préréglées (15min → 24h)
+  * Tableau détaillé : navigateur, IP, dernière activité, expiration,
+    action ; ligne en surbrillance verte pour la session courante
+  * Bouton « Déconnecter toutes les autres » + révocation individuelle
+  * Poll automatique toutes les 30s
+  * Bloc d'info sur l'immédiateté de la révocation
+
+### Changed (frontend)
+- Sous-menu **Centre de sécurité** enrichi (4 items) :
+  * Vue d'ensemble (`/security-center`)
+  * Utilisateurs (`/users`)
+  * MFA (`/security-center/mfa`) — nouveau
+  * Sessions actives (`/security-center/sessions`) — nouveau
+- Menu **Paramètres** redevient un simple lien (le contenu MFA/Sessions
+  n'y est plus dupliqué).
+- `Settings.jsx` allégé : suppression de la Card MFA (2FA) et de
+  `SecuritySessionsCard` (`~125 lignes supprimées`). Le contenu de
+  Settings se recentre sur : Apparence, Compte, Rétention (admin),
+  Stockage (admin), Base de données (admin).
+
+### Notes
+- Aucune modification backend : les endpoints existants sont réutilisés
+  (`/api/auth/2fa/*`, `/api/security/sessions*`, `/api/security/timeout`).
+- Zéro régression fonctionnelle. Les data-testid existants sont conservés
+  (`mfa-*`, `sessions-*`, `security-timeout-*`, etc.).
+
+---
+
 ## [v0.5.5.a] — 2026-02 — Sidebar sous-menus (Centre de sécurité + Paramètres)
 
 ### Changed (frontend)

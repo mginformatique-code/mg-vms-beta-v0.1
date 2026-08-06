@@ -5,7 +5,7 @@ import api from "@/lib/api";
 import Logo from "@/components/Logo";
 import {
   LayoutDashboard, Grid3x3, Cctv, Building2, ScanLine, Car, Bell, Map, Zap,
-  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock, Layers, ChevronDown, ChevronRight, LineChart, Sparkles, ShieldCheck,
+  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock, Layers, ChevronDown, ChevronRight, LineChart, Sparkles, ShieldCheck, Lock,
 } from "lucide-react";
 
 const PLUGIN_ICON = {
@@ -40,10 +40,12 @@ const NAV = [
   ]},
   { group: "nav.admin", items: [
     { to: "/pipeline-center", icon: LineChart, key: "nav.pipeline_center", role: "technician" },
-    // Centre de sécurité — devient un vrai sous-menu (Vue d'ensemble + Utilisateurs)
+    // Centre de sécurité — sous-menu complet (Vue d'ensemble + Utilisateurs + MFA + Sessions)
     { key: "nav.security_center", icon: ShieldCheck, role: "admin", children: [
       { to: "/security-center", key: "nav.security_score", icon: ShieldCheck, end: true },
       { to: "/users", key: "nav.users", icon: Users, role: "admin" },
+      { to: "/security-center/mfa", key: "nav.mfa", icon: Lock },
+      { to: "/security-center/sessions", key: "nav.sessions_active", icon: Clock },
     ]},
     { to: "/network", icon: Network, key: "nav.network", role: "client" },
     { to: "/plugins", icon: Puzzle, key: "nav.plugins", role: "admin" },
@@ -54,12 +56,7 @@ const NAV = [
     { to: "/diagnostics", icon: Activity, key: "nav.diagnostics", role: "technician" },
   ]},
   { group: "nav.settings_group", items: [
-    // Paramètres — devient un vrai sous-menu (Général + MFA + Sessions actives)
-    { key: "nav.settings", icon: Settings, children: [
-      { to: "/settings", key: "nav.settings_general", icon: Settings, end: true },
-      { to: "/settings#mfa", key: "nav.mfa", icon: ShieldCheck },
-      { to: "/settings#sessions", key: "nav.sessions_active", icon: Clock },
-    ]},
+    { to: "/settings", icon: Settings, key: "nav.settings" },
     { to: "/notifications", icon: BellRing, key: "nav.notifications", role: "technician" },
   ]},
 ];
