@@ -89,6 +89,10 @@ class PluginBus:
     def __init__(self, default_timeout_s: float = 5.0):
         self._entries: dict[str, BusEntry] = {}
         self.default_timeout_s = default_timeout_s
+        # v0.4.1 · Per-camera stats (Issue #2 · stats plugins fidèles).
+        # Structure : {camera_id: {plugin_name: {calls, errors, timeouts, last_ms}}}
+        # Renseignée par _call_one() quand un camera_id est fourni.
+        self._per_camera_stats: dict[str, dict[str, dict]] = {}
 
     def _mark_success(self, entry: BusEntry) -> None:
         """Un appel a réussi → on réinitialise le compteur d'erreurs consécutives."""
@@ -148,17 +152,25 @@ class PluginBus:
 
         entry = BusEntry(name=name, interface=iface, instance=instance, order=order)
         self._entries[name] = entry
+        _bump_graph_registry()
         logger.info("plugin_bus.register name=%s interface=%s order=%s", name, iface, order)
         return entry
 
     def unregister(self, name: str) -> bool:
-        return self._entries.pop(name, None) is not None
+        removed = self._entries.pop(name, None) is not None
+        if removed:
+            _bump_graph_registry()
+        return removed
 
     def set_enabled(self, name: str, enabled: bool) -> bool:
         entry = self._entries.get(name)
         if not entry:
             return False
-        entry.enabled = enabled
+        if entry.enabled != enabled:
+            entry.enabled = enabled
+            _bump_graph_registry()
+        else:
+            entry.enabled = enabled
         return True
 
     # ── Sélection ───────────────────────────────────────────────────────
@@ -193,9 +205,23 @@ class PluginBus:
         entry: BusEntry,
         coro_factory,
         timeout_s: Optional[float] = None,
+        camera_id: Optional[str] = None,
     ):
-        """Exécute une coroutine plugin avec timeout + capture d'erreur + quarantine auto."""
+        """Exécute une coroutine plugin avec timeout + capture d'erreur + quarantine auto.
+
+        Si ``camera_id`` est fourni, incrémente aussi les compteurs par-caméra
+        (utilisés par l'endpoint ``/api/diagnostics/pipeline-v2/stats`` pour
+        montrer combien de fois chaque plugin a tourné pour chaque caméra).
+        """
         entry.calls += 1
+        # Per-camera counters (v0.4.1 · Issue #2)
+        cam_stats: Optional[dict] = None
+        if camera_id:
+            cam_stats = self._per_camera_stats.setdefault(camera_id, {}) \
+                .setdefault(entry.name, {"calls": 0, "errors": 0,
+                                          "timeouts": 0, "last_ms": 0.0,
+                                          "last_error": None})
+            cam_stats["calls"] += 1
         t0 = time.perf_counter()
         try:
             result = await asyncio.wait_for(
@@ -204,6 +230,9 @@ class PluginBus:
             )
             entry.last_ms = (time.perf_counter() - t0) * 1000
             entry.last_error = None
+            if cam_stats is not None:
+                cam_stats["last_ms"] = round(entry.last_ms, 2)
+                cam_stats["last_error"] = None
             self._mark_success(entry)
             return result
         except asyncio.TimeoutError:
@@ -211,6 +240,11 @@ class PluginBus:
             entry.errors += 1
             entry.last_ms = (time.perf_counter() - t0) * 1000
             entry.last_error = "timeout"
+            if cam_stats is not None:
+                cam_stats["timeouts"] += 1
+                cam_stats["errors"] += 1
+                cam_stats["last_ms"] = round(entry.last_ms, 2)
+                cam_stats["last_error"] = "timeout"
             logger.warning("plugin_bus.timeout name=%s after=%.1fms", entry.name, entry.last_ms)
             self._mark_failure(entry, "timeout")
             return None
@@ -218,9 +252,26 @@ class PluginBus:
             entry.errors += 1
             entry.last_ms = (time.perf_counter() - t0) * 1000
             entry.last_error = f"{type(e).__name__}: {e}"[:200]
+            if cam_stats is not None:
+                cam_stats["errors"] += 1
+                cam_stats["last_ms"] = round(entry.last_ms, 2)
+                cam_stats["last_error"] = entry.last_error
             logger.warning("plugin_bus.error name=%s err=%s", entry.name, entry.last_error)
             self._mark_failure(entry, entry.last_error)
             return None
+
+    def per_camera_stats(self, camera_id: Optional[str] = None) -> dict:
+        """Retourne les stats par-caméra (utilisé par /api/diagnostics/pipeline-v2/stats)."""
+        if camera_id:
+            return dict(self._per_camera_stats.get(camera_id, {}))
+        # Copie shallow — l'appelant peut sérialiser sans risque
+        return {cid: dict(plugs) for cid, plugs in self._per_camera_stats.items()}
+
+    def reset_per_camera_stats(self, camera_id: Optional[str] = None) -> None:
+        if camera_id:
+            self._per_camera_stats.pop(camera_id, None)
+        else:
+            self._per_camera_stats.clear()
 
     async def dispatch_frame(
         self,
@@ -237,8 +288,10 @@ class PluginBus:
         if not entries:
             return []
         cfg = camera_config or {}
+        _cam = getattr(frame, "camera_id", None) or cfg.get("camera_id")
         results = await asyncio.gather(
-            *[self._call_one(e, lambda inst, f=frame, c=cfg: inst.analyze(f, c), timeout_s)
+            *[self._call_one(e, lambda inst, f=frame, c=cfg: inst.analyze(f, c),
+                             timeout_s, camera_id=_cam)
               for e in entries],
             return_exceptions=False,
         )
@@ -263,6 +316,7 @@ class PluginBus:
         entries = self.active("PlateRecognizer")
         if not entries:
             return []
+        _cam = getattr(frame, "camera_id", None)
 
         if cascade_stop_at is not None:
             # Appels séquentiels (cascade) — respecte l'ordre `order`
@@ -272,6 +326,7 @@ class PluginBus:
                     e,
                     lambda inst, f=frame, b=vehicle_bbox: inst.recognize(f, b),
                     timeout_s,
+                    camera_id=_cam,
                 )
                 out.append((e.name, plates or []))
                 if plates and max((p.confidence for p in plates), default=0.0) >= cascade_stop_at:
@@ -280,7 +335,8 @@ class PluginBus:
 
         # Parallèle
         results = await asyncio.gather(
-            *[self._call_one(e, lambda inst, f=frame, b=vehicle_bbox: inst.recognize(f, b), timeout_s)
+            *[self._call_one(e, lambda inst, f=frame, b=vehicle_bbox: inst.recognize(f, b),
+                             timeout_s, camera_id=_cam)
               for e in entries],
             return_exceptions=False,
         )
@@ -327,6 +383,8 @@ class PluginBus:
         # ``enabled_plugins`` non vide, on ne dispatche qu'aux plugins listés
         # (par name). Liste vide → comportement legacy (tous les plugins actifs).
         enabled = set((cfg.get("enabled_plugins") or []))
+        # v0.4.1 · Per-camera stats (Issue #2) — propagé à _call_one.
+        _cam = getattr(frame, "camera_id", None) or cfg.get("camera_id")
 
         def _filter(entries):
             if not enabled:
@@ -362,7 +420,7 @@ class PluginBus:
         if tracker_entries and result.detections:
             tr_results = await asyncio.gather(
                 *[self._call_one(e, lambda inst, f=frame, d=result.detections: inst.track(f, d),
-                                 timeout_s) for e in tracker_entries],
+                                 timeout_s, camera_id=_cam) for e in tracker_entries],
                 return_exceptions=False,
             )
             # Prend les tracks du 1er tracker (ordre order asc). Les autres
@@ -381,7 +439,7 @@ class PluginBus:
             if seg_entries:
                 seg_results = await asyncio.gather(
                     *[self._call_one(e, lambda inst, f=frame, c=cfg: inst.segment(f, c),
-                                     timeout_s) for e in seg_entries],
+                                     timeout_s, camera_id=_cam) for e in seg_entries],
                     return_exceptions=False,
                 )
                 for r in seg_results:
@@ -397,7 +455,7 @@ class PluginBus:
             if biz_entries:
                 biz_results = await asyncio.gather(
                     *[self._call_one(e, lambda inst, f=frame, p=result: inst.consume(f, p),
-                                     timeout_s) for e in biz_entries],
+                                     timeout_s, camera_id=_cam) for e in biz_entries],
                     return_exceptions=False,
                 )
                 for name, events in zip([e.name for e in biz_entries], biz_results):
@@ -426,3 +484,17 @@ class PluginBus:
 
 # Singleton
 bus = PluginBus()
+
+
+def _bump_graph_registry() -> None:
+    """Invalide les graphes per-camera (Pipeline v2) sur un changement du bus.
+
+    Appelé sur register / unregister / set_enabled pour que la prochaine
+    frame reconstruise le graphe avec la nouvelle réalité du bus.
+    Import local pour éviter les cycles.
+    """
+    try:
+        from pipeline_v2.registry import registry
+        registry.bump_bus_version()
+    except Exception:
+        pass

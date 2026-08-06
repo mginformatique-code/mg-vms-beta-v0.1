@@ -14,6 +14,7 @@ import logging
 import os
 import time
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -275,7 +276,6 @@ async def diagnostics_streaming_metrics(user: dict = Depends(require_permission(
     Interroge go2rtc pour obtenir : nb de clients WebRTC, débit, uptime par
     caméra. Le pipeline IA et le streaming sont désormais **indépendants**.
     """
-    import os
     import httpx
 
     go2rtc_url = os.environ.get("GO2RTC_URL", "http://localhost:1984")
@@ -318,4 +318,129 @@ async def diagnostics_wsdl(user: dict = Depends(require_permission("view_live"))
     """
     from wsdl_path import validate_wsdl_dir
     return validate_wsdl_dir()
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Pipeline v2 · P0 (Feb 2026) — Per-camera execution graphs + stats
+# ═══════════════════════════════════════════════════════════════════
+
+@health_dashboard_router.get("/diagnostics/pipeline-v2")
+async def diagnostics_pipeline_v2(user: dict = Depends(require_permission("view_live"))):
+    """v0.4.1 · P0 · **Pipeline IA par caméra** — état des graphes d'exécution.
+
+    Retourne pour chaque caméra en cache :
+      - ``enabled_plugins`` : la whitelist configurée
+      - ``needs`` : quelles étapes tournent réellement (detection, tracking,
+        segmentation, business, anpr) — les étapes False sont **complètement
+        skippées** (zéro CPU / VRAM / compteur de plugin incrémenté)
+      - ``plugins`` : les plugin names dispatchables par étape
+      - ``total_active_plugins`` : nombre total de plugins en activité pour
+        cette caméra
+      - ``is_empty`` : True si la caméra n'a AUCUN plugin pipeline actif
+        → le dispatch complet est court-circuité pour elle
+
+    Utilisé par l'UI Pipeline Designer + le monitoring pour prouver que les
+    plugins désactivés ne consomment aucune ressource.
+    """
+    from pipeline_v2.registry import registry as _graph_registry
+    return {
+        "cameras": _graph_registry.all_graphs(),
+        "stats": _graph_registry.stats(),
+    }
+
+
+@health_dashboard_router.get("/diagnostics/pipeline-v2/stats")
+async def diagnostics_pipeline_v2_stats(user: dict = Depends(require_permission("view_live"))):
+    """v0.4.1 · P1 · **Stats plugins fidèles** (par-caméra × plugin).
+
+    Retourne les compteurs runtime réellement mesurés :
+      - ``per_camera`` : {camera_id: {plugin_name: {calls, errors, timeouts,
+        last_ms, last_error}}}
+      - ``per_plugin`` : compteurs globaux du bus (calls / errors / timeouts /
+        last_ms / consecutive_errors / state / quarantined_at)
+
+    Le champ ``per_camera`` prouve visuellement dans l'UI que les plugins
+    désactivés pour une caméra n'incrémentent jamais leur compteur
+    ``calls`` pour elle. Corrige le bug "0 calls même quand des plaques
+    sont détectées" (rapport audit v0.4.1).
+    """
+    try:
+        from plugin_manager.bus import bus
+        per_plugin = [e.summary() for e in bus.list_entries()]
+        per_camera = bus.per_camera_stats()
+    except Exception as e:
+        return {"error": str(e), "per_camera": {}, "per_plugin": []}
+    return {"per_camera": per_camera, "per_plugin": per_plugin}
+
+
+@health_dashboard_router.post("/diagnostics/pipeline-v2/invalidate")
+async def diagnostics_pipeline_v2_invalidate(
+    camera_id: Optional[str] = None,
+    user: dict = Depends(require_permission("view_live")),
+):
+    """v0.4.1 · P0 · Force le rebuild des graphes per-camera.
+
+    Utile après un toggle admin d'un plugin global ou un reload du plugin
+    manager. Sans arg → invalide TOUS les graphes.
+    """
+    from pipeline_v2.registry import registry as _graph_registry
+    if camera_id:
+        _graph_registry.invalidate(camera_id)
+    else:
+        _graph_registry.bump_bus_version()
+        _graph_registry.invalidate()
+    return {"ok": True, "invalidated": camera_id or "all"}
+
+
+@health_dashboard_router.get("/diagnostics/anpr-quality")
+async def diagnostics_anpr_quality(user: dict = Depends(require_permission("view_live"))):
+    """v0.4.2 · P1 · **ANPR Auto-suspension qualité** — état par caméra.
+
+    Retourne pour chaque caméra ayant subi une évaluation :
+      - ``suspended`` : True si l'OCR est actuellement suspendu
+      - ``last_score`` : dernier score qualité (0-1)
+      - ``consecutive_bad/good`` : compteurs d'hystérésis
+      - ``suspended_since`` : timestamp epoch (si suspendu)
+      - ``total_suspensions`` : nombre total de bascules ACTIVE→SUSPENDED
+      - ``is_specialized`` + ``specialized_model`` : True pour Dahua ITC /
+        Hikvision DeepInView → OCR toujours actif (bypass auto-suspend)
+      - ``last_reason`` : message court affichable dans l'UI
+        ("ANPR suspendu automatiquement — sharpness=42 < 100 (flou)")
+
+    Le seuil et l'hystérésis sont configurables via
+    ``PUT /api/diagnostics/anpr-quality/config``.
+    """
+    from pipeline_v2.anpr_quality import anpr_quality
+    return {
+        "config": anpr_quality.config_dict(),
+        "cameras": anpr_quality.states(),
+    }
+
+
+@health_dashboard_router.put("/diagnostics/anpr-quality/config")
+async def diagnostics_anpr_quality_configure(
+    patch: dict,
+    user: dict = Depends(require_permission("view_live")),
+):
+    """v0.4.2 · Reconfigure le contrôleur qualité ANPR à chaud.
+
+    Champs acceptés : ``min_score``, ``suspend_after_bad``, ``resume_after_good``,
+    ``brightness_min/max``, ``sharpness_min``, ``contrast_min``,
+    ``night_hour_start/end``.
+    """
+    from pipeline_v2.anpr_quality import anpr_quality
+    anpr_quality.configure(**(patch or {}))
+    return {"ok": True, "config": anpr_quality.config_dict()}
+
+
+@health_dashboard_router.post("/diagnostics/anpr-quality/reset")
+async def diagnostics_anpr_quality_reset(
+    camera_id: Optional[str] = None,
+    user: dict = Depends(require_permission("view_live")),
+):
+    """v0.4.2 · Reset l'état d'auto-suspension (force reprise immédiate)."""
+    from pipeline_v2.anpr_quality import anpr_quality
+    anpr_quality.reset(camera_id)
+    return {"ok": True, "reset": camera_id or "all"}
 

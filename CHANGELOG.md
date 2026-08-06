@@ -3,9 +3,46 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 > Depuis Feb 2026, MG-VMS bascule sur un cycle interne de versions « pipeline »
-> (v0.3 → v0.4 → v0.4.1) qui reflète la refonte vers une architecture modulaire
-> Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate). L'ancien
-> cycle produit (1.x/2.x) reste préservé en bas de fichier.
+> (v0.3 → v0.4 → v0.4.1 → v0.4.2) qui reflète la refonte vers une architecture
+> modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
+> L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
+
+## [v0.4.2] — 2026-02 — Pipeline per-camera + ANPR Qualité intelligente (P0 · P1 · P2)
+### Ajouté — P0 · Fondation architecturale
+- **`pipeline_v2/registry.py`** — `CameraGraphRegistry` : compile un **graphe d'exécution unique par caméra** basé sur sa whitelist `enabled_plugins`. Précalcule quelles étapes (`detection`, `tracking`, `segmentation`, `business`, `anpr`) doivent tourner et la liste exacte des plugin names dispatchables par étape.
+  - Cache invalidé au hash (whitelist qui change → rebuild)
+  - Rebuild automatique sur `register` / `unregister` / `set_enabled` du bus (via `bump_bus_version()`)
+  - Résultat : **si une caméra n'a que fast-alpr et bytetrack activés, les 8 PipelineConsumers globalement actifs (person-counting, vehicle-counting, smoke-detection, etc.) ne sont JAMAIS dispatchés pour elle** → zéro CPU/VRAM, zéro compteur incrémenté.
+- **Stats plugins per-camera** (`plugin_manager/bus.py`) — le `PluginBus` maintient désormais `_per_camera_stats[camera_id][plugin_name] = {calls, errors, timeouts, last_ms, last_error}` réellement mesurés. `_call_one()` accepte un paramètre `camera_id` et incrémente les deux compteurs (global + per-camera). Preuve visuelle dans l'UI que les plugins désactivés pour une caméra ne s'exécutent effectivement pas pour elle.
+- **Skip early dans `_do_downstream_work`** : le check `_pipeline_plugins_active = graph.needs_tracking or graph.needs_segmentation or graph.needs_business` court-circuite complètement l'import du bus, la reconstruction des Detection() et le dispatch quand aucun plugin pipeline n'est activé pour la caméra.
+- **Whitelist per-camera aussi sur multi-moteur ANPR** : le fan-out `dispatch_plate` respecte désormais `cam.enabled_plugins` (filtrage sur les entries AVANT et APRÈS dispatch — double sécurité).
+
+### Ajouté — P1 · ANPR Auto-suspension qualité
+- **`pipeline_v2/anpr_quality.py`** — `AnprQualityController` : évalue chaque frame véhicule sur 3 axes (luminosité, netteté via Laplacian, contraste) + détection heure de nuit. Score composite 0.0-1.0.
+- **Machine à états ACTIVE ↔ SUSPENDED** avec hystérésis N/M cycles configurable (défaut : 5 bad → suspend, 3 good → resume). Anti-blip.
+- **Message UI clair** : `"ANPR suspendu automatiquement — sharpness=42 < 100 (flou)"`, `"ANPR repris — conditions redevenues favorables (score=0.68)"`.
+- **Principe métier** : "pas de plaque > fausse plaque" — mieux vaut suspendre que générer des lectures erronées.
+
+### Ajouté — P2 · Caméras ANPR spécialisées
+- **`SPECIALIZED_ANPR_MODELS`** : détection par `camera.model` de Dahua ITC (413/237/215/352), Hikvision DeepInView (iDS-2CD7A / iDS-2TD81), Axis P1465-LE, Bosch AutoDome IP starlight. Ces caméras **bypass complètement l'auto-suspension** → OCR 24/7 même en nuit noire.
+- État exposé : `is_specialized: true, specialized_model: "Dahua ITC413 · ANPR 24/7 dédié"`.
+
+### Ajouté — Endpoints (6 au total)
+- `GET  /api/diagnostics/pipeline-v2` → graphes per-camera + stats registry
+- `GET  /api/diagnostics/pipeline-v2/stats` → `per_camera` × `per_plugin` (compteurs runtime)
+- `POST /api/diagnostics/pipeline-v2/invalidate?camera_id=…` → force rebuild
+- `GET  /api/diagnostics/anpr-quality` → états auto-suspension par caméra
+- `PUT  /api/diagnostics/anpr-quality/config` → reconfigure à chaud (min_score, seuils, hystérésis)
+- `POST /api/diagnostics/anpr-quality/reset` → force reprise immédiate
+
+### Vérifié
+- **28 nouveaux tests** : 14 P0 (`test_v041_pipeline_per_camera.py`) + 14 P1/P2 (`test_v042_anpr_quality.py`)
+- **76/76 tests** pipeline v0.4.x + v0.3 = **verte totale**
+- **Preuve runtime P0** : sur `demo-cam-002` avec whitelist `["yolo-detection", "bytetrack", "fast-alpr"]`, seul `bytetrack` apparaît dans `per_camera_stats` (4 calls, 1.18ms) — les 8 PipelineConsumers globaux ne sont jamais appelés pour cette caméra.
+- **Preuve runtime P1** : sur `demo-cam-002` (mire testsrc2 = score qualité 0.30-0.33), `consecutive_bad` progresse cycle par cycle → auto-suspension après 5 cycles.
+
+### Backlog restant v0.4.1
+- P1 · Zero-copy dispatch (Issue #3) — non traité cette session (refacto large des paths mémoire)
 
 ## [v0.4.1] — 2026-02 — Fix critique ANPR whitelist (Session 16)
 ### Corrigé (🔴 P0 critical)

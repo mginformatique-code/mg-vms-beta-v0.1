@@ -354,7 +354,8 @@ def _detect_motion(camera_id: str, img) -> float:
     return round(changed * 100.0 / diff.size, 2)
 
 
-def _analyze_frame(camera_id: str, frame_bytes: bytes, enabled_plugins: Optional[list[str]] = None) -> dict:
+def _analyze_frame(camera_id: str, frame_bytes: bytes, enabled_plugins: Optional[list[str]] = None,
+                    camera: Optional[dict] = None) -> dict:
     """Mouvement + YOLO d'abord (rapide), puis ALPR uniquement si véhicule détecté et hors-cache.
 
     v0.4.1 · **Fix bug critique** : ``enabled_plugins`` = whitelist des plugins IA
@@ -362,6 +363,13 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes, enabled_plugins: Optional
     le bloc ANPR est **complètement court-circuité** — aucun OCR, aucune écriture
     Mongo, aucun événement plaque. Répare le bug "FastALPR désactivé mais des
     plaques sont malgré tout reconnues" (rapport audit v0.4.1).
+
+    v0.4.2 · **ANPR Auto-suspension qualité** : si les conditions optiques
+    sont insuffisantes (nuit + capteur non-IR, flou, contre-jour...) pendant
+    N cycles consécutifs, l'OCR est automatiquement suspendu pour cette
+    caméra (état exposé via ``/api/diagnostics/anpr-quality``). Les caméras
+    spécialisées (Dahua ITC / Hikvision DeepInView) sont détectées par
+    ``camera.model`` et bypassent cette suspension (ANPR 24/7).
 
     Retourne aussi les timings ms par étape et un snapshot pour le mode debug."""
     import cv2
@@ -426,6 +434,30 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes, enabled_plugins: Optional
     if _anpr_skipped:
         logger.debug("ANPR skip %s : fast-alpr not in enabled_plugins %s",
                      camera_id, enabled_plugins)
+
+    # v0.4.2 · **P1 · ANPR Auto-suspension qualité** — évaluation continue
+    # de la scène. Si nuit + faible luminosité + flou + contre-jour ⇒ on
+    # préfère suspendre l'OCR pour ne pas générer de fausses plaques
+    # (principe métier : "pas de plaque > fausse plaque").
+    # Les caméras spécialisées (Dahua ITC / Hikvision DeepInView) sont
+    # détectées via ``camera.model`` et échappent à la suspension.
+    _anpr_quality_state = None
+    _anpr_quality_score = None
+    if vehicles and _alpr and not _anpr_skipped:
+        try:
+            from pipeline_v2.anpr_quality import anpr_quality
+            should_run, _anpr_quality_state, _anpr_quality_score = \
+                anpr_quality.should_run_anpr(camera_id, img, camera=camera)
+            if not should_run:
+                _anpr_skipped = True
+                logger.info(
+                    "ANPR skip %s : qualité insuffisante (score=%.2f · %s)",
+                    camera_id, _anpr_quality_score.score,
+                    _anpr_quality_state.last_reason,
+                )
+        except Exception:
+            logger.exception("anpr_quality.should_run_anpr error — legacy path")
+
     if vehicles and _alpr and not _anpr_skipped:
         now = datetime.now(timezone.utc)
         # Purge cache expiré
@@ -638,7 +670,10 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes, enabled_plugins: Optional
     # (surtout pour les caméras HD 2304×1296).
     return {"detections": detections, "plates": plates, "motion_pct": motion_pct,
             "_img_bgr": img, "timings": timings,
-            "overlay_boxes": overlay_boxes, "counts": counts}
+            "overlay_boxes": overlay_boxes, "counts": counts,
+            # v0.4.2 · exposition de l'état ANPR qualité au downstream/UI
+            "anpr_quality": (_anpr_quality_score.to_dict() if _anpr_quality_score else None),
+            "anpr_state": (_anpr_quality_state.to_dict() if _anpr_quality_state else None)}
 
 
 def _ensure_frame_thumb(result: dict) -> str | None:
@@ -956,8 +991,10 @@ async def _process_camera(cam: dict) -> None:
     t_ai = time.perf_counter()
     # v0.4.1 · Passe la whitelist enabled_plugins à _analyze_frame pour
     # court-circuiter le bloc ANPR si fast-alpr n'est pas activé sur cette caméra.
+    # v0.4.2 · Passe aussi le dict caméra complet pour la détection de modèle
+    # spécialisé (Dahua ITC / Hikvision DeepInView → bypass auto-suspension).
     _enabled = cam.get("enabled_plugins") or []
-    result = await asyncio.to_thread(_analyze_frame, cam["id"], frame, _enabled)
+    result = await asyncio.to_thread(_analyze_frame, cam["id"], frame, _enabled, cam)
     t_ai_ms = (time.perf_counter() - t_ai) * 1000
     dets = result.get("detections", [])
     plates = result.get("plates", [])
@@ -1118,6 +1155,16 @@ async def _do_downstream_work(cam: dict, frame, result: dict) -> None:
     # bus.dispatch_pipeline (Tracker → Segmenter → PipelineConsumer →
     # EventConsumer). Court-circuite les FrameAnalyzers (détections déjà
     # calculées par le core ai_engine).
+    #
+    # v0.4.1 · P0 · Pipeline per-camera :
+    # Le graph registry détermine si CETTE caméra a un pipeline "vide"
+    # (aucun plugin Tracker/Segmenter/PipelineConsumer activé dans sa
+    # whitelist). Dans ce cas → on skip totalement le bloc sans même
+    # importer le bus ni instancier un Frame. Gains attendus :
+    #   - Zéro CPU/VRAM sur les caméras dont l'utilisateur n'a activé
+    #     que fast-alpr (ou aucun plugin).
+    #   - Zéro compteur "calls" incrémenté sur les plugins qui ne
+    #     concernent pas cette caméra.
     try:
         pipeline_cfg = await db.settings.find_one(
             {"key": "plugin_manager_pipeline"}, {"_id": 0}
@@ -1125,59 +1172,82 @@ async def _do_downstream_work(cam: dict, frame, result: dict) -> None:
         if (pipeline_cfg or {}).get("value", {}).get("enabled", True):
             from plugin_manager import bus as _plugin_bus, Frame as _Frame
             from plugin_manager.interfaces import Detection as _Detection
+            from pipeline_v2.registry import registry as _graph_registry
 
-            # Reconstitue les Detection() à partir des dicts YOLO
-            det_objs = []
-            for d in result["detections"]:
-                bb = d.get("bbox") or (0, 0, 0, 0)
-                det_objs.append(_Detection(
-                    label=d.get("label", "?"),
-                    label_fr=d.get("label_fr"),
-                    confidence=float(d.get("confidence", 0.0)),
-                    bbox=tuple(bb),
-                    track_id=d.get("track_id"),
-                ))
-            # Frame minimal (numpy_bgr optionnel — le tracking en a besoin, mais
-            # pour PipelineConsumer c'est facultatif). `frame` peut être un ndarray
-            # numpy ou bytes (JPEG) selon le chemin — protège l'accès .shape.
-            _has_shape = frame is not None and hasattr(frame, "shape")
-            _frame = _Frame(
-                camera_id=cam["id"],
-                timestamp=now_iso,
-                numpy_bgr=frame if _has_shape else None,
-                width=int(frame.shape[1]) if _has_shape else 0,
-                height=int(frame.shape[0]) if _has_shape else 0,
+            # ► Graph per-camera : évalue en O(nb_plugins_actifs) si ce
+            #   pipeline a du travail à faire. Rebuild automatique si la
+            #   whitelist a changé (hash).
+            _graph = _graph_registry.get(
+                cam["id"],
+                enabled_plugins=cam.get("enabled_plugins") or [],
+                bus=_plugin_bus,
             )
-            # P9+ · Réactivité temps réel — le dispatch pipeline reste await mais
-            # avec un timeout resserré (2s max) pour ne pas bloquer la boucle vidéo.
-            # Métriques accumulées dans `pipeline_metrics` pour /api/diagnostics/pipeline-metrics.
-            _pipeline_t0 = time.perf_counter()
+            # Skip early si le pipeline plugin-manager n'a AUCUN stage
+            # actif pour cette caméra (tracking + segmenter + business
+            # tous vides). L'ANPR direct dans _analyze_frame reste géré
+            # séparément (whitelist "fast-alpr" évaluée là-bas).
+            _pipeline_plugins_active = (
+                _graph.needs_tracking or _graph.needs_segmentation
+                or _graph.needs_business
+            )
+            _pr = None
             _pipeline_ok = True
-            try:
-                _pr = await _plugin_bus.dispatch_pipeline(
-                    _frame,
-                    camera_config={
-                        "camera_id": cam["id"],
-                        "site_id": cam.get("site_id"),
-                        # v0.3 · Config caméra modulaire : liste blanche des plugins
-                        # IA activés pour cette caméra (vide = tous les plugins actifs)
-                        "enabled_plugins": cam.get("enabled_plugins") or [],
-                    },
-                    precomputed_detections=det_objs,
-                    run_business=True,
-                    run_segmentation=False,
-                    emit_events=True,
-                    timeout_s=2.0,
-                )
-                _pipeline_ms = (time.perf_counter() - _pipeline_t0) * 1000
-                pipeline_metrics.record(cam["id"], _pipeline_ms,
-                                         plugins_used=_pr.plugins_used or {})
-            except Exception:
-                _pipeline_ms = (time.perf_counter() - _pipeline_t0) * 1000
-                pipeline_metrics.record_error(cam["id"], _pipeline_ms)
-                logger.exception("dispatch_pipeline error — skip plugin block")
-                _pipeline_ok = False
+            if not _pipeline_plugins_active:
+                # Aucun plugin pipeline pertinent → zéro dispatch pour
+                # cette caméra. On log une fois par rebuild pour ne pas
+                # spammer, mais on ne consomme rien à chaque frame.
                 _pr = None
+            else:
+                # Reconstitue les Detection() à partir des dicts YOLO
+                det_objs = []
+                for d in result["detections"]:
+                    bb = d.get("bbox") or (0, 0, 0, 0)
+                    det_objs.append(_Detection(
+                        label=d.get("label", "?"),
+                        label_fr=d.get("label_fr"),
+                        confidence=float(d.get("confidence", 0.0)),
+                        bbox=tuple(bb),
+                        track_id=d.get("track_id"),
+                    ))
+                # Frame minimal (numpy_bgr optionnel — le tracking en a besoin, mais
+                # pour PipelineConsumer c'est facultatif). `frame` peut être un ndarray
+                # numpy ou bytes (JPEG) selon le chemin — protège l'accès .shape.
+                _has_shape = frame is not None and hasattr(frame, "shape")
+                _frame = _Frame(
+                    camera_id=cam["id"],
+                    timestamp=now_iso,
+                    numpy_bgr=frame if _has_shape else None,
+                    width=int(frame.shape[1]) if _has_shape else 0,
+                    height=int(frame.shape[0]) if _has_shape else 0,
+                )
+                # P9+ · Réactivité temps réel — le dispatch pipeline reste await mais
+                # avec un timeout resserré (2s max) pour ne pas bloquer la boucle vidéo.
+                _pipeline_t0 = time.perf_counter()
+                try:
+                    _pr = await _plugin_bus.dispatch_pipeline(
+                        _frame,
+                        camera_config={
+                            "camera_id": cam["id"],
+                            "site_id": cam.get("site_id"),
+                            # v0.3 · Config caméra modulaire : liste blanche des plugins
+                            # IA activés pour cette caméra (vide = tous les plugins actifs)
+                            "enabled_plugins": cam.get("enabled_plugins") or [],
+                        },
+                        precomputed_detections=det_objs,
+                        run_business=_graph.needs_business,
+                        run_segmentation=_graph.needs_segmentation,
+                        emit_events=True,
+                        timeout_s=2.0,
+                    )
+                    _pipeline_ms = (time.perf_counter() - _pipeline_t0) * 1000
+                    pipeline_metrics.record(cam["id"], _pipeline_ms,
+                                             plugins_used=_pr.plugins_used or {})
+                except Exception:
+                    _pipeline_ms = (time.perf_counter() - _pipeline_t0) * 1000
+                    pipeline_metrics.record_error(cam["id"], _pipeline_ms)
+                    logger.exception("dispatch_pipeline error — skip plugin block")
+                    _pipeline_ok = False
+                    _pr = None
 
             if _pipeline_ok and _pr:
                 # Persistence des événements métier générés
@@ -1261,10 +1331,18 @@ async def _do_downstream_work(cam: dict, frame, result: dict) -> None:
     # On délègue aussi aux PlateRecognizer plugins actifs (plate-recognizer,
     # openalpr, paddle-ocr, easyocr, azure-vision, google-vision, tesseract…)
     # et on ajoute leurs résultats à la liste — chacun persisté avec son engine.
+    #
+    # v0.4.1 · P0 · Whitelist per-camera : si la caméra a une liste
+    # ``enabled_plugins`` non vide, on ne dispatche qu'aux PlateRecognizer
+    # présents dans cette whitelist. Comportement legacy si whitelist vide.
     try:
         from plugin_manager.bus import bus as _plugin_bus_multi
         from plugin_manager.interfaces import Frame as _MFrame
-        if _plugin_bus_multi.active("PlateRecognizer"):
+        _cam_whitelist = set(cam.get("enabled_plugins") or [])
+        _anpr_entries = _plugin_bus_multi.active("PlateRecognizer")
+        if _cam_whitelist:
+            _anpr_entries = [e for e in _anpr_entries if e.name in _cam_whitelist]
+        if _anpr_entries:
             _multi_frame = _MFrame(
                 camera_id=cam["id"], timestamp=now.isoformat(),
                 numpy_bgr=frame if hasattr(frame, "shape") else None,
@@ -1274,9 +1352,13 @@ async def _do_downstream_work(cam: dict, frame, result: dict) -> None:
             _multi_results = await _plugin_bus_multi.dispatch_plate(
                 _multi_frame, vehicle_bbox=None, timeout_s=8.0,
             )
+            # Applique aussi la whitelist aux résultats (au cas où active()
+            # aurait été inclusif pour d'autres appels concurrents).
             for engine_name, plate_results in _multi_results:
                 if engine_name == "fast-alpr":
                     continue  # déjà dans result["plates"]
+                if _cam_whitelist and engine_name not in _cam_whitelist:
+                    continue
                 for pr in plate_results or []:
                     result["plates"].append({
                         "plate": (pr.text or "").upper().strip(),

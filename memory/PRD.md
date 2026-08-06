@@ -48,6 +48,30 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 - ✅ Health Dashboard UI mis à jour pour la nouvelle forme recorder
 - ✅ Suite pytest : 12/12 (health + pipeline + PTZ/recorder) — voir `tests/test_ptz_and_recorder_health.py`
 
+**Session 17 (Feb 2026)** — v0.4.2 · Pipeline IA per-camera + Stats plugins fidèles (P0) + ANPR Qualité intelligente + Caméras spécialisées (P1/P2) :
+
+**P0 · Fondation architecturale** :
+- 🎯 **CameraGraphRegistry** (`pipeline_v2/registry.py`) — compile un **graphe d'exécution unique par caméra** basé sur `enabled_plugins` : precalcule `needs_detection/tracking/segmentation/business/anpr` + la liste précise des plugins dispatchables par étape. Cache invalidé au hash + rebuild auto sur register/unregister/set_enabled du bus.
+- 📊 **Per-camera plugin stats** (`plugin_manager/bus.py`) — `_call_one()` accepte `camera_id` et incrémente `_per_camera_stats[camera_id][plugin_name] = {calls, errors, timeouts, last_ms, last_error}`. Corrige le bug historique "0 calls même quand des plaques sont détectées".
+- ⚡ **Skip early dans `_do_downstream_work`** : si le graphe indique `needs_tracking + needs_segmentation + needs_business = tous False` → import bus, reconstruction Detection(), dispatch : tout court-circuité. Zéro allocation.
+- 🔒 **Whitelist per-camera étendue au multi-ANPR** : `dispatch_plate` respecte `cam.enabled_plugins` (double filtrage entries + résultats).
+- 🔌 **3 endpoints P0** : `/api/diagnostics/pipeline-v2` (graphes), `/pipeline-v2/stats` (per_camera × per_plugin), `/pipeline-v2/invalidate` (force rebuild).
+
+**P1 · ANPR Auto-suspension qualité (Issue #4)** :
+- 🧠 **AnprQualityController** (`pipeline_v2/anpr_quality.py`) — évalue chaque frame véhicule sur 3 axes (luminosité, netteté via Laplacian, contraste) + détection heure de nuit. Score composite 0.0-1.0.
+- 🚦 **Machine à états ACTIVE ↔ SUSPENDED** avec hystérésis N/M cycles (défaut : 5 bad → suspend, 3 good → resume). Empêche les blips.
+- 🔔 **Message UI clair** : `"ANPR suspendu automatiquement — sharpness=42 < 100 (flou)"`.
+- ⚙️ **3 endpoints** : `/api/diagnostics/anpr-quality` (états), `/config` (PUT reconfigure à chaud), `/reset` (force reprise).
+
+**P2 · Caméras ANPR spécialisées (Issue #5)** :
+- 🎯 **SPECIALIZED_ANPR_MODELS** : détection par `camera.model` de Dahua ITC (413/237/215/352), Hikvision DeepInView (iDS-2CD7A / iDS-2TD81), Axis P1465-LE, Bosch AutoDome IP starlight. Ces caméras **bypass complètement l'auto-suspension** → OCR 24/7.
+- 🌙 État renvoyé : `is_specialized: true, specialized_model: "Dahua ITC413 · ANPR 24/7 dédié"`.
+
+**Résultats et vérifications** :
+- ✅ Tests : 14 P0 (`test_v041_pipeline_per_camera.py`) + 14 P1/P2 (`test_v042_anpr_quality.py`) + 48 régression = **76/76 OK**
+- 📈 **Preuve runtime P0** : sur `demo-cam-002` (whitelist=`[yolo-detection, bytetrack, fast-alpr]`), seul `bytetrack` apparaît dans les stats per-camera. Les 8 PipelineConsumers globalement actifs (person-counting, vehicle-counting, smoke-detection, weapon-detection...) ne sont **jamais** appelés pour cette caméra.
+- 📈 **Preuve runtime P1** : sur `demo-cam-002` (mire testsrc2 = score qualité 0.30-0.33), `consecutive_bad` progresse cycle par cycle. Après 5 cycles → OCR auto-suspendu, message UI clair.
+
 **Session 16 (Feb 2026)** — v0.4.1 · Fix bug critique ANPR whitelist :
 - 🔴 **Bug critique fixé** : le pipeline ANPR (`_alpr.predict` dans `ai_engine._analyze_frame`) tournait **hors du Plugin Manager** et ignorait `enabled_plugins`. Résultat : FastALPR désactivé sur une caméra → des plaques étaient malgré tout écrites en Mongo.
 - ✅ **Fix appliqué** : signature `_analyze_frame(camera_id, frame_bytes, enabled_plugins=None)` + guard `_anpr_skipped = bool(enabled_plugins) and "fast-alpr" not in enabled_plugins` → le bloc OCR est court-circuité (aucun `_alpr.predict`, aucune écriture Mongo, aucun événement). `_process_camera` passe `cam.get("enabled_plugins")`. Comportement legacy (whitelist vide) préservé.
