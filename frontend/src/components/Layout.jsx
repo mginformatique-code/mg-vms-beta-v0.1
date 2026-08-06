@@ -5,7 +5,7 @@ import api from "@/lib/api";
 import Logo from "@/components/Logo";
 import {
   LayoutDashboard, Grid3x3, Cctv, Building2, ScanLine, Car, Bell, Map, Zap,
-  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock,
+  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock, Layers,
 } from "lucide-react";
 
 const PLUGIN_ICON = {
@@ -43,6 +43,7 @@ const NAV = [
     { to: "/pipeline-monitor", icon: Brain, key: "nav.pipeline_monitor", role: "technician" },
     { to: "/pipeline-designer", icon: Zap, key: "nav.pipeline_designer", role: "technician" },
     { to: "/pipeline-inspector", icon: Activity, key: "nav.pipeline_inspector", role: "technician" },
+    { to: "/pipeline-center", icon: Layers, key: "nav.pipeline_center", role: "technician" },
     { to: "/reports", icon: FileText, key: "nav.reports", role: "technician" },
     { to: "/notifications", icon: BellRing, key: "nav.notifications", role: "technician" },
     { to: "/plugins", icon: Puzzle, key: "nav.plugins", role: "admin" },

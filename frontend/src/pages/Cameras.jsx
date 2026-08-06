@@ -301,6 +301,7 @@ export default function Cameras() {
                 <td className="px-3 py-2 text-xs">{c.ptz_enabled ? "✓" : "—"}</td>
                 <td className="px-3 py-2"><div className="flex items-center justify-end gap-1">
                   <button onClick={() => test(c)} data-testid="test-camera-btn" title="Tester" className="p-1.5 hover:bg-secondary">{testing === c.id ? <Loader2 size={15} className="animate-spin" /> : <Activity size={15} />}</button>
+                  <a href={`/camera-center/${c.id}`} data-testid="open-camera-center" title="Camera Center" className="p-1.5 hover:bg-secondary inline-flex items-center text-[#0088FF]"><Radar size={15} /></a>
                   <button onClick={() => openDiagnostic(c)} data-testid="diagnostic-btn" title="Diagnostic complet" className="p-1.5 hover:bg-secondary text-[#00E676]"><Radar size={15} /></button>
                   <button onClick={() => snapshot(c)} data-testid="snapshot-btn" title="Snapshot" className="p-1.5 hover:bg-secondary"><CamIcon size={15} /></button>
                   {c.detect_enabled && <button onClick={() => openDebug(c)} data-testid="debug-ia-btn" title="Debug IA (dernier snapshot d'analyse)" className="p-1.5 hover:bg-secondary text-[#0044FF]"><BrainCircuit size={15} /></button>}
