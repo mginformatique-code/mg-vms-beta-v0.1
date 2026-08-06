@@ -76,6 +76,9 @@ function AppRoutes() {
       <Route path="/pipeline-monitor" element={<Protected><AIPipelineMonitor /></Protected>} />
       <Route path="/pipeline-designer" element={<Protected><PipelineDesigner /></Protected>} />
       <Route path="/pipeline-inspector" element={<Protected><PipelineInspector /></Protected>} />
+      {/* v0.5.0.b · Alias sous /pipeline/ pour cohérence UX */}
+      <Route path="/pipeline/designer" element={<Protected><PipelineDesigner /></Protected>} />
+      <Route path="/pipeline/inspector" element={<Protected><PipelineInspector /></Protected>} />
       <Route path="/pipeline-center" element={<Protected><PipelineCenter /></Protected>} />
       <Route path="/camera-center/:cameraId" element={<Protected><CameraCenter /></Protected>} />
       <Route path="/users" element={<Protected><UsersPage /></Protected>} />

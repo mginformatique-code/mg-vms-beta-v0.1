@@ -281,7 +281,7 @@ export default function Cameras() {
           </tr></thead>
           <tbody>
             {cams.map((c) => (
-              <tr key={c.id} className="border-b border-border hover:bg-secondary/50" data-testid="camera-row">
+              <tr key={c.id} className="border-b border-border hover:bg-secondary/50 cursor-pointer" data-testid="camera-row" onClick={(e) => { if (e.target.closest("button,a,input,select")) return; window.location.href = `/camera-center/${c.id}`; }}>
                 <td className="px-3 py-2"><span className={`inline-flex items-center gap-1.5 text-xs ${c.status === "online" ? "mg-online" : "mg-offline"}`}>
                   {c.status === "online" ? <Wifi size={13} /> : <WifiOff size={13} />}{t(c.status === "online" ? "common.online" : "common.offline")}</span></td>
                 <td className="px-3 py-2 font-medium">{c.name}<div className="text-[10px] text-muted-foreground truncate max-w-xs">{c.manufacturer} {c.model}</div></td>

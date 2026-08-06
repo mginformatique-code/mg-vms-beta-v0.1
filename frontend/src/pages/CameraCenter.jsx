@@ -12,8 +12,8 @@
  *   Ne JAMAIS deviner les capacités depuis le modèle de caméra.
  *   Toujours lire depuis GET /api/devices/{id}/capabilities.
  */
-import React, { useEffect, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -23,9 +23,11 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import useDeviceCapabilities from "@/hooks/useDeviceCapabilities";
+import WebRTCPlayer from "@/components/WebRTCPlayer";
 import {
   Camera, Wifi, Video, Layers, Cpu, Volume2, Sun, Bell, Move3d, Wrench,
-  ScanLine, RefreshCw, AlertCircle, CircleCheck,
+  ScanLine, RefreshCw, AlertCircle, CircleCheck, ChevronLeft, ChevronRight,
+  ArrowLeft, HardDrive, Activity,
 } from "lucide-react";
 
 const TABS = [
@@ -35,6 +37,7 @@ const TABS = [
   { id: "streams",      label: "Streams",      icon: Video },
   { id: "capabilities", label: "Capabilities", icon: Layers },
   { id: "ai",           label: "AI",           icon: Cpu },
+  { id: "events",       label: "Events",       icon: Activity },
   { id: "audio",        label: "Audio",        icon: Volume2 },
   { id: "lighting",     label: "Lighting",     icon: Sun },
   { id: "alarm",        label: "Alarm",        icon: Bell },
@@ -42,38 +45,108 @@ const TABS = [
   { id: "maintenance",  label: "Maintenance",  icon: Wrench },
 ];
 
+// v0.5.0.b · Bandeau santé global (GPU/CPU/RAM/VRAM/Mongo/go2rtc/Capture/Pipeline)
+function HealthBanner() {
+  const [h, setH] = useState({});
+  useEffect(() => {
+    const load = async () => {
+      const [sys, cap] = await Promise.all([
+        api.get("/system-health").catch(() => ({ data: {} })),
+        api.get("/diagnostics/capture/stats").catch(() => ({ data: {} })),
+      ]);
+      setH({ ...(sys.data || {}), capture: cap.data || {} });
+    };
+    load();
+    const iv = setInterval(load, 8000);
+    return () => clearInterval(iv);
+  }, []);
+  const items = [
+    { label: "CPU", value: h.cpu_percent != null ? `${h.cpu_percent}%` : "—" },
+    { label: "RAM", value: h.ram_percent != null ? `${h.ram_percent}%` : "—" },
+    { label: "GPU", value: h.gpu_percent != null ? `${h.gpu_percent}%` : "—" },
+    { label: "VRAM", value: h.vram_percent != null ? `${h.vram_percent}%` : "—" },
+    { label: "Mongo", value: h.mongo_ok ? "OK" : (h.mongo_ok === false ? "KO" : "—") },
+    { label: "go2rtc", value: h.go2rtc_ok ? "OK" : (h.go2rtc_ok === false ? "KO" : "—") },
+    { label: "Capture", value: h.capture?.cuvid_available ? "NVDEC" : (h.capture?.mode || "—") },
+    { label: "Pipeline", value: h.pipeline_ok ? "OK" : "—" },
+  ];
+  return (
+    <div className="flex flex-wrap gap-2 py-2 px-3 border-b border-border bg-secondary/30 text-xs"
+         data-testid="health-banner">
+      {items.map((it) => (
+        <div key={it.label} className="flex gap-1 items-center">
+          <span className="text-muted-foreground">{it.label}</span>
+          <span className="font-mono">{it.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function CameraCenter() {
   const { cameraId } = useParams();
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const tab = params.get("tab") || "overview";
   const setTab = (t) => setParams({ tab: t });
   const { caps, info, loading, error, refresh, discover } = useDeviceCapabilities(cameraId);
 
+  // v0.5.0.b · Navigation prev/next entre caméras sans revenir à la liste
+  const [allCams, setAllCams] = useState([]);
+  useEffect(() => {
+    api.get("/cameras").then((r) => setAllCams(r.data || [])).catch(() => setAllCams([]));
+  }, []);
+  const { prevId, nextId } = useMemo(() => {
+    const idx = allCams.findIndex((c) => c.id === cameraId);
+    if (idx < 0) return { prevId: null, nextId: null };
+    return {
+      prevId: idx > 0 ? allCams[idx - 1].id : null,
+      nextId: idx < allCams.length - 1 ? allCams[idx + 1].id : null,
+    };
+  }, [allCams, cameraId]);
+  const go = (id) => id && navigate(`/camera-center/${id}?tab=${tab}`);
+
   return (
-    <div className="p-6 space-y-4" data-testid="camera-center">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight" data-testid="cam-title">
-            {info?.model || info?.manufacturer || cameraId}
-          </h1>
-          <div className="flex gap-2 items-center text-sm text-muted-foreground">
-            <span className="font-mono">{cameraId}</span>
-            {info?.manufacturer && <Badge variant="outline">{info.manufacturer}</Badge>}
-            {info?.firmware && <span>FW {info.firmware}</span>}
-            {info?.ip && <span>· {info.ip}</span>}
+    <div data-testid="camera-center">
+      <HealthBanner />
+      <div className="p-6 space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="sm" onClick={() => navigate("/cameras")}
+                    data-testid="back-to-cameras">
+              <ArrowLeft className="w-4 h-4 mr-1" />Liste
+            </Button>
+            <Button variant="outline" size="icon" disabled={!prevId}
+                    onClick={() => go(prevId)} data-testid="cam-prev">
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <Button variant="outline" size="icon" disabled={!nextId}
+                    onClick={() => go(nextId)} data-testid="cam-next">
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight" data-testid="cam-title">
+                {info?.model || info?.manufacturer || cameraId}
+              </h1>
+              <div className="flex gap-2 items-center text-sm text-muted-foreground">
+                <span className="font-mono">{cameraId}</span>
+                {info?.manufacturer && <Badge variant="outline">{info.manufacturer}</Badge>}
+                {info?.firmware && <span>FW {info.firmware}</span>}
+                {info?.ip && <span>· {info.ip}</span>}
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={refresh} data-testid="cam-refresh">
+              <RefreshCw className="w-4 h-4 mr-2" />Rafraîchir
+            </Button>
+            <Button onClick={() => discover().then(() => toast.success("Capacités détectées"))
+                                       .catch((e) => toast.error(e.response?.data?.detail?.message || "Échec probe"))}
+                    data-testid="cam-discover">
+              <ScanLine className="w-4 h-4 mr-2" />Détecter capacités
+            </Button>
           </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={refresh} data-testid="cam-refresh">
-            <RefreshCw className="w-4 h-4 mr-2" />Rafraîchir
-          </Button>
-          <Button onClick={() => discover().then(() => toast.success("Capacités détectées"))
-                                     .catch((e) => toast.error(e.response?.data?.detail?.message || "Échec probe"))}
-                  data-testid="cam-discover">
-            <ScanLine className="w-4 h-4 mr-2" />Détecter capacités
-          </Button>
-        </div>
-      </div>
 
       {error && (
         <Card className="p-4 border-destructive/40" data-testid="cam-error">
@@ -103,18 +176,20 @@ export default function CameraCenter() {
           ))}
         </TabsList>
 
-        <TabsContent value="overview"><OverviewTab info={info} caps={caps} /></TabsContent>
+        <TabsContent value="overview"><OverviewTab info={info} caps={caps} cameraId={cameraId} /></TabsContent>
         <TabsContent value="live"><LiveTab cameraId={cameraId} /></TabsContent>
         <TabsContent value="network"><NetworkTab info={info} /></TabsContent>
         <TabsContent value="streams"><StreamsTab cameraId={cameraId} /></TabsContent>
         <TabsContent value="capabilities"><CapabilitiesTab caps={caps} /></TabsContent>
-        <TabsContent value="ai"><AITab caps={caps} /></TabsContent>
+        <TabsContent value="ai"><AITab caps={caps} cameraId={cameraId} /></TabsContent>
+        <TabsContent value="events"><EventsTab cameraId={cameraId} /></TabsContent>
         <TabsContent value="audio"><AudioTab cameraId={cameraId} caps={caps} /></TabsContent>
         <TabsContent value="lighting"><LightingTab cameraId={cameraId} caps={caps} /></TabsContent>
         <TabsContent value="alarm"><AlarmTab cameraId={cameraId} caps={caps} /></TabsContent>
         <TabsContent value="ptz"><PTZTab cameraId={cameraId} caps={caps} /></TabsContent>
         <TabsContent value="maintenance"><MaintenanceTab cameraId={cameraId} /></TabsContent>
       </Tabs>
+      </div>
     </div>
   );
 }
@@ -135,30 +210,76 @@ const NotSupported = ({ what }) => (
   </Card>
 );
 
-// ─── Overview ───
-function OverviewTab({ info, caps }) {
+const fmtMs = (v) => (v == null ? "—" : `${v} ms`);
+
+const EventPanel = ({ title, items, render }) => (
+  <Card className="p-3 space-y-2">
+    <div className="text-xs uppercase tracking-wider text-muted-foreground">{title}</div>
+    <div className="space-y-1 max-h-64 overflow-auto">
+      {items.length === 0 && <div className="text-xs text-muted-foreground py-3 text-center">Aucun</div>}
+      {items.map((it, i) => (
+        <div key={i} className="text-xs border-b border-border/40 pb-1">{render(it)}</div>
+      ))}
+    </div>
+  </Card>
+);
+
+// ─── Overview ─── v0.5.0.b · tableau de bord complet
+function OverviewTab({ info, caps, cameraId }) {
+  const [rt, setRt] = useState({});
+  useEffect(() => {
+    const load = async () => {
+      const [cap, pipe, cam] = await Promise.all([
+        api.get("/diagnostics/capture/stats").catch(() => ({ data: {} })),
+        api.get("/diagnostics/pipeline-v2/stats").catch(() => ({ data: {} })),
+        api.get(`/cameras/${cameraId}`).catch(() => ({ data: {} })),
+      ]);
+      const w = (cap.data.workers || {})[cameraId] || {};
+      const p = ((pipe.data.per_camera || {})[cameraId]) || {};
+      setRt({ capture: w, pipeline: p, cam: cam.data || {} });
+    };
+    load();
+    const iv = setInterval(load, 5000);
+    return () => clearInterval(iv);
+  }, [cameraId]);
+  const w = rt.capture || {};
+  const cam = rt.cam || {};
+  const aiActive = !!(cam.enabled_plugins && cam.enabled_plugins.length);
   return (
-    <div className="grid gap-3 md:grid-cols-2" data-testid="cam-overview">
+    <div className="grid gap-3 md:grid-cols-3" data-testid="cam-overview">
       <Card className="p-4 space-y-1">
         <div className="text-sm text-muted-foreground">Identité</div>
         <div className="grid grid-cols-2 gap-1 text-sm">
+          <div>Nom</div><div className="font-mono truncate">{cam.name || "—"}</div>
+          <div>État</div><div>{w.alive ? <Badge>en ligne</Badge> : <Badge variant="destructive">hors ligne</Badge>}</div>
+          <div>Driver</div><div className="font-mono">{cam.driver || "onvif"}</div>
           <div>Fabricant</div><div className="font-mono">{info?.manufacturer || "—"}</div>
           <div>Modèle</div><div className="font-mono">{info?.model || "—"}</div>
           <div>Firmware</div><div className="font-mono">{info?.firmware || "—"}</div>
-          <div>Serial</div><div className="font-mono">{info?.serial || "—"}</div>
-          <div>MAC</div><div className="font-mono">{info?.mac || "—"}</div>
-          <div>IP</div><div className="font-mono">{info?.ip || "—"}</div>
         </div>
       </Card>
       <Card className="p-4 space-y-1">
-        <div className="text-sm text-muted-foreground">Capacités clés</div>
-        <div className="grid grid-cols-2 gap-1 mt-2">
-          <CapField ok={caps?.ptz} label="PTZ" />
-          <CapField ok={caps?.zoom} label="Zoom" />
-          <CapField ok={caps?.spotlight || caps?.white_light} label="Lumière" />
-          <CapField ok={caps?.siren} label="Sirène" />
-          <CapField ok={caps?.two_way_audio} label="Talk-back" />
-          <CapField ok={caps?.onboard_ai} label="IA embarquée" />
+        <div className="text-sm text-muted-foreground">Vidéo · Capture</div>
+        <div className="grid grid-cols-2 gap-1 text-sm">
+          <div>RTSP</div><div className="font-mono truncate text-xs">{cam.rtsp_url ? "configuré" : "—"}</div>
+          <div>Codec</div><div className="font-mono">{w.codec || "—"}</div>
+          <div>Résolution</div><div className="font-mono">{w.resolution || "—"}</div>
+          <div>FPS capture</div><div className="font-mono">{w.fps_capture_1min ?? "—"}</div>
+          <div>Frames dropped</div><div className="font-mono">{w.frames_dropped ?? 0}</div>
+          <div>Warmup</div><div className="font-mono">{fmtMs(w.warmup_ms)}</div>
+        </div>
+      </Card>
+      <Card className="p-4 space-y-1">
+        <div className="text-sm text-muted-foreground">IA · ANPR · Stockage</div>
+        <div className="grid grid-cols-2 gap-1 text-sm">
+          <div>IA active</div>
+          <div>{aiActive ? <Badge>ON</Badge> : <Badge variant="secondary">OFF</Badge>}</div>
+          <div>ANPR</div>
+          <div>{(cam.enabled_plugins || []).includes("fast-alpr") ? <Badge>ON</Badge> : <Badge variant="secondary">OFF</Badge>}</div>
+          <div>Plugins actifs</div><div className="font-mono">{(cam.enabled_plugins || []).length}</div>
+          <div>Enregistrement</div><div>{cam.record_enabled ? "actif" : "inactif"}</div>
+          <div>Batterie</div><div className="font-mono">—</div>
+          <div>Temp°</div><div className="font-mono">—</div>
         </div>
       </Card>
     </div>
@@ -166,10 +287,12 @@ function OverviewTab({ info, caps }) {
 }
 
 function LiveTab({ cameraId }) {
+  // v0.5.0.b · WebRTC intégré directement dans Camera Center (plus de renvoi ailleurs)
   return (
-    <Card className="p-6 text-sm text-muted-foreground" data-testid="cam-live">
-      Live WebRTC : cette vue utilise la page{" "}
-      <a className="underline" href={`/live?camera=${cameraId}`}>Live</a> existante.
+    <Card className="p-3" data-testid="cam-live">
+      <div className="aspect-video bg-black">
+        <WebRTCPlayer cameraId={cameraId} />
+      </div>
     </Card>
   );
 }
@@ -219,28 +342,60 @@ function StreamsTab({ cameraId }) {
   );
 }
 
+// v0.5.0.b · Capabilities catégorisées (jamais du JSON brut)
 function CapabilitiesTab({ caps }) {
   if (!caps) return <Card className="p-6 text-sm">Capabilités non détectées. Lancez un discover.</Card>;
   const groups = [
-    { title: "PTZ / Optique", fields: ["ptz", "zoom", "focus"] },
-    { title: "Audio", fields: ["audio_input", "audio_output", "microphone", "speaker", "two_way_audio"] },
-    { title: "Lumière & IR", fields: ["spotlight", "white_light", "ir_control", "ir_cut_filter"] },
-    { title: "Alarme", fields: ["siren", "alarm_output"] },
-    { title: "Capteurs", fields: ["pir_sensor", "battery"] },
-    { title: "IA embarquée", fields: ["onboard_ai"] },
-    { title: "Protocoles", fields: ["onvif", "isapi", "cgi", "reolink_api"] },
+    { title: "VIDEO", fields: [
+      { key: "onvif", label: "RTSP (ONVIF)" },
+      { key: "isapi", label: "ISAPI" },
+      { key: "cgi", label: "CGI" },
+      { key: "reolink_api", label: "Reolink API" },
+    ]},
+    { title: "PTZ", fields: [
+      { key: "ptz", label: "PTZ" },
+      { key: "zoom", label: "Zoom" },
+      { key: "focus", label: "Focus" },
+    ]},
+    { title: "AUDIO", fields: [
+      { key: "audio_input", label: "Micro" },
+      { key: "audio_output", label: "Speaker" },
+      { key: "two_way_audio", label: "Talk-back" },
+    ]},
+    { title: "LUMIÈRE", fields: [
+      { key: "spotlight", label: "Spotlight" },
+      { key: "white_light", label: "White light" },
+      { key: "ir_control", label: "IR" },
+      { key: "ir_cut_filter", label: "IR cut filter" },
+    ]},
+    { title: "ALARME", fields: [
+      { key: "siren", label: "Sirène" },
+      { key: "alarm_output", label: "Relais alarme" },
+    ]},
+    { title: "CAPTEURS", fields: [
+      { key: "pir_sensor", label: "PIR" },
+      { key: "battery", label: "Batterie" },
+    ]},
+    { title: "IA EMBARQUÉE", fields: [{ key: "onboard_ai", label: "Détection embarquée" }]},
   ];
   return (
     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="cam-capabilities">
       {groups.map((g) => (
         <Card key={g.title} className="p-4 space-y-2">
-          <div className="text-sm text-muted-foreground">{g.title}</div>
-          {g.fields.map((f) => <CapField key={f} ok={!!caps[f]} label={f} />)}
+          <div className="text-xs uppercase tracking-wider text-muted-foreground">{g.title}</div>
+          {g.fields.map((f) => (
+            <div key={f.key} className="flex items-center justify-between text-sm">
+              <span className={caps[f.key] ? "" : "text-muted-foreground"}>{f.label}</span>
+              <span className={caps[f.key] ? "text-green-500 font-mono" : "text-muted-foreground font-mono"}>
+                {caps[f.key] ? "✓" : "✗"}
+              </span>
+            </div>
+          ))}
         </Card>
       ))}
       {caps.onboard_ai_features?.length > 0 && (
-        <Card className="p-4 space-y-1">
-          <div className="text-sm text-muted-foreground">Features IA embarquées</div>
+        <Card className="p-4 space-y-1 md:col-span-2 xl:col-span-3">
+          <div className="text-xs uppercase tracking-wider text-muted-foreground">Features IA embarquées</div>
           <div className="flex flex-wrap gap-1 pt-1">
             {caps.onboard_ai_features.map((f) => <Badge key={f} variant="secondary">{f}</Badge>)}
           </div>
@@ -250,15 +405,91 @@ function CapabilitiesTab({ caps }) {
   );
 }
 
-function AITab({ caps }) {
-  if (!caps?.onboard_ai) return <NotSupported what="IA embarquée constructeur" />;
+// v0.5.0.b · AI enrichi (état plugins + latence inférence live)
+function AITab({ caps, cameraId }) {
+  const [ai, setAi] = useState({});
+  useEffect(() => {
+    const load = async () => {
+      const [cam, insp] = await Promise.all([
+        api.get(`/cameras/${cameraId}`).catch(() => ({ data: {} })),
+        api.get("/diagnostics/pipeline-inspector").catch(() => ({ data: {} })),
+      ]);
+      const stages = ((insp.data.per_camera || {})[cameraId]) || {};
+      setAi({ cam: cam.data || {}, stages });
+    };
+    load();
+    const iv = setInterval(load, 4000);
+    return () => clearInterval(iv);
+  }, [cameraId]);
+  const plugins = ai.cam?.enabled_plugins || [];
+  const stages = ai.stages || {};
   return (
-    <Card className="p-4" data-testid="cam-ai">
-      <div className="text-sm">Features supportées :</div>
-      <div className="flex flex-wrap gap-1 pt-2">
-        {(caps.onboard_ai_features || []).map((f) => <Badge key={f}>{f}</Badge>)}
-      </div>
-    </Card>
+    <div className="grid gap-3 md:grid-cols-2" data-testid="cam-ai">
+      <Card className="p-4 space-y-2">
+        <div className="text-xs uppercase tracking-wider text-muted-foreground">Pipeline actif</div>
+        <div className="grid grid-cols-2 gap-1 text-sm">
+          <div>Détection</div><div className="font-mono">YOLO11</div>
+          <div>Tracking</div><div className="font-mono">{ai.cam?.tracker_algo || "ByteTrack"}</div>
+          <div>ANPR</div>
+          <div>{plugins.includes("fast-alpr") ? <Badge>FastALPR</Badge> : <Badge variant="secondary">OFF</Badge>}</div>
+          <div>IA embarquée</div>
+          <div>{caps?.onboard_ai ? <Badge variant="secondary">dispo</Badge> : "—"}</div>
+          <div>Plugins actifs</div><div className="font-mono">{plugins.length}</div>
+        </div>
+      </Card>
+      <Card className="p-4 space-y-2">
+        <div className="text-xs uppercase tracking-wider text-muted-foreground">Latences (dernière frame)</div>
+        <div className="grid grid-cols-2 gap-1 text-sm">
+          <div>Decode</div><div className="font-mono">{fmtMs(stages.decode)}</div>
+          <div>YOLO</div><div className="font-mono">{fmtMs(stages.detection)}</div>
+          <div>Tracking</div><div className="font-mono">{fmtMs(stages.tracking)}</div>
+          <div>ROI</div><div className="font-mono">{fmtMs(stages.roi)}</div>
+          <div>ANPR</div><div className="font-mono">{fmtMs(stages.anpr)}</div>
+          <div>Total</div><div className="font-mono">{fmtMs(stages.total)}</div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// v0.5.0.b · Events par caméra (plaques + alertes + erreurs)
+function EventsTab({ cameraId }) {
+  const [ev, setEv] = useState({ plates: [], alerts: [], errors: [] });
+  useEffect(() => {
+    const load = async () => {
+      const [plates, alerts] = await Promise.all([
+        api.get(`/plates?camera_id=${cameraId}&limit=20`).catch(() => ({ data: [] })),
+        api.get(`/alerts?camera_id=${cameraId}&limit=20`).catch(() => ({ data: [] })),
+      ]);
+      setEv({
+        plates: (plates.data || []).slice(0, 20),
+        alerts: (alerts.data || []).slice(0, 20),
+        errors: [],
+      });
+    };
+    load();
+    const iv = setInterval(load, 10000);
+    return () => clearInterval(iv);
+  }, [cameraId]);
+  return (
+    <div className="grid gap-3 md:grid-cols-3" data-testid="cam-events">
+      <EventPanel title="Dernières plaques" items={ev.plates}
+             render={(p) => (
+               <div className="flex justify-between">
+                 <span className="font-mono">{p.plate || "—"}</span>
+                 <span className="text-muted-foreground">{p.confidence != null ? `${Math.round(p.confidence * 100)}%` : ""}</span>
+               </div>
+             )} />
+      <EventPanel title="Dernières alertes" items={ev.alerts}
+             render={(a) => (
+               <div>
+                 <div className="font-medium">{a.title || a.type || "Alerte"}</div>
+                 <div className="text-muted-foreground text-[10px]">{a.created_at?.slice(0, 19)?.replace("T", " ")}</div>
+               </div>
+             )} />
+      <EventPanel title="Dernières erreurs" items={ev.errors}
+             render={(e) => <div>{e.message || "—"}</div>} />
+    </div>
   );
 }
 
