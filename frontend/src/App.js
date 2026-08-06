@@ -7,6 +7,7 @@ import Layout from "@/components/Layout";
 import Login from "@/pages/Login";
 import ResetPassword from "@/pages/ResetPassword";
 import Dashboard from "@/pages/Dashboard";
+import WelcomeCenter from "@/pages/WelcomeCenter";
 import LiveView from "@/pages/LiveView";
 import Recordings from "@/pages/Recordings";
 import Network from "@/pages/Network";
@@ -51,7 +52,9 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/reset-password" element={<ResetPassword />} />
-      <Route path="/" element={<Protected><Dashboard /></Protected>} />
+      <Route path="/" element={<Protected><WelcomeCenter /></Protected>} />
+      <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
+      <Route path="/welcome" element={<Protected><WelcomeCenter /></Protected>} />
       <Route path="/live" element={<Protected><LiveView /></Protected>} />
       <Route path="/recordings" element={<Protected><Recordings /></Protected>} />
       <Route path="/network" element={<Protected><Network /></Protected>} />

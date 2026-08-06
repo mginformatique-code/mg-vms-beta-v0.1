@@ -1,158 +1,131 @@
-# MG-VMS · ROADMAP versionnée (v0.5.1.b)
+# MG-VMS · ROADMAP v0.5.1.b (réalignement produit)
 
-**Objectif final** : Release Candidate v1.0 · plateforme VMS professionnelle
-comparable à Milestone XProtect / Nx Witness / Genetec / Synology.
+**Vision produit** : MG-VMS n'est pas une collection de pages, c'est une **suite
+Control Center** avec 8 centres spécialisés, cohérente et complète, comparable
+en approche à Milestone XProtect / Nx Witness / Synology Surveillance Station.
 
-**Maturité globale actuelle** : **68 % → RC v1.0** *(estimation à date v0.5.1.b)*
+**Maturité globale actuelle** : **~62 % → RC v1.0** *(recalibrée v0.5.1.b)*
 
-Décomposition (poids relatifs) :
+## Décomposition (poids relatifs recalibrés)
 
-| Domaine | Poids | Avancement | Contribution |
-|---|---:|---:|---:|
-| Pipeline IA (unique, déterministe) | 15 % | 95 % | 14.3 |
-| Camera Device Layer | 10 % | 85 % | 8.5 |
-| Latence acquisition | 10 % | 90 % | 9.0 |
-| Sécurité + HTTPS prod | 10 % | 80 % | 8.0 |
-| Camera Center UI | 8 % | 75 % | 6.0 |
-| Pipeline Center UI | 8 % | 80 % | 6.4 |
-| Docker / Déploiement | 7 % | 80 % | 5.6 |
-| Drivers constructeurs | 8 % | 45 % | 3.6 |
-| Plugin Manager UX | 6 % | 40 % | 2.4 |
-| Welcome Center | 4 % | 0 % | 0.0 |
-| Monitoring temps réel | 5 % | 30 % | 1.5 |
-| Tests régression | 5 % | 60 % | 3.0 |
-| Documentation | 4 % | 25 % | 1.0 |
-| **TOTAL** | **100 %** | | **≈68 %** |
+| Domaine | Poids | Avancement | Contribution | Δ vs estim. précédente |
+|---|---:|---:|---:|---:|
+| Pipeline IA | 12 % | 90 % | 10.8 | -0.4 (9/10) |
+| Camera Device Layer | 10 % | 95 % | 9.5 | +1.0 (9.5/10) |
+| Plugin System | 8 % | 90 % | 7.2 | +0.8 (9/10) |
+| Latence acquisition | 8 % | 90 % | 7.2 | inchangé |
+| UX (Centers unifiés) | 10 % | 85 % | 8.5 | +2.5 (8.5/10) |
+| Sécurité | 8 % | 80 % | 6.4 | inchangé |
+| Déploiement | 6 % | 75 % | 4.5 | -0.5 (7.5/10) |
+| **Observabilité (nouveau)** | 10 % | 25 % | 2.5 | ⚠ nouveau domaine 1er ordre |
+| Monitoring temps réel | 5 % | 30 % | 1.5 | -1.5 (6.5/10) |
+| **Documentation** | 8 % | **40 %** | 3.2 | +2.5 (4/10, poids augmenté) |
+| Tests régression | 5 % | 65 % | 3.3 | +0.3 |
+| Workflow automation | 5 % | 40 % | 2.0 | nouveau |
+| Drivers constructeurs | 5 % | 45 % | 2.3 | inchangé |
+| **TOTAL** | **100 %** | | **≈62 %** | |
 
----
-
-## ✅ Tranches livrées
-
-### v0.4.3 · Fermeture stricte pipeline (fail-safe)
-- 3 points de fail-open éliminés, 1406 lignes code mort supprimées, une seule architecture pipeline
-- 12/12 tests d'isolation stricte, benchmarks CPU-only
-
-### v0.4.4 · Requirements + Docker refonte
-- 3 fichiers `requirements*.txt` séparés (runtime / IA / dev), ~50 packages supprimés
-- Dockerfile 2 layers pip stables, docker-compose.yml sans volumes nommés, .env.example durci
-
-### v0.4.5.a · Latence pipeline acquisition
-- Métriques `frames_produced/dropped/fps_capture_1min/warmup_ms`
-- `_fetch_frame` non-bloquant strict, double encode/decode supprimé, warm-start automatique
-- `AI_INTERVAL` par défaut 2.0 → 0.15 s (~6-7 FPS/caméra), backoff max 30 → 5 s
-- 9/9 tests latence + endpoint `/api/diagnostics/capture/stats`
-
-### v0.4.6 · Camera Device Layer
-- `CameraDeviceService` + `CameraDriver` abstrait + `ONVIFDriver`/`ReolinkDriver`/`DahuaDriver`/`HikvisionDriver`
-- 14 endpoints `/api/devices/*` avec mapping erreur → HTTP propre (jamais 500)
-- Gardes de capacités (`UnsupportedCapabilityError`), registry avec fallback ONVIF
-- 22/22 tests drivers, documentation `drivers/README.md`
-
-### v0.5.0.a · Pipeline Center + Camera Center UI
-- `PipelineCenter` 10 onglets · `CameraCenter` 11 onglets par caméra
-- Hook `useDeviceCapabilities` centralisé, widgets conditionnels stricts
-- 42/42 tests structurels
-
-### v0.5.0.b · UX Unification
-- Menu principal nettoyé (retiré pipeline-video/monitor/designer/inspector)
-- Alias `/pipeline/designer`, `/pipeline/inspector`
-- Camera Center enrichi : HealthBanner + prev/next + WebRTC embed + Events tab + Capabilities catégorisées + AI latences
-- Cameras.jsx ligne cliquable → Camera Center
-- 22/22 tests UX unification
-
-### v0.5.1.b · Sécurité + déploiement production ⬅ **cette session**
-- `nginx.conf` : HTTPS TLS 1.2/1.3, HSTS + CSP + X-Frame + Permissions-Policy, rate limit login 5r/min + API 100r/s, OCSP stapling
-- `docker-compose.prod.yml` : Nginx + Certbot auto-renew, backend/frontend/go2rtc non exposés en direct, secrets obligatoires (`?requis`), CORS restreint au domaine prod
-- Backend : `TrustedHostMiddleware` conditionné à `MGVMS_TRUSTED_HOSTS`
-- 29/29 tests sécurité production
-
-**Total tests actifs : 149/149 verts.**
+L'observabilité passe en domaine de 1er ordre (10 %). La documentation est revalorisée
+en poids (8 % au lieu de 4 %) et en criticité (bloquant pour RC).
 
 ---
 
-## 🚧 Tranches restantes vers v1.0
+## 🎯 Les 8 Centers (identité produit)
 
-### v0.5.1.a · Welcome Center + Menu final 7 items *(prochaine session)*
-**Dépend de** : rien
-**Contenu** : Welcome intelligent (score santé, changelog auto, alertes, tips), menu final Dashboard/Cameras/Pipeline/AI & Plugins/Events/Recordings/Settings
-**Estimation** : ~3 h
+Toute nouvelle page appartient à EXACTEMENT un Center. Un Center = un domaine, une couleur, un rôle.
 
-### v0.5.1.c · Camera Wizard
-**Dépend de** : v0.4.6 (device layer)
-**Contenu** : Assistant ajout caméra · découverte réseau → détection constructeur → auth → probe capacités → tests RTSP/PTZ/audio/light → save
-**Estimation** : ~4 h
-
-### v0.5.1.d · Plugin Manager unifié
-**Dépend de** : rien
-**Contenu** : Onglets Installed/Marketplace/Configuration/Runtime/Logs/SDK · éradiquer terme "Extension"
-**Estimation** : ~4 h
-
-### v0.5.1.e · Audit code mort + rapport dette technique
-**Dépend de** : rien
-**Contenu** : Grep exhaustif imports/composants/CSS/routes inutilisés, cleanup, rapport chiffré
-**Estimation** : ~3 h
-
-### v0.5.1.f · Monitoring temps réel
-**Dépend de** : v0.4.5.a (métriques capture)
-**Contenu** : Dashboard CPU/GPU/VRAM/RAM/Mongo/go2rtc/Pipeline/YOLO/Tracking/Plugins/Workflows/Disques/Réseau + alertes + historique 24h
-**Estimation** : ~4 h
-
-### v0.5.2 · Drivers constructeurs supplémentaires
-**Dépend de** : v0.4.6
-**Contenu** : Axis VAPIX, Hanwha Sunapi, Uniview LAPI + tests contre mocks + validation matérielle
-**Estimation** : ~2 h/driver
-
-### v0.5.3 · Workflow Center complet
-**Dépend de** : rien
-**Contenu** : Moteur graphique SI/ALORS complet (plaque → portail, bookmark, clip vidéo, spotlight)
-**Estimation** : ~6 h
-
-### v0.5.4 · Documentation
-**Dépend de** : tout ce qui précède figé
-**Contenu** : README + Installation + Docker + HTTPS + Drivers + Plugins + API + Architecture + Pipeline
-**Estimation** : ~1 journée
-
-### v0.5.5 · Tests stress 30/50 caméras
-**Dépend de** : machine RTX A2000 avec matériel réel
-**Contenu** : Harness synthétique + validation terrain
-**Estimation** : ~6 h + accès matériel
-
-### v1.0-RC · Release Candidate
-**Dépend de** : v0.5.1.* + v0.5.2 + v0.5.3 + v0.5.4 + v0.5.5
-**Contenu** : Audit sécurité complet (`security_audit_agent`), audit régression complet (`testing_agent_v3_fork`), release notes, migration guide
+| Center | Rôle | Statut |
+|---|---|---|
+| 🏠 **Dashboard** | Vue globale, points d'entrée | 60 % (Dashboard existant à moderniser) |
+| 📹 **Camera Center** | Tout sur UNE caméra (11 onglets) | 85 % (v0.5.0.a/b) |
+| ⚙️ **Pipeline Center** | Traitement vidéo + IA (10 onglets) | 80 % (v0.5.0.a) |
+| 🧩 **Plugin Center** | Installed / Marketplace / Config / Runtime / Logs / SDK | 40 % (fragmenté) |
+| 🖥️ **Operations Center** | Santé système, Docker, GPU, Mongo, go2rtc — répond au *"Pourquoi ?"* | **25 %** — priorité |
+| 🔔 **Event Center** | Événements / ANPR / alertes / logs corrélés | 50 % (pages existantes non unifiées) |
+| 🎬 **Recording Center** | Recherche + lecture enregistrements | 60 % (Timeline existant) |
+| ⚙️ **Settings Center** | Configuration générale, utilisateurs, sécurité | 55 % |
 
 ---
 
-## 🐛 Dette technique restante (à vider avant v1.0)
+## Roadmap produit réorganisée
 
-| Item | Impact | Effort | Priorité |
-|---|---|---|---|
-| Rate-limit brute-force casse CI parallèle (recur. 4 forks) | 🔥 tests régression | ~1 h | P1 |
-| Aucun test E2E upload → CameraWorker | 🟠 régression silencieuse possible | ~1 h | P2 |
-| Benchmarks GPU/VRAM absents (pod cloud sans GPU) | 🟠 promesse scale non prouvée | machine A2000 | P1 (machine) |
-| Refactor `routers.py` monolithique → `routes/*` par domaine | 🟡 maintenabilité | ~3 h | P2 |
-| `analyze_image_local` hardcode `enabled_plugins=["fast-alpr"]` | 🟡 UX upload manuel limitée | ~30 min | P3 |
-| Tests React Testing Library réels (rendu vs invariants) | 🟡 confiance rendu | ~2 h | P2 |
-| Health banner backend : endpoints `mongo_ok`, `go2rtc_ok`, `pipeline_ok`, `gpu_percent`, `vram_percent` | 🟠 UI attend ces champs | ~1 h | P1 |
-| Rolling window `pipeline_metrics` imprécise | 🟡 diagnostic UI | ~30 min | P3 |
-| `enabled_plugins` non validé à l'insertion Mongo | 🟡 config invalide silencieuse | ~30 min | P2 |
-| Migration menu vers 7 items finaux (Dashboard/Cameras/Pipeline/AI&Plugins/Events/Recordings/Settings) | 🟡 UX | v0.5.1.a | P1 |
+### v0.5.1 · **Production Ready** *(en cours)*
+Objectif : socle client pilote sécurisé + expérience d'accueil pro.
+
+- ✅ v0.5.1.b · HTTPS + Nginx + docker-compose.prod + audit sécurité *(livré)*
+- ⏳ v0.5.1.a · Welcome Center + menu final 7 items *(prochaine session)*
+- ⏳ v0.5.1.c · **Documentation d'architecture minimale** (ADR pour décisions v0.4.3/v0.4.6, guide install, README refondu)
+- ⏳ v0.5.1.d · Health backend endpoints (`mongo_ok`, `go2rtc_ok`, `gpu_percent`, `vram_percent`) pour alimenter le HealthBanner v0.5.0.b
+
+### v0.6 · **Operations Center** *(le grand chantier observabilité)*
+Objectif : répondre au *"Pourquoi ?"* — pas seulement au *"Combien ?"*.
+
+- Camera Wizard (assistant ajout caméra avec probe automatique)
+- Operations Center MVP : GPU/CPU/RAM/VRAM temps réel + historique 24h
+- **Corrélation événements** : "cette caméra est passée à 2 FPS car GPU=97 % à cet instant"
+- Alertes proactives (GPU>90 %, Mongo latence>1s, caméra offline>30s, disk<10 %)
+- Drivers Axis + Hanwha + Uniview (compléter la matrice constructeur)
+- Historique métriques Prometheus-like (série temporelle Mongo TS ou InfluxDB embedded)
+
+### v0.7 · **Workflow Center**
+Objectif : automation métier riche.
+
+- Moteur Workflow graphique complet (SI plaque → ALORS portail + notif + bookmark + clip + spotlight)
+- Scénarios pré-packagés (parking, sortie de secours, contrôle d'accès, ANPR liste noire)
+- Triggers cross-Center (caméra → workflow → événement → notification)
+
+### v0.8 · **Plugin Marketplace**
+Objectif : écosystème plugin extensible par des tiers.
+
+- Plugin Center unifié final (Marketplace, versioning, sandbox, signature)
+- SDK plugin documenté avec templates prêts (FrameAnalyzer, PlateRecognizer, EventConsumer)
+- Certification plugin (tests de charge automatisés, quarantaine si latence excessive)
+
+### v0.9 · **Performances & Stress**
+Objectif : preuves de scale mesurables sur RTX A2000.
+
+- Benchmarks GPU réels 1/10/30/50 caméras (VRAM, FPS, latence bout-en-bout)
+- Optimisations révélées par les bench (potentiellement TensorRT, batching YOLO, sub-streams IA)
+- Documentation performances complète
+
+### v1.0-RC → v1.0 Stable
+- Audit sécurité complet externe (`security_audit_agent`)
+- Audit régression complet UI+API (`testing_agent_v3_fork`)
+- Release notes + migration guide + guide de déploiement client final
+- 60 jours de stabilisation sur pilote client réel
 
 ---
 
-## Contraintes absolues (v0.5.1 onwards)
+## 🐛 Dette technique bloquante RC (à traiter dans v0.5.1 - v0.9)
 
-- ❌ Ne pas casser pipeline IA (v0.4.3 · 12 tests iso)
-- ❌ Ne pas casser drivers (v0.4.6 · 22 tests)
-- ❌ Ne pas casser Camera/Pipeline Center (v0.5.0.a/b · 64 tests)
-- ❌ Ne pas casser Docker / Mongo (v0.4.4)
-- ✅ Rétrocompatibilité routes existantes
-- ✅ Chaque tranche = audit non-régression + tests + rapport + doc + roadmap + score maturité
+| Item | Impact | Phase |
+|---|---|---|
+| Rate-limit brute-force casse CI (récur. 5 forks) | Tests régression fragiles | v0.5.1 |
+| Health backend endpoints manquants | HealthBanner UI incomplète | v0.5.1 |
+| CSP `'unsafe-inline'` (Tailwind runtime) | Sécurité 8→10 | v0.8 |
+| Refresh token JWT + rotation | Sécurité 8→10 | v0.7 |
+| Refactor `routers.py` monolithique | Maintenabilité | v0.6 |
+| `analyze_image_local` hardcode `enabled_plugins` | UX upload manuel | v0.6 |
+| Tests RTL réels (rendu vs invariants) | Confiance rendu | v0.6 |
+| Backup MongoDB chiffré scripté | Production | v0.9 |
+| Pipeline metrics rolling window imprécis | Diagnostic | v0.6 |
+| `pip-audit` / `npm audit` CI | Sécurité | v0.7 |
 
 ---
 
-## Prochaine session (v0.5.1.a)
+## Contraintes absolues (invariantes v0.5.1 → v1.0)
 
-**Cible** : Welcome Center intelligent + menu final 7 items
-**Prérequis** : cette tranche v0.5.1.b déployée et validée par l'utilisateur
-**Estimation avancement post-v0.5.1.a** : ~72 %
+- ❌ Ne pas casser pipeline IA (v0.4.3 · 12 tests iso stricts)
+- ❌ Ne pas casser Camera Device Layer (v0.4.6 · 22 tests)
+- ❌ Ne pas casser Pipeline/Camera Center (v0.5.0.a/b · 64 tests)
+- ❌ Ne pas casser Docker / Mongo / go2rtc
+- ✅ Chaque nouvelle page appartient à UN des 8 Centers (jamais isolée)
+- ✅ Chaque tranche = audit non-régression + tests + rapport + doc + roadmap + score
+
+---
+
+## Prochaine session : choix
+
+**Recommandation** : v0.5.1.a **Welcome Center + Menu final 7 items** — c'est ce qui rend visible tout ce qu'on a construit et donne l'impression de suite Control Center dès l'ouverture. Ça change la perception du produit sans nouvelle brique lourde.
+
+**Alternative** : v0.5.1.c **Documentation ADR + README architecture** — moins glamour, mais évite que le "pourquoi" architectural se perde.

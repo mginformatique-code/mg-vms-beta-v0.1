@@ -2,12 +2,21 @@
 
 Note prod: le rate-limit en mémoire suppose un process unique. En production
 multi-instances, déporter vers Redis (voir /deploy). Ici (process unique), suffisant.
+
+En mode test (env `TESTING=1`), le rate-limit est complètement bypassé afin
+d'éviter les faux positifs (429) durant les campagnes pytest parallèles. Les
+en-têtes OWASP restent appliqués pour continuer à couvrir leur vérification.
 """
+import os
 import time
 from collections import defaultdict, deque
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+
+
+def _testing_mode() -> bool:
+    return os.environ.get("TESTING", "").lower() in ("1", "true", "yes", "on")
 
 # Limites par IP : (max requêtes, fenêtre secondes) sur chemins sensibles
 SENSITIVE_LIMITS = {
@@ -38,7 +47,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         path = request.url.path
         limit = SENSITIVE_LIMITS.get(path)
-        if limit and request.method == "POST":
+        if limit and request.method == "POST" and not _testing_mode():
             max_req, window = limit
             key = f"{_client_ip(request)}:{path}"
             now = time.time()

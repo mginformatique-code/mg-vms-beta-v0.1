@@ -15,7 +15,8 @@ const PLUGIN_ICON = {
 
 const NAV = [
   { group: "nav.operations", items: [
-    { to: "/", icon: LayoutDashboard, key: "nav.dashboard", end: true },
+    { to: "/", icon: LayoutDashboard, key: "nav.welcome", end: true },
+    { to: "/dashboard", icon: Grid3x3, key: "nav.dashboard" },
     { to: "/live", icon: Grid3x3, key: "nav.live", perm: "view_live" },
     { to: "/recordings", icon: Film, key: "nav.recordings", perm: "view_recordings" },
     { to: "/cameras", icon: Cctv, key: "nav.cameras" },

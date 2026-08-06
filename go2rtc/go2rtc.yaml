@@ -1,6 +1,4 @@
 streams:
-        cam_demo-cam-001_hd:
-          - ffmpeg:cam_demo-cam-001#video=mjpeg#low_latency
         cam_demo-cam-001_sd:
           - ffmpeg:cam_demo-cam-001#video=mjpeg#width=640#low_latency
         cam_demo-cam-002_hd:

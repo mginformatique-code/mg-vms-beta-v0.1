@@ -1,0 +1,27 @@
+{
+  "summary": "MG-VMS v0.5.1.a Welcome Center — full backend + frontend testing. All 13 pytest tests pass (8 Welcome Center HTTP live + 5 TESTING bypass unit). All Welcome Center UI features confirmed against admin login: greeting, 9 health components, health ring, version card v0.4.3-stable with changelog button, 4 stats, 8 Centers links, alerts, tips, news admin CRUD, prefs with persistence after reload, sidebar entries 'Accueil' + 'Tableau de bord', /dashboard route still accessible. Sequential admin login (15x) via public URL returned all 200 → no 423/429 (brute-force lockout not triggered for valid credentials, as expected).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_welcome_center.py",
+    "/app/backend/tests/test_testing_bypass.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/iter40_welcome.xml",
+    "/app/test_reports/iter40_welcome.jpeg"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "welcome.py health.score depends on live go2rtc + plugins state; on this pod score sits at 76/100 (expected 70-80) — matches spec.",
+    "Score ring color thresholds are 60/85 (warn/ok) — coherent with alerts rules.",
+    "welcome_news created_by uses email only — no user id stored, minor limitation if user email is renamed (non-blocking).",
+    "PrefsInput exclude_none semantics: passing last_seen_version=null is filtered out (uses exclude_none) — so 'reset last_seen_version' via null does not persist. The tests use it for cleanup but rely on default fallback; consider explicit reset endpoint. Non-blocking."
+  ],
+  "updated_files": ["/app/backend/tests/conftest.py"],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "100%"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Test news 'TEST_news_iter40' created + auto-deleted during flow. Prefs hide_until_next_version toggled + reset. No residual test data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "conftest.py now inserts /app/backend into sys.path so unit tests importing 'auth'/'security' modules work from any pytest rootdir. TESTING=1 is forced automatically. Backend service (supervisor) does NOT have TESTING=1 (this is by design — bypass is pytest-only via conftest.py). All Welcome Center endpoints/UI are stable.",
+  "rca of the issue": "Initial run of test_testing_bypass.py failed 4/5 with ModuleNotFoundError('security'/'auth') because pytest.ini rootdir is /app/backend but pytest was invoked from /app; sys.path didn't include /app/backend for the tests directory. Fix: added sys.path.insert to conftest.py at the top so backend modules are always importable during test collection. After fix all 13 tests pass in ~3s."
+}

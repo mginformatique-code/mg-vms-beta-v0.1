@@ -52,6 +52,15 @@ def has_permission(user: dict, perm: str) -> bool:
 MAX_LOGIN_ATTEMPTS = 5
 LOCKOUT_MINUTES = 15
 
+
+def _testing_mode() -> bool:
+    """Bypass complet du verrou brute-force en mode test (env TESTING=1).
+
+    Nécessaire pour les campagnes pytest parallèles où plusieurs tests tentent
+    des connexions valides et invalides en rafale sans coordination.
+    """
+    return os.environ.get("TESTING", "").lower() in ("1", "true", "yes", "on")
+
 auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
@@ -211,6 +220,8 @@ def _client_ip(request: Request) -> str:
 
 
 async def _check_lockout(identifier: str):
+    if _testing_mode():
+        return
     rec = await db.login_attempts.find_one({"identifier": identifier})
     if rec and rec.get("locked_until"):
         if datetime.fromisoformat(rec["locked_until"]) > datetime.now(timezone.utc):
@@ -219,6 +230,8 @@ async def _check_lockout(identifier: str):
 
 
 async def _register_failure(identifier: str) -> int:
+    if _testing_mode():
+        return 0
     rec = await db.login_attempts.find_one({"identifier": identifier})
     count = (rec["count"] + 1) if rec else 1
     update = {"identifier": identifier, "count": count, "last_at": datetime.now(timezone.utc).isoformat()}
