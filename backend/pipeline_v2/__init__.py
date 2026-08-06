@@ -1,24 +1,28 @@
-"""MG-VMS · Pipeline Engine v2 — Architecture inversée (Feb 2026).
+"""MG-VMS · Pipeline v2 — Architecture UNIQUE (v0.4.3, Feb 2026).
 
-**Bascule majeure** : le **Pipeline Engine** devient le chef d'orchestre.
-Le Plugin Manager ne pilote plus le traitement — il ne fait que **fournir**
-les providers (detection / tracking / recognition / consumers).
+Un seul chemin d'exécution IA dans le backend :
 
-Architecture cible :
-    Camera → Frame Acquisition → Scheduler → Cache → Pre-processing
-        → Detection → Tracking → ROI Extraction → Recognition
-        → Fusion → Business Logic → Events → Notifications
+    ai_engine.ai_loop
+        → PipelineRuntime.worker(camera_id)
+            → CameraWorker.analyze(ndarray | bytes, enabled_plugins, camera)
+                → FrameContext (image partagée, ROIs partagés, JPEG memoizés)
+                → stages : decode → motion → yolo → tracking → roi → anpr
+        → run_downstream(cam, ctx, result)
+            → plugin_bus.dispatch_pipeline(precomputed_detections, tracks)
+            → scenarios / smart_zones / persistance plaques
 
-Chaque étape est indépendante et branchable. Les plugins sont ultra-simples
-(``providers``) — ils font UNE seule tâche et retournent un résultat
-standardisé, sans se soucier du cache, de la BD, des websockets, du
-tracking, ni des règles métier.
+**Règle absolue** (v0.4.3) : le CameraWorker est l'unique autorité qui
+décide quels plugins reçoivent une frame. Aucun plugin ne s'auto-déclenche.
+``enabled_plugins`` vide/null/absent ⇒ zéro plugin, zéro CPU, zéro GPU
+(fermeture stricte, fail-safe).
 
-Modules du package :
-    - ``interfaces``  : Protocols stables + dataclasses résultats standardisés
-    - ``fusion``      : FusionEngine (6 stratégies configurables par caméra)
-    - ``stages``      : PipelineStage de base + implémentations par défaut
-    - ``engine``      : PipelineEngine — orchestrateur du pipeline
-    - ``scheduler``   : FrameScheduler multi-caméra (FPS/priorité)
-    - ``adapter``     : compat rétro (wrap les plugins existants en providers v2)
+Modules :
+    - ``frame_context`` : dataclass unique partagée (image, ROIs, cache JPEG)
+    - ``camera_worker`` : pipeline PAR caméra (état isolé)
+    - ``tracking``      : TrackerPool — un tracker par caméra
+    - ``downstream``    : dispatch aux plugins + persistance métier
+    - ``registry``      : CameraGraph — précompile les étapes actives par caméra
+    - ``scenarios``     : heuristiques d'alertes (intrusion, collision…)
+    - ``anpr_quality``  : hystérésis qualité / caméras spécialisées
+    - ``inspector``     : métriques temps par stage (UI Diagnostics)
 """

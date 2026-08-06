@@ -281,13 +281,20 @@ class PluginBus:
     ) -> list[tuple[str, object]]:
         """Fan-out sur tous les `FrameAnalyzer` actifs.
 
+        v0.4.3 · Fermeture stricte : si ``camera_config['enabled_plugins']``
+        est null/vide/absent, retourne ``[]`` sans dispatch (fail-safe —
+        aucun plugin ne s'auto-déclenche).
+
         Retourne `[(plugin_name, AnalysisResult|None), ...]` dans l'ordre
         d'enregistrement (déterministe pour cascade).
         """
-        entries = self.active("FrameAnalyzer")
+        cfg = camera_config or {}
+        enabled = set((cfg.get("enabled_plugins") or []))
+        if not enabled:
+            return []
+        entries = [e for e in self.active("FrameAnalyzer") if e.name in enabled]
         if not entries:
             return []
-        cfg = camera_config or {}
         _cam = getattr(frame, "camera_id", None) or cfg.get("camera_id")
         results = await asyncio.gather(
             *[self._call_one(e, lambda inst, f=frame, c=cfg: inst.analyze(f, c),
@@ -306,20 +313,21 @@ class PluginBus:
         cascade_stop_at: Optional[float] = None,
         only: Optional[set] = None,
     ) -> list[tuple[str, list]]:
-        """Fan-out sur tous les `PlateRecognizer` actifs.
+        """Fan-out sur les `PlateRecognizer` explicitement whitelistés.
+
+        v0.4.3 · Fermeture stricte : ``only`` est **obligatoire**. Si
+        ``only`` est ``None`` ou vide, aucun moteur n'est dispatché
+        (fail-safe — le CameraWorker est l'unique autorité).
 
         Si `cascade_stop_at` est fourni : arrête dès qu'un moteur retourne un
         résultat avec `confidence >= cascade_stop_at` (mode économie
-        cloud/quota). Sinon appelle tous les moteurs en parallèle.
-
-        v0.4.2 · ``only`` : whitelist per-camera — SEULS les moteurs listés
-        sont dispatchés (zéro appel API, zéro CPU pour les autres).
+        cloud/quota). Sinon appelle tous les moteurs whitelistés en parallèle.
 
         Retourne `[(engine_name, [PlateResult, ...]), ...]`.
         """
-        entries = self.active("PlateRecognizer")
-        if only is not None:
-            entries = [e for e in entries if e.name in only]
+        if not only:
+            return []
+        entries = [e for e in self.active("PlateRecognizer") if e.name in only]
         if not entries:
             return []
         _cam = getattr(frame, "camera_id", None)
@@ -390,16 +398,19 @@ class PluginBus:
         JAMAIS appelés (tracking unique, fait par le TrackingStage core).
         """
         cfg = camera_config or {}
-        # v0.3 · Config caméra modulaire : si la caméra a une liste
-        # ``enabled_plugins`` non vide, on ne dispatche qu'aux plugins listés
-        # (par name). Liste vide → comportement legacy (tous les plugins actifs).
+        # v0.4.3 · Fermeture stricte (fail-safe). Le CameraWorker est
+        # l'unique autorité — si ``enabled_plugins`` est null/vide/absent,
+        # AUCUN plugin n'est dispatché (ni FrameAnalyzer, ni Tracker, ni
+        # Segmenter, ni PipelineConsumer). Zéro CPU, zéro GPU, zéro auto-run.
         enabled = set((cfg.get("enabled_plugins") or []))
         # v0.4.1 · Per-camera stats (Issue #2) — propagé à _call_one.
         _cam = getattr(frame, "camera_id", None) or cfg.get("camera_id")
 
         def _filter(entries):
+            # STRICT : whitelist vide ⇒ liste vide (jamais "tout"). Voir ADR
+            # stabilisation v0.4.3 · P1 fermeture fail-open.
             if not enabled:
-                return entries
+                return []
             return [e for e in entries if e.name in enabled]
 
         result = PipelineResult(

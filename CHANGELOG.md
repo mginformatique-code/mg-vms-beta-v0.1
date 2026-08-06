@@ -7,6 +7,65 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
 
+## [v0.4.3-stable] — 2026-02 — Stabilisation stricte (audit critique · 10 priorités)
+
+### Contexte
+Après un audit technique critique de la refonte v0.4.3, dix défauts structurels
+ont été identifiés (fail-open sur `enabled_plugins=[]`, double encode/decode
+RTSP, ~980 lignes de scaffold parallèle mort, fusion ANPR dupliquée, champs
+morts dans `FrameContext`, deux `Frame` coexistantes, upload manuel hors
+pipeline, absence de benchmarks réels, absence de test d'isolation, règle
+d'auto-déclenchement non explicite). Cette version corrige les 10 points.
+
+### Fixed
+- **P1 · Fermeture stricte fail-safe** — `enabled_plugins` null/vide/absent ⇒
+  0 plugin dispatché (jamais fail-open). Modifié : `plugin_manager/bus.py`
+  (`dispatch_pipeline._filter`, `dispatch_frame`, `dispatch_plate`),
+  `pipeline_v2/camera_worker.py::_stage_anpr`,
+  `pipeline_v2/downstream.py` (multi-ANPR). Preuve : `consumer_calls=0` sur
+  10 consumers avec whitelist vide (bench + test).
+- **P2 · Double encode/decode supprimé** — `_fetch_frame` retourne un
+  `ndarray` directement (frame_source RTSP direct), `_stage_decode` accepte
+  `ndarray | bytes`. Économie mesurée : ~6-10 ms/frame/caméra CPU.
+- **P4 · Fusion ANPR unique** — `pipeline_v2/fusion.py::FusionEngine`
+  supprimé, `anpr_tracker.record_reading` = seule source de vérité.
+- **P5 · FrameContext nettoyé** — champ mort `plate_rois` supprimé.
+- **P6 · Frames unifiés** — `FrameContext.as_plugin_frame()` construit un
+  `plugin_manager.Frame` partageant buffer numpy + cache JPEG (memoization).
+- **P7 · Upload manuel unifié** — `analyze_image_local` réécrit en wrapper
+  thin `CameraWorker("__upload__").analyze(bytes, ["fast-alpr"])`.
+  Suppression de la seconde implémentation YOLO+ALPR de `ai_engine.py`.
+
+### Removed
+- **P3 · 1 406 lignes de code mort supprimées** (7 fichiers dans
+  `pipeline_v2/` + 2 fichiers de tests morts) :
+  `engine.py`, `stages.py`, `interfaces.py`, `adapter.py`, `scheduler.py`,
+  `fusion.py`, `providers/*`, `tests/test_pipeline_v2.py`,
+  `tests/test_yolo_provider_and_ui.py`. Une seule architecture pipeline
+  en vie : `CameraWorker + Downstream + PluginBus`.
+
+### Added
+- **P8 · Benchmarks réels enregistrés** — `/app/benchmarks/results_v043.md`
+  (+ `.json`). Mesures CPU/timings sur 1/5/10/20/**30/50** plugins.
+  GPU/VRAM marqués explicitement "non mesurés (pod cloud)" — jamais
+  fabriqués. Résultat clef : encodes ROI 80→4 pour 20 moteurs ANPR
+  (×20 en encodes économisés), dispatch bus scale linéairement à 50 plugins.
+- **P9 · Tests non-régression isolation** —
+  `backend/tests/test_v043_strict_isolation.py` (11 tests) :
+  fail-safe list vide/null/absente, `dispatch_plate` exige `only`,
+  isolation caméra-caméra, aucune fuite téléobjectif→grand-angle,
+  aucun partage de `_plate_cache` entre workers.
+
+### Règle absolue (v0.4.3-stable)
+Aucun plugin ne peut s'auto-déclencher. Le **CameraWorker est l'unique
+autorité** qui décide des plugins dispatchés. Aucun fallback, aucun
+auto-dispatch, aucune découverte implicite. Cette règle est encodée dans le
+docstring de `pipeline_v2/__init__.py`.
+
+### Statistiques diff
++275 / -1666 lignes = **-1 391 lignes nettes**.
+
+
 ## [v0.4.3] — 2026-06 — Refonte finale « Architecture First » : Pipeline Engine v2 en production
 ### Changé — Runtime pipeline-driven (remplace le monolithe)
 - **`ai_engine.py` : 1557 → ~500 lignes.** Ne fait plus QUE : acquisition RTSP

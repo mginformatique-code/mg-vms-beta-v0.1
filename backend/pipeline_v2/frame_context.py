@@ -123,7 +123,6 @@ class FrameContext:
     detections: list = field(default_factory=list)   # dicts legacy YOLO
     tracks: list = field(default_factory=list)       # dicts {track_id,label,bbox,confidence}
     vehicle_rois: list = field(default_factory=list)  # list[VehicleROI]
-    plate_rois: list = field(default_factory=list)
     plates: list = field(default_factory=list)
 
     motion_pct: float = 0.0
@@ -149,6 +148,43 @@ class FrameContext:
         if key not in self.cache:
             self.cache[key] = encode_jpeg_data_uri(self.image, max_width, quality)
         return self.cache[key]
+
+    def as_plugin_frame(self, timestamp_iso: Optional[str] = None):
+        """Vue ``plugin_manager.Frame`` sur CE contexte — zéro copie.
+
+        Le buffer numpy et le cache JPEG sont partagés : appeler ``.jpeg(q)``
+        sur la Frame retournée écrit dans ``self.cache`` (clé ``("plugin_jpeg", q)``),
+        donc plusieurs plugins consommant la même Frame ne déclenchent
+        qu'un seul ``cv2.imencode``. Utilisé par ``downstream.run_downstream``
+        pour dispatcher au PluginBus sans dupliquer la mémoire.
+        """
+        from plugin_manager.interfaces import Frame as _PMFrame
+        ts = timestamp_iso or ""
+        f = _PMFrame(
+            camera_id=self.camera_id,
+            timestamp=ts,
+            numpy_bgr=self.image,
+            width=self.width,
+            height=self.height,
+        )
+        # Partage du cache JPEG : la Frame écrit dans son propre dict,
+        # mais le proxy ci-dessous route vers self.cache pour éviter
+        # tout ré-encodage entre stages.
+        shared = self.cache
+        def _shared_jpeg(quality: int = 85, _self=f):
+            q = int(quality)
+            key = ("plugin_jpeg", q)
+            if key not in shared:
+                img = _self.numpy_bgr
+                if img is None or getattr(img, "size", 0) == 0:
+                    shared[key] = None
+                else:
+                    import cv2
+                    ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, q])
+                    shared[key] = buf.tobytes() if ok else None
+            return shared[key]
+        f.jpeg = _shared_jpeg  # type: ignore[method-assign]
+        return f
 
     def to_legacy_result(self) -> dict:
         """Forme dict historique consommée par le downstream et les tests."""

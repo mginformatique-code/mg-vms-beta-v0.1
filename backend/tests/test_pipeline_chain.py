@@ -51,7 +51,14 @@ def test_pipeline_dispatches_detections_to_tracker_and_business():
             ])
             bus.register("_pipeline_test_seed", seed, order=1)
             frame = _make_frame()
-            pr = await bus.dispatch_pipeline(frame, run_business=True, emit_events=False)
+            # v0.4.3 · Fermeture stricte : enabled_plugins explicite obligatoire
+            pr = await bus.dispatch_pipeline(
+                frame,
+                camera_config={"enabled_plugins": [
+                    "_pipeline_test_seed", "occupancy", "core-tracking-stage",
+                ]},
+                run_business=True, emit_events=False,
+            )
 
             # Vérifie le chaînage
             assert len(pr.detections) == 2
@@ -79,7 +86,13 @@ def test_pipeline_fire_detection_emits_critical():
                 Detection(label="fire", confidence=0.88, bbox=(300, 100, 500, 300)),
             ])
             bus.register("_pipeline_test_seed", seed, order=1)
-            pr = await bus.dispatch_pipeline(_make_frame(), run_business=True)
+            pr = await bus.dispatch_pipeline(
+                _make_frame(),
+                camera_config={"enabled_plugins": [
+                    "_pipeline_test_seed", "fire-detection",
+                ]},
+                run_business=True,
+            )
             fire_events = [ev for ev in pr.business_events
                            if ev.get("source") == "fire-detection"]
             assert len(fire_events) == 1
@@ -94,7 +107,13 @@ def test_pipeline_fire_detection_emits_critical():
 def test_pipeline_returns_timing_metrics():
     async def _run():
         await loader.discover_and_load_all()
-        pr = await bus.dispatch_pipeline(_make_frame(), run_business=True)
+        # v0.4.3 · timing metrics disponibles même quand aucun plugin ne
+        # tourne (fermeture stricte, whitelist vide).
+        pr = await bus.dispatch_pipeline(
+            _make_frame(),
+            camera_config={"enabled_plugins": ["occupancy"]},
+            run_business=True,
+        )
         assert "detection_ms" in pr.timing_ms
         assert "tracking_ms" in pr.timing_ms
         assert "business_ms" in pr.timing_ms

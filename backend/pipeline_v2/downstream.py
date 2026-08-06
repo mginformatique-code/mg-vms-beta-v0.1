@@ -283,11 +283,15 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
     try:
         from plugin_manager.bus import bus as _plugin_bus_multi
         from plugin_manager.interfaces import Frame as _MFrame
+        # v0.4.3 · Fermeture stricte : ``enabled_plugins`` est l'unique
+        # source d'autorité. Whitelist vide/null/absente ⇒ aucun moteur
+        # ANPR cloud dispatché.
         _cam_whitelist = set(cam.get("enabled_plugins") or [])
-        _anpr_entries = [e for e in _plugin_bus_multi.active("PlateRecognizer")
-                         if e.name != "fast-alpr"]
-        if _cam_whitelist:
-            _anpr_entries = [e for e in _anpr_entries if e.name in _cam_whitelist]
+        if not _cam_whitelist:
+            _anpr_entries: list = []
+        else:
+            _anpr_entries = [e for e in _plugin_bus_multi.active("PlateRecognizer")
+                             if e.name != "fast-alpr" and e.name in _cam_whitelist]
         _rois = (ctx.vehicle_rois if ctx else []) or []
         if _anpr_entries and _rois:
             _only = {e.name for e in _anpr_entries}

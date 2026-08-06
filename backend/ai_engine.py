@@ -287,57 +287,52 @@ from pipeline_v2.scenarios import (DEFAULT_ARMING, DEFAULT_SCENARIOS,  # noqa: E
 
 
 def analyze_image_local(image_bytes: bytes) -> dict:
-    """Analyse LOCALE d'une image (upload manuel) : YOLO + fast-alpr."""
-    import cv2
-    import numpy as np
-    _load_models()
-    img = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
-    if img is None:
-        return {"plate": "", "confidence": 0.0}
-    result = {"plate": "", "country": "", "vehicle_color": "", "vehicle_make": "",
-              "vehicle_model": "", "vehicle_type": "Inconnu", "confidence": 0.0, "plate_crop": ""}
-    yr = _model.predict(img, conf=AI_CONFIDENCE, verbose=False)[0]
-    best_vehicle = None
-    for box in yr.boxes:
-        cls_name = _model.names[int(box.cls)]
-        if cls_name not in VEHICLE_CLASSES:
-            continue
-        x1, y1, x2, y2 = (max(0, int(v)) for v in box.xyxy[0])
-        area = (x2 - x1) * (y2 - y1)
-        if best_vehicle is None or area > best_vehicle[1]:
-            best_vehicle = ((x1, y1, x2, y2), area, CLASS_FR.get(cls_name, "Inconnu"),
-                            _dominant_color_fr(img[y1:y2, x1:x2]))
-    if best_vehicle:
-        result["vehicle_type"] = best_vehicle[2]
-        result["vehicle_color"] = best_vehicle[3] or ""
-    if _alpr:
-        try:
-            for r in _alpr.predict(img):
-                if not r.ocr or not r.ocr.text:
-                    continue
-                bb = r.detection.bounding_box
-                result["plate"] = r.ocr.text.upper()
-                result["confidence"] = round(float(r.ocr.confidence), 2)
-                crop = img[max(0, bb.y1):bb.y2, max(0, bb.x1):bb.x2]
-                result["plate_crop"] = _jpeg_data_uri(crop, 240) or ""
-                break
-        except Exception:
-            logger.exception("Erreur LAPI locale (upload)")
-    return result
+    """Analyse LOCALE d'une image (upload manuel) via le CameraWorker unique.
+
+    v0.4.3 · P7 · L'analyse d'une image uploadée passe EXACTEMENT par le
+    même pipeline (decode → motion → yolo → tracking → roi → anpr) que
+    les frames RTSP. Zéro duplication : `analyze_image_local` = wrapper
+    thin autour de `CameraWorker("__upload__").analyze(bytes,
+    enabled_plugins=["fast-alpr"])`.
+    """
+    from pipeline_v2.camera_worker import CameraWorker
+    worker = CameraWorker("__upload__")
+    # Enable fast-alpr explicitement : le CameraWorker est fail-safe strict —
+    # sans whitelist, aucun plugin ANPR ne tournerait.
+    res = worker.analyze(image_bytes, enabled_plugins=["fast-alpr"], camera=None)
+    out = {"plate": "", "country": "", "vehicle_color": "", "vehicle_make": "",
+           "vehicle_model": "", "vehicle_type": "Inconnu", "confidence": 0.0,
+           "plate_crop": ""}
+    dets = res.get("detections") or []
+    veh = next((d for d in dets if d.get("class") in VEHICLE_CLASSES), None)
+    if veh:
+        out["vehicle_type"] = veh.get("label", "Inconnu")
+        out["vehicle_color"] = veh.get("vehicle_color") or ""
+    plates = res.get("plates") or []
+    if plates:
+        p = plates[0]
+        out["plate"] = (p.get("plate") or "").upper()
+        out["confidence"] = float(p.get("confidence", 0.0))
+        out["plate_crop"] = p.get("plate_crop") or ""
+    return out
 
 
 # ── Acquisition ─────────────────────────────────────────────────────
 
-async def _fetch_frame(camera_id: str) -> bytes | None:
-    """Frame la plus récente d'une caméra (frame_source RTSP direct, fallback go2rtc)."""
-    import cv2
+async def _fetch_frame(camera_id: str):
+    """Frame la plus récente d'une caméra.
+
+    v0.4.3 · Retourne un ``numpy.ndarray`` BGR directement quand
+    ``frame_source`` (RTSP direct via ffmpeg) est disponible — plus
+    aucun aller-retour ``imencode → imdecode``. Fallback go2rtc HTTP
+    retourne des ``bytes`` JPEG (une seule fois, décodage assuré par
+    le worker).
+    """
     try:
         from frame_source import get_latest_frame_async
         frame = await get_latest_frame_async(camera_id, max_age_sec=5.0, wait_timeout=0.5)
         if frame is not None:
-            ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
-            if ok:
-                return buf.tobytes()
+            return frame  # numpy ndarray — zéro encode
     except Exception as e:
         logger.debug("_fetch_frame: frame_source indispo pour %s (%s)", camera_id, e)
     try:

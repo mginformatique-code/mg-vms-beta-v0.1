@@ -36,7 +36,9 @@ def test_stage_anpr_skips_when_whitelist_excludes_fast_alpr():
     """Le bloc ANPR doit être bypassé si fast-alpr absent de la whitelist."""
     from pipeline_v2.camera_worker import CameraWorker
     src = inspect.getsource(CameraWorker._stage_anpr)
-    assert '"fast-alpr" not in enabled_plugins' in src
+    # v0.4.3 · fermeture stricte : skip si fast-alpr n'est pas dans la liste,
+    # quelle que soit la taille de la liste (y compris vide/null).
+    assert '"fast-alpr" not in active' in src
     assert "not skipped" in src
 
 
@@ -48,12 +50,14 @@ def test_process_camera_passes_enabled_plugins_to_analyze():
     assert "worker.analyze, frame, _enabled" in src
 
 
-def test_empty_whitelist_keeps_legacy_behavior():
-    """Whitelist vide (None ou []) doit laisser passer l'ANPR (legacy)."""
+def test_empty_whitelist_now_strict_fail_safe():
+    """v0.4.3 · Whitelist vide/None ⇒ AUCUN plugin (plus de fail-open)."""
     from pipeline_v2.camera_worker import CameraWorker
     src = inspect.getsource(CameraWorker._stage_anpr)
-    # bool(enabled_plugins) = False si None/[] → pas de skip
-    assert "bool(enabled_plugins)" in src
+    # Doit contenir la normalisation stricte : list(enabled_plugins) if enabled_plugins else []
+    assert "list(enabled_plugins) if enabled_plugins else []" in src
+    # Ne doit PLUS contenir l'ancien fail-open bool(enabled_plugins) and ...
+    assert "bool(enabled_plugins)" not in src
 
 
 def test_no_alpr_predict_when_skipped():

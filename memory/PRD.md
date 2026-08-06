@@ -25,7 +25,19 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 
 ### État Feb 2026 — sessions successives
 
-**Session 18 (Jun 2026)** — v0.4.3 · Refonte finale « Architecture First » (12 points utilisateur) :
+**Session 19 (Feb 2026)** — v0.4.3 · Stabilisation stricte (audit critique) :
+- 🔒 **P1 · Fermeture stricte fail-safe** : `enabled_plugins ∈ {[], null, absent}` ⇒ AUCUN plugin dispatché (plus aucun fail-open). Le CameraWorker est l'unique autorité — aucun plugin ne s'auto-déclenche. Preuve : bench `consumer_calls = 0` sur 10 consumers enregistrés avec whitelist vide/null/absente.
+- 🔀 **P2 · Suppression du double encode/decode** : `_fetch_frame` retourne un `ndarray` directement, `_stage_decode` accepte `ndarray` OU `bytes`. Zéro `cv2.imencode` dans la boucle temps réel côté RTSP direct.
+- 🗑️ **P3 · Code mort supprimé** : `pipeline_v2/{engine.py, stages.py, interfaces.py, adapter.py, scheduler.py, fusion.py, providers/}` + 2 fichiers de tests morts = **1 406 lignes supprimées**. Une seule architecture pipeline en vie : `CameraWorker + Downstream + PluginBus`.
+- 🎯 **P4 · Fusion ANPR unique** : `pipeline_v2.fusion.FusionEngine` supprimé (mort). `anpr_tracker.record_reading` = source unique de vérité pour le vote/consensus.
+- 🧹 **P5 · FrameContext nettoyé** : champ `plate_rois` inutilisé supprimé.
+- 🔗 **P6 · Frames unifiés** : `FrameContext.as_plugin_frame()` — vue *lazy* sur `plugin_manager.Frame` partageant le buffer numpy et le cache JPEG (memoization par quality). Aucune copie inutile.
+- 📤 **P7 · Upload manuel unifié** : `analyze_image_local` réécrit en wrapper thin `CameraWorker("__upload__").analyze(bytes, ["fast-alpr"])`. Une seule implémentation IA.
+- 📊 **P8 · Benchmarks réels** : `/app/benchmarks/results_v043.md` — mesures CPU/timings sur 1/5/10/20/30/50 plugins. GPU/VRAM non mesurés (pod cloud sans GPU, différé RTX A2000). Gains clefs : encodes ROI 80→4 pour 20 moteurs ANPR, dispatch scale à 50 plugins.
+- 🛡️ **P9 · Tests d'isolation** : `tests/test_v043_strict_isolation.py` — 11 tests couvrant fail-safe (list vide/null/absente), isolation caméra/caméra, absence de fuite téléobjectif→grand-angle.
+- ✅ **P10 · Zéro régression fonctionnelle** : Mongo/HDD/CUDA/Docker/CameraGraph/YOLO unique/tracking unique/ROI cache **intouchés**. 57 tests critiques v0.4.3 verts (incl. multi-plugin, sandbox, whitelist strict, isolation).
+
+**Session 18 (Jun 2026)** — v0.4.3 · Refonte « Architecture First » (12 points) :
 - 🏗️ **Runtime pipeline-driven EN PRODUCTION** : `PipelineRuntime → CameraWorker → FrameContext → Stages → PluginBus`. `ai_engine.py` réduit de 1557 à ~500 lignes (acquisition RTSP + modèles + wrappers compat uniquement).
 - 🎯 **YOLO 1× / frame** (stage detection du worker) · **Tracking UNIQUE** (`TrackerPool`, 1 tracker/caméra ; plugins tracker convertis en choix d'algo du stage ; `dispatch_pipeline(precomputed_tracks)` court-circuite les plugins Tracker — preuve par SpyTracker jamais appelé).
 - 🖼️ **VehicleROI partagé** (1 crop/véhicule, JPEG memoizé) + `Frame.jpeg()` partagé dans les 5 plugins ANPR cloud + thumbnails YOLO lazy + `dispatch_plate(only=whitelist)`.

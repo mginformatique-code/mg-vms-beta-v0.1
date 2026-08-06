@@ -30,13 +30,19 @@ def _fake_frame():
     return Frame(camera_id="c1", timestamp="now", numpy_bgr=None, width=0, height=0)
 
 
+# v0.4.3 · Fermeture stricte : dispatch_frame exige enabled_plugins.
+_CRASH_CFG = {"enabled_plugins": ["crash"]}
+_SLOW_CFG = {"enabled_plugins": ["slow"]}
+_GOOD_CFG = {"enabled_plugins": ["good"]}
+
+
 def test_quarantine_after_threshold_crashes():
     async def _run():
         bus = PluginBus(default_timeout_s=0.5)
         bus.register("crash", _AlwaysCrash(), order=10)
         assert bus._entries["crash"].state == "ready"
         for _ in range(bus.QUARANTINE_THRESHOLD):
-            await bus.dispatch_frame(_fake_frame())
+            await bus.dispatch_frame(_fake_frame(), camera_config=_CRASH_CFG)
         entry = bus._entries["crash"]
         assert entry.state == "quarantined"
         assert entry.consecutive_errors >= bus.QUARANTINE_THRESHOLD
@@ -51,7 +57,7 @@ def test_quarantine_after_timeouts():
         bus = PluginBus(default_timeout_s=0.05)
         bus.register("slow", _AlwaysSlow(), order=10)
         for _ in range(bus.QUARANTINE_THRESHOLD):
-            await bus.dispatch_frame(_fake_frame())
+            await bus.dispatch_frame(_fake_frame(), camera_config=_SLOW_CFG)
         entry = bus._entries["slow"]
         assert entry.state == "quarantined"
         assert entry.timeouts >= bus.QUARANTINE_THRESHOLD
@@ -64,7 +70,7 @@ def test_success_resets_consecutive_errors():
         bus.register("good", _AlwaysGood(), order=10)
         entry = bus._entries["good"]
         entry.consecutive_errors = 3
-        await bus.dispatch_frame(_fake_frame())
+        await bus.dispatch_frame(_fake_frame(), camera_config=_GOOD_CFG)
         assert entry.consecutive_errors == 0
     asyncio.run(_run())
 
@@ -74,7 +80,7 @@ def test_unquarantine_restores_dispatch():
         bus = PluginBus(default_timeout_s=0.5)
         bus.register("crash", _AlwaysCrash(), order=10)
         for _ in range(bus.QUARANTINE_THRESHOLD):
-            await bus.dispatch_frame(_fake_frame())
+            await bus.dispatch_frame(_fake_frame(), camera_config=_CRASH_CFG)
         assert bus._entries["crash"].state == "quarantined"
         ok = bus.unquarantine("crash")
         assert ok is True

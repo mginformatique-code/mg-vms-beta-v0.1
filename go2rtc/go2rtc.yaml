@@ -1,3 +1,9 @@
 streams:
-        probe_1786011104617:
-          - rtsp://127.0.0.1:8554/cam_demo-cam-001
+        cam_demo-cam-001_hd:
+          - ffmpeg:cam_demo-cam-001#video=mjpeg#low_latency
+        cam_demo-cam-001_sd:
+          - ffmpeg:cam_demo-cam-001#video=mjpeg#width=640#low_latency
+        cam_demo-cam-002_hd:
+          - ffmpeg:cam_demo-cam-002#video=mjpeg#low_latency
+        cam_demo-cam-002_sd:
+          - ffmpeg:cam_demo-cam-002#video=mjpeg#width=640#low_latency

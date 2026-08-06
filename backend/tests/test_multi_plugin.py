@@ -96,7 +96,8 @@ def test_bus_registers_and_dispatches_multiple_plate_plugins():
         b.register("mock-a", MockPlatePlugin(engine_name="mock-a", text="AB-100-AA", confidence=0.80))
         b.register("mock-b", MockPlatePlugin(engine_name="mock-b", text="AB-100-AA", confidence=0.95))
         b.register("mock-c", MockPlatePlugin(engine_name="mock-c", text="AB-101-AA", confidence=0.60))
-        results = await b.dispatch_plate(_frame())
+        # v0.4.3 · dispatch_plate exige `only` (fermeture stricte).
+        results = await b.dispatch_plate(_frame(), only={"mock-a", "mock-b", "mock-c"})
         assert len(results) == 3
         names = [n for n, _ in results]
         assert names == ["mock-a", "mock-b", "mock-c"]
@@ -112,7 +113,7 @@ def test_bus_isolation_crash_does_not_break_other_plugins():
         b = PluginBus(default_timeout_s=2.0)
         b.register("good", MockPlatePlugin(engine_name="good", text="AB-100-AA", confidence=0.9))
         b.register("broken", BrokenPlate())
-        results = await b.dispatch_plate(_frame())
+        results = await b.dispatch_plate(_frame(), only={"good", "broken"})
         result_by_name = {n: r for n, r in results}
         assert result_by_name["good"] and result_by_name["good"][0].text == "AB-100-AA"
         assert result_by_name["broken"] == []
@@ -127,7 +128,8 @@ def test_bus_cascade_stops_early_saving_cloud_quota():
         b = PluginBus(default_timeout_s=2.0)
         b.register("cloud", MockPlatePlugin(engine_name="cloud", text="AB-100-AA", confidence=0.98), order=1)
         b.register("local", MockPlatePlugin(engine_name="local", text="AB-100-AA", confidence=0.60), order=2)
-        results = await b.dispatch_plate(_frame(), cascade_stop_at=0.85)
+        results = await b.dispatch_plate(_frame(), cascade_stop_at=0.85,
+                                          only={"cloud", "local"})
         assert [n for n, _ in results] == ["cloud"]
         local_entry = next(e for e in b.list_entries() if e.name == "local")
         assert local_entry.calls == 0
@@ -144,7 +146,7 @@ def test_bus_timeout_isolated():
         b = PluginBus(default_timeout_s=0.1)
         b.register("slow", SlowPlate())
         b.register("fast", MockPlatePlugin(engine_name="fast", text="OK", confidence=0.9))
-        results = await b.dispatch_plate(_frame())
+        results = await b.dispatch_plate(_frame(), only={"slow", "fast"})
         result_by_name = {n: r for n, r in results}
         assert result_by_name["slow"] == []
         assert result_by_name["fast"] and result_by_name["fast"][0].text == "OK"

@@ -160,7 +160,14 @@ def bench_crops_after(img, dets, n_engines: int) -> dict:
 
 
 async def bench_bus_dispatch(n_plugins: int, per_camera: bool) -> dict:
-    """Dispatch bus avec N consumers. per_camera=True → whitelist 1 seul plugin."""
+    """Dispatch bus avec N consumers.
+
+    - `per_camera=True`  (v0.4.3, cible) : whitelist explicite d'UN seul
+      plugin — seul lui tourne, coût O(1) au lieu de O(N).
+    - `per_camera=False` (baseline)     : whitelist explicite des N plugins
+      — tous tournent (représente une configuration où tous les plugins ont
+      été activés au niveau caméra, coût O(N)).
+    """
     from plugin_manager.bus import PluginBus
     from plugin_manager.interfaces import (PipelineConsumer, Frame)
 
@@ -178,7 +185,7 @@ async def bench_bus_dispatch(n_plugins: int, per_camera: bool) -> dict:
 
     img = np.zeros((720, 1280, 3), dtype=np.uint8)
     frame = Frame(camera_id="bench", timestamp="t", numpy_bgr=img, width=1280, height=720)
-    enabled = ["consumer-0"] if per_camera else []
+    enabled = ["consumer-0"] if per_camera else [f"consumer-{i}" for i in range(n_plugins)]
     times = []
     for _ in range(N_ITER):
         t0 = time.perf_counter()
@@ -190,6 +197,37 @@ async def bench_bus_dispatch(n_plugins: int, per_camera: bool) -> dict:
     return {"avg_ms": round(statistics.mean(times), 2),
             "plugins_registered": n_plugins,
             "plugins_dispatched": 1 if per_camera else n_plugins}
+
+
+async def bench_fail_safe_closure() -> dict:
+    """v0.4.3 · Vérifie qu'`enabled_plugins=[]` n'exécute AUCUN plugin.
+    Régression du fail-open : ce bench doit toujours retourner 0 appel."""
+    from plugin_manager.bus import PluginBus
+    from plugin_manager.interfaces import (PipelineConsumer, Frame)
+
+    calls = {"n": 0}
+
+    class _Counter(PipelineConsumer):
+        name = "counter"
+
+        async def consume(self, frame, pipeline_result):
+            calls["n"] += 1
+            return []
+
+    bus = PluginBus()
+    for i in range(10):
+        c = _Counter(); c.name = f"counter-{i}"
+        bus.register(c.name, c)
+
+    img = np.zeros((720, 1280, 3), dtype=np.uint8)
+    frame = Frame(camera_id="b", timestamp="t", numpy_bgr=img, width=1280, height=720)
+    for cfg in ({"enabled_plugins": []},
+                {"enabled_plugins": None},
+                {}):  # champ absent
+        await bus.dispatch_pipeline(
+            frame, camera_config=cfg, precomputed_detections=[],
+            precomputed_tracks=[], run_business=True, emit_events=False, timeout_s=2.0)
+    return {"consumers_registered": 10, "consumer_calls": calls["n"]}
 
 
 def main():
@@ -219,15 +257,19 @@ def main():
               f"après {RESULTS['after'][f'crops_{n}_engines']['avg_ms']} ms "
               f"({RESULTS['after'][f'crops_{n}_engines']['jpeg_encodes_per_cycle']} encodes)")
 
-    print("── Dispatch bus : broadcast global (avant) vs graph per-camera (après) ──")
+    print("── Dispatch bus : broadcast (avant) vs graph per-camera (après) ──")
     loop = asyncio.new_event_loop()
-    for n in (1, 5, 10, 20):
+    for n in (1, 5, 10, 20, 30, 50):
         RESULTS["before"][f"dispatch_{n}_plugins"] = loop.run_until_complete(
             bench_bus_dispatch(n, per_camera=False))
         RESULTS["after"][f"dispatch_{n}_plugins"] = loop.run_until_complete(
             bench_bus_dispatch(n, per_camera=True))
         print(f"{n:>2} plugins → avant {RESULTS['before'][f'dispatch_{n}_plugins']['avg_ms']} ms · "
               f"après {RESULTS['after'][f'dispatch_{n}_plugins']['avg_ms']} ms")
+
+    print("── Fermeture stricte (fail-safe) — enabled_plugins ∈ {[], null, absent} ──")
+    RESULTS["failsafe"] = loop.run_until_complete(bench_fail_safe_closure())
+    print(json.dumps(RESULTS["failsafe"]))
     loop.close()
 
     RESULTS["meta"]["system_end"] = sysinfo()
@@ -247,12 +289,23 @@ def main():
         b = RESULTS["before"][f"crops_{n}_engines"]
         a = RESULTS["after"][f"crops_{n}_engines"]
         md.append(f"| {n} | {b['avg_ms']} ({b['jpeg_encodes_per_cycle']}) | {a['avg_ms']} ({a['jpeg_encodes_per_cycle']}) |")
-    md.append("\n## Dispatch PluginBus (consumers 1 ms)\n\n| Plugins | Avant ms (broadcast) | Après ms (per-camera) |\n|---|---|---|")
-    for n in (1, 5, 10, 20):
+    md.append("\n## Dispatch PluginBus (consumers 1 ms · latence par frame)\n\n"
+              "| Plugins | Baseline · tous activés (ms) | Cible · 1 seul activé (ms) | Facteur |\n"
+              "|---|---|---|---|")
+    for n in (1, 5, 10, 20, 30, 50):
         b = RESULTS["before"][f"dispatch_{n}_plugins"]
         a = RESULTS["after"][f"dispatch_{n}_plugins"]
-        md.append(f"| {n} | {b['avg_ms']} | {a['avg_ms']} |")
-    md.append(f"\n## Système\n\n- Début : {RESULTS['meta']['system_start']}\n- Fin : {RESULTS['meta']['system_end']}\n")
+        factor = round(b['avg_ms'] / max(a['avg_ms'], 0.01), 1)
+        md.append(f"| {n} | {b['avg_ms']} | {a['avg_ms']} | ×{factor} |")
+    md.append("\n## Fermeture stricte fail-safe (v0.4.3 · P1)\n\n"
+              f"Registered : {RESULTS['failsafe']['consumers_registered']} · "
+              f"Appels réels avec `enabled_plugins ∈ {{[], null, absent}}` : "
+              f"**{RESULTS['failsafe']['consumer_calls']}** (attendu 0)\n\n"
+              "*Preuve que le comportement fail-open a bien été éliminé.*")
+    md.append(f"\n## Système\n\n- Début : {RESULTS['meta']['system_start']}\n"
+              f"- Fin : {RESULTS['meta']['system_end']}\n"
+              "- GPU : **non mesuré** (environnement cloud sans GPU · benchmarks GPU différés RTX A2000)\n"
+              "- VRAM : **N/A**\n")
     (out_dir / "pipeline_v2_benchmark.md").write_text("\n".join(md))
     print(f"\nRésultats → {out_dir}/pipeline_v2_benchmark.json + .md")
 

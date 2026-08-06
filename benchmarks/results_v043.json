@@ -1,27 +1,27 @@
 {
   "meta": {
-    "date": "2026-08-06 10:07:15",
+    "date": "2026-08-06 11:57:42",
     "frame": "1920x1080",
     "vehicles": 4,
     "iterations": 30,
     "system_start": {
-      "cpu_percent": 5.0,
-      "rss_mb": 55.9,
+      "cpu_percent": 6.3,
+      "rss_mb": 58.0,
       "vram_mb": null
     },
     "system_end": {
-      "cpu_percent": 2.5,
-      "rss_mb": 809.1,
+      "cpu_percent": 1.9,
+      "rss_mb": 894.1,
       "vram_mb": null
     }
   },
   "before": {
     "tracking": {
-      "avg_ms": 0.715,
+      "avg_ms": 0.919,
       "trackers_run": 2
     },
     "crops_1_engines": {
-      "avg_ms": 0.75,
+      "avg_ms": 1.01,
       "jpeg_encodes_per_cycle": 4
     },
     "crops_5_engines": {
@@ -33,21 +33,21 @@
       "jpeg_encodes_per_cycle": 40
     },
     "crops_20_engines": {
-      "avg_ms": 14.65,
+      "avg_ms": 14.66,
       "jpeg_encodes_per_cycle": 80
     },
     "dispatch_1_plugins": {
-      "avg_ms": 1.15,
+      "avg_ms": 1.1,
       "plugins_registered": 1,
       "plugins_dispatched": 1
     },
     "dispatch_5_plugins": {
-      "avg_ms": 1.2,
+      "avg_ms": 1.17,
       "plugins_registered": 5,
       "plugins_dispatched": 5
     },
     "dispatch_10_plugins": {
-      "avg_ms": 1.25,
+      "avg_ms": 1.23,
       "plugins_registered": 10,
       "plugins_dispatched": 10
     },
@@ -55,15 +55,25 @@
       "avg_ms": 1.42,
       "plugins_registered": 20,
       "plugins_dispatched": 20
+    },
+    "dispatch_30_plugins": {
+      "avg_ms": 1.57,
+      "plugins_registered": 30,
+      "plugins_dispatched": 30
+    },
+    "dispatch_50_plugins": {
+      "avg_ms": 1.91,
+      "plugins_registered": 50,
+      "plugins_dispatched": 50
     }
   },
   "after": {
     "tracking": {
-      "avg_ms": 0.367,
+      "avg_ms": 0.37,
       "trackers_run": 1
     },
     "crops_1_engines": {
-      "avg_ms": 0.74,
+      "avg_ms": 0.75,
       "jpeg_encodes_per_cycle": 4
     },
     "crops_5_engines": {
@@ -79,17 +89,17 @@
       "jpeg_encodes_per_cycle": 4
     },
     "dispatch_1_plugins": {
-      "avg_ms": 1.15,
+      "avg_ms": 1.09,
       "plugins_registered": 1,
       "plugins_dispatched": 1
     },
     "dispatch_5_plugins": {
-      "avg_ms": 1.1,
+      "avg_ms": 1.09,
       "plugins_registered": 5,
       "plugins_dispatched": 1
     },
     "dispatch_10_plugins": {
-      "avg_ms": 1.11,
+      "avg_ms": 1.1,
       "plugins_registered": 10,
       "plugins_dispatched": 1
     },
@@ -97,10 +107,24 @@
       "avg_ms": 1.11,
       "plugins_registered": 20,
       "plugins_dispatched": 1
+    },
+    "dispatch_30_plugins": {
+      "avg_ms": 1.13,
+      "plugins_registered": 30,
+      "plugins_dispatched": 1
+    },
+    "dispatch_50_plugins": {
+      "avg_ms": 1.11,
+      "plugins_registered": 50,
+      "plugins_dispatched": 1
     }
   },
   "yolo": {
-    "avg_ms": 263.5,
-    "max_ms": 405.3
+    "avg_ms": 338.4,
+    "max_ms": 402.8
+  },
+  "failsafe": {
+    "consumers_registered": 10,
+    "consumer_calls": 0
   }
 }

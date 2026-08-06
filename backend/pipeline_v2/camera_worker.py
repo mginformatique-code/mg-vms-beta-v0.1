@@ -46,11 +46,22 @@ class CameraWorker:
 
     # ── Stages ───────────────────────────────────────────────────────
 
-    def _stage_decode(self, ctx: FrameContext, frame_bytes: bytes) -> bool:
+    def _stage_decode(self, ctx: FrameContext, frame_input) -> bool:
+        """Charge ``ctx.image`` depuis un ndarray (zéro copie) ou depuis
+        des bytes JPEG (imdecode). v0.4.3 · plus aucun ré-encodage inutile
+        avant le worker : le RTSP direct passe directement en ndarray."""
         import cv2
         import numpy as np
         t0 = time.monotonic()
-        ctx.image = cv2.imdecode(np.frombuffer(frame_bytes, np.uint8), cv2.IMREAD_COLOR)
+        if frame_input is None:
+            ctx.image = None
+        elif hasattr(frame_input, "shape"):
+            # Déjà un ndarray BGR — utilisé tel quel (référence partagée)
+            ctx.image = frame_input
+        else:
+            ctx.image = cv2.imdecode(
+                np.frombuffer(frame_input, np.uint8), cv2.IMREAD_COLOR
+            )
         ms = (time.monotonic() - t0) * 1000
         ctx.timings["decode_ms"] = round(ms, 1)
         inspector.record(self.camera_id, "decode", ms, error=ctx.image is None)
@@ -159,10 +170,14 @@ class CameraWorker:
         anpr_cfg = _ae._camera_anpr_cfg.get(self.camera_id, {}) or {}
         roi_poly = anpr_cfg.get("roi_polygon") or []
 
-        # Whitelist per-camera (fix critique v0.4.1 — préservé)
-        skipped = bool(enabled_plugins) and "fast-alpr" not in enabled_plugins
+        # v0.4.3 · Fermeture stricte (fail-safe) — le CameraWorker est
+        # l'unique autorité qui décide des plugins. ``enabled_plugins``
+        # null / vide / absent ⇒ aucun plugin dispatché, jamais.
+        active = list(enabled_plugins) if enabled_plugins else []
+        skipped = "fast-alpr" not in active
         if skipped:
-            logger.debug("ANPR skip %s : fast-alpr not in enabled_plugins", self.camera_id)
+            logger.debug("ANPR skip %s : fast-alpr not in enabled_plugins (strict)",
+                         self.camera_id)
 
         # Auto-suspension qualité + caméras spécialisées (v0.4.2 — préservé)
         if ctx.vehicle_rois and _ae._alpr and not skipped:
@@ -292,9 +307,14 @@ class CameraWorker:
 
     # ── Entrée principale (sync, appelée via asyncio.to_thread) ─────
 
-    def analyze(self, frame_bytes: bytes, enabled_plugins: Optional[list] = None,
+    def analyze(self, frame_input, enabled_plugins: Optional[list] = None,
                 camera: Optional[dict] = None) -> dict:
-        """Exécute tous les stages sur une frame et retourne le résultat legacy."""
+        """Exécute tous les stages sur une frame et retourne le résultat legacy.
+
+        v0.4.3 · ``frame_input`` accepte :
+          - ``numpy.ndarray`` BGR (chemin RTSP direct — zéro encode)
+          - ``bytes`` JPEG (fallback go2rtc, upload manuel, tests)
+        """
         import ai_engine as _ae
         _ae._load_models()
         t_total = time.monotonic()
@@ -305,7 +325,7 @@ class CameraWorker:
             ctx.fps = round(1.0 / dt, 2) if dt > 0 else 0.0
         self._last_ts = now_ts
 
-        if not self._stage_decode(ctx, frame_bytes):
+        if not self._stage_decode(ctx, frame_input):
             return {"detections": [], "plates": [], "motion_pct": 0.0}
         self._stage_motion(ctx)
         self._stage_detection(ctx)
