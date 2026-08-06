@@ -38,6 +38,7 @@ from routes.smart_zones import smart_zones_router
 from routes.workflows import workflows_router
 from routes.timeline import timeline_router
 from routes.camera_control import camera_control_router
+from routes.devices import devices_router
 from wsdl_path import validate_wsdl_dir
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -88,6 +89,7 @@ app.include_router(smart_zones_router)
 app.include_router(workflows_router)
 app.include_router(timeline_router)
 app.include_router(camera_control_router)
+app.include_router(devices_router)
 app.include_router(api_router)
 app.include_router(notif_router)
 app.include_router(realtime_router)
