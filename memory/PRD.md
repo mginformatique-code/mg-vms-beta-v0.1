@@ -25,6 +25,15 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 
 ### État Feb 2026 — sessions successives
 
+**Session 18 (Jun 2026)** — v0.4.3 · Refonte finale « Architecture First » (12 points utilisateur) :
+- 🏗️ **Runtime pipeline-driven EN PRODUCTION** : `PipelineRuntime → CameraWorker → FrameContext → Stages → PluginBus`. `ai_engine.py` réduit de 1557 à ~500 lignes (acquisition RTSP + modèles + wrappers compat uniquement).
+- 🎯 **YOLO 1× / frame** (stage detection du worker) · **Tracking UNIQUE** (`TrackerPool`, 1 tracker/caméra ; plugins tracker convertis en choix d'algo du stage ; `dispatch_pipeline(precomputed_tracks)` court-circuite les plugins Tracker — preuve par SpyTracker jamais appelé).
+- 🖼️ **VehicleROI partagé** (1 crop/véhicule, JPEG memoizé) + `Frame.jpeg()` partagé dans les 5 plugins ANPR cloud + thumbnails YOLO lazy + `dispatch_plate(only=whitelist)`.
+- 🔬 **Pipeline Inspector** : `GET /api/diagnostics/pipeline-inspector` (13 stages × caméra : avg/max ms, calls, errors, timeouts, FPS + CPU/RAM/GPU/VRAM) + page React `/pipeline-inspector`.
+- 📊 **Benchmarks** (`scripts/benchmark_pipeline.py` → `/app/benchmarks/`) : tracking 2× (0.72→0.37 ms), crops 20 moteurs 20× (14.65→0.75 ms, 80→4 encodes JPEG).
+- ✅ Préservé : whitelist ANPR per-camera, auto-suspension qualité, caméras spécialisées, infra SSD/HDD/CUDA.
+- ✅ Tests : **73/73 OK** (testing agent iteration_39, 0 bug critique). Préexistants hors périmètre : iter30 (1), iter32 (4).
+
 **Session 1 (précédente)** : Fix régression IA, go2rtc gateway strict, diagnostics AI/sync, doc 28 chapitres, Plugin Manager fondations (interfaces, contexte, registry), Fernet passwords caméras, `/api/v1/` versioning.
 
 **Sessions 2 à 6 (Feb 2026, en cours)** : Plugin Manager NG opérationnel :

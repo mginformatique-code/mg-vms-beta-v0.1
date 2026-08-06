@@ -3,9 +3,66 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 > Depuis Feb 2026, MG-VMS bascule sur un cycle interne de versions « pipeline »
-> (v0.3 → v0.4 → v0.4.1 → v0.4.2) qui reflète la refonte vers une architecture
+> (v0.3 → v0.4 → v0.4.1 → v0.4.2 → v0.4.3) qui reflète la refonte vers une architecture
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
+
+## [v0.4.3] — 2026-06 — Refonte finale « Architecture First » : Pipeline Engine v2 en production
+### Changé — Runtime pipeline-driven (remplace le monolithe)
+- **`ai_engine.py` : 1557 → ~500 lignes.** Ne fait plus QUE : acquisition RTSP
+  (`_fetch_frame`, `_sync_frame_source_workers`), chargement modèles (YOLO/ALPR),
+  config runtime, et boucle `ai_loop` qui démarre les CameraWorker. Toute la
+  logique métier est sortie du fichier (wrappers de compat conservés :
+  `_analyze_frame`, `_do_downstream_work`, re-exports scénarios).
+- **Nouveau runtime** : `PipelineRuntime → CameraWorker → FrameContext → Stages → PluginBus`.
+  - `pipeline_v2/camera_worker.py` — un worker PAR caméra (état strictement isolé :
+    motion, tracker, cache plaques). Stages : decode → motion → yolo → tracking → roi → anpr.
+  - `pipeline_v2/frame_context.py` — **FrameContext unique** (frame, timestamp, camera_id,
+    fps, detections, tracks, vehicle_rois, cache, metadata) passé par référence à tous
+    les stages/plugins. JPEG data-URI memoizé par (taille, qualité).
+  - `pipeline_v2/downstream.py` — travail métier hors chemin critique (events, faces,
+    bus, smart zones, workflows, multi-ANPR, persistance plaques).
+  - `pipeline_v2/scenarios.py` — scénarios IA + armement sortis d'ai_engine.
+### Ajouté — Tracking UNIQUE (fin du double tracking)
+- **`pipeline_v2/tracking.py` · TrackerPool** — UN tracker par caméra, instances jamais
+  partagées. Les plugins tracker (bytetrack/botsort/deepsort/ocsort/strongsort) sont
+  **convertis en choix d'algorithme du TrackingStage** (bytetrack=sv.ByteTrack core,
+  botsort=ultralytics BOTSORT ; autres → fallback bytetrack tracé).
+- **`bus.dispatch_pipeline(precomputed_tracks=...)`** — les plugins Tracker ne sont
+  **JAMAIS dispatchés** quand le core fournit les tracks (`plugins_used.trackers =
+  ["core-tracking-stage"]`). Test de preuve : un SpyTracker enregistré n'est jamais appelé.
+### Ajouté — Cache ROI + JPEG partagés (fin des encodes redondants)
+- **`VehicleROI`** — crop véhicule extrait UNE fois (vue numpy zéro-copie), JPEG et
+  data-URI memoizés. fast-alpr ET tous les moteurs cloud lisent les mêmes pixels.
+- **`Frame.jpeg(quality)`** (plugin_manager) — encodage JPEG partagé memoizé. Les 5
+  plugins ANPR cloud (plate-recognizer, openalpr, google-vision, azure-vision,
+  codeproject-ai) n'appellent plus `cv2.imencode` en chemin partagé.
+- **Thumbnails YOLO lazy** — le crop d'une détection n'est encodé QUE si un événement
+  est réellement inséré (cooldown-gated), plus à chaque frame.
+- **`bus.dispatch_plate(only=whitelist)`** — les moteurs hors whitelist caméra ne sont
+  jamais appelés (avant : dispatch à tous puis filtrage des résultats = appels API gaspillés).
+### Ajouté — Pipeline Inspector (diagnostic complet)
+- **`pipeline_v2/inspector.py`** + `GET /api/diagnostics/pipeline-inspector` (+ `/reset`) —
+  par caméra × stage (fetch/decode/motion/yolo/tracking/roi/anpr/dispatch/multi_anpr/
+  scenarios/persist/websocket/downstream) : avg/max/last ms, fenêtre 60s, appels, erreurs,
+  timeouts, FPS effectif. Système : CPU, RAM, GPU, VRAM. Workers + trackers actifs.
+- **Page React `/pipeline-inspector`** (menu technicien) — tableau temps réel par caméra,
+  badge « tracker unique : bytetrack », cartes CPU/RAM/GPU/uptime, refresh 5s.
+### Ajouté — Benchmarks obligatoires (mesures réelles avant/après)
+- **`scripts/benchmark_pipeline.py`** → `/app/benchmarks/pipeline_v2_benchmark.{json,md}` :
+  - Tracking : 0.715 ms (2 trackers) → **0.367 ms (1 tracker)** = 2×
+  - Crops+JPEG ANPR (4 véhicules) : 20 moteurs = 14.65 ms / **80 encodes** → **0.75 ms / 4 encodes** (20×)
+  - Dispatch bus 20 plugins : 1.42 ms broadcast → 1.11 ms per-camera (+ zéro travail plugin hors whitelist)
+  - YOLO : 263 ms avg CPU 1080p (une seule inférence, inchangé)
+### Préservé (aucune régression)
+- Whitelist ANPR per-camera (fix critique v0.4.1), auto-suspension qualité nocturne,
+  caméras ANPR spécialisées (Dahua ITC / Hikvision DeepInView), graph registry per-camera,
+  stats plugins per-camera, MongoDB SSD / recordings HDD / CUDA / Docker bind mounts.
+### Tests
+- 25 nouveaux (`test_v043_pipeline_engine.py` + `test_v042_pipeline_inspector_api.py` du
+  testing agent) + périmètre complet : **73/73 OK** (testing agent iteration_39, 0 bug critique).
+- Échecs préexistants hors périmètre (inchangés) : test_iter30 (guard go2rtc ère v0.2),
+  test_iter32 ×4 (forme catalogue plugins).
 
 ## [v0.4.2] — 2026-02 — Pipeline per-camera + ANPR Qualité intelligente (P0 · P1 · P2)
 ### Ajouté — P0 · Fondation architecturale
