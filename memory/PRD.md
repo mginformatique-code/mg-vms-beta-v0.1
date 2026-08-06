@@ -25,6 +25,15 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 
 ### État Feb 2026 — sessions successives
 
+**Session 44 (Feb 2026)** — v0.5.2.b · Sidebar sous-menus + renommages :
+- 📂 Sous-menus dépliables : **Accueil** (Welcome Center + Tableau de bord)
+  et **Événements** (Événements + Alertes + Recherche véhicule).
+- 🇫🇷 Renommages FR : Pipeline Center → **Suivi des performances**,
+  Workflows → **Automatisations**, Événements IA → **Événements**.
+- 🧭 Supervision réseau déplacée dans Administration.
+- ✅ Sidebar finale à 6 groupes : OPÉRATIONS · ÉVÉNEMENTS · INTELLIGENCE ·
+  ADMINISTRATION · JOURNAUX & RAPPORTS · PARAMÈTRES.
+
 **Session 43 (Feb 2026)** — v0.5.2 · **Map Center Phase 1** (Site Designer) :
 - 🗺️ Refonte `/map` en Map Center basé sur **Konva.js / react-konva**
   (moteur canvas 2D évolutif : zoom, pan, drag, rotation, layers, mesures).

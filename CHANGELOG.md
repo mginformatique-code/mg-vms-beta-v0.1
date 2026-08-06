@@ -7,6 +7,44 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
 
+## [v0.5.2.b] — 2026-02 — Sidebar sous-menus + renommages FR (Session 44)
+
+### Contexte
+Retour utilisateur après v0.5.2 : demande de finaliser la navigation avec
+sous-menus dépliables (Accueil / Événements) et de renommer certains
+menus pour être plus explicites côté FR.
+
+### Changed
+- **Sidebar : sous-menus dépliables** (support des `children` dans NAV,
+  chevron animé, ouverture automatique si un enfant est actif).
+  * **Accueil** *(nouveau parent)* → sous-menu :
+    - Welcome Center (route `/`)
+    - Tableau de bord (route `/dashboard`)
+  * **Événements** *(nouveau parent, nouveau groupe "ÉVÉNEMENTS")* → sous-menu :
+    - Événements (route `/events`, label sans "IA")
+    - Alertes (route `/alerts`)
+    - Recherche véhicule (route `/vehicles`)
+- **Renommages FR** :
+  * `Pipeline Center` → **"Suivi des performances"** (FR uniquement, EN reste "Pipeline Center")
+  * `Workflows` → **"Automatisations"** (FR + EN "Automations")
+  * `Événements IA` → **"Événements"** (retrait de "IA" du texte)
+- **Réorganisation** :
+  * **Supervision réseau** déplacée dans **Administration** (était dans Opérations).
+  * Groupe **Intelligence** simplifié : Zones intelligentes + Automatisations.
+- **Docs** : traductions ajoutées (`nav.home`, `nav.events_group`,
+  `nav.events_root`, `nav.events_item`).
+
+### Sidebar finale (v0.5.2.b)
+- **OPÉRATIONS** : Accueil ⌵ (Welcome Center · Tableau de bord), Mur vidéo,
+  Enregistrements, Caméras, Sites, Carte.
+- **ÉVÉNEMENTS** : Événements ⌵ (Événements · Alertes · Recherche véhicule).
+- **INTELLIGENCE** : Zones intelligentes, Automatisations.
+- **ADMINISTRATION** : Suivi des performances, Supervision réseau, Plugins,
+  Utilisateurs.
+- **JOURNAUX & RAPPORTS** : Rapports, Journal d'audit, Journal de diagnostic.
+- **PARAMÈTRES** : Paramètres, Notifications.
+
+
 ## [v0.5.2] — 2026-02 — Map Center · Phase 1 · Site Designer (Session 43)
 
 ### Contexte

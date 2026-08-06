@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import Logo from "@/components/Logo";
 import {
   LayoutDashboard, Grid3x3, Cctv, Building2, ScanLine, Car, Bell, Map, Zap,
-  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock, Layers,
+  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock, Layers, ChevronDown, ChevronRight, LineChart, Sparkles,
 } from "lucide-react";
 
 const PLUGIN_ICON = {
@@ -15,26 +15,32 @@ const PLUGIN_ICON = {
 
 const NAV = [
   { group: "nav.operations", items: [
-    { to: "/", icon: LayoutDashboard, key: "nav.welcome", end: true },
-    { to: "/dashboard", icon: Grid3x3, key: "nav.dashboard" },
+    // Accueil avec vrai sous-menu (Welcome Center + Tableau de bord)
+    { key: "nav.home", icon: LayoutDashboard, children: [
+      { to: "/", key: "nav.welcome", icon: Sparkles, end: true },
+      { to: "/dashboard", key: "nav.dashboard", icon: Grid3x3 },
+    ]},
     { to: "/live", icon: Grid3x3, key: "nav.live", perm: "view_live" },
     { to: "/recordings", icon: Film, key: "nav.recordings", perm: "view_recordings" },
     { to: "/cameras", icon: Cctv, key: "nav.cameras" },
-    { to: "/network", icon: Network, key: "nav.network", role: "client" },
-    // v0.5.1.d · Ressources matérielles + Accélération GPU accessibles
-    // uniquement depuis le Pipeline Center (onglets dédiés).
     { to: "/sites", icon: Building2, key: "nav.sites" },
     { to: "/map", icon: Map, key: "nav.map" },
   ]},
+  { group: "nav.events_group", items: [
+    // Vrai sous-menu Événements
+    { key: "nav.events_root", icon: Zap, children: [
+      { to: "/events", key: "nav.events_item", icon: Zap },
+      { to: "/alerts", key: "nav.alerts", icon: Bell },
+      { to: "/vehicles", key: "nav.vehicles", icon: Car, perm: "read_plates" },
+    ]},
+  ]},
   { group: "nav.intelligence", items: [
-    { to: "/events", icon: Zap, key: "nav.events" },
-    { to: "/vehicles", icon: Car, key: "nav.vehicles", perm: "read_plates" },
-    { to: "/alerts", icon: Bell, key: "nav.alerts" },
     { to: "/smart-zones", icon: MapPin, key: "nav.smart_zones" },
     { to: "/workflows", icon: Zap, key: "nav.workflows" },
   ]},
   { group: "nav.admin", items: [
-    { to: "/pipeline-center", icon: Layers, key: "nav.pipeline_center", role: "technician" },
+    { to: "/pipeline-center", icon: LineChart, key: "nav.pipeline_center", role: "technician" },
+    { to: "/network", icon: Network, key: "nav.network", role: "client" },
     { to: "/plugins", icon: Puzzle, key: "nav.plugins", role: "admin" },
     { to: "/users", icon: Users, key: "nav.users", role: "admin" },
   ]},
@@ -88,6 +94,84 @@ function GpuMiniBar({ gpu, onClick }) {
   );
 }
 
+function NavLeafItem({ item, t }) {
+  const Ic = item.icon;
+  return (
+    <NavLink
+      to={item.to}
+      end={item.end}
+      data-testid={`nav-${item.key.split(".")[1]}`}
+      className={({ isActive }) =>
+        `flex items-center gap-3 px-4 py-2 text-sm transition-colors border-l-2 ${
+          isActive
+            ? "border-l-[#0044FF] bg-secondary text-foreground font-medium"
+            : "border-l-transparent text-muted-foreground hover:bg-secondary hover:text-foreground"
+        }`
+      }
+    >
+      <Ic size={17} strokeWidth={1.5} />
+      {t(item.key)}
+    </NavLink>
+  );
+}
+
+function NavGroupItem({ item, t, can, hasPerm }) {
+  const location = useLocation();
+  const children = (item.children || []).filter(
+    (c) => (!c.role || can(c.role)) && (!c.perm || hasPerm(c.perm))
+  );
+  const activeChild = children.some((c) => location.pathname === c.to);
+  const [open, setOpen] = useState(activeChild);
+  useEffect(() => {
+    if (activeChild) setOpen(true);
+  }, [activeChild]);
+  const Ic = item.icon;
+  const testId = `nav-${item.key.split(".")[1]}`;
+  return (
+    <div data-testid={testId}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`w-full flex items-center gap-3 px-4 py-2 text-sm transition-colors border-l-2 ${
+          activeChild
+            ? "border-l-[#0044FF] text-foreground font-medium"
+            : "border-l-transparent text-muted-foreground hover:bg-secondary hover:text-foreground"
+        }`}
+        aria-expanded={open}
+      >
+        <Ic size={17} strokeWidth={1.5} />
+        <span className="flex-1 text-left">{t(item.key)}</span>
+        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+      </button>
+      {open && (
+        <div className="pb-1">
+          {children.map((c) => {
+            const CIc = c.icon;
+            return (
+              <NavLink
+                key={c.to}
+                to={c.to}
+                end={c.end}
+                data-testid={`nav-${c.key.split(".")[1]}`}
+                className={({ isActive }) =>
+                  `flex items-center gap-2 pl-11 pr-4 py-1.5 text-[13px] transition-colors border-l-2 ${
+                    isActive
+                      ? "border-l-[#0044FF] bg-secondary text-foreground font-medium"
+                      : "border-l-transparent text-muted-foreground/90 hover:bg-secondary hover:text-foreground"
+                  }`
+                }
+              >
+                <CIc size={13} strokeWidth={1.5} />
+                {t(c.key)}
+              </NavLink>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Layout({ children }) {
   const { t, user, logout, theme, toggleTheme, lang, toggleLang, can, hasPerm, liveMetrics, alertPing } = useApp();
   const navigate = useNavigate();
@@ -125,18 +209,11 @@ export default function Layout({ children }) {
           {NAV.map((g) => (
             <div key={g.group} className="mb-4">
               <div className="px-4 mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground font-medium">{t(g.group)}</div>
-              {g.items.filter((it) => (!it.role || can(it.role)) && (!it.perm || hasPerm(it.perm))).map((it) => (
-                <NavLink key={it.to} to={it.to} end={it.end}
-                  data-testid={`nav-${it.key.split(".")[1]}`}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-4 py-2 text-sm transition-colors border-l-2 ${
-                      isActive ? "border-l-[#0044FF] bg-secondary text-foreground font-medium"
-                               : "border-l-transparent text-muted-foreground hover:bg-secondary hover:text-foreground"
-                    }`}>
-                  <it.icon size={17} strokeWidth={1.5} />
-                  {t(it.key)}
-                </NavLink>
-              ))}
+              {g.items
+                .filter((it) => (!it.role || can(it.role)) && (!it.perm || hasPerm(it.perm)))
+                .map((it) => it.children
+                  ? <NavGroupItem key={it.key} item={it} t={t} can={can} hasPerm={hasPerm} />
+                  : <NavLeafItem key={it.to} item={it} t={t} />)}
             </div>
           ))}
         </nav>
