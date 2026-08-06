@@ -28,7 +28,7 @@ from pipeline_metrics import pipeline_metrics
 logger = logging.getLogger("ai-engine")
 
 GO2RTC_URL = os.environ.get("GO2RTC_URL", "http://localhost:1984")
-AI_INTERVAL = float(os.environ.get("AI_INTERVAL_SECONDS", "2"))
+AI_INTERVAL = float(os.environ.get("AI_INTERVAL_SECONDS", "0.15"))  # v0.4.5.a · ~6-7 FPS/cam
 AI_CONFIDENCE = float(os.environ.get("AI_CONFIDENCE", "0.45"))
 AI_MIN_PLATE_PX = int(os.environ.get("AI_MIN_PLATE_PX", "24"))
 AI_PLATE_CACHE_SECONDS = int(os.environ.get("AI_PLATE_CACHE_SECONDS", "8"))
@@ -322,23 +322,33 @@ def analyze_image_local(image_bytes: bytes) -> dict:
 async def _fetch_frame(camera_id: str):
     """Frame la plus récente d'une caméra.
 
-    v0.4.3 · Retourne un ``numpy.ndarray`` BGR directement quand
-    ``frame_source`` (RTSP direct via ffmpeg) est disponible — plus
-    aucun aller-retour ``imencode → imdecode``. Fallback go2rtc HTTP
-    retourne des ``bytes`` JPEG (une seule fois, décodage assuré par
-    le worker).
+    v0.4.5.a · Pipeline non-bloquant strict :
+      1. ``frame_source.get_latest_frame_async(wait_timeout=0)`` — retour
+         immédiat de la ref numpy (zéro copie, zéro attente).
+      2. Fallback go2rtc HTTP réservé UNIQUEMENT au worker sévèrement mort
+         (>10 s sans frame, restart_count > 0) : dernière chance snapshot,
+         jamais dans le chemin nominal.
+      3. Si rien : renvoie None, le pipeline saute cette itération.
     """
     try:
-        from frame_source import get_latest_frame_async
-        frame = await get_latest_frame_async(camera_id, max_age_sec=5.0, wait_timeout=0.5)
+        from frame_source import get_latest_frame_async, status as _fs_status
+        frame = await get_latest_frame_async(camera_id, max_age_sec=5.0, wait_timeout=0.0)
         if frame is not None:
-            return frame  # numpy ndarray — zéro encode
+            return frame  # chemin nominal — zéro fallback
+        # Fallback strict : worker en crash persistant seulement.
+        w = _fs_status().get("workers", {}).get(camera_id, {})
+        age_ms = w.get("last_frame_age_ms")
+        restart = w.get("restart_count", 0) or 0
+        if not (restart > 0 and (age_ms is None or age_ms > 10000)):
+            return None
     except Exception as e:
         logger.debug("_fetch_frame: frame_source indispo pour %s (%s)", camera_id, e)
+        return None
     try:
-        async with httpx.AsyncClient(timeout=12) as client:
+        async with httpx.AsyncClient(timeout=2.0) as client:
             r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": f"cam_{camera_id}"})
             if r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff":
+                logger.warning("_fetch_frame: fallback go2rtc utilisé (worker %s crashé)", camera_id)
                 return r.content
     except httpx.HTTPError:
         pass
@@ -400,15 +410,44 @@ _downstream_inflight: dict[str, int] = {}
 _MAX_DOWNSTREAM_INFLIGHT = int(os.environ.get("AI_MAX_DOWNSTREAM_INFLIGHT", "2"))
 
 
+def _ensure_frame_source_running(cam: dict) -> None:
+    """v0.4.5.a · Warm-start persistant du worker ffmpeg pour cette caméra.
+
+    Appelé au début de chaque itération de la boucle IA. Idempotent :
+    ``frame_source.start()`` compare la config et fait no-op si identique.
+    Le résultat est que dès l'activation ``detect_enabled=True``, le thread
+    ffmpeg tourne en arrière-plan et remplit ``latest_frame`` en continu —
+    l'IA ne provoque JAMAIS l'ouverture d'un RTSP à la volée.
+    """
+    try:
+        from frame_source import start as _fs_start
+        rtsp_url = cam.get("ai_rtsp_url") or cam.get("rtsp_url")
+        if not rtsp_url:
+            return
+        codec = (cam.get("ai_codec") or cam.get("codec") or "auto").lower()
+        if codec not in ("h264", "h265", "auto"):
+            codec = "auto"
+        w = int(cam.get("ai_frame_width") or 0)
+        h = int(cam.get("ai_frame_height") or 0)
+        _fs_start(cam["id"], rtsp_url, codec=codec, width=w, height=h)
+    except Exception:
+        logger.debug("frame-source warm-start failed for %s", cam.get("id"), exc_info=True)
+
+
 async def _process_camera(cam: dict) -> None:
     """Phase A : acquisition + CameraWorker (pipeline v2) + broadcast overlay."""
     from pipeline_v2.camera_worker import runtime as _runtime
     from pipeline_v2.inspector import inspector as _inspector
 
+    # v0.4.5.a · Warm-start persistant : garantit que le thread ffmpeg est
+    # déjà en train de lire dès que la caméra est marquée `detect_enabled`.
+    # Idempotent (no-op si déjà démarré avec la même config).
+    _ensure_frame_source_running(cam)
+
     t_start = time.perf_counter()
     frame = await _fetch_frame(cam["id"])
     if frame is None:
-        logger.info("IA · %s (%s) : frame indisponible (flux offline)", cam["name"], cam["id"])
+        logger.debug("IA · %s (%s) : frame indisponible (skip iteration)", cam["name"], cam["id"])
         return
     t_fetch_ms = (time.perf_counter() - t_start) * 1000
     _inspector.record(cam["id"], "fetch", t_fetch_ms)

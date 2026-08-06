@@ -44,8 +44,8 @@ _HWACCEL_MODE = os.environ.get("MGVMS_AI_HW_ACCEL", "auto").lower()
 _FRAME_WIDTH = int(os.environ.get("MGVMS_AI_FRAME_WIDTH", "0") or 0)
 _FRAME_HEIGHT = int(os.environ.get("MGVMS_AI_FRAME_HEIGHT", "0") or 0)
 _FFMPEG_PATH = os.environ.get("MGVMS_FFMPEG_PATH", shutil.which("ffmpeg") or "ffmpeg")
-_RESTART_BACKOFF_SEC = 4.0     # attente initiale entre 2 tentatives de restart
-_RESTART_MAX_BACKOFF_SEC = 30.0
+_RESTART_BACKOFF_SEC = 1.0     # attente initiale entre 2 tentatives de restart
+_RESTART_MAX_BACKOFF_SEC = 5.0 # v0.4.5.a — de 30s à 5s (moins d'accumulation de latence)
 _READ_TIMEOUT_SEC = 20.0       # si aucune frame lue en 20s → considérer mort et redémarrer
 
 
@@ -73,6 +73,10 @@ def _ffmpeg_supports_cuvid() -> bool:
 _HAS_CUVID = _ffmpeg_supports_cuvid() if _HWACCEL_MODE in ("auto", "cuda") else False
 
 
+# Fenêtre glissante FPS (1 minute) : nombre de timestamps de frames récentes
+_FPS_WINDOW_SEC = 60.0
+_FPS_WINDOW_MAX = 1800   # cap : 30 fps × 60 s
+
 def _use_gpu() -> bool:
     if _HWACCEL_MODE == "cuda":
         return True   # forcé (attention : plante si NVDEC indispo)
@@ -83,7 +87,10 @@ def _use_gpu() -> bool:
 
 @dataclass
 class _Worker:
-    """État d'un worker FFmpeg persistant pour une caméra."""
+    """État d'un worker FFmpeg persistant pour une caméra.
+
+    v0.4.5.a — Ajout de métriques capture séparées de l'IA.
+    """
     camera_id: str
     rtsp_url: str
     codec: str                       # 'h264' | 'h265' | 'auto'
@@ -96,6 +103,14 @@ class _Worker:
     reader_thread: Optional[threading.Thread] = None
     restart_count: int = 0
     last_error: str = ""
+    # ── métriques v0.4.5.a ─────────────────────────────
+    frames_produced: int = 0         # total depuis start()
+    frames_dropped: int = 0          # frames écrasées avant lecture par le consommateur
+    consumed_ts: float = 0.0         # dernier ts où un consommateur a lu latest_frame
+    started_at: float = 0.0
+    first_frame_at: float = 0.0      # ts de la 1re frame (mesure temps de warm-up)
+    last_capture_ms: float = 0.0     # intervalle entre 2 frames stdout (capture pace)
+    frame_ts_window: list = field(default_factory=list)  # rolling window pour FPS_1min
 
 
 # Registre des workers actifs : camera_id → _Worker
@@ -189,6 +204,8 @@ def _reader_loop(w: _Worker):
         stderr_thread.start()
 
         last_read_ts = time.monotonic()
+        w.started_at = w.started_at or last_read_ts
+        prev_frame_ts = 0.0
         try:
             while not w.stop_event.is_set() and w.proc.poll() is None:
                 # Lecture bloquante d'une frame complète
@@ -202,9 +219,27 @@ def _reader_loop(w: _Worker):
                     break
                 # Convertit en numpy BGR24 sans copie
                 frame = np.frombuffer(buf, dtype=np.uint8).reshape((h_out, w_out, 3))
+                now = time.monotonic()
+                # v0.4.5.a · Métriques capture :
+                #  - dropped : la frame précédente n'a jamais été consommée
+                if w.latest_frame is not None and w.latest_ts > w.consumed_ts:
+                    w.frames_dropped += 1
+                #  - pace entre 2 frames stdout (capture_latency)
+                if prev_frame_ts:
+                    w.last_capture_ms = (now - prev_frame_ts) * 1000
+                prev_frame_ts = now
+                #  - rolling window FPS 1min
+                w.frame_ts_window.append(now)
+                cutoff = now - _FPS_WINDOW_SEC
+                if len(w.frame_ts_window) > _FPS_WINDOW_MAX or w.frame_ts_window[0] < cutoff:
+                    w.frame_ts_window = [t for t in w.frame_ts_window if t >= cutoff]
+                # Écriture atomique de la ref (le lecteur voit soit l'ancienne, soit la nouvelle)
                 w.latest_frame = frame
-                w.latest_ts = time.monotonic()
-                last_read_ts = w.latest_ts
+                w.latest_ts = now
+                w.frames_produced += 1
+                if not w.first_frame_at:
+                    w.first_frame_at = now
+                last_read_ts = now
                 backoff = _RESTART_BACKOFF_SEC   # reset backoff après succès
         finally:
             # Cleanup ffmpeg
@@ -299,9 +334,16 @@ def start(camera_id: str, rtsp_url: str, codec: str = "auto",
             stop(camera_id)
         w = _Worker(camera_id=camera_id, rtsp_url=rtsp_url, codec=codec,
                      width=width, height=height)
+        w.started_at = time.monotonic()
         w.reader_thread = threading.Thread(target=_reader_loop, args=(w,), daemon=True)
         _workers[camera_id] = w
         w.reader_thread.start()
+
+
+def is_running(camera_id: str) -> bool:
+    """v0.4.5.a · Utilisé par ai_engine pour éviter un start() redondant."""
+    w = _workers.get(camera_id)
+    return w is not None and bool(w.reader_thread and w.reader_thread.is_alive())
 
 
 def stop(camera_id: str) -> None:
@@ -331,26 +373,56 @@ def get_latest_frame(camera_id: str, max_age_sec: float = 5.0) -> Optional[np.nd
     - le worker n'existe pas ;
     - aucune frame n'a été produite ;
     - la dernière frame est plus vieille que `max_age_sec` (worker mort).
+
+    v0.4.5.a · Zéro attente : renvoie IMMÉDIATEMENT la ref numpy déjà
+    en mémoire (écriture atomique côté reader). Marque le timestamp
+    de consommation pour le compteur ``frames_dropped``.
     """
     w = _workers.get(camera_id)
     if w is None or w.latest_frame is None:
         return None
-    if time.monotonic() - w.latest_ts > max_age_sec:
+    now = time.monotonic()
+    if now - w.latest_ts > max_age_sec:
         return None
+    w.consumed_ts = now
     return w.latest_frame   # zéro-copie : le lecteur écrit atomiquement une nouvelle ref
 
 
 def status() -> dict:
-    """Résumé de l'état de tous les workers (utilisable dans /api/diagnostics)."""
+    """Résumé de l'état de tous les workers (utilisable dans /api/diagnostics).
+
+    v0.4.5.a · Métriques capture séparées :
+      - fps_capture_1min : FPS effectif produit par ffmpeg (fenêtre 60s)
+      - frames_produced / frames_dropped
+      - warmup_ms : durée jusqu'à la 1re frame après start()
+      - last_capture_interval_ms : pace entre 2 frames stdout
+      - alive / last_frame_age_ms / last_error
+    """
     out = {}
     now = time.monotonic()
     for cam_id, w in _workers.items():
+        window = w.frame_ts_window
+        # FPS calculé sur la fenêtre effective (peut être plus courte que 60s)
+        if len(window) >= 2:
+            span = window[-1] - window[0]
+            fps = round((len(window) - 1) / span, 1) if span > 0 else 0.0
+        else:
+            fps = 0.0
+        warmup_ms = round((w.first_frame_at - w.started_at) * 1000, 1) if (
+            w.first_frame_at and w.started_at) else None
+        last_age_ms = round((now - w.latest_ts) * 1000, 1) if w.latest_ts else None
         out[cam_id] = {
             "codec": w.codec,
             "resolution": f"{w.width}x{w.height}",
             "gpu": _use_gpu(),
             "restart_count": w.restart_count,
-            "last_frame_age_s": round(now - w.latest_ts, 1) if w.latest_ts else None,
+            "reconnect_count": max(0, w.restart_count - 1),
+            "frames_produced": w.frames_produced,
+            "frames_dropped": w.frames_dropped,
+            "fps_capture_1min": fps,
+            "warmup_ms": warmup_ms,
+            "last_capture_interval_ms": round(w.last_capture_ms, 1) if w.last_capture_ms else None,
+            "last_frame_age_ms": last_age_ms,
             "alive": bool(w.reader_thread and w.reader_thread.is_alive()),
             "last_error": w.last_error,
         }
@@ -358,13 +430,20 @@ def status() -> dict:
 
 
 async def get_latest_frame_async(camera_id: str, max_age_sec: float = 5.0,
-                                  wait_timeout: float = 3.0) -> Optional[np.ndarray]:
-    """Version async avec attente : si aucune frame encore disponible (worker vient de
-    démarrer), attend jusqu'à `wait_timeout` avant de retourner None."""
+                                  wait_timeout: float = 0.0) -> Optional[np.ndarray]:
+    """Version async : retourne la dernière frame OU None (jamais d'attente longue).
+
+    v0.4.5.a · `wait_timeout` défaut = 0.0 (zéro attente). Le pipeline IA
+    saute cette itération plutôt que bloquer. Si `wait_timeout > 0`, poll
+    court (50ms) — utile uniquement pour warm-up initial explicite.
+    """
+    frame = get_latest_frame(camera_id, max_age_sec=max_age_sec)
+    if frame is not None or wait_timeout <= 0:
+        return frame
     deadline = time.monotonic() + wait_timeout
     while time.monotonic() < deadline:
+        await asyncio.sleep(0.05)
         frame = get_latest_frame(camera_id, max_age_sec=max_age_sec)
         if frame is not None:
             return frame
-        await asyncio.sleep(0.2)
     return None

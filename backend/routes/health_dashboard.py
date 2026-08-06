@@ -419,6 +419,29 @@ async def diagnostics_pipeline_inspector_reset(
     return {"ok": True, "reset": camera_id or "all"}
 
 
+@health_dashboard_router.get("/diagnostics/capture/stats")
+async def diagnostics_capture_stats(user: dict = Depends(require_permission("view_live"))):
+    """v0.4.5.a · **Métriques capture** — séparées de l'IA.
+
+    Retourne par caméra :
+      - ``fps_capture_1min`` : FPS effectif produit par ffmpeg (fenêtre 60s)
+      - ``frames_produced`` / ``frames_dropped``
+      - ``warmup_ms`` : durée jusqu'à la 1re frame (mesure temps de startup)
+      - ``last_capture_interval_ms`` : pace entre 2 frames stdout
+      - ``last_frame_age_ms`` : âge de la dernière frame disponible
+      - ``reconnect_count`` : nombre de redémarrages ffmpeg
+      - ``alive`` / ``last_error``
+
+    Permet à l'UI de distinguer "caméra lente" (fps_capture bas) et
+    "IA lente" (fps_capture normal + IA en retard).
+    """
+    try:
+        from frame_source import status as _fs_status
+        return _fs_status()
+    except Exception as e:
+        return {"error": str(e), "workers": {}}
+
+
 @health_dashboard_router.get("/diagnostics/anpr-quality")
 async def diagnostics_anpr_quality(user: dict = Depends(require_permission("view_live"))):
     """v0.4.2 · P1 · **ANPR Auto-suspension qualité** — état par caméra.
