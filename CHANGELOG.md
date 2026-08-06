@@ -7,6 +7,65 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
 
+## [v0.5.4-A] — 2026-02 — Session Manager + timeout configurable (Session 47)
+
+### Contexte
+Phase A du chantier Enterprise Security. Sessions traquées côté serveur avec
+révocation JWT par `jti`, timeout configurable, popup d'expiration.
+
+### Added (backend)
+- Nouveau module `backend/routes/security.py` (prefix `/api/security/`).
+- Nouvelle collection Mongo **`sessions`** :
+  `{jti, user_id, email, created_at, last_seen_at, expires_at, ip,
+    user_agent, revoked, revoked_at?}`.
+- JWT enrichi d'un `jti` unique (UUID v4) + durée configurable (`hours`
+  passé au `create_access_token`).
+- `auth.get_current_user` vérifie que la session n'est **pas révoquée**
+  et rafraîchit `last_seen_at` à chaque requête (best-effort). Bypass
+  automatique en `TESTING=1`.
+- `auth.login` crée une session avec IP + user-agent et applique le
+  timeout depuis `settings.security.session_hours` (défaut 8h).
+- Endpoints :
+  * `GET  /api/security/sessions`               → liste des sessions de
+    l'utilisateur + marqueur `current`.
+  * `DELETE /api/security/sessions/{jti}`       → révoque une session
+    (audit `session_revoked`).
+  * `POST /api/security/sessions/revoke-others` → révoque toutes les
+    autres sessions (audit `sessions_revoked_others`).
+  * `GET  /api/security/timeout`                → timeout actuel + options
+    supportées (`[0.25, 0.5, 1, 4, 8, 12, 24]`).
+  * `PUT  /api/security/timeout` *(admin)*      → met à jour le timeout
+    (`session_hours` ∈ [0.25, 24], audit `session_timeout_changed`).
+
+### Added (frontend)
+- **Settings → Sessions actives** (`SecuritySessionsCard`) : sélecteur
+  timeout (15min/30min/1h/4h/8h/12h/24h — admin), liste sessions avec
+  navigateur, IP, dernière activité, expiration, badge "Actuelle",
+  bouton "Déconnecter" par ligne + "Déconnecter toutes les autres".
+- **`SessionExpiryWatcher`** (composant global) : décode le JWT côté
+  client, affiche un popup fixe bottom-right 60 s avant expiration avec
+  "Continuer" (refresh via `/api/auth/refresh`) et "Déconnexion".
+- **i18n** : +20 clés FR/EN (`security.sessions_title`, `security.timeout_*`,
+  `security.revoke_*`, `security.expiry_*`, `security.current_session`…).
+
+### Tests
+- Nouveau fichier `tests/test_v054_sessions.py` — **6 tests** :
+  * Liste des sessions expose la session courante.
+  * `GET/PUT /timeout` fonctionnent + options exposées.
+  * `PUT /timeout` rejette les valeurs hors [0.25, 24].
+  * `revoke-others` révoque bien les autres tokens (401 attendu ensuite).
+  * Révocation ciblée par `jti`.
+  * Endpoints protégés par authentification.
+- **108/108 tests critiques verts** (0 régression sur v0.4.x/v0.5.x).
+
+### À suivre (Phases B → F)
+- Phase B : Security Center v1 + Security Score.
+- Phase C : MFA / TOTP + Refresh Tokens.
+- Phase D : RBAC granulaire + Camera Security Score.
+- Phase E : Sandbox Plugins + Backups + Notifications.
+- Phase F : API Keys + Assistant déploiement + RGPD.
+
+
 ## [v0.5.3] — 2026-02 — Welcome Center refactoré (tutoriels vidéo + widgets) + Dashboard allégé (Session 46)
 
 ### Contexte

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
-import { Moon, Sun, Languages, ShieldCheck, Monitor, Loader2, HardDrive, Save, Trash2, PlayCircle, Database, RefreshCw, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
+import { Moon, Sun, Languages, ShieldCheck, Monitor, Loader2, HardDrive, Save, Trash2, PlayCircle, Database, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Clock, Wifi, LogOut } from "lucide-react";
 import { toast } from "sonner";
 
 export default function SettingsPage() {
@@ -72,6 +72,8 @@ export default function SettingsPage() {
           <button onClick={start2fa} disabled={loading} data-testid="enable-2fa-btn" className="px-4 py-2 bg-[#0044FF] text-white text-sm flex items-center gap-2">{loading && <Loader2 size={15} className="animate-spin" />}{t("settings.twofa_enable")}</button>
         )}
       </Card>
+
+      <SecuritySessionsCard t={t} user={user} Card={Card} />
 
       <Card title="Compte" icon={ShieldCheck}>
         <div className="grid grid-cols-2 gap-y-2 text-sm">
@@ -239,7 +241,7 @@ function StorageCard() {
     <div className="bg-card border border-border p-5 mb-3">
       <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-4"><HardDrive size={15} /> Stockage multi-disques</div>
 
-      <div className="text-[11px] mono text-muted-foreground mb-2">Dossier d'enregistrement principal : {state.primary_recordings_dir}</div>
+      <div className="text-[11px] mono text-muted-foreground mb-2">Dossier d&apos;enregistrement principal : {state.primary_recordings_dir}</div>
 
       {/* Partitions détectées */}
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Partitions physiques détectées ({state.partitions.length})</div>
@@ -496,5 +498,131 @@ function DatabaseCard() {
         </span>
       </div>
     </div>
+  );
+}
+
+
+// ─────────────────────────────────────────────────────────────────
+// v0.5.4 · Session Manager : liste sessions actives + révocation
+// + timeout configurable (admin).
+// ─────────────────────────────────────────────────────────────────
+function SecuritySessionsCard({ t, user, Card }) {
+  const [data, setData] = useState({ items: [], current_jti: null });
+  const [timeout, setT] = useState({ session_hours: 8, options: [0.25, 0.5, 1, 4, 8, 12, 24] });
+  const [busy, setBusy] = useState(false);
+  const isAdmin = user?.role === "admin";
+
+  const load = async () => {
+    try {
+      const [r1, r2] = await Promise.all([
+        api.get("/security/sessions"),
+        api.get("/security/timeout"),
+      ]);
+      setData(r1.data);
+      setT(r2.data);
+    } catch (e) { /* noop */ }
+  };
+  useEffect(() => { load(); const iv = setInterval(load, 30000); return () => clearInterval(iv); }, []);
+
+  const revoke = async (jti) => {
+    if (!window.confirm(t("security.revoke_confirm"))) return;
+    setBusy(true);
+    try { await api.delete(`/security/sessions/${jti}`); await load(); toast.success(t("security.revoked")); }
+    catch (e) { toast.error(t("security.revoke_failed")); }
+    finally { setBusy(false); }
+  };
+  const revokeOthers = async () => {
+    if (!window.confirm(t("security.revoke_others_confirm"))) return;
+    setBusy(true);
+    try {
+      const r = await api.post("/security/sessions/revoke-others");
+      toast.success(t("security.revoked_n", { n: r.data.revoked_count }) || `${r.data.revoked_count} révoquées`);
+      await load();
+    } catch (e) { toast.error(t("security.revoke_failed")); }
+    finally { setBusy(false); }
+  };
+  const setHours = async (h) => {
+    try { await api.put("/security/timeout", { session_hours: Number(h) }); await load(); toast.success(t("security.timeout_saved")); }
+    catch (e) { toast.error(t("security.timeout_failed")); }
+  };
+
+  const fmt = (iso) => iso ? new Date(iso).toLocaleString() : "—";
+  const uaShort = (ua) => {
+    if (!ua) return "—";
+    if (ua.includes("Chrome")) return "Chrome";
+    if (ua.includes("Firefox")) return "Firefox";
+    if (ua.includes("Safari")) return "Safari";
+    if (ua.includes("Edge")) return "Edge";
+    return ua.slice(0, 30);
+  };
+
+  return (
+    <Card title={t("security.sessions_title")} icon={LogOut}>
+      {isAdmin && (
+        <div className="mb-4 pb-3 border-b border-border">
+          <div className="text-xs mb-2 flex items-center gap-1"><Clock size={12} /> {t("security.timeout_label")}</div>
+          <div className="flex flex-wrap gap-1">
+            {timeout.options.map((h) => (
+              <button key={h}
+                onClick={() => setHours(h)}
+                className={`px-2 py-1 text-xs mono border ${timeout.session_hours === h ? "border-[#0044FF] bg-[#0044FF]/10 text-[#0044FF]" : "border-border hover:bg-secondary/50"}`}
+                data-testid={`security-timeout-${h}`}>
+                {h < 1 ? `${h * 60}min` : `${h}h`}
+              </button>
+            ))}
+          </div>
+          <div className="text-[10px] text-muted-foreground mt-1">
+            {t("security.timeout_hint")}
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs text-muted-foreground">
+          {data.items.length} {t("security.active_sessions")}
+        </div>
+        {data.items.length > 1 && (
+          <button onClick={revokeOthers} disabled={busy}
+            className="text-xs text-[#FF3333] hover:underline flex items-center gap-1"
+            data-testid="security-revoke-others">
+            <LogOut size={12} /> {t("security.revoke_others_btn")}
+          </button>
+        )}
+      </div>
+
+      <div className="border border-border">
+        {data.items.map((s) => (
+          <div key={s.jti} className="flex items-center gap-3 px-3 py-2 border-b border-border/60 last:border-b-0" data-testid={`security-session-${s.jti}`}>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm flex items-center gap-2">
+                <span className="font-medium">{uaShort(s.user_agent)}</span>
+                {s.current && (
+                  <span className="text-[9px] mono uppercase tracking-wider px-1 py-0.5 bg-[#00E676]/20 text-[#00E676] border border-[#00E676]/50">
+                    {t("security.current_session")}
+                  </span>
+                )}
+              </div>
+              <div className="text-[10px] text-muted-foreground mono flex flex-wrap gap-x-3">
+                <span className="flex items-center gap-1"><Wifi size={10} /> {s.ip}</span>
+                <span className="flex items-center gap-1"><Clock size={10} /> {fmt(s.last_seen_at)}</span>
+                <span>{t("security.expires")}: {fmt(s.expires_at)}</span>
+              </div>
+            </div>
+            {!s.current && (
+              <button onClick={() => revoke(s.jti)} disabled={busy}
+                className="text-xs text-[#FF3333] hover:underline"
+                data-testid={`security-revoke-${s.jti}`}>
+                {t("security.revoke")}
+              </button>
+            )}
+          </div>
+        ))}
+        {data.items.length === 0 && (
+          <div className="px-3 py-6 text-xs text-muted-foreground text-center">
+            {t("security.no_session")}
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }

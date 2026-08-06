@@ -25,6 +25,22 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 
 ### État Feb 2026 — sessions successives
 
+**Session 47 (Feb 2026)** — v0.5.4-A · Session Manager + timeout :
+- 🔐 Sessions tracquées serveur (collection `sessions` Mongo) avec JWT
+  enrichi d'un `jti` unique, révocation immédiate, timeout configurable.
+- ⚙️ 5 endpoints `/api/security/*` (list, revoke, revoke-others, get/put
+  timeout).
+- 🖼️ Settings → Sessions actives : sélecteur timeout admin (7 valeurs
+  préréglées) + liste sessions (navigateur/IP/dernière activité) + boutons
+  déconnecter individuel / toutes-autres.
+- ⏰ Popup global `SessionExpiryWatcher` : alerte 60s avant expiration avec
+  Continuer/Déconnexion (refresh JWT).
+- 🌐 +20 clés i18n FR/EN.
+- 📊 108/108 tests critiques verts (6 nouveaux Phase A).
+- 📋 Reste à faire : Phases B (Security Center + Score), C (MFA/TOTP),
+  D (RBAC granulaire + Camera Score), E (Sandbox+Backups+Notifs),
+  F (API Keys + Assistant déploiement + RGPD).
+
 **Session 46 (Feb 2026)** — v0.5.3 · Welcome refactoré + Dashboard allégé :
 - 📝 Welcome Center recentré éditorial : suppression Stats+Alertes système,
   ajout **Tutoriels vidéo YouTube** (CRUD admin, miniature auto) et

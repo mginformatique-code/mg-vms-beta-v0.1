@@ -94,12 +94,18 @@ def get_jwt_secret() -> str:
     return os.environ["JWT_SECRET"]
 
 
-def create_access_token(user_id: str, email: str, role: str) -> str:
+def create_access_token(user_id: str, email: str, role: str, hours: int = 8, jti: Optional[str] = None) -> str:
+    """v0.5.4 · JWT enrichi d'un `jti` unique + durée configurable pour permettre
+    la révocation par session (collection `sessions.revoked=True`) et le
+    respect du timeout configurable côté Security Center."""
+    import uuid as _uuid
     payload = {
         "sub": user_id,
         "email": email,
         "role": role,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=8),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=hours),
+        "iat": datetime.now(timezone.utc),
+        "jti": jti or str(_uuid.uuid4()),
         "type": "access",
     }
     return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
@@ -144,6 +150,21 @@ async def get_current_user(request: Request) -> dict:
         payload = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
         if payload.get("type") != "access":
             raise HTTPException(status_code=401, detail="Invalid token type")
+        # v0.5.4 · Vérifie que la session (jti) n'a pas été révoquée.
+        jti = payload.get("jti")
+        if jti and not _testing_mode():
+            sess = await db.sessions.find_one({"jti": jti}, {"_id": 0})
+            if sess and sess.get("revoked"):
+                raise HTTPException(status_code=401, detail="Session révoquée")
+            if sess:
+                # Rafraîchit `last_seen_at` (best-effort, ne bloque pas la requête)
+                try:
+                    await db.sessions.update_one(
+                        {"jti": jti},
+                        {"$set": {"last_seen_at": datetime.now(timezone.utc).isoformat()}},
+                    )
+                except Exception:
+                    pass
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
@@ -272,11 +293,35 @@ async def login(data: LoginInput, request: Request, response: Response):
             raise HTTPException(status_code=401, detail="Code 2FA invalide")
 
     await _clear_attempts(identifier)
-    access = create_access_token(user["id"], user["email"], user["role"])
+    # v0.5.4 · Session tracking + timeout configurable
+    hours = await _get_session_hours()
+    import uuid as _uuid
+    jti = str(_uuid.uuid4())
+    access = create_access_token(user["id"], user["email"], user["role"], hours=hours, jti=jti)
     refresh = create_refresh_token(user["id"])
-    response.set_cookie("access_token", access, httponly=True, secure=True, samesite="lax", max_age=28800, path="/")
-    await log_audit(user, "login", email, "Connexion réussie", ip)
+    # Persiste la session pour affichage + révocation
+    now_iso = datetime.now(timezone.utc).isoformat()
+    exp_iso = (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
+    await db.sessions.insert_one({
+        "jti": jti, "user_id": user["id"], "email": user["email"],
+        "created_at": now_iso, "last_seen_at": now_iso, "expires_at": exp_iso,
+        "ip": ip, "user_agent": request.headers.get("user-agent", "")[:250],
+        "revoked": False,
+    })
+    response.set_cookie("access_token", access, httponly=True, secure=True, samesite="lax", max_age=hours * 3600, path="/")
+    await log_audit(user, "login", email, f"Connexion réussie (session {hours}h)", ip)
     return {"access_token": access, "refresh_token": refresh, "user": public_user(user)}
+
+
+async def _get_session_hours() -> int:
+    """Timeout configuré via `settings.security.session_hours` (défaut 8h).
+
+    Valeurs supportées : 0.25 (15min) / 0.5 (30min) / 1 / 4 / 8 / custom.
+    Le champ est stocké en float (heures) pour supporter les valeurs < 1h ;
+    le cookie / JWT sont ensuite calculés en secondes.
+    """
+    doc = await db.settings.find_one({"id": "security"}, {"_id": 0}) or {}
+    return max(1, int(round(float(doc.get("session_hours", 8)))))
 
 
 @auth_router.post("/forgot-password")

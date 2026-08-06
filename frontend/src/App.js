@@ -17,6 +17,7 @@ import Cameras from "@/pages/Cameras";
 import Sites from "@/pages/Sites";
 import MapView from "@/pages/MapView";
 import MapCenter from "@/pages/MapCenter";
+import SessionExpiryWatcher from "@/components/SessionExpiryWatcher";
 import Anpr from "@/pages/Anpr";
 import Events from "@/pages/Events";
 import VehicleSearch from "@/pages/VehicleSearch";
@@ -101,6 +102,7 @@ function App() {
     <AppProvider>
       <BrowserRouter>
         <AppRoutes />
+        <SessionExpiryWatcher />
         <Toaster position="top-right" />
       </BrowserRouter>
     </AppProvider>

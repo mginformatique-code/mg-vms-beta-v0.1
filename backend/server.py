@@ -40,6 +40,7 @@ from routes.workflows import workflows_router
 from routes.timeline import timeline_router
 from routes.welcome import welcome_router
 from routes.site_manager import site_manager_router
+from routes.security import security_router
 from routes.camera_control import camera_control_router
 from routes.devices import devices_router
 from wsdl_path import validate_wsdl_dir
@@ -103,6 +104,7 @@ app.include_router(reports_router)
 app.include_router(hardware_router)
 app.include_router(welcome_router)
 app.include_router(site_manager_router)
+app.include_router(security_router)
 
 app.add_middleware(SecurityMiddleware)
 
