@@ -18,7 +18,7 @@ import api, { formatApiErrorDetail } from "@/lib/api";
 import { toast } from "sonner";
 import {
   ShieldCheck, ShieldOff, Smartphone, Copy, CheckCircle2, AlertTriangle,
-  QrCode, Info, Lock, RefreshCw, Loader2,
+  QrCode, Info, Lock, RefreshCw, Loader2, KeyRound, Download,
 } from "lucide-react";
 
 export default function MfaCenter() {
@@ -27,6 +27,8 @@ export default function MfaCenter() {
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [recoveryCodes, setRecoveryCodes] = useState(null); // list[str] après verify
+  const [confirmedSaved, setConfirmedSaved] = useState(false);
 
   const start = async () => {
     setLoading(true);
@@ -41,10 +43,29 @@ export default function MfaCenter() {
     if (!code || code.length < 6) { toast.error("Entrez un code à 6 chiffres"); return; }
     setBusy(true);
     try {
-      await api.post("/auth/2fa/verify", { code });
+      const { data } = await api.post("/auth/2fa/verify", { code });
       toast.success("MFA activée avec succès");
       setUser({ ...user, twofa_enabled: true });
       setSetup(null); setCode("");
+      // Affiche l'écran « codes de récupération » (usage unique, à sauvegarder).
+      if (Array.isArray(data?.recovery_codes) && data.recovery_codes.length > 0) {
+        setRecoveryCodes(data.recovery_codes);
+        setConfirmedSaved(false);
+      }
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e.response?.data?.detail));
+    } finally { setBusy(false); }
+  };
+  const regenerateRecovery = async () => {
+    if (!window.confirm("Régénérer 10 nouveaux codes de récupération ? Les anciens seront invalidés immédiatement.")) return;
+    setBusy(true);
+    try {
+      const { data } = await api.post("/auth/2fa/recovery-regenerate");
+      if (Array.isArray(data?.recovery_codes)) {
+        setRecoveryCodes(data.recovery_codes);
+        setConfirmedSaved(false);
+        toast.success("10 nouveaux codes générés");
+      }
     } catch (e) {
       toast.error(formatApiErrorDetail(e.response?.data?.detail));
     } finally { setBusy(false); }
@@ -56,9 +77,27 @@ export default function MfaCenter() {
       await api.post("/auth/2fa/disable");
       toast.success("MFA désactivée");
       setUser({ ...user, twofa_enabled: false });
+      setRecoveryCodes(null);
     } catch (e) {
       toast.error(formatApiErrorDetail(e.response?.data?.detail));
     } finally { setBusy(false); }
+  };
+  const copyRecovery = async () => {
+    if (!recoveryCodes) return;
+    try {
+      await navigator.clipboard.writeText(recoveryCodes.join("\n"));
+      toast.success("10 codes copiés dans le presse-papier");
+    } catch (_) { toast.error("Copie impossible"); }
+  };
+  const downloadRecovery = () => {
+    if (!recoveryCodes) return;
+    const header = `MG-VMS — Codes de récupération MFA\nCompte : ${user?.email}\nGénérés le : ${new Date().toLocaleString()}\n\nChaque code est à usage unique. Conservez-les précieusement.\n\n`;
+    const body = recoveryCodes.map((c, i) => `${String(i + 1).padStart(2, "0")}. ${c}`).join("\n");
+    const blob = new Blob([header + body], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url;
+    a.download = `mgvms-recovery-codes-${(user?.email || "user").replace(/[^a-z0-9]/gi, "_")}.txt`;
+    a.click(); URL.revokeObjectURL(url);
   };
   const copySecret = async () => {
     if (!setup?.secret) return;
@@ -95,7 +134,15 @@ export default function MfaCenter() {
               : "Votre compte n'est protégé que par un mot de passe. L'activation de la MFA est fortement recommandée."}
           </div>
         </div>
-        {enabled && (
+        {enabled && !recoveryCodes && (
+          <button onClick={regenerateRecovery} disabled={busy}
+            className="px-3 py-2 border border-border text-xs hover:bg-secondary flex items-center gap-2"
+            data-testid="mfa-regen-recovery-btn"
+            title="Générer 10 nouveaux codes de récupération">
+            <KeyRound size={13} /> Régénérer les codes
+          </button>
+        )}
+        {enabled && !recoveryCodes && (
           <button onClick={disable} disabled={busy}
             className="px-4 py-2 border border-[#FF3333] text-[#FF3333] text-sm hover:bg-[#FF3333]/10 flex items-center gap-2"
             data-testid="mfa-disable-btn">
@@ -104,6 +151,52 @@ export default function MfaCenter() {
           </button>
         )}
       </div>
+
+      {/* ─── Recovery Codes Display ─── */}
+      {recoveryCodes && (
+        <div className="border border-[#FFB800]/40 bg-[#FFB800]/5 p-5 mb-4" data-testid="mfa-recovery-panel">
+          <div className="flex items-start gap-3 mb-4">
+            <AlertTriangle size={22} className="text-[#FFB800] shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <div className="text-base font-semibold flex items-center gap-2">
+                <KeyRound size={16} /> Codes de récupération
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                <b>Notez ces 10 codes maintenant.</b> Chacun est à usage unique et
+                vous permet de vous reconnecter en cas de perte du téléphone.
+                Ils <b>ne seront plus jamais réaffichés</b>.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
+            {recoveryCodes.map((c, i) => (
+              <div key={i} className="border border-border bg-card px-3 py-2 mono text-sm text-center tracking-widest" data-testid={`recovery-code-${i}`}>
+                {c}
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap mb-4">
+            <button onClick={copyRecovery} className="px-3 py-2 border border-border text-xs hover:bg-secondary flex items-center gap-2" data-testid="recovery-copy-btn">
+              <Copy size={13} /> Copier
+            </button>
+            <button onClick={downloadRecovery} className="px-3 py-2 border border-border text-xs hover:bg-secondary flex items-center gap-2" data-testid="recovery-download-btn">
+              <Download size={13} /> Télécharger .txt
+            </button>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm cursor-pointer p-2 border border-border">
+            <input type="checkbox" checked={confirmedSaved} onChange={(e) => setConfirmedSaved(e.target.checked)} data-testid="recovery-confirm-checkbox" />
+            <span>Je confirme avoir sauvegardé les 10 codes dans un endroit sûr.</span>
+          </label>
+          <button onClick={() => setRecoveryCodes(null)} disabled={!confirmedSaved}
+            className="mt-3 px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40 flex items-center gap-2"
+            data-testid="recovery-dismiss-btn">
+            <CheckCircle2 size={14} /> J&apos;ai bien conservé mes codes
+          </button>
+        </div>
+      )}
 
       {/* ─── Setup Flow ─── */}
       {!enabled && (

@@ -23,6 +23,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from auth import get_current_user, get_jwt_secret, JWT_ALGORITHM, require_role, log_audit
+from auth import (
+    PERMISSIONS, PERMISSION_META, PERMISSION_GROUPS, DEFAULT_PERMISSIONS,
+    ROLES, ROLE_LEVEL, _role_permissions_from_db, _invalidate_role_perm_cache,
+)
 from database import db
 
 security_router = APIRouter(prefix="/api/security", tags=["security"])
@@ -345,3 +349,104 @@ async def security_score(user: dict = Depends(get_current_user)):
         "checks": {k: {**v, "label": CRITERION_LABEL[k], "weight": _SEC_WEIGHTS[k]}
                     for k, v in checks.items()},
     }
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# v0.5.5.d · Phase D — RBAC (Role-Based Access Control)
+# ═════════════════════════════════════════════════════════════════════════
+# Les permissions par défaut de chaque rôle sont codées dans `auth.py`
+# (DEFAULT_PERMISSIONS). Un admin peut les surcharger via l'UI Centre de
+# sécurité → Rôles & Permissions ; les overrides sont stockés dans la
+# collection Mongo `role_permissions` (document `_id="default"`).
+#
+# Prise en compte : `effective_permissions()` merge dans l'ordre :
+#     DEFAULT_PERMISSIONS[role] < overrides DB[role] < user.permissions
+# Le rôle "admin" garde toujours toutes les permissions (bypass strict).
+
+
+class RbacInput(BaseModel):
+    """Payload PUT /api/security/rbac : {role_name: {perm: bool}}."""
+    role: str = Field(..., description="Nom du rôle (client, readonly, guest, technician)")
+    permissions: dict[str, bool]
+
+
+@security_router.get("/rbac")
+async def get_rbac(user: dict = Depends(require_role("admin"))):
+    """Retourne la matrice complète RBAC.
+
+    Réponse : {
+        permissions: [...],       # liste ordonnée des perms
+        permission_meta: {...},   # {perm: {group, label}}
+        permission_groups: [...], # groupes ordonnés [(id, label), ...]
+        roles: [...],             # liste ordonnée des rôles
+        defaults: {role: {perm: bool}, ...},  # DEFAULT_PERMISSIONS (code)
+        overrides: {role: {perm: bool}, ...}, # depuis DB (peut être vide)
+        effective: {role: {perm: bool}, ...}, # ce qui s'applique vraiment
+    }
+    """
+    overrides = await _role_permissions_from_db()
+    # `overrides` contient toutes les entrées du document, sauf `_id`.
+    # On ne garde que les rôles valides.
+    clean_overrides = {r: {k: bool(v) for k, v in (overrides.get(r) or {}).items()
+                            if k in PERMISSIONS}
+                        for r in ROLES if r in overrides}
+    effective = {}
+    for r in ROLES:
+        base = dict(DEFAULT_PERMISSIONS.get(r, DEFAULT_PERMISSIONS["guest"]))
+        for k, v in (clean_overrides.get(r) or {}).items():
+            base[k] = v
+        effective[r] = base
+    return {
+        "permissions": PERMISSIONS,
+        "permission_meta": PERMISSION_META,
+        "permission_groups": [{"id": g, "label": l} for g, l in PERMISSION_GROUPS],
+        "roles": ROLES,
+        "defaults": DEFAULT_PERMISSIONS,
+        "overrides": clean_overrides,
+        "effective": effective,
+    }
+
+
+@security_router.put("/rbac")
+async def put_rbac(body: RbacInput,
+                    user: dict = Depends(require_role("admin"))):
+    """Met à jour les permissions par défaut d'un rôle.
+
+    Le rôle ``admin`` ne peut pas être modifié (bypass strict).
+    Les permissions inconnues sont ignorées silencieusement.
+    """
+    if body.role == "admin":
+        raise HTTPException(400, "Impossible de modifier les permissions du rôle admin")
+    if body.role not in ROLES:
+        raise HTTPException(400, f"Rôle inconnu : {body.role}")
+    clean = {k: bool(v) for k, v in (body.permissions or {}).items()
+             if k in PERMISSIONS}
+    # Upsert : on met à jour uniquement la clé du rôle demandé, en
+    # préservant les autres rôles.
+    await db.role_permissions.update_one(
+        {"_id": "default"},
+        {"$set": {body.role: clean}},
+        upsert=True,
+    )
+    _invalidate_role_perm_cache()
+    await log_audit(user, "rbac_role_updated", body.role,
+                     f"{sum(1 for v in clean.values() if v)}/{len(PERMISSIONS)} on")
+    # Réponse : renvoie la nouvelle matrice complète.
+    return await get_rbac(user)
+
+
+@security_router.delete("/rbac/{role}")
+async def reset_rbac(role: str,
+                      user: dict = Depends(require_role("admin"))):
+    """Remet un rôle à ses permissions par défaut (efface les overrides DB)."""
+    if role == "admin":
+        raise HTTPException(400, "Impossible de reset le rôle admin")
+    if role not in ROLES:
+        raise HTTPException(400, f"Rôle inconnu : {role}")
+    await db.role_permissions.update_one(
+        {"_id": "default"},
+        {"$unset": {role: ""}},
+    )
+    _invalidate_role_perm_cache()
+    await log_audit(user, "rbac_role_reset", role)
+    return await get_rbac(user)

@@ -168,6 +168,29 @@ async def send_notification(subject: str, body: str, image_url: Optional[str] = 
     return results
 
 
+async def send_email_to(recipient: str, subject: str, body: str) -> str:
+    """Envoie un email SMTP vers ``recipient`` en utilisant la config SMTP
+    globale (host/port/username/password/from_email). ``to_email`` est
+    remplacé par le destinataire spécifique.
+
+    Retourne 'sent' ou 'error: <detail>' — jamais d'exception (best-effort).
+    """
+    doc = await _load_raw()
+    if not doc.get("smtp", {}).get("enabled"):
+        return "smtp_disabled"
+    cfg = await _channel_cfg(doc, "smtp")
+    if not cfg or not cfg.get("host") or not cfg.get("from_email"):
+        return "smtp_misconfigured"
+    if not recipient or "@" not in recipient:
+        return "invalid_recipient"
+    override_cfg = {**cfg, "to_email": recipient}
+    try:
+        await send_smtp(override_cfg, f"[MG-VMS] {subject}", body)
+        return "sent"
+    except Exception as e:
+        return f"error: {type(e).__name__}: {e}"
+
+
 def _mask(doc: dict) -> dict:
     """Return config without secret values; expose has_<secret> booleans."""
     smtp = doc.get("smtp", {}) or {}

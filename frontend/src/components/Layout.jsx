@@ -40,12 +40,13 @@ const NAV = [
   ]},
   { group: "nav.admin", items: [
     { to: "/pipeline-center", icon: LineChart, key: "nav.pipeline_center", role: "technician" },
-    // Centre de sécurité — sous-menu complet (Vue d'ensemble + Utilisateurs + MFA + Sessions)
+    // Centre de sécurité — sous-menu complet (Vue d'ensemble + Utilisateurs + MFA + Sessions + RBAC)
     { key: "nav.security_center", icon: ShieldCheck, role: "admin", children: [
       { to: "/security-center", key: "nav.security_score", icon: ShieldCheck, end: true },
       { to: "/users", key: "nav.users", icon: Users, role: "admin" },
       { to: "/security-center/mfa", key: "nav.mfa", icon: Lock },
       { to: "/security-center/sessions", key: "nav.sessions_active", icon: Clock },
+      { to: "/security-center/rbac", key: "nav.rbac", icon: Layers, role: "admin" },
     ]},
     { to: "/network", icon: Network, key: "nav.network", role: "client" },
     { to: "/plugins", icon: Puzzle, key: "nav.plugins", role: "admin" },

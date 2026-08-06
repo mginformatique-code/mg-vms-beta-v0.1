@@ -7,6 +7,83 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
 
+## [v0.5.5.d] — 2026-02 — Phase D RBAC + Codes de récupération + Email notif
+
+### Added (backend) — RBAC Phase D
+- **Extension de `PERMISSIONS`** de 6 → **14 permissions** couvrant tous
+  les modules produit : `view_live`, `view_recordings`, `read_plates`,
+  `stream_hd`, `ptz_control`, `export_files`, **`manage_cameras`**,
+  **`manage_sites`**, **`manage_users`**, **`manage_plugins`**,
+  **`manage_workflows`**, **`manage_settings`**, **`view_audit_log`**,
+  **`access_security_center`**.
+- Ajout de `PERMISSION_META` (group + label FR) et `PERMISSION_GROUPS`
+  (vidéo, gestion, sécurité).
+- Nouvelle collection Mongo **`role_permissions`** pour overrides
+  admin, avec cache in-memory + invalidation à chaque PUT/DELETE.
+- Nouveaux endpoints (admin) :
+  * `GET  /api/security/rbac` — matrice complète (defaults + overrides
+    + effective) avec métadonnées pour l'UI.
+  * `PUT  /api/security/rbac` — enregistre les permissions d'un rôle.
+    Rôle admin refusé (400). Rôle inconnu refusé (400).
+  * `DELETE /api/security/rbac/{role}` — reset aux valeurs par défaut.
+- `effective_permissions()` refactoré en 3 variantes (sync/async/legacy)
+  pour merger dans l'ordre :
+  `DEFAULT_PERMISSIONS[role] < DB overrides < user.permissions`.
+
+### Added (frontend) — RBAC
+- Nouvelle page **`/security-center/rbac`** (`RbacCenter.jsx`) :
+  * Matrice interactive avec groupes (Vidéo, Gestion, Sécurité).
+  * 5 colonnes de rôles avec couleurs distinctes.
+  * Colonne admin grisée (immuable).
+  * Cases modifiées mises en évidence avec ring jaune.
+  * Bouton `Enregistrer` par colonne (visible si dirty).
+  * Bouton `Reset` par rôle (uniquement s'il a des overrides DB).
+  * Bannière d'info expliquant le merge order.
+- Sous-menu Centre de sécurité étendu à 5 items (ajout **Rôles & Permissions**).
+- i18n FR/EN : `nav.rbac`.
+
+### Added (backend) — Codes de récupération
+- `/api/auth/2fa/verify` déjà retournait `recovery_codes` (10 codes
+  hex 8 caractères, hash bcrypt en DB). Le frontend les affiche
+  maintenant.
+
+### Added (frontend) — Codes de récupération
+- Après activation MFA, panneau jaune de sécurité s'affiche dans
+  `MfaCenter.jsx` :
+  * 10 codes affichés en grille 2×5 / 5×2 responsive.
+  * Boutons **Copier** (presse-papier) et **Télécharger .txt**
+    (fichier nommé avec l'email de l'utilisateur).
+  * Case à cocher « Je confirme avoir sauvegardé les codes ».
+  * Bouton confirmant la sauvegarde (dismiss le panneau).
+- Bouton **Régénérer les codes** (`KeyRound`) visible quand MFA activée
+  et pas de panneau ouvert. Invalide les anciens et affiche les 10
+  nouveaux.
+
+### Added (backend) — Notification email
+- Nouveau helper `send_email_to(recipient, subject, body)` dans
+  `notifications.py` : utilise la config SMTP globale mais override
+  `to_email` par le destinataire spécifique.
+- Endpoint `DELETE /api/users/{user_id}/mfa` envoie désormais un
+  **email de notification** au user concerné en `BackgroundTasks`
+  (best-effort, ne bloque pas la réponse). Le mail détaille :
+  * Qui a désactivé (email admin)
+  * Instructions de réenrollement
+  * Horodatage UTC
+  * Contact admin en cas d'action non autorisée
+
+### Tests
+- `test_v055d_rbac.py` — 6/6 verts :
+  * Auth requise (401)
+  * Structure GET complète
+  * PUT override + effective correct
+  * DELETE reset
+  * Admin immuable (400)
+  * Rôle inconnu rejeté (400)
+- Total tests v0.5.5.* : **27/27 verts** (Discovery + Sessions + Disable
+  MFA + RBAC).
+
+---
+
 ## [v0.5.5.c] — 2026-02 — Désactivation MFA à distance par un admin
 
 ### Added (backend)

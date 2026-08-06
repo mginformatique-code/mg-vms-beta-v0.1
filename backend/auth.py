@@ -18,29 +18,135 @@ ROLES = ["admin", "technician", "client", "readonly", "guest"]
 ROLE_LEVEL = {"guest": 0, "readonly": 1, "client": 2, "technician": 3, "admin": 4}
 
 # Granular per-user permissions (gérées uniquement par l'admin)
-PERMISSIONS = ["view_live", "view_recordings", "read_plates", "stream_hd", "ptz_control", "export_files"]
+# v0.5.5.d · Élargi pour couvrir tous les modules produit (RBAC Phase D).
+PERMISSIONS = [
+    # Vidéo & lecture
+    "view_live", "view_recordings", "read_plates", "stream_hd", "ptz_control",
+    "export_files",
+    # Gestion (admin / technicien)
+    "manage_cameras", "manage_sites", "manage_users", "manage_plugins",
+    "manage_workflows", "manage_settings",
+    # Audit & sécurité
+    "view_audit_log", "access_security_center",
+]
+
+# Métadonnées d'affichage pour l'UI RBAC (groupes + labels FR).
+PERMISSION_META = {
+    "view_live":              {"group": "video",    "label": "Visionnage temps réel"},
+    "view_recordings":        {"group": "video",    "label": "Lecture des enregistrements"},
+    "read_plates":            {"group": "video",    "label": "Lecture des plaques (ANPR)"},
+    "stream_hd":              {"group": "video",    "label": "Affichage HD (sinon SD)"},
+    "ptz_control":            {"group": "video",    "label": "Contrôle PTZ"},
+    "export_files":           {"group": "video",    "label": "Export de fichiers"},
+    "manage_cameras":         {"group": "manage",   "label": "Gérer les caméras"},
+    "manage_sites":           {"group": "manage",   "label": "Gérer les sites/bâtiments"},
+    "manage_users":           {"group": "manage",   "label": "Gérer les utilisateurs"},
+    "manage_plugins":         {"group": "manage",   "label": "Gérer les plugins"},
+    "manage_workflows":       {"group": "manage",   "label": "Gérer les workflows"},
+    "manage_settings":        {"group": "manage",   "label": "Modifier les paramètres système"},
+    "view_audit_log":         {"group": "security", "label": "Consulter le journal d'audit"},
+    "access_security_center": {"group": "security", "label": "Accéder au Centre de sécurité"},
+}
+
+PERMISSION_GROUPS = [
+    ("video",    "Vidéo & lecture"),
+    ("manage",   "Gestion"),
+    ("security", "Audit & sécurité"),
+]
+
 DEFAULT_PERMISSIONS = {
     "admin":      {p: True for p in PERMISSIONS},
     "technician": {p: True for p in PERMISSIONS},
-    "client":     {"view_live": True, "view_recordings": True, "read_plates": True,
-                   "stream_hd": True, "ptz_control": True, "export_files": False},
-    "readonly":   {"view_live": True, "view_recordings": True, "read_plates": False,
-                   "stream_hd": False, "ptz_control": False, "export_files": False},
+    "client":     {
+        "view_live": True, "view_recordings": True, "read_plates": True,
+        "stream_hd": True, "ptz_control": True, "export_files": False,
+        "manage_cameras": False, "manage_sites": False, "manage_users": False,
+        "manage_plugins": False, "manage_workflows": False, "manage_settings": False,
+        "view_audit_log": False, "access_security_center": False,
+    },
+    "readonly":   {
+        "view_live": True, "view_recordings": True, "read_plates": False,
+        "stream_hd": False, "ptz_control": False, "export_files": False,
+        "manage_cameras": False, "manage_sites": False, "manage_users": False,
+        "manage_plugins": False, "manage_workflows": False, "manage_settings": False,
+        "view_audit_log": False, "access_security_center": False,
+    },
     "guest":      {p: False for p in PERMISSIONS},
 }
 
 
-def effective_permissions(user: dict) -> dict:
-    """Permissions par défaut du rôle + overrides par utilisateur (admin = tout)."""
+# v0.5.5.d · Cache in-memory des overrides RBAC (collection `role_permissions`).
+# Invalidé lors des PUT /api/security/rbac. Lecture lazy à la première requête.
+_ROLE_PERM_CACHE: dict = {}
+_ROLE_PERM_CACHE_LOADED = False
+
+
+async def _role_permissions_from_db() -> dict:
+    """Retourne les overrides de rôles stockés en DB (peut être vide).
+
+    Format : {role_name: {permission: bool, ...}, ...}
+    """
+    global _ROLE_PERM_CACHE, _ROLE_PERM_CACHE_LOADED
+    if _ROLE_PERM_CACHE_LOADED:
+        return _ROLE_PERM_CACHE
+    try:
+        doc = await db.role_permissions.find_one({"_id": "default"}, {"_id": 0})
+    except Exception:
+        doc = None
+    _ROLE_PERM_CACHE = doc or {}
+    _ROLE_PERM_CACHE_LOADED = True
+    return _ROLE_PERM_CACHE
+
+
+def _invalidate_role_perm_cache() -> None:
+    """Force le rechargement de `_role_permissions_from_db` au prochain accès."""
+    global _ROLE_PERM_CACHE_LOADED
+    _ROLE_PERM_CACHE_LOADED = False
+
+
+def effective_permissions_sync(user: dict, role_overrides: dict | None = None) -> dict:
+    """Version synchrone — utilisée par les vues qui ont déjà chargé les overrides.
+
+    Pattern pour éviter le coût d'un await à chaque `get_current_user` :
+    - `effective_permissions()` (async) fait le lookup DB si nécessaire.
+    - `effective_permissions_sync()` accepte les overrides pré-chargés.
+    """
     role = user.get("role", "guest")
     if role == "admin":
         return {p: True for p in PERMISSIONS}
-    perms = dict(DEFAULT_PERMISSIONS.get(role, DEFAULT_PERMISSIONS["guest"]))
+    base = dict(DEFAULT_PERMISSIONS.get(role, DEFAULT_PERMISSIONS["guest"]))
+    # Applique les overrides de rôle (DB) par-dessus les valeurs par défaut.
+    if role_overrides and role in role_overrides:
+        for k, v in role_overrides[role].items():
+            if k in PERMISSIONS and isinstance(v, bool):
+                base[k] = v
+    # Applique les overrides par utilisateur (le plus prioritaire).
     overrides = user.get("permissions") or {}
     for k, v in overrides.items():
         if k in PERMISSIONS and isinstance(v, bool):
-            perms[k] = v
-    return perms
+            base[k] = v
+    return base
+
+
+async def effective_permissions_async(user: dict) -> dict:
+    """Async version — charge les overrides de rôle depuis Mongo."""
+    role_overrides = await _role_permissions_from_db()
+    return effective_permissions_sync(user, role_overrides)
+
+
+def effective_permissions(user: dict) -> dict:
+    """Rétro-compatible : lookup DB si event-loop, sinon synchrone.
+
+    - Ce chemin est utilisé pour construire ``public_user()`` renvoyé à la
+      connexion. On tolère un léger lag après un `PUT /api/security/rbac` :
+      la config effective se rafraîchit à la prochaine connexion (cache
+      invalidé côté serveur, mais public_user est appelé une seule fois).
+    """
+    # Lecture non-bloquante depuis le cache. Si pas encore chargé, on
+    # renvoie les DEFAULT_PERMISSIONS sans overrides — sera rechargé
+    # lors du prochain lookup async naturellement.
+    role_overrides = _ROLE_PERM_CACHE if _ROLE_PERM_CACHE_LOADED else None
+    return effective_permissions_sync(user, role_overrides)
 
 
 def has_permission(user: dict, perm: str) -> bool:

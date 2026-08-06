@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
 from auth import (
@@ -13,6 +13,7 @@ from auth import (
     PERMISSIONS, ROLES, require_role,
 )
 from database import db
+from notifications import send_email_to
 
 users_router = APIRouter(prefix="/api", tags=["users"])
 
@@ -106,12 +107,16 @@ async def delete_user(user_id: str, user: dict = Depends(require_role("admin")))
 
 @users_router.delete("/users/{user_id}/mfa")
 async def admin_disable_mfa(user_id: str,
+                             background: BackgroundTasks,
                              user: dict = Depends(require_role("admin"))):
     """Désactive la MFA d'un utilisateur (usage : perte du téléphone).
 
     Efface ``twofa_enabled``, ``twofa_secret`` et les hashes des codes de
     récupération, permettant à l'utilisateur de se reconnecter avec son
     seul mot de passe et de refaire un enrollment complet.
+
+    Envoie également un email de notification au user concerné pour
+    tracer et détecter les abus.
 
     Réservé aux admins. Ne peut pas s'appliquer sur son propre compte
     depuis cet endpoint (on utilise `/auth/2fa/disable` pour se
@@ -140,4 +145,20 @@ async def admin_disable_mfa(user_id: str,
         user, "user_mfa_disabled_by_admin", target.get("email", user_id),
         f"admin={user.get('email')}"
     )
+    # v0.5.5.d · Notifie le user concerné par email (best-effort, background).
+    subject = "Votre MFA a été désactivée par un administrateur"
+    body = (
+        f"Bonjour {target.get('name') or target.get('email')},\n\n"
+        f"L'administrateur {user.get('email')} vient de désactiver la MFA\n"
+        f"de votre compte MG-VMS ({target.get('email')}).\n\n"
+        "Vous pouvez désormais vous reconnecter avec votre seul mot de\n"
+        "passe. Il est fortement recommandé de :\n"
+        "  1. Vous reconnecter immédiatement,\n"
+        "  2. Refaire un enrollement MFA depuis Centre de sécurité → MFA,\n"
+        "  3. Signaler à l'administrateur toute action que vous n'auriez pas\n"
+        "     autorisée.\n\n"
+        f"Horodatage : {datetime.now(timezone.utc).isoformat()}\n"
+        "-- MG-VMS Security"
+    )
+    background.add_task(send_email_to, target.get("email"), subject, body)
     return {"ok": True, "user_id": user_id, "email": target.get("email")}
