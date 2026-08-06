@@ -1,74 +1,86 @@
-# MG-VMS — Déploiement Docker production (FastAPI + React + MongoDB + go2rtc)
+# MG-VMS — Déploiement Docker production (v0.4.4)
 # ================================================================================
-# Démarrage : cp .env.example .env  &&  docker compose up -d --build
-# Frontend  : http://192.168.1.21:3000
-# API       : http://192.168.1.21:8001/api/
-# go2rtc UI : http://192.168.1.21:1984
+# Cette configuration N'UTILISE PLUS de volume Docker nommé. Toutes les
+# données persistantes vivent sur des chemins host explicites (bind mounts).
 #
-# Pré-requis serveur :
-#   - Ubuntu 22.04+ / Debian 12+
-#   - NVIDIA driver >= 550 (pour CUDA 12.4)
-#   - nvidia-container-toolkit installé (`docker run --rm --gpus all nvidia/cuda:12.4-runtime nvidia-smi` doit répondre)
-#   - Ports LAN ouverts : 3000 (UI), 8001 (API), 1984 (go2rtc UI), 8554 (RTSP), 8555 TCP+UDP (WebRTC)
+#   MONGO_DATA_PATH   → base MongoDB   (SSD dédié recommandé)
+#   RECORDINGS_PATH   → enregistrements vidéo (HDD dédié recommandé)
+#
+# Défauts en développement (Linux dev laptop) :
+#     MONGO_DATA_PATH=./data/mongo
+#     RECORDINGS_PATH=./data/recordings
+#
+# Défauts en production (host cible) :
+#     MONGO_DATA_PATH=/mnt/mongodb
+#     RECORDINGS_PATH=/mnt/video-datastore/recordings
+#
+# Ces valeurs sont surchargées via un fichier ``.env`` à côté de ce fichier :
+#     cp .env.example .env
+#     # éditer .env pour production
+#     docker compose up -d --build
+#
+# Pré-requis serveur (production) :
+#   - Ubuntu 24.04 LTS
+#   - NVIDIA Driver >= 550 (support CUDA 12.4)
+#   - nvidia-container-toolkit installé
+#   - `docker run --rm --gpus all nvidia/cuda:12.4.1-runtime-ubuntu22.04 nvidia-smi` OK
+#   - Ports LAN ouverts : 3000 (UI), 8001 (API), 1984 (go2rtc UI), 8554 (RTSP),
+#                          8555 TCP+UDP (WebRTC)
+#   - Point de montage `/mnt/mongodb` (SSD ext4 dédié)
+#   - Point de montage `/mnt/video-datastore/recordings` (HDD ext4 dédié)
 
 services:
   mongo:
     image: mongo:7
     restart: unless-stopped
     volumes:
-      - mongo_data:/data/db
+      # Bind mount host → conteneur : MongoDB écrit directement sur le SSD dédié.
+      # v0.4.4 · suppression définitive du volume Docker nommé `mongo_data`.
+      - ${MONGO_DATA_PATH:-./data/mongo}:/data/db
     networks: [mgvms]
 
   # ─── go2rtc : moteur central de flux vidéo ──────────────────────────────
-  # Ports exposés sur le host pour :
-  #   - WebRTC (candidate ICE = 192.168.1.21:8555 côté LAN → doit être atteignable)
-  #   - Debugging via UI go2rtc:1984
-  #   - RTSP éventuel côté client (VLC / autres)
   go2rtc:
-    image: alexxit/go2rtc:1.9.9   # ← Upgrade 1.9.8 → 1.9.9 : fix crash H.265 pkg/h265/rtp.go
+    image: alexxit/go2rtc:1.9.9
     restart: unless-stopped
     volumes:
       - ./go2rtc.yaml:/config/go2rtc.yaml
-      - ../media:/app/media:ro    # médias de démo (mp4 boucle)
+      # v0.4.4 · unification : le dossier ``recordings`` du HDD est exposé aux
+      # deux services en lecture (go2rtc pour streaming des replays,
+      # backend pour l'écriture des enregistrements et vignettes).
+      - ${RECORDINGS_PATH:-./data/recordings}:/app/media:ro
     ports:
-      - "1984:1984"       # HTTP API + WebSocket (frontend WebRTC signaling proxy)
-      - "8554:8554"       # RTSP (client direct type VLC)
+      - "1984:1984"       # HTTP API + WebSocket
+      - "8554:8554"       # RTSP (VLC / clients directs)
       - "8555:8555"       # WebRTC ICE TCP
-      - "8555:8555/udp"   # WebRTC ICE UDP (essentiel pour perf)
-    # NOTE : pour découverte ONVIF multicast LAN, utiliser plutôt "network_mode: host"
-    # (dans ce cas les ports ci-dessus deviennent inutiles, les services écoutent
-    # directement sur l'IP host 192.168.1.21).
+      - "8555:8555/udp"   # WebRTC ICE UDP
     networks: [mgvms]
 
-  # ─── Backend FastAPI (Python 3.11 + torch cu124 + FFmpeg CUDA) ─────────
-  # GPU NVIDIA passthrough : nécessite nvidia-container-toolkit sur le host.
-  # Le container voit le RTX A2000 12GB → PyTorch YOLO tourne en CUDA + ffmpeg NVDEC.
+  # ─── Backend FastAPI (Python 3.11 · torch cu124 · FFmpeg CUDA) ─────────
   backend:
     build:
-      context: ..                     # ← racine du repo (contient backend/, data/, media/, ...)
-      dockerfile: backend/Dockerfile   # ← Dockerfile dans le sous-dossier backend/
+      context: ..                     # racine du repo
+      dockerfile: backend/Dockerfile
     restart: unless-stopped
-    runtime: nvidia   # ← passthrough GPU host → container (nvidia-container-toolkit)
+    runtime: nvidia
     environment:
-      # ── Base MG-VMS ────────────────────────────────────────────
+      # ── Base MG-VMS ─────────────────────────────────────────
       MONGO_URL: mongodb://mongo:27017
       DB_NAME: ${DB_NAME:-mgvms}
-      # CORS : frontend sert depuis 192.168.1.21:3000 (LAN interne)
       CORS_ORIGINS: ${CORS_ORIGINS:-http://192.168.1.21:3000,http://localhost:3000}
       JWT_SECRET: ${JWT_SECRET:-please_change_this_secret_in_production}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@mg-vms.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@2026}
       GO2RTC_URL: ${GO2RTC_URL:-http://go2rtc:1984}
       GO2RTC_RTSP: ${GO2RTC_RTSP:-rtsp://go2rtc:8554}
-      # ── GPU / CUDA / FFmpeg NVDEC ───────────────────────────────
+      # ── GPU / CUDA / FFmpeg NVDEC ───────────────────────────
       NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility,video  # video → NVDEC/NVENC ffmpeg
-      # Auto-fallback si NVDEC indisponible (cam H.264 SW ou GPU saturé)
-      MGVMS_AI_HW_ACCEL: ${MGVMS_AI_HW_ACCEL:-auto}   # auto | cuda | none
-      # ⚠ Les variantes MJPEG (_hd/_sd) sont transcodées par le ffmpeg DU CONTENEUR
-      # GO2RTC qui n'a PAS de GPU. Laisser à 0 (CPU) sauf si vous donnez un runtime
-      # nvidia + ffmpeg CUDA au conteneur go2rtc.
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,video
+      MGVMS_AI_HW_ACCEL: ${MGVMS_AI_HW_ACCEL:-auto}
       GO2RTC_FFMPEG_CUDA: ${GO2RTC_FFMPEG_CUDA:-0}
+    volumes:
+      # v0.4.4 · Enregistrements sur HDD dédié (jamais dans un volume nommé).
+      - ${RECORDINGS_PATH:-./data/recordings}:/app/recordings
     depends_on:
       - mongo
       - go2rtc
@@ -80,7 +92,7 @@ services:
           devices:
             - driver: nvidia
               count: all
-              capabilities: [gpu, video]   # 'video' nécessaire pour cuvid/nvenc
+              capabilities: [gpu, video]
     networks: [mgvms]
 
   frontend:
@@ -95,8 +107,8 @@ services:
       - "3000:80"
     networks: [mgvms]
 
-volumes:
-  mongo_data:   # ← préservé, ne pas supprimer (données caméras/users/ANPR)
+# v0.4.4 · Bloc `volumes:` supprimé — plus AUCUN volume Docker nommé.
+# MongoDB et enregistrements utilisent exclusivement des bind mounts host.
 
 networks:
   mgvms:
