@@ -7,6 +7,65 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
 
+## [v0.5.1.a] — 2026-02 — Welcome Center + TESTING=1 bypass (Session 40)
+
+### Contexte
+Après la Sécurité/Prod (v0.5.1.b) et l'alignement produit sur les 8 Centers,
+cette tranche livre l'écran d'accueil officiel de MG-VMS et purge la dette
+technique du rate-limit qui cassait la CI pytest depuis 5 forks consécutifs.
+
+### Added
+- **Welcome Center** (`/app/frontend/src/pages/WelcomeCenter.jsx`) : nouvelle
+  route `/` remplaçant le Dashboard historique (accessible désormais à
+  `/dashboard`). Composé de :
+  - Health score global 0-100 avec ring animé + statut par composant (GPU,
+    Mongo, Pipeline, go2rtc, Disque, CPU, RAM, Caméras, Plugins).
+  - Version installée + build date + bandeau "nouveautés disponibles" +
+    bouton `Voir le changelog`.
+  - 4 stats express (Caméras en ligne, Événements 24h, Plaques 24h, Alertes
+    actives) auto-scoped aux sites de l'utilisateur.
+  - Alertes système auto-déduites (disque critique/faible, MongoDB KO, GPU
+    absent, go2rtc HS, plugins en erreur, caméras offline).
+  - Actualités administrateur (nouvelle collection `welcome_news`, publication
+    admin only via UI `welcome-news-create-btn`, épinglage + sévérité info /
+    warning / critical).
+  - Conseils contextuels (5 tips dépendant de l'état système).
+  - Accès rapide aux 8 Centers (Live, Camera, Pipeline, Plugin, Event,
+    Recording, Dashboard, Settings) sous forme de tuiles cliquables.
+  - Section changelog (parsing de `CHANGELOG.md`) affichant les nouveautés
+    depuis la dernière version consultée par l'utilisateur.
+  - Documentation & liens externes (Doc, GitHub, Changelog, Support).
+  - Préférences per-user (`welcome_prefs`) : `hide_until_next_version`,
+    `always_show`, `important_only`, `last_seen_version` + bouton "Marquer
+    comme lu".
+- **Route module** `backend/routes/welcome.py` exposant :
+  - `GET /api/welcome/summary` — payload agrégé unique < 200 ms.
+  - `GET /api/welcome/changelog?since_version=X&limit=N` — parseur CHANGELOG.
+  - `GET|PUT /api/welcome/preferences` — persistance des prefs.
+  - `GET /api/welcome/news` (auth) + `POST|DELETE /api/welcome/news` (admin).
+- **Menu latéral** (`components/Layout.jsx`) : `nav.welcome` (Accueil, "/")
+  et `nav.dashboard` (Tableau de bord, "/dashboard") séparés.
+
+### Fixed
+- **Rate-limit brute-force casse la CI (dette récurrente 5 forks · P1)** :
+  ajout d'un bypass complet lorsque l'env `TESTING=1` est actif, dans
+  `security.py` (`SecurityMiddleware.dispatch`) et `auth.py`
+  (`_check_lockout` / `_register_failure`). `conftest.py` force ce flag pour
+  toute campagne pytest. Résultat : plus de 429/423 durant les tests
+  parallèles.
+
+### Tests
+- **Backend** : `tests/test_welcome_center.py` (8 tests HTTP live) +
+  `tests/test_testing_bypass.py` (5 tests unitaires du bypass). 13/13 verts.
+  84 tests critiques `v0.4.x` (isolation stricte, latence, drivers, ANPR
+  qualité, pipeline per-camera) toujours verts — zéro régression.
+- **Frontend** : validé par testing_agent (100 % succès, aucune anomalie
+  UI/UX, tous les data-testid présents, prefs persistent après reload).
+
+### Statistiques diff
++960 / -3 lignes (essentiellement WelcomeCenter.jsx + routes/welcome.py).
+
+
 ## [v0.4.3-stable] — 2026-02 — Stabilisation stricte (audit critique · 10 priorités)
 
 ### Contexte

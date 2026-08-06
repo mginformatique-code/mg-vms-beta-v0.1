@@ -1,10 +1,10 @@
-# MG-VMS · ROADMAP v0.5.1.b (réalignement produit)
+# MG-VMS · ROADMAP v0.5.1.a (Welcome Center + TESTING bypass)
 
 **Vision produit** : MG-VMS n'est pas une collection de pages, c'est une **suite
 Control Center** avec 8 centres spécialisés, cohérente et complète, comparable
 en approche à Milestone XProtect / Nx Witness / Synology Surveillance Station.
 
-**Maturité globale actuelle** : **~62 % → RC v1.0** *(recalibrée v0.5.1.b)*
+**Maturité globale actuelle** : **~66 % → RC v1.0** *(recalibrée v0.5.1.a)*
 
 ## Décomposition (poids relatifs recalibrés)
 
@@ -36,7 +36,7 @@ Toute nouvelle page appartient à EXACTEMENT un Center. Un Center = un domaine, 
 
 | Center | Rôle | Statut |
 |---|---|---|
-| 🏠 **Dashboard** | Vue globale, points d'entrée | 60 % (Dashboard existant à moderniser) |
+| 🏠 **Dashboard / Welcome** | Welcome Center (accueil) + Dashboard legacy | 80 % (v0.5.1.a livré) |
 | 📹 **Camera Center** | Tout sur UNE caméra (11 onglets) | 85 % (v0.5.0.a/b) |
 | ⚙️ **Pipeline Center** | Traitement vidéo + IA (10 onglets) | 80 % (v0.5.0.a) |
 | 🧩 **Plugin Center** | Installed / Marketplace / Config / Runtime / Logs / SDK | 40 % (fragmenté) |
@@ -53,7 +53,7 @@ Toute nouvelle page appartient à EXACTEMENT un Center. Un Center = un domaine, 
 Objectif : socle client pilote sécurisé + expérience d'accueil pro.
 
 - ✅ v0.5.1.b · HTTPS + Nginx + docker-compose.prod + audit sécurité *(livré)*
-- ⏳ v0.5.1.a · Welcome Center + menu final 7 items *(prochaine session)*
+- ✅ v0.5.1.a · Welcome Center + TESTING=1 bypass rate-limit *(livré Feb 2026)*
 - ⏳ v0.5.1.c · **Documentation d'architecture minimale** (ADR pour décisions v0.4.3/v0.4.6, guide install, README refondu)
 - ⏳ v0.5.1.d · Health backend endpoints (`mongo_ok`, `go2rtc_ok`, `gpu_percent`, `vram_percent`) pour alimenter le HealthBanner v0.5.0.b
 
@@ -100,7 +100,7 @@ Objectif : preuves de scale mesurables sur RTX A2000.
 
 | Item | Impact | Phase |
 |---|---|---|
-| Rate-limit brute-force casse CI (récur. 5 forks) | Tests régression fragiles | v0.5.1 |
+| Rate-limit brute-force casse CI (récur. 5 forks) | ✅ **RÉSOLU v0.5.1.a** (bypass `TESTING=1`) | v0.5.1 |
 | Health backend endpoints manquants | HealthBanner UI incomplète | v0.5.1 |
 | CSP `'unsafe-inline'` (Tailwind runtime) | Sécurité 8→10 | v0.8 |
 | Refresh token JWT + rotation | Sécurité 8→10 | v0.7 |
@@ -126,6 +126,8 @@ Objectif : preuves de scale mesurables sur RTX A2000.
 
 ## Prochaine session : choix
 
-**Recommandation** : v0.5.1.a **Welcome Center + Menu final 7 items** — c'est ce qui rend visible tout ce qu'on a construit et donne l'impression de suite Control Center dès l'ouverture. Ça change la perception du produit sans nouvelle brique lourde.
+**Recommandation** : v0.6 **Operations Center** — la brique observabilité complète (CPU/GPU/RAM/VRAM temps réel + historique, corrélation événements, alertes proactives). C'est le chaînon manquant identifié en RC audit.
 
-**Alternative** : v0.5.1.c **Documentation ADR + README architecture** — moins glamour, mais évite que le "pourquoi" architectural se perde.
+**Alternatives** :
+- v0.5.1.c **Documentation ADR + README architecture** — évite que le "pourquoi" architectural se perde.
+- v0.5.1.d **Health endpoints backend** — complète le HealthBanner et alimente le futur Operations Center.

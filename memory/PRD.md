@@ -25,6 +25,28 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 
 ### État Feb 2026 — sessions successives
 
+**Session 40 (Feb 2026)** — v0.5.1.a · Welcome Center + TESTING=1 bypass :
+- 🏠 **Welcome Center** livré comme écran d'accueil officiel (route `/`).
+  Dashboard historique déplacé sur `/dashboard`. Un unique call
+  `/api/welcome/summary` agrège : score de santé 0-100 (9 composants),
+  version + build + changelog des nouveautés depuis dernière visite,
+  alertes système auto-déduites (disque, Mongo, GPU, go2rtc, plugins,
+  caméras offline), actualités administrateur (publiables via
+  collection `welcome_news`), 4 stats express, 5 conseils contextuels,
+  8 Centers en accès rapide, documentation, préférences per-user
+  (`welcome_prefs` : hide_until_next_version / always_show /
+  important_only / last_seen_version).
+- 🔓 **TESTING=1 bypass** (fix dette récurrente 5 forks) : rate-limit
+  (`SecurityMiddleware`) et brute-force lockout (`_check_lockout`,
+  `_register_failure`) court-circuités quand `TESTING=1`. `conftest.py`
+  force le flag pour toute campagne pytest.
+- 📊 Tests : 8 tests HTTP live Welcome Center + 5 tests unitaires bypass,
+  100 % verts. 84 tests critiques v0.4.x (isolation, latence, drivers,
+  pipeline, ANPR qualité) toujours verts. Testing agent iteration_40 :
+  100 % succès UI + API, 0 bug.
+- 🧭 Menu latéral : "Accueil" + "Tableau de bord" séparés dans le groupe
+  Opérations. i18n FR/EN mis à jour (`nav.welcome`).
+
 **Session 19 (Feb 2026)** — v0.4.3 · Stabilisation stricte (audit critique) :
 - 🔒 **P1 · Fermeture stricte fail-safe** : `enabled_plugins ∈ {[], null, absent}` ⇒ AUCUN plugin dispatché (plus aucun fail-open). Le CameraWorker est l'unique autorité — aucun plugin ne s'auto-déclenche. Preuve : bench `consumer_calls = 0` sur 10 consumers enregistrés avec whitelist vide/null/absente.
 - 🔀 **P2 · Suppression du double encode/decode** : `_fetch_frame` retourne un `ndarray` directement, `_stage_decode` accepte `ndarray` OU `bytes`. Zéro `cv2.imencode` dans la boucle temps réel côté RTSP direct.
