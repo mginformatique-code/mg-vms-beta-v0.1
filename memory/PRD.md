@@ -48,6 +48,16 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 - ✅ Health Dashboard UI mis à jour pour la nouvelle forme recorder
 - ✅ Suite pytest : 12/12 (health + pipeline + PTZ/recorder) — voir `tests/test_ptz_and_recorder_health.py`
 
+**Session 16 (Feb 2026)** — v0.4.1 · Fix bug critique ANPR whitelist :
+- 🔴 **Bug critique fixé** : le pipeline ANPR (`_alpr.predict` dans `ai_engine._analyze_frame`) tournait **hors du Plugin Manager** et ignorait `enabled_plugins`. Résultat : FastALPR désactivé sur une caméra → des plaques étaient malgré tout écrites en Mongo.
+- ✅ **Fix appliqué** : signature `_analyze_frame(camera_id, frame_bytes, enabled_plugins=None)` + guard `_anpr_skipped = bool(enabled_plugins) and "fast-alpr" not in enabled_plugins` → le bloc OCR est court-circuité (aucun `_alpr.predict`, aucune écriture Mongo, aucun événement). `_process_camera` passe `cam.get("enabled_plugins")`. Comportement legacy (whitelist vide) préservé.
+- 🩹 **Correctif intermédiaire iteration_37** : premier fix causait `UnboundLocalError` (`timings["alpr_ms"]=0.0` avant que le dict soit créé). Corrigé en itération 38 avec variable locale `t_alpr = 0.0` initialisée avant le bloc.
+- ✅ **bug_testing_agent iteration_38** : verdict **fixed** — sur 35s + 60s de fenêtre "disabled" : 0 nouvelle plaque écrite en Mongo (700 → 700), logs confirment `alpr_ms=0ms` frame par frame, réactivation fast-alpr → 75 ms sur une frame véhicule. Regression endpoints frame-source/bus/catalog OK.
+- ⏳ **Minor cosmétique connu** : `pipeline_metrics.alpr_ms.avg` (rolling window 100 cycles) descend progressivement, pas immédiatement à 0 après désactivation (13.2ms après 35s, 3.8ms après 60s). Preuve d'exécution effective venir via `/api/ai/debug` frame-par-frame (=0ms).
+- ✅ Tests : 5 nouveaux `test_v041_anpr_whitelist.py` + 71 régression = **76/76 OK**
+
+**Backlog v0.4.1** (points 1, 4-12 non livrés dans cette itération, à traiter séparément) : pipeline par caméra (graphe distinct), stats plugins fidèles (calls/errors/timeout), optimisation zero-copy dispatch, qualité ANPR "no plate > false plate", recommandation automatique ANPR (jour/nuit), désactivation intelligente selon luminosité, détection caméras spécialisées (Dahua ITC / Hikvision DeepInView), assistant configuration, différenciation Installé/Chargé/Actif, préservation bind mounts MongoDB SSD + recordings HDD, runtime CUDA 12.4 + FFmpeg CUDA.
+
 **Session 15 (Feb 2026)** — Pipeline v2 · Provider natif YOLO + Designer + Overlay caméra :
 - 🎯 **YoloDetectionProvider natif** (`pipeline_v2/providers/yolo_provider.py`) — implémente `DetectionProvider` v2, réutilise `ai_engine._model` (aucune duplication modèle), gère fallback si YOLO pas chargé
 - 🧩 **Pipeline Designer UI** (`/pipeline-designer`) — assemble Camera → Detector → Tracker → ANPR → Fusion → Consumer, catalogue de plugins filtré par interface, sélection multi-providers, 6 stratégies fusion configurables, config JSON compilée en preview. Remplacera à terme le Plugin Manager.

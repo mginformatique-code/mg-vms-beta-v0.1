@@ -2,6 +2,179 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+> Depuis Feb 2026, MG-VMS bascule sur un cycle interne de versions « pipeline »
+> (v0.3 → v0.4 → v0.4.1) qui reflète la refonte vers une architecture modulaire
+> Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate). L'ancien
+> cycle produit (1.x/2.x) reste préservé en bas de fichier.
+
+## [v0.4.1] — 2026-02 — Fix critique ANPR whitelist (Session 16)
+### Corrigé (🔴 P0 critical)
+- **Bug MongoDB pollution** : le pipeline OCR (`_alpr.predict` dans `ai_engine._analyze_frame`) tournait **hors du Plugin Manager** et ignorait `enabled_plugins`. Résultat : FastALPR désactivé sur une caméra → des plaques étaient malgré tout écrites en Mongo.
+- **Fix appliqué** : signature `_analyze_frame(camera_id, frame_bytes, enabled_plugins=None)` + guard `_anpr_skipped = bool(enabled_plugins) and "fast-alpr" not in enabled_plugins`. Le bloc OCR est court-circuité (aucun `_alpr.predict`, aucune écriture Mongo, aucun événement). `_process_camera` passe `cam.get("enabled_plugins")`. Comportement legacy (whitelist vide) préservé.
+- **Correctif intermédiaire** : premier fix causait `UnboundLocalError` (`timings["alpr_ms"]=0.0` avant que le dict soit créé). Corrigé avec variable locale `t_alpr = 0.0` initialisée avant le bloc.
+### Vérifié
+- `bug_testing_agent` verdict **fixed** : sur 35s + 60s de fenêtre "disabled", 0 nouvelle plaque écrite en Mongo (700 → 700), logs confirment `alpr_ms=0ms` frame par frame. Réactivation fast-alpr → 75 ms sur une frame véhicule. Regression endpoints frame-source/bus/catalog OK.
+- Tests : 5 nouveaux `test_v041_anpr_whitelist.py` + 71 régression = **76/76 OK**.
+### Backlog (points reportés du prompt v0.4.1)
+- Pipeline IA par caméra (graphe distinct par cam)
+- Statistiques plugins fidèles (calls/errors/timeout/fps)
+- Optimisation zero-copy dispatch
+- Qualité ANPR intelligente + auto-désactivation OCR (jour/nuit)
+- Détection caméras spécialisées (Dahua ITC / Hikvision DeepInView)
+
+## [v0.4 · Pipeline v2] — 2026-02 — Refonte architecture IA (Sessions 14 & 15)
+### Ajouté — Session 14 · Pipeline Engine v2 (fondations)
+- **Bascule majeure** : le **Pipeline Engine** devient le chef d'orchestre au lieu du Plugin Manager. Les plugins ne pilotent plus, ils **fournissent** (providers) ou **consomment** (consumers).
+- Nouveau package `/app/backend/pipeline_v2/` (6 modules, ~1100 lignes) :
+  - `interfaces.py` — Protocols `DetectionProvider` / `TrackingProvider` / `PlateRecognitionProvider` / `PipelineConsumer` + dataclasses `Frame` / `BBox` / `Detection` / `Track` / `PlateResult`
+  - `fusion.py` — 6 stratégies configurables par caméra
+  - `stages.py` — 5 étapes avec timeout + timing par stage
+  - `engine.py` — `build_default()` + `stats()` + `describe()`
+  - `scheduler.py` — multi-caméra FPS/priorité/backpressure
+  - `adapter.py` — compat rétro v1 (les 50 plugins existants continuent à tourner)
+- **Format PlateResult standard obligatoire** : `plate`, `confidence`, `bbox`, `country`, `processing_time_ms`, `provider`, `raw_text`, `vehicle_type`, `vehicle_color`, `track_id`, `extras`.
+- **Tracking centralisé + ROI unique partagée** : 1 crop par véhicule réutilisé par TOUS les providers ANPR.
+- **Parallélisme providers** via `asyncio.gather` + `to_thread`.
+- Tests : 17 nouveaux + 52 régression = **69/69 OK**.
+
+### Ajouté — Session 15 · Provider natif YOLO + Designer + Overlay caméra
+- 🎯 **YoloDetectionProvider natif** (`pipeline_v2/providers/yolo_provider.py`) — implémente `DetectionProvider` v2, réutilise `ai_engine._model` (aucune duplication modèle), gère fallback si YOLO pas chargé.
+- 🧩 **Pipeline Designer UI** (`/pipeline-designer`) — assemble Camera → Detector → Tracker → ANPR → Fusion → Consumer, catalogue de plugins filtré par interface, sélection multi-providers, 6 stratégies fusion configurables, config JSON compilée en preview. Remplacera à terme le Plugin Manager.
+- 🎛️ **CameraControlOverlay** (`/pages/CameraControlOverlay.jsx`) intégré à LiveView — 5 boutons overlay (Projecteur / IR / Sirène / TTS / Reboot) apparaissent au hover sur chaque tuile caméra, actions via `POST /cameras/{id}/relay/{token}/{on|off}`, `POST /cameras/{id}/audio/tts`, `POST /cameras/{id}/reboot`.
+- 🧭 Menu enrichi avec "Pipeline Designer" (section technicien).
+- Tests : 6 nouveaux `test_yolo_provider_and_ui.py` + 69 régression = **75/75 OK**.
+
+## [v0.4 · Stabilisation] — 2026-02 — Sprint correctifs Docker/GPU/ByteTrack (Session 13)
+### Corrigé
+- 🐳 **Docker plugins** : `context: ../backend` → `context: ..` (racine repo) + `dockerfile: backend/Dockerfile`. Le Dockerfile ajoute `COPY backend/`, `COPY backend/wsdl/`, `COPY data/plugins/` + assertion build-time (échec build si <40 plugins). Fin des 2 plugins fallback en Docker.
+- 🔍 **Plugin Loader** : `_resolve_plugins_dir()` enrichi avec le candidat canonical `<backend>/data/plugins` (chemin Docker v0.4) + log clair `plugins_dir: /app/data/plugins (contient 50 entrées)`.
+- 🔄 **Sync runtime ByteTrack** : `PUT /api/plugins/tracking/config` appelle désormais `load_runtime_config()` immédiatement → les paramètres UI sont réellement appliqués au moteur IA sans redémarrage.
+- ⚠️ **Message ONVIF clair** : `onvif_camera()` fait un preflight sur `devicemgmt.wsdl` et lève une `FileNotFoundError` explicite ("PAS un problème d'identifiants — reconstruisez l'image Docker") au lieu du message générique trompeur.
+### Ajouté
+- 📊 **GPU boot log** : `server.on_startup` logge `GPU · Torch=X TorchVision=Y CUDA=OK/INDISPONIBLE (vN) · Device=<name> · N GB`.
+- 📈 **Runtime state** : `GET /api/diagnostics/pipeline-metrics` retourne un nouveau champ `runtime` avec `bytetrack` (état réel du moteur), `ai_config` et `gpu` (Torch/CUDA/device). Fin du bug "ByteTrack=False dans monitoring".
+### Vérifié
+- Tests : 9 nouveaux `test_v04_stabilization.py` + 43 régression = **52/52 pytest OK**.
+- `bug_testing_agent` (iteration_36) : verdict **fixed** — 12/12 checks API + 17/17 pytest, 50 plugins chargés sans fallback, WSDL 7/7, ByteTrack sync validé (track_thresh=0.3 appliqué immédiatement), GPU/Torch exposés.
+
+## [v0.4 · WSDL] — 2026-02 — ONVIF WSDL embarqués (Session 12)
+### Corrigé
+- 🛠️ **Diagnostic** : le package `onvif-zeep-async` distribué via PyPI ne bundle plus les fichiers WSDL → `ONVIFCamera(...)` échouait avec `FileNotFoundError` sur tous les endpoints (PTZ, découverte, capabilities).
+### Ajouté
+- 📦 **34 WSDL/XSD embarqués** dans `/app/backend/wsdl/` (versionnés dans git, dont les 7 essentiels : devicemgmt, media, media2, ptz, events, imaging, deviceio).
+- 🏭 **Factory centralisée** `wsdl_path.onvif_camera()` — remplace tous les appels directs à `ONVIFCamera()`, injecte automatiquement `wsdl_dir=WSDL_DIR`.
+- 🔧 **10 callsites migrés** : 6 dans `routes/camera_control.py` + 4 dans `streaming.py` (PTZ, IR, relais, capabilities, reboot, device_info).
+- ✅ **Validation au démarrage** : `validate_wsdl_dir()` log `7/7 essentiels + 16/16 optionnels présents` — warning explicite si un fichier manque.
+- 🚢 **Dockerfile** enrichi : `COPY wsdl/ ./wsdl/` explicite + assertion build-time.
+- 🌐 **Env override** `MGVMS_WSDL_DIR` pour déploiements exotiques.
+- 🔍 **Nouveau endpoint** `GET /api/diagnostics/wsdl` pour l'UI/monitoring.
+### Vérifié
+- Tests : 8 unitaires + 35 régression = **43/43 OK**.
+
+## [v0.3 · Config Caméra Modulaire] — 2026-02 — Whitelist plugins par caméra (Session 11)
+### Ajouté
+- 🎛️ **Nouveau champ** `Camera.enabled_plugins: list[str]` (whitelist des plugins IA activés pour cette caméra — 0 à N plugins).
+- 🔌 **Nouvel endpoint** `GET /api/plugins/catalog` — 50 plugins regroupés en 12 catégories principales (ANPR/LPR, Détection IA, Tracking, Segmentation, Feu/Fumée, Sûreté active, EPI, Comptage, Retail, Parking, Agriculture, Notifications, Événements) avec icônes lucide-react.
+- 🔀 **Filtrage `dispatch_pipeline`** : si `camera_config.enabled_plugins` non vide, seuls les plugins listés (par `name`) sont dispatchés — sinon fallback legacy (tous les plugins actifs).
+- ⚙️ **`ai_engine._do_downstream_work`** passe `enabled_plugins=cam.get("enabled_plugins")` au bus.
+- 🎨 **Nouveau composant React `CameraPluginsConfig.jsx`** : catalogue interactif avec recherche live, expand/collapse par groupe, sélection multi (tout activer/retirer, cocher tout par groupe), badges d'interface (`PipelineConsumer` / `PlateRecognizer` / `Tracker`…).
+- 🔧 **`Cameras.jsx`** : le composant s'affiche quand `detect_enabled=true` (la case reste comme kill-switch global caméra).
+### Vérifié
+- Tests : 6 unitaires + 13 HTTP e2e + 30 régression = **49/49 OK** (testing_agent iter35, zéro bug).
+
+## [v0.3 · Audit RTSP/ANPR] — 2026-02 — Découplage go2rtc final (Session 10)
+### Corrigé
+- 🧹 **Garde-fou supprimé** dans `frame_source.start()` — plus de refus d'URL non-go2rtc.
+- 🐧 **ffmpeg 5.1.9 installé** dans le container (`apt-get install -y ffmpeg`).
+- 🔀 **Workers démos** : `_sync_frame_source_workers` démarre aussi un worker persistant pour les caméras démo (via `rtsp://127.0.0.1:8554/cam_XXX` — go2rtc en local) au lieu de skipper.
+- ⚙️ **GO2RTC_RTSP=rtsp://127.0.0.1:8554** ajouté à `.env` (résolution hostname `localhost`→`::1` refusée par ffmpeg dans le container Kubernetes).
+### Ajouté
+- 📊 **Métrique alpr_ms** : maintenant enregistrée dans `pipeline_metrics.record_stage()` — visible dans le dashboard.
+- 🎯 **ANPR par crop véhicule** : `_alpr.predict(vehicle_crop)` remplace `_alpr.predict(img)` — meilleure précision, associations plate↔owner naturelles.
+- 🔍 **Nouvel endpoint** `/api/diagnostics/frame-source` — état runtime des workers ffmpeg (alive/last_frame_age/restart_count).
+- 📉 **Cache `_plate_cache` raccourci à 1s** — laisse anpr_tracker gérer les doublons via track_id, permet multi-OCR par véhicule mobile.
+### Résultats mesurés (avant → après)
+| Métrique | Avant | Après (p95) | Gain |
+|---|---|---|---|
+| fetch_ms | 2720 ms | **3-4 ms** | **~700×** |
+| yolo_ms | 128 ms | 138 ms | idem |
+| tracking_ms | 2 ms | 1 ms | idem |
+| alpr_ms | 0 (non affiché) | **36 ms** | affiché ✓ |
+| realtime_ms | 2895 ms | 260 ms avg | **11×** |
+| downstream_ms | 9 ms | 13 ms | idem |
+| Workers actifs | 0 | **1** (demo-cam-002) | ✓ |
+### Vérifié
+- Tests : 6 unitaires audit + 23 régression = **29/29 OK**.
+
+## [v0.3 · Séparation IA/Streaming] — 2026-02 — Découplage moteur IA / go2rtc (Session 9)
+### Ajouté
+- 🎯 **Découplage go2rtc / IA** : `_sync_frame_source_workers` lit désormais l'URL RTSP native de la caméra (`camera.ai_rtsp_url` prioritaire → `camera.rtsp_url` → fallback go2rtc uniquement pour démos). Env `MGVMS_AI_DIRECT_RTSP=1` (défaut) active le mode direct. **go2rtc = streaming/WebRTC uniquement**.
+- ✅ **Nouveau champ** `Camera.ai_rtsp_url` : URL dédiée IA (flux principal HD) permettant d'utiliser un flux différent que celui exposé aux clients WebRTC.
+- ✅ **Module `anpr_tracker.py`** : accumulateur par `track_id` ByteTrack avec machine à états `ENTERED → PRESENT → LEFT` :
+  - `record_reading(camera_id, track_id, PlateReading)` — accumule OCR par track
+  - `tick_missing(camera_id, seen_tids)` — marque tracks disparus, émet EXIT après `lost_cycles`
+  - `best_reading()` — consensus par texte + confiance max
+  - Anti-doublons stationnés (1 seul ENTRY) + retente véhicules mobiles (multi-OCR)
+- ✅ **Intégration `_analyze_frame`** : chaque plate détectée est routée via anpr_tracker (flag `_emit`) ; downstream ne persiste que les plates avec `_emit=True`.
+- ✅ **Nouveaux endpoints diagnostics** :
+  - `GET /api/diagnostics/anpr-tracker` — config + véhicules trackés par caméra
+  - `GET /api/diagnostics/streaming-metrics` — go2rtc streams (producers/consumers/WebRTC clients) — **séparé** du pipeline IA
+- ✅ **Frontend `/pipeline-monitor` enrichi** : panneau Streaming go2rtc + panneau ANPR Tracker.
+### Vérifié
+- Tests : 9 unitaires (`test_v03_ai_streaming_decoupling.py`) + 10 HTTP (testing_agent) = **19/19 OK**.
+
+## [v0.3 · Pipeline temps réel] — 2026-02 — P0 non-bloquant (Session 8)
+### Corrigé
+- 🔴 **Bug fatal** : `SyntaxError` dans `ai_engine.py` (bloc `if _pipeline_ok and _pr:` mal indenté) qui empêchait le backend de démarrer.
+- ✅ **Ordre des routers corrigé** dans `server.py` : `plugin_config_router` désormais AVANT `plugins_bus_router` (sinon `/api/plugins/tracking/config` intercepté par `/plugins/{name}/config`).
+### Ajouté
+- ✅ **Refactor `_process_camera`** en Phase A (SYNC ≤200ms) / Phase B (fire-and-forget) :
+  - Phase A : fetch_frame → YOLO + ByteTrack + broadcast overlay → return
+  - Phase B : `asyncio.create_task(_process_downstream)` — Multi-ANPR, Smart Zones, Workflows, Plugin bus, Event persistence
+  - **Backpressure guard** : `_MAX_DOWNSTREAM_INFLIGHT=2` par caméra, drops enregistrés
+- ✅ **`pipeline_metrics.py` enrichi** : `record_stage()` par étape (fetch/yolo/tracking/alpr/realtime/downstream), `record_drop()`, snapshot avec avg/max/p95 par stage, fps_5s, drops_5s.
+- ✅ **ByteTrack activé par défaut** : `enabled=True, track_thresh=0.25, match_thresh=0.85, track_buffer=60, id_persist_seconds=120` — objectif : minimiser la perte d'IDs.
+- ✅ **Frontend `/pipeline-monitor`** (`AIPipelineMonitor.jsx`) : dashboard temps réel avec bandeau agrégé, cartes caméras expandables (StageBar avec cible), ByteTrack Tuner, objectifs P0, diagramme d'architecture.
+- ✅ Route + menu ajoutés (`nav.pipeline_monitor` = "Pipeline IA · Live", section Admin).
+### Vérifié
+- Tests : 11 unitaires `test_pipeline_realtime.py` + 9 HTTP intégration = **20/20 OK**.
+- Métriques observées démo : `downstream_ms=5.6ms` (fire-and-forget confirmé), `tracking_ms=51ms` (ByteTrack actif), drops=0.
+
+## [v0.2.7 · P1 Stabilisation] — 2026-02 — Assets logo + PTZ ONVIF réel + Recorder Health (Session 7)
+### Ajouté
+- 🎨 **Logo dark/light** : assets réels intégrés (`mg-vms-logo-light.png` / `-dark.png`).
+- 📡 **PTZ ONVIF réel** : l'endpoint no-op remplacé par `ContinuousMove` + `Stop` via `onvif_zeep`.
+  - 8 commandes : `pan_left/right`, `tilt_up/down`, `zoom_in/out`, `home`, `stop`
+  - Nouveaux endpoints : `GET /api/cameras/{id}/ptz/presets`, `POST /api/cameras/{id}/ptz/preset/{token}`
+  - UI 8-directions dans LiveView (croix + colonne zoom)
+- 💾 **Recorder Health** : `GET /api/diagnostics/recorder-health` — ffmpeg alive, PID OS, dernier segment, gap détecté, continuité 24h (couverture % + trous listés).
+- 📊 **Health Dashboard UI** mis à jour pour la nouvelle forme recorder.
+### Vérifié
+- Suite pytest : 12/12 (health + pipeline + PTZ/recorder) — voir `tests/test_ptz_and_recorder_health.py`.
+
+## [v0.2 · Plugin Manager NG] — 2026-02 — 50 plugins isolés + Fusion + Hot reload (Sessions 2 à 6)
+### Ajouté — Architecture Plugin Manager NG
+- **Bus multi-plugin** avec 4 politiques fusion ANPR (`cascade` / `highest` / `vote` / `compare`).
+- **Loader dynamique** manifest YAML + import isolé via `importlib`.
+- **Config store persistant** + hot reload + endpoints `/api/plugins/{name}/config`.
+- **50 plugins isolés** dans `/app/data/plugins/` répartis en 12 catégories (ANPR, Détection, Tracking, Segmentation, Feu/Fumée, Sûreté, EPI, Comptage, Retail, Parking, Agriculture, Notifs).
+- **5 interfaces plugin** : `FrameAnalyzer`, `PlateRecognizer`, `Tracker`, `Segmenter`, `PipelineConsumer`, `EventConsumer`.
+- **Pipeline chaîné** `bus.dispatch_pipeline()` wired dans `ai_engine.ai_loop` — chaque frame décodée traverse Detector → Tracker → Business → Notifications.
+- **Frontend** : `PluginManagerNG.jsx` + `PluginConfigDialog.jsx` + `PipelineTestPanel.jsx` (canvas viz).
+- **Bouton "Installer les deps"** (`--no-deps` par défaut pour protection env).
+### Vérifié
+- 24 tests pytest OK.
+
+## [v0.1 · Plugin Manager fondations] — 2026-01 — Fernet + Diagnostics + Doc (Session 1)
+### Ajouté
+- Fix régression IA (go2rtc gateway strict, diagnostics AI/sync).
+- Documentation 28 chapitres.
+- Plugin Manager fondations : interfaces, contexte, registry.
+- Fernet passwords caméras (chiffrement au repos).
+- URL versioning `/api/v1/` introduit.
+
+---
+
 ## [2.0.0] — 2026-06 — Permissions granulaires par utilisateur (gérées par admin)
 ### Ajouté
 - **Permissions granulaires** par utilisateur (en plus des rôles), **gérées uniquement par l'admin** : `view_live`, `view_recordings`, `read_plates`, `stream_hd`, `ptz_control`, `export_files`. Admin = bypass (toutes accordées). Défauts par rôle + overrides par utilisateur (`effective_permissions`).
