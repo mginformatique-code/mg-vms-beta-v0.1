@@ -422,10 +422,10 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes, enabled_plugins: Optional
     # **court-circuite** tout le bloc OCR : zéro CPU/VRAM, zéro écriture
     # Mongo, zéro événement plaque. Whitelist vide → comportement legacy.
     _anpr_skipped = bool(enabled_plugins) and "fast-alpr" not in enabled_plugins
+    t_alpr = 0.0  # défaut si le bloc ANPR est skip
     if _anpr_skipped:
         logger.debug("ANPR skip %s : fast-alpr not in enabled_plugins %s",
                      camera_id, enabled_plugins)
-        timings["alpr_ms"] = 0.0
     if vehicles and _alpr and not _anpr_skipped:
         now = datetime.now(timezone.utc)
         # Purge cache expiré

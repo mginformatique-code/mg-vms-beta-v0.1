@@ -1,0 +1,57 @@
+bringing up nodes...
+bringing up nodes...
+
+FFFFF                                                                    [100%]
+=================================== FAILURES ===================================
+_____________ test_analyze_frame_signature_accepts_enabled_plugins _____________
+[gw0] linux -- Python 3.11.15 /root/.venv/bin/python
+
+    def test_analyze_frame_signature_accepts_enabled_plugins():
+        """_analyze_frame doit accepter enabled_plugins comme 3ème paramètre."""
+>       from ai_engine import _analyze_frame
+E       ModuleNotFoundError: No module named 'ai_engine'
+
+tests/test_v041_anpr_whitelist.py:21: ModuleNotFoundError
+_______ test_analyze_frame_skips_anpr_when_whitelist_excludes_fast_alpr ________
+[gw0] linux -- Python 3.11.15 /root/.venv/bin/python
+
+    def test_analyze_frame_skips_anpr_when_whitelist_excludes_fast_alpr():
+        """Le bloc ANPR doit être bypassé si fast-alpr absent de la whitelist."""
+>       from ai_engine import _analyze_frame
+E       ModuleNotFoundError: No module named 'ai_engine'
+
+tests/test_v041_anpr_whitelist.py:29: ModuleNotFoundError
+____________ test_process_camera_passes_enabled_plugins_to_analyze _____________
+[gw0] linux -- Python 3.11.15 /root/.venv/bin/python
+
+    def test_process_camera_passes_enabled_plugins_to_analyze():
+        """_process_camera doit passer cam.get('enabled_plugins') à _analyze_frame."""
+>       from ai_engine import _process_camera
+E       ModuleNotFoundError: No module named 'ai_engine'
+
+tests/test_v041_anpr_whitelist.py:40: ModuleNotFoundError
+__________________ test_empty_whitelist_keeps_legacy_behavior __________________
+[gw0] linux -- Python 3.11.15 /root/.venv/bin/python
+
+    def test_empty_whitelist_keeps_legacy_behavior():
+        """Whitelist vide (None ou []) doit laisser passer l'ANPR (legacy)."""
+>       from ai_engine import _analyze_frame
+E       ModuleNotFoundError: No module named 'ai_engine'
+
+tests/test_v041_anpr_whitelist.py:49: ModuleNotFoundError
+______________________ test_no_alpr_predict_when_skipped _______________________
+[gw0] linux -- Python 3.11.15 /root/.venv/bin/python
+
+    def test_no_alpr_predict_when_skipped():
+        """Vérifie que le predict ANPR est bien protégé par la condition."""
+>       from ai_engine import _analyze_frame
+E       ModuleNotFoundError: No module named 'ai_engine'
+
+tests/test_v041_anpr_whitelist.py:57: ModuleNotFoundError
+=========================== short test summary info ============================
+FAILED tests/test_v041_anpr_whitelist.py::test_analyze_frame_signature_accepts_enabled_plugins
+FAILED tests/test_v041_anpr_whitelist.py::test_analyze_frame_skips_anpr_when_whitelist_excludes_fast_alpr
+FAILED tests/test_v041_anpr_whitelist.py::test_process_camera_passes_enabled_plugins_to_analyze
+FAILED tests/test_v041_anpr_whitelist.py::test_empty_whitelist_keeps_legacy_behavior
+FAILED tests/test_v041_anpr_whitelist.py::test_no_alpr_predict_when_skipped
+5 failed in 0.29s

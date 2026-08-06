@@ -1,0 +1,307 @@
+{
+  "started_at": "2026-08-06T08:47:40.895509+00:00",
+  "camera_id": "demo-cam-002",
+  "disabled_plugins": [
+    "yolo-detection",
+    "bytetrack"
+  ],
+  "samples": [
+    {
+      "elapsed_s": 0,
+      "plate_total": 700,
+      "metric": {
+        "camera_present": true,
+        "alpr_ms": {
+          "avg": 11.4,
+          "max": 385.4,
+          "p95": 95.3
+        },
+        "yolo_ms": {
+          "avg": 121.0,
+          "max": 471.9,
+          "p95": 283.7
+        },
+        "total_ms": null,
+        "raw_keys": [
+          "drop_count",
+          "drops_5s",
+          "error_count",
+          "fps_5s",
+          "last_plugins",
+          "pipeline_ms_avg",
+          "pipeline_ms_max",
+          "pipeline_ms_p95",
+          "stages",
+          "success_count"
+        ]
+      },
+      "debug": {
+        "status": 200,
+        "timestamp": "2026-08-06T08:47:41.436925+00:00",
+        "timings": {
+          "decode_ms": 2.1,
+          "motion_ms": 6.5,
+          "yolo_ms": 70.0,
+          "alpr_ms": 0.0,
+          "total_ms": 78.8,
+          "tracking_ms": 0.6
+        },
+        "plates_ocr": [],
+        "plate_attempts_count": 0,
+        "vehicles_count": 0
+      }
+    },
+    {
+      "elapsed_s": 10,
+      "plate_total": 700,
+      "metric": {
+        "camera_present": true,
+        "alpr_ms": {
+          "avg": 10.8,
+          "max": 385.4,
+          "p95": 95.3
+        },
+        "yolo_ms": {
+          "avg": 117.6,
+          "max": 471.9,
+          "p95": 283.7
+        },
+        "total_ms": null,
+        "raw_keys": [
+          "drop_count",
+          "drops_5s",
+          "error_count",
+          "fps_5s",
+          "last_plugins",
+          "pipeline_ms_avg",
+          "pipeline_ms_max",
+          "pipeline_ms_p95",
+          "stages",
+          "success_count"
+        ]
+      },
+      "debug": {
+        "status": 200,
+        "timestamp": "2026-08-06T08:47:51.791506+00:00",
+        "timings": {
+          "decode_ms": 2.1,
+          "motion_ms": 6.5,
+          "yolo_ms": 54.3,
+          "alpr_ms": 0.0,
+          "total_ms": 63.0,
+          "tracking_ms": 0.0
+        },
+        "plates_ocr": [],
+        "plate_attempts_count": 0,
+        "vehicles_count": 0
+      }
+    },
+    {
+      "elapsed_s": 20,
+      "plate_total": 700,
+      "metric": {
+        "camera_present": true,
+        "alpr_ms": {
+          "avg": 10.5,
+          "max": 385.4,
+          "p95": 95.3
+        },
+        "yolo_ms": {
+          "avg": 109.3,
+          "max": 309.8,
+          "p95": 280.5
+        },
+        "total_ms": null,
+        "raw_keys": [
+          "drop_count",
+          "drops_5s",
+          "error_count",
+          "fps_5s",
+          "last_plugins",
+          "pipeline_ms_avg",
+          "pipeline_ms_max",
+          "pipeline_ms_p95",
+          "stages",
+          "success_count"
+        ]
+      },
+      "debug": {
+        "status": 200,
+        "timestamp": "2026-08-06T08:48:02.157923+00:00",
+        "timings": {
+          "decode_ms": 2.1,
+          "motion_ms": 6.5,
+          "yolo_ms": 57.6,
+          "alpr_ms": 0.0,
+          "total_ms": 66.3,
+          "tracking_ms": 0.0
+        },
+        "plates_ocr": [],
+        "plate_attempts_count": 0,
+        "vehicles_count": 0
+      }
+    },
+    {
+      "elapsed_s": 30,
+      "plate_total": 700,
+      "metric": {
+        "camera_present": true,
+        "alpr_ms": {
+          "avg": 9.5,
+          "max": 385.4,
+          "p95": 25.4
+        },
+        "yolo_ms": {
+          "avg": 102.3,
+          "max": 309.8,
+          "p95": 279.9
+        },
+        "total_ms": null,
+        "raw_keys": [
+          "drop_count",
+          "drops_5s",
+          "error_count",
+          "fps_5s",
+          "last_plugins",
+          "pipeline_ms_avg",
+          "pipeline_ms_max",
+          "pipeline_ms_p95",
+          "stages",
+          "success_count"
+        ]
+      },
+      "debug": {
+        "status": 200,
+        "timestamp": "2026-08-06T08:48:12.509816+00:00",
+        "timings": {
+          "decode_ms": 2.1,
+          "motion_ms": 6.5,
+          "yolo_ms": 52.0,
+          "alpr_ms": 0.0,
+          "total_ms": 61.1,
+          "tracking_ms": 0.5
+        },
+        "plates_ocr": [],
+        "plate_attempts_count": 0,
+        "vehicles_count": 1
+      }
+    },
+    {
+      "elapsed_s": 45,
+      "plate_total": 700,
+      "metric": {
+        "camera_present": true,
+        "alpr_ms": {
+          "avg": 9.5,
+          "max": 385.4,
+          "p95": 25.4
+        },
+        "yolo_ms": {
+          "avg": 93.7,
+          "max": 292.8,
+          "p95": 199.8
+        },
+        "total_ms": null,
+        "raw_keys": [
+          "drop_count",
+          "drops_5s",
+          "error_count",
+          "fps_5s",
+          "last_plugins",
+          "pipeline_ms_avg",
+          "pipeline_ms_max",
+          "pipeline_ms_p95",
+          "stages",
+          "success_count"
+        ]
+      },
+      "debug": {
+        "status": 200,
+        "timestamp": "2026-08-06T08:48:29.095135+00:00",
+        "timings": {
+          "decode_ms": 2.1,
+          "motion_ms": 6.5,
+          "yolo_ms": 58.2,
+          "alpr_ms": 0.0,
+          "total_ms": 66.9,
+          "tracking_ms": 0.0
+        },
+        "plates_ocr": [],
+        "plate_attempts_count": 0,
+        "vehicles_count": 0
+      }
+    },
+    {
+      "elapsed_s": 60,
+      "plate_total": 700,
+      "metric": {
+        "camera_present": true,
+        "alpr_ms": {
+          "avg": 3.8,
+          "max": 154.2,
+          "p95": 18.6
+        },
+        "yolo_ms": {
+          "avg": 85.7,
+          "max": 280.5,
+          "p95": 191.3
+        },
+        "total_ms": null,
+        "raw_keys": [
+          "drop_count",
+          "drops_5s",
+          "error_count",
+          "fps_5s",
+          "last_plugins",
+          "pipeline_ms_avg",
+          "pipeline_ms_max",
+          "pipeline_ms_p95",
+          "stages",
+          "success_count"
+        ]
+      },
+      "debug": {
+        "status": 200,
+        "timestamp": "2026-08-06T08:48:43.614435+00:00",
+        "timings": {
+          "decode_ms": 2.0,
+          "motion_ms": 6.5,
+          "yolo_ms": 55.8,
+          "alpr_ms": 0.0,
+          "total_ms": 64.5,
+          "tracking_ms": 0.0
+        },
+        "plates_ocr": [],
+        "plate_attempts_count": 0,
+        "vehicles_count": 0
+      }
+    }
+  ],
+  "failures": [
+    "alpr_ms.avg expected <=1.0 after 60s disabled, got 3.8"
+  ],
+  "login_status": 200,
+  "login_has_token": true,
+  "get_camera_status": 200,
+  "original_enabled_plugins": [
+    "yolo-detection",
+    "bytetrack",
+    "fast-alpr"
+  ],
+  "disable_status": 200,
+  "persisted_enabled_plugins_after_disable": [
+    "yolo-detection",
+    "bytetrack"
+  ],
+  "plates_before": 700,
+  "plates_after_60s": 700,
+  "plates_delta_60s": 0,
+  "final_pipeline_alpr_ms_avg": 3.8,
+  "cleanup_status": 200,
+  "cleanup_enabled_plugins": [
+    "yolo-detection",
+    "bytetrack",
+    "fast-alpr"
+  ],
+  "finished_at": "2026-08-06T08:48:45.246801+00:00"
+}

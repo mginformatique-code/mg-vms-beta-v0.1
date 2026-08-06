@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "result_keys": [
+    "_img_bgr",
+    "counts",
+    "detections",
+    "motion_pct",
+    "overlay_boxes",
+    "plates",
+    "timings"
+  ],
+  "timings": {
+    "decode_ms": 0.0,
+    "motion_ms": 0.6,
+    "yolo_ms": 0.0,
+    "alpr_ms": 0.0,
+    "total_ms": 0.7,
+    "tracking_ms": 0.0
+  }
+}

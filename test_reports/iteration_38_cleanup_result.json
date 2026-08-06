@@ -1,0 +1,20 @@
+{
+  "login_status": 200,
+  "login_has_access_token": true,
+  "get_camera_before_status": 200,
+  "put_enable_fast_alpr_status": 200,
+  "camera_final_enabled_plugins": [
+    "yolo-detection",
+    "bytetrack",
+    "fast-alpr"
+  ],
+  "plugins_bus_status": 200,
+  "plugins_bus_total": 50,
+  "frame_source_status": 200,
+  "frame_source_alive_workers": [
+    "demo-cam-002"
+  ],
+  "plugins_catalog_status": 200,
+  "plugins_catalog_total": 50,
+  "plugins_catalog_group_count": 9
+}

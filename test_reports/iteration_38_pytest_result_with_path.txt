@@ -1,0 +1,11 @@
+bringing up nodes...
+bringing up nodes...
+
+.....                                                                    [100%]
+=============================== warnings summary ===============================
+tests/test_v041_anpr_whitelist.py::test_analyze_frame_signature_accepts_enabled_plugins
+  /root/.venv/lib/python3.11/site-packages/starlette/formparsers.py:12: PendingDeprecationWarning: Please use `import python_multipart` instead.
+    import multipart
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+5 passed, 1 warning in 0.68s

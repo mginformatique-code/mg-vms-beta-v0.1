@@ -1,0 +1,54 @@
+{
+  "verdict": "fixed",
+  "user_reported_bug": "MG-VMS v0.4.1 · BUG CRITIQUE : FastALPR désactivé sur une caméra, des plaques sont MALGRÉ TOUT reconnues et écrites en base MongoDB. La whitelist enabled_plugins de la caméra n'est pas respectée par le pipeline ANPR.",
+  "summary": "No relevant testing skill found. Focused backend/API verification on demo-cam-002: disabling fast-alpr persisted correctly, no new MongoDB plate rows appeared over 35s and 60s disabled windows (700 -> 700), local _analyze_frame skip path no longer raises UnboundLocalError, runtime debug/logs show alpr_ms=0ms while disabled (including vehicle frames), and after re-enable the pipeline was no longer skipped (log showed alpr=75ms on a vehicle frame). Regression endpoints frame-source and plugins bus passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/diagnostics/pipeline-metrics",
+        "issue": "The alpr_ms.avg aggregate is a 100-cycle rolling window and did not fall to <=1ms within 60s after disabling fast-alpr (13.2ms after 35s; 3.8ms after 60s). Per-frame /api/ai/debug and backend logs showed alpr_ms=0ms, so this appears to be stale telemetry rather than active ALPR execution."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/test_v041_anpr_whitelist_local.py",
+    "/app/test_reports/test_v041_anpr_whitelist_api_final.py",
+    "/app/test_reports/test_v041_anpr_whitelist_metrics_probe.py",
+    "/app/test_reports/test_v041_regressions_cleanup.py",
+    "/app/backend/tests/test_v041_anpr_whitelist.py"
+  ],
+  "action_items": [
+    "Optional telemetry cleanup: reset or segment pipeline_metrics.alpr_ms when a camera's enabled_plugins changes, or expose current-frame alpr_ms separately, so diagnostics immediately reflects a disabled FastALPR state."
+  ],
+  "critical_code_review_comments": [
+    "/app/backend/ai_engine.py:424-429 now uses local t_alpr=0.0 and no longer writes to timings before the timings dict is created; local skip-path execution returned normally with alpr_ms=0.0.",
+    "/app/backend/pipeline_metrics.py uses a 100-cycle rolling deque, which explains the temporary nonzero alpr_ms.avg despite disabled-frame logs showing alpr=0ms."
+  ],
+  "updated_files": [
+    "/app/test_reports/test_v041_anpr_whitelist_metrics_probe.py",
+    "/app/test_reports/iteration_38_local_result.json",
+    "/app/test_reports/iteration_38_api_result.json",
+    "/app/test_reports/iteration_38_cleanup_result.json",
+    "/app/test_reports/iteration_38_pytest_result.txt",
+    "/app/test_reports/iteration_38_pytest_result_with_path.txt",
+    "/app/test_reports/iteration_38_metrics_probe_result.json",
+    "/app/test_reports/iteration_38_backend_log_tail.txt",
+    "/app/test_reports/bug_verification_38.json",
+    "/app/test_reports/iteration_38.json"
+  ],
+  "success_rate": {
+    "backend": "95%",
+    "frontend": "N/A (backend-only test requested)"
+  },
+  "seed_data_creation": "No new seed data created. demo-cam-002 was temporarily updated to ['yolo-detection','bytetrack'] for disabled-window testing and restored to ['yolo-detection','bytetrack','fast-alpr'] during cleanup.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The critical Mongo write bug appears fixed. Use /app/test_reports/test_v041_anpr_whitelist_metrics_probe.py for runtime evidence; note that the older API-final script still exits 1 because it treats rolling alpr_ms.avg >1ms as failure, while per-frame debug/log evidence shows disabled frames record alpr_ms=0.0. Final camera state includes fast-alpr restored.",
+  "rca_of_the_issue": "Previous iteration failed because the skip branch wrote timings['alpr_ms']=0.0 before timings existed. The current code initializes t_alpr=0.0 before the skip branch and creates timings later from t_alpr. Reproduction checks: login, PUT demo-cam-002 without fast-alpr, verify GET camera persistence, monitor /api/plates count for 35s/60s, inspect /api/ai/debug and backend logs for alpr_ms=0ms, then restore fast-alpr and verify regressions. APIs were real; no mocked integrations were used."
+}

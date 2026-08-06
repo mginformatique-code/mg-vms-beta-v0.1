@@ -1,0 +1,243 @@
+==> /var/log/supervisor/backend.err.log <==
+2026-08-06 08:48:20,795 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 0 détection(s) [aucune] · mouvement=0.2% · 0 plaque(s) · fetch=3ms yolo=53ms tracking=0ms alpr=0ms rt=66ms
+2026-08-06 08:48:22,797 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:48:22,798 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:48:22,798 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:48:22,878 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 0 détection(s) [aucune] · mouvement=0.3% · 0 plaque(s) · fetch=3ms yolo=68ms tracking=0ms alpr=0ms rt=80ms
+2026-08-06 08:48:24,880 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:48:24,881 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:48:24,881 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:48:24,951 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 0 détection(s) [aucune] · mouvement=0.1% · 0 plaque(s) · fetch=3ms yolo=57ms tracking=0ms alpr=0ms rt=70ms
+2026-08-06 08:48:26,952 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:48:26,953 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:48:26,953 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:48:27,022 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 0 détection(s) [aucune] · mouvement=0.5% · 0 plaque(s) · fetch=3ms yolo=57ms tracking=0ms alpr=0ms rt=69ms
+2026-08-06 08:48:29,024 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:48:29,025 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:48:29,025 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:48:29,096 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 0 détection(s) [aucune] · mouvement=0.0% · 0 plaque(s) · fetch=3ms yolo=58ms tracking=0ms alpr=0ms rt=71ms
+2026-08-06 08:48:31,098 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:48:31,098 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:48:31,098 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:48:31,162 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 0 détection(s) [aucune] · mouvement=0.0% · 0 plaque(s) · fetch=3ms yolo=51ms tracking=0ms alpr=0ms rt=63ms
+2026-08-06 08:48:33,163 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:48:33,163 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:48:33,163 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:48:33,235 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 0 détection(s) [aucune] · mouvement=0.0% · 0 plaque(s) · fetch=3ms yolo=59ms tracking=0ms alpr=0ms rt=72ms
+2026-08-06 08:48:35,238 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:48:35,238 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:48:35,238 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:48:35,310 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 1 détection(s) [Personne:0.8] · mouvement=0.1% · 0 plaque(s) · fetch=3ms yolo=59ms tracking=1ms alpr=0ms rt=72ms
+2026-08-06 08:48:35,316 - plugin - WARNING - bytetrack update failed: index 1 is out of bounds for axis 0 with size 1
+2026-08-06 08:48:37,312 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:48:37,313 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:48:37,313 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:48:37,379 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 1 détection(s) [Personne:0.73] · mouvement=0.6% · 0 plaque(s) · fetch=3ms yolo=53ms tracking=1ms alpr=0ms rt=66ms
+2026-08-06 08:48:37,381 - plugin - WARNING - bytetrack update failed: index 1 is out of bounds for axis 0 with size 1
+2026-08-06 08:48:39,381 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:48:39,381 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:48:39,381 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:48:39,449 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 1 détection(s) [Voiture:0.58] · mouvement=6.5% · 0 plaque(s) · fetch=3ms yolo=54ms tracking=1ms alpr=0ms rt=68ms
+2026-08-06 08:48:39,455 - plugin - WARNING - bytetrack update failed: index 1 is out of bounds for axis 0 with size 1
+2026-08-06 08:48:41,451 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:48:41,452 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:48:41,452 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:48:41,544 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 2 détection(s) [Voiture:0.9,Personne:0.65] · mouvement=9.7% · 0 plaque(s) · fetch=3ms yolo=78ms tracking=1ms alpr=0ms rt=92ms
+RuntimeWarning: invalid value encountered in scalar divide
+2026-08-06 08:48:41,547 - plugin - WARNING - bytetrack update failed: 1-th leading minor of the array is not positive definite
+2026-08-06 08:48:43,138 - httpx - INFO - HTTP Request: GET http://localhost:1984/api/frame.jpeg?src=cam_demo-cam-001 "HTTP/1.1 200 OK"
+2026-08-06 08:48:43,138 - lifecycle - INFO - [Camera demo-cam-001] stream_lifecycle: status_probe_ok reason='producteur actif ou caméra joignable (probe non-invasif)' caller='camera_status_loop'
+2026-08-06 08:48:43,546 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:48:43,547 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:48:43,547 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:48:43,615 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 0 détection(s) [aucune] · mouvement=3.9% · 0 plaque(s) · fetch=3ms yolo=56ms tracking=0ms alpr=0ms rt=68ms
+2026-08-06 08:48:45,351 - httpx - INFO - HTTP Request: GET http://localhost:1984/api/frame.jpeg?src=cam_demo-cam-002 "HTTP/1.1 200 OK"
+2026-08-06 08:48:45,351 - lifecycle - INFO - [Camera demo-cam-002] stream_lifecycle: status_probe_ok reason='producteur actif ou caméra joignable (probe non-invasif)' caller='camera_status_loop'
+2026-08-06 08:48:45,617 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:48:45,617 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:48:45,617 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:48:45,683 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 0 détection(s) [aucune] · mouvement=0.2% · 0 plaque(s) · fetch=3ms yolo=53ms tracking=0ms alpr=0ms rt=66ms
+2026-08-06 08:48:47,684 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:48:47,685 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:48:47,685 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:48:47,749 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 0 détection(s) [aucune] · mouvement=3.0% · 0 plaque(s) · fetch=3ms yolo=52ms tracking=0ms alpr=0ms rt=65ms
+2026-08-06 08:48:49,751 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:48:49,752 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:48:49,752 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:48:49,821 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 1 détection(s) [Personne:0.92] · mouvement=3.4% · 0 plaque(s) · fetch=3ms yolo=55ms tracking=1ms alpr=0ms rt=69ms
+2026-08-06 08:48:49,823 - plugin - WARNING - bytetrack update failed: index 1 is out of bounds for axis 0 with size 1
+2026-08-06 08:48:51,823 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:48:51,824 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:48:51,824 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:48:51,897 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 1 détection(s) [Personne:0.86] · mouvement=1.2% · 0 plaque(s) · fetch=3ms yolo=60ms tracking=1ms alpr=0ms rt=73ms
+2026-08-06 08:48:51,899 - plugin - WARNING - bytetrack update failed: index 1 is out of bounds for axis 0 with size 1
+2026-08-06 08:48:53,899 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:48:53,900 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:48:53,900 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:48:53,969 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 1 détection(s) [Personne:0.79] · mouvement=0.9% · 0 plaque(s) · fetch=3ms yolo=55ms tracking=1ms alpr=0ms rt=69ms
+2026-08-06 08:48:53,971 - plugin - WARNING - bytetrack update failed: index 1 is out of bounds for axis 0 with size 1
+2026-08-06 08:48:55,971 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:48:55,972 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:48:55,972 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:48:56,040 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 0 détection(s) [aucune] · mouvement=0.4% · 0 plaque(s) · fetch=3ms yolo=56ms tracking=0ms alpr=0ms rt=68ms
+2026-08-06 08:48:58,042 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:48:58,043 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:48:58,043 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:48:58,120 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 0 détection(s) [aucune] · mouvement=0.8% · 0 plaque(s) · fetch=3ms yolo=65ms tracking=0ms alpr=0ms rt=78ms
+2026-08-06 08:49:00,122 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:49:00,123 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:49:00,123 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:49:00,216 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 0 détection(s) [aucune] · mouvement=2.4% · 0 plaque(s) · fetch=3ms yolo=81ms tracking=0ms alpr=0ms rt=93ms
+2026-08-06 08:49:02,226 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:49:02,226 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:49:02,227 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:49:02,299 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 0 détection(s) [aucune] · mouvement=3.5% · 0 plaque(s) · fetch=3ms yolo=60ms tracking=0ms alpr=0ms rt=73ms
+2026-08-06 08:49:04,300 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:49:04,301 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:49:04,301 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:49:04,391 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 0 détection(s) [aucune] · mouvement=10.2% · 0 plaque(s) · fetch=3ms yolo=78ms tracking=0ms alpr=0ms rt=91ms
+2026-08-06 08:49:06,393 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:49:06,394 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:49:06,394 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:49:06,552 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 1 détection(s) [Voiture:0.86] · mouvement=8.6% · 0 plaque(s) · fetch=3ms yolo=70ms tracking=1ms alpr=75ms rt=158ms
+2026-08-06 08:49:06,625 - plugin - WARNING - bytetrack update failed: index 1 is out of bounds for axis 0 with size 1
+2026-08-06 08:49:08,554 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:49:08,555 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:49:08,555 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:49:08,622 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 0 détection(s) [aucune] · mouvement=2.2% · 0 plaque(s) · fetch=3ms yolo=55ms tracking=0ms alpr=0ms rt=68ms
+2026-08-06 08:49:10,624 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:49:10,625 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:49:10,625 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:49:10,692 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 0 détection(s) [aucune] · mouvement=0.0% · 0 plaque(s) · fetch=3ms yolo=54ms tracking=0ms alpr=0ms rt=67ms
+2026-08-06 08:49:12,694 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:49:12,695 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:49:12,695 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:49:12,762 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 0 détection(s) [aucune] · mouvement=0.1% · 0 plaque(s) · fetch=3ms yolo=55ms tracking=0ms alpr=0ms rt=67ms
+2026-08-06 08:49:14,764 - ai-engine - INFO - Config IA runtime chargée : {'interval_seconds': 2.0, 'confidence': 0.5, 'min_plate_px': 20, 'plate_cache_seconds': 10, 'device': 'auto'} (bytetrack=True)
+2026-08-06 08:49:14,765 - ai-engine - INFO - frame_source.start demo-cam-002 src=demo-go2rtc-relay codec=h264 (rtsp://127.0.0.1:8554/cam_demo-cam-002)
+2026-08-06 08:49:14,765 - ai-engine - INFO - IA · cycle : 1 caméra(s) réelle(s) en parallèle ['Caméra Démo Trafic (IA + LAPI)']
+2026-08-06 08:49:14,830 - ai-engine - INFO - IA · Caméra Démo Trafic (IA + LAPI) (demo-cam-002) : 2 détection(s) [Vélo:0.56,Personne:0.52] · mouvement=0.3% · 0 plaque(s) · fetch=3ms yolo=52ms tracking=1ms alpr=0ms rt=65ms
+RuntimeWarning: invalid value encountered in scalar divide
+2026-08-06 08:49:14,836 - plugin - WARNING - bytetrack update failed: 1-th leading minor of the array is not positive definite
+
+==> /var/log/supervisor/backend.out.log <==
+INFO:     10.66.3.202:46304 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:47638 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:36248 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:53762 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     10.66.3.203:53762 - "GET /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:53762 - "PUT /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:53762 - "GET /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:55958 - "GET /api/plates?camera_id=demo-cam-002&limit=100 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:53762 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:33240 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:51854 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:37014 - "GET /api/plates?camera_id=demo-cam-002&limit=100 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:37014 - "GET /api/diagnostics/pipeline-metrics HTTP/1.1" 200 OK
+INFO:     10.66.3.203:44616 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     10.66.3.203:44616 - "GET /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:59786 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:59786 - "GET /api/diagnostics/frame-source HTTP/1.1" 200 OK
+INFO:     10.66.3.203:44616 - "GET /api/diagnostics/pipeline-metrics HTTP/1.1" 200 OK
+INFO:     10.66.3.202:59786 - "GET /api/ai/debug/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:40170 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:54822 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:50644 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:59654 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:40200 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     10.66.3.202:40200 - "GET /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:46110 - "PUT /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:46110 - "GET /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:46110 - "GET /api/plugins/bus HTTP/1.1" 200 OK
+INFO:     10.66.3.202:40200 - "GET /api/diagnostics/frame-source HTTP/1.1" 200 OK
+INFO:     10.66.3.203:46110 - "GET /api/plugins/catalog HTTP/1.1" 200 OK
+INFO:     10.66.3.203:46114 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:44448 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:33044 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     10.66.3.202:42824 - "GET /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:33044 - "PUT /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:42824 - "GET /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:33044 - "GET /api/plates?camera_id=demo-cam-002&limit=100 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:42840 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:44472 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:41184 - "GET /api/plates?camera_id=demo-cam-002&limit=100 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:41320 - "GET /api/diagnostics/pipeline-metrics HTTP/1.1" 200 OK
+INFO:     10.66.3.203:41320 - "GET /api/ai/debug/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:41184 - "PUT /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:41320 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:37228 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     10.66.3.202:48110 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:48110 - "GET /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:37228 - "GET /api/diagnostics/pipeline-metrics HTTP/1.1" 200 OK
+INFO:     10.66.3.202:48110 - "GET /api/diagnostics/frame-source HTTP/1.1" 200 OK
+INFO:     10.66.3.202:48110 - "GET /api/plates?camera_id=demo-cam-002&limit=1 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:33930 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:45756 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:53668 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:50224 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:33578 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:56362 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:38230 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:36418 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:59872 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:49516 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:53848 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:50646 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:45300 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:48378 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:60282 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:51796 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:51796 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     10.66.3.202:46060 - "GET /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:46060 - "PUT /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:51796 - "GET /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:46060 - "GET /api/plates?camera_id=demo-cam-002&limit=100 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:35930 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:46552 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:51060 - "GET /api/plates?camera_id=demo-cam-002&limit=100 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:48234 - "GET /api/diagnostics/pipeline-metrics HTTP/1.1" 200 OK
+INFO:     10.66.3.203:48234 - "GET /api/ai/debug/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:51060 - "PUT /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:56134 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:53136 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     10.66.3.202:53136 - "GET /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:53136 - "PUT /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:53136 - "GET /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:34388 - "GET /api/plugins/bus HTTP/1.1" 200 OK
+INFO:     10.66.3.203:34388 - "GET /api/diagnostics/frame-source HTTP/1.1" 200 OK
+INFO:     10.66.3.202:53136 - "GET /api/plugins/catalog HTTP/1.1" 200 OK
+INFO:     10.66.3.203:34388 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:45054 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:42218 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:38460 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:47660 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     10.66.3.202:51940 - "GET /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:47660 - "PUT /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:47660 - "GET /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:47660 - "GET /api/plates?camera_id=demo-cam-002&limit=1 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:51940 - "GET /api/plates?camera_id=demo-cam-002&limit=1 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:47660 - "GET /api/diagnostics/pipeline-metrics HTTP/1.1" 200 OK
+INFO:     10.66.3.203:47660 - "GET /api/ai/debug/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:51940 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.202:47242 - "GET /api/plates?camera_id=demo-cam-002&limit=1 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:48694 - "GET /api/diagnostics/pipeline-metrics HTTP/1.1" 200 OK
+INFO:     10.66.3.202:47242 - "GET /api/ai/debug/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:49548 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:44516 - "GET /api/plates?camera_id=demo-cam-002&limit=1 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:49548 - "GET /api/diagnostics/pipeline-metrics HTTP/1.1" 200 OK
+INFO:     10.66.3.203:44516 - "GET /api/ai/debug/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:54926 - "GET /api/plates?camera_id=demo-cam-002&limit=1 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:51000 - "GET /api/diagnostics/pipeline-metrics HTTP/1.1" 200 OK
+INFO:     10.66.3.203:54926 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:54926 - "GET /api/ai/debug/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:37900 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:47908 - "GET /api/plates?camera_id=demo-cam-002&limit=1 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:37900 - "GET /api/diagnostics/pipeline-metrics HTTP/1.1" 200 OK
+INFO:     10.66.3.203:47908 - "GET /api/ai/debug/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:59514 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:59514 - "GET /api/plates?camera_id=demo-cam-002&limit=1 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:59514 - "GET /api/diagnostics/pipeline-metrics HTTP/1.1" 200 OK
+INFO:     10.66.3.202:46054 - "GET /api/ai/debug/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.202:46054 - "PUT /api/cameras/demo-cam-002 HTTP/1.1" 200 OK
+INFO:     10.66.3.203:34322 - "GET /api/system/public-status HTTP/1.1" 200 OK
+INFO:     10.66.3.203:43212 - "GET /api/system/public-status HTTP/1.1" 200 OK
