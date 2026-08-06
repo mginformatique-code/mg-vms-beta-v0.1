@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
-import { Loader2, Moon, Sun, Languages } from "lucide-react";
+import { Loader2, Moon, Sun, Languages, Clock } from "lucide-react";
 import { toast } from "sonner";
 import Logo from "@/components/Logo";
 
 export default function Login() {
   const { login, t, theme, toggleTheme, lang, toggleLang, user } = useApp();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const inactivityLogout = searchParams.get("reason") === "inactivity";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [totp, setTotp] = useState("");
@@ -121,6 +123,19 @@ export default function Login() {
           <form onSubmit={submit} className="w-full max-w-sm fade-up" data-testid="login-form">
             <h2 className="font-head font-bold text-2xl tracking-tight mb-1">{t("login.title")}</h2>
             <p className="text-sm text-muted-foreground mb-8">{t("login.subtitle")}</p>
+
+            {inactivityLogout && (
+              <div className="mb-4 p-3 border border-[#FFB800] bg-[#FFB800]/10 text-[#FFB800] text-xs flex items-start gap-2" data-testid="inactivity-banner">
+                <Clock size={14} className="mt-0.5 shrink-0" />
+                <div>
+                  <div className="font-semibold mb-0.5">Session expirée pour inactivité</div>
+                  Vous avez été déconnecté en raison de l&apos;inactivité (politique de timeout).
+                  Reconnectez-vous pour reprendre votre session.
+                </div>
+                <button type="button" onClick={() => setSearchParams({}, { replace: true })}
+                        className="ml-auto text-[#FFB800]/70 hover:text-[#FFB800]" aria-label="Fermer">✕</button>
+              </div>
+            )}
 
             {!need2fa ? (
               <>

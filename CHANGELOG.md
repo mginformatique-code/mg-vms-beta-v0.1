@@ -7,6 +7,67 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
 
+## [v0.5.5.e] — 2026-02 — Inactivité + Enforcement RBAC + Audit RBAC
+
+### Added (frontend) — Timeout d'inactivité "en dur"
+- Nouveau composant **`InactivityWatcher.jsx`** monté globalement dans
+  `App.js` (à côté de `SessionExpiryWatcher`) :
+  * Écoute les événements d'activité (`mousemove`, `mousedown`, `keydown`,
+    `scroll`, `touchstart`, `wheel`) avec throttle 5s.
+  * Récupère `session_hours` depuis `/api/security/timeout` (fallback 8h).
+  * Timer de vérification toutes les 15s. Après N heures d'inactivité :
+    logout + redirect `/login?reason=inactivity`.
+- **Login.jsx** affiche une bannière orange persistante quand le param
+  `?reason=inactivity` est présent :
+  > « Session expirée pour inactivité — Vous avez été déconnecté en
+  > raison de l'inactivité (politique de timeout). »
+- La modification du timeout par un admin s'applique désormais **à tous
+  les users connectés**, sans attendre leur prochaine connexion.
+
+### Changed (frontend) — Nettoyage menu utilisateurs
+- Suppression du bouton **ShieldCheck (Permissions)** dans la table
+  Utilisateurs et du dialog associé.
+- Le CRUD permissions utilisateur passe désormais **exclusivement** par
+  la nouvelle page RBAC (Centre de sécurité → Rôles & Permissions).
+- Suppression des états morts `permUser`, `selPerms`, `openPerms`,
+  `togglePerm`, `savePerms` et de la constante `PERMS`.
+
+### Added (backend) — Enforcement RBAC réel
+- `require_permission("view_audit_log")` sur `GET /api/audit`.
+- `require_permission("manage_users")` sur les 4 endpoints CRUD users +
+  admin_disable_mfa (`GET/POST/PUT/DELETE /api/users` et
+  `DELETE /api/users/{id}/mfa`).
+- **Admin bypass** conservé : tout admin traverse `require_permission`
+  quelle que soit la permission demandée.
+- Un `guest` (aucune perm) reçoit **403 Forbidden** ; un admin qui
+  active `manage_users` pour le rôle guest via RBAC débloque
+  immédiatement l'endpoint (invalidation cache).
+
+### Added (backend) — Filtre audit
+- `GET /api/audit?action_prefix=rbac_` — nouveau paramètre optionnel
+  pour filtrer les entrées par préfixe d'action (utilisé pour l'onglet
+  Historique RBAC).
+
+### Added (frontend) — Onglet Historique RBAC
+- `RbacCenter.jsx` gagne un système d'onglets :
+  * **Matrice de permissions** (par défaut) — comme avant.
+  * **Historique des changements** — appel `/api/audit?action_prefix=rbac_`
+    avec un tableau : horodatage, type (Modification/Reset colorisé),
+    rôle ciblé (couleur), résumé « N/14 on », auteur.
+- Chargement à la demande (lazy) au premier switch d'onglet + bouton
+  Actualiser.
+
+### Tests
+- `test_v055e_rbac_enforcement.py` — 5/5 verts :
+  * Guest 403 sur `/audit` et `/users`
+  * Admin 200 sur `/audit`
+  * Filtre `action_prefix=rbac_` retourne les entrées attendues
+  * Grant dynamique `manage_users` au rôle guest → guest peut lister
+    users immédiatement (sans nouveau login).
+- Suite v0.5.5.* + v0.5.4 : **32/32 tests verts**.
+
+---
+
 ## [v0.5.5.d] — 2026-02 — Phase D RBAC + Codes de récupération + Email notif
 
 ### Added (backend) — RBAC Phase D

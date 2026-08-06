@@ -16,16 +16,20 @@ import api, { formatApiErrorDetail } from "@/lib/api";
 import { toast } from "sonner";
 import {
   ShieldCheck, Save, RotateCcw, Loader2, Info, Users, Eye, Cog, ShieldAlert,
+  History, RefreshCw,
 } from "lucide-react";
 
 const GROUP_ICON = { video: Eye, manage: Cog, security: ShieldAlert };
 const ROLE_COLOR = { admin: "#FF3333", technician: "#0044FF", client: "#00E676", readonly: "#FFB800", guest: "#71717a" };
 
 export default function RbacCenter() {
+  const [tab, setTab] = useState("matrix"); // matrix | history
   const [data, setData] = useState(null);
-  const [draft, setDraft] = useState({});    // {role: {perm: bool}}
-  const [saving, setSaving] = useState({});  // {role: bool}
+  const [draft, setDraft] = useState({});
+  const [saving, setSaving] = useState({});
   const [loading, setLoading] = useState(true);
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -38,6 +42,16 @@ export default function RbacCenter() {
     finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
+
+  const loadHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const r = await api.get("/audit", { params: { action_prefix: "rbac_", limit: 200 } });
+      setHistory(Array.isArray(r.data) ? r.data : []);
+    } catch (e) { toast.error("Impossible de charger l'historique"); }
+    finally { setHistoryLoading(false); }
+  };
+  useEffect(() => { if (tab === "history") loadHistory(); }, [tab]);
 
   const toggle = (role, perm) => {
     if (role === "admin") return;
@@ -101,6 +115,57 @@ export default function RbacCenter() {
         </div>
       </div>
 
+      {/* ─── Tabs ─── */}
+      <div className="flex items-center gap-1 mb-4 border-b border-border">
+        <button onClick={() => setTab("matrix")} data-testid="rbac-tab-matrix"
+          className={`px-4 py-2 text-sm border-b-2 flex items-center gap-2 ${tab === "matrix" ? "border-[#0044FF] text-[#0044FF]" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+          <Cog size={14} /> Matrice de permissions
+        </button>
+        <button onClick={() => setTab("history")} data-testid="rbac-tab-history"
+          className={`px-4 py-2 text-sm border-b-2 flex items-center gap-2 ${tab === "history" ? "border-[#0044FF] text-[#0044FF]" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+          <History size={14} /> Historique des changements
+        </button>
+      </div>
+
+      {tab === "history" ? (
+        <div className="border border-border bg-card" data-testid="rbac-history">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-muted">
+            <div className="text-xs uppercase tracking-widest text-muted-foreground">
+              {history.length} entrée(s) — actions filtrées : rbac_*
+            </div>
+            <button onClick={loadHistory} disabled={historyLoading}
+              className="px-2 py-1 text-xs border border-border hover:bg-secondary flex items-center gap-1">
+              <RefreshCw size={11} className={historyLoading ? "animate-spin" : ""} /> Actualiser
+            </button>
+          </div>
+          {historyLoading && (
+            <div className="p-6 text-center text-sm text-muted-foreground flex items-center justify-center gap-2">
+              <Loader2 size={14} className="animate-spin" /> Chargement...
+            </div>
+          )}
+          {!historyLoading && history.length === 0 && (
+            <div className="p-6 text-center text-sm text-muted-foreground">
+              Aucun changement RBAC enregistré pour le moment.
+            </div>
+          )}
+          {history.map((h, i) => (
+            <div key={i} className="grid grid-cols-[160px_140px_1fr_160px] gap-3 px-3 py-2 border-b border-border/50 last:border-0 items-center text-xs" data-testid={`rbac-history-row-${i}`}>
+              <div className="mono text-muted-foreground">{h.timestamp ? new Date(h.timestamp).toLocaleString() : "—"}</div>
+              <div className="mono">
+                {h.action === "rbac_role_updated" && <span className="text-[#0044FF]">Modification</span>}
+                {h.action === "rbac_role_reset" && <span className="text-[#FFB800]">Reset</span>}
+                {!["rbac_role_updated", "rbac_role_reset"].includes(h.action) && h.action}
+              </div>
+              <div>
+                Rôle <span className="uppercase font-medium" style={{ color: ROLE_COLOR[h.target] || "inherit" }}>{h.target}</span>
+                {h.details && <span className="text-muted-foreground"> — {h.details}</span>}
+              </div>
+              <div className="text-right text-muted-foreground">par {h.user_email || h.user || "—"}</div>
+            </div>
+          ))}
+        </div>
+      ) : (
+      <>
       <div className="border border-border p-3 bg-card flex items-start gap-2 mb-4">
         <Info size={14} className="text-[#0044FF] mt-0.5 shrink-0" />
         <p className="text-xs text-muted-foreground leading-relaxed">
@@ -210,6 +275,8 @@ export default function RbacCenter() {
         <span>·</span>
         <span>Les changements sont enregistrés par rôle (colonne).</span>
       </div>
+      </>
+      )}
     </div>
   );
 }

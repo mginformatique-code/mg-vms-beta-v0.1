@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from auth import (
     hash_password, log_audit, public_user,
-    PERMISSIONS, ROLES, require_role,
+    PERMISSIONS, ROLES, require_permission, require_role,
 )
 from database import db
 from notifications import send_email_to
@@ -44,13 +44,13 @@ def _clean_permissions(perms: Optional[Dict[str, bool]]) -> Dict[str, bool]:
 
 
 @users_router.get("/users")
-async def list_users(user: dict = Depends(require_role("admin"))):
+async def list_users(user: dict = Depends(require_permission("manage_users"))):
     users = await db.users.find({}, {"_id": 0, "password_hash": 0, "twofa_secret": 0}).to_list(500)
     return [public_user(u) for u in users]
 
 
 @users_router.post("/users")
-async def create_user(data: UserCreate, user: dict = Depends(require_role("admin"))):
+async def create_user(data: UserCreate, user: dict = Depends(require_permission("manage_users"))):
     email = data.email.lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(400, "Email déjà utilisé")
@@ -97,7 +97,7 @@ async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(requi
 
 
 @users_router.delete("/users/{user_id}")
-async def delete_user(user_id: str, user: dict = Depends(require_role("admin"))):
+async def delete_user(user_id: str, user: dict = Depends(require_permission("manage_users"))):
     if user_id == user["id"]:
         raise HTTPException(400, "Impossible de supprimer votre propre compte")
     await db.users.delete_one({"id": user_id})
@@ -108,7 +108,7 @@ async def delete_user(user_id: str, user: dict = Depends(require_role("admin")))
 @users_router.delete("/users/{user_id}/mfa")
 async def admin_disable_mfa(user_id: str,
                              background: BackgroundTasks,
-                             user: dict = Depends(require_role("admin"))):
+                             user: dict = Depends(require_permission("manage_users"))):
     """Désactive la MFA d'un utilisateur (usage : perte du téléphone).
 
     Efface ``twofa_enabled``, ``twofa_secret`` et les hashes des codes de

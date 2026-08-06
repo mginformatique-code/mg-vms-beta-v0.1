@@ -18,6 +18,7 @@ import Sites from "@/pages/Sites";
 import MapView from "@/pages/MapView";
 import MapCenter from "@/pages/MapCenter";
 import SessionExpiryWatcher from "@/components/SessionExpiryWatcher";
+import InactivityWatcher from "@/components/InactivityWatcher";
 import SecurityCenter from "@/pages/SecurityCenter";
 import MfaCenter from "@/pages/MfaCenter";
 import SessionsCenter from "@/pages/SessionsCenter";
@@ -111,6 +112,7 @@ function App() {
       <BrowserRouter>
         <AppRoutes />
         <SessionExpiryWatcher />
+        <InactivityWatcher />
         <Toaster position="top-right" />
       </BrowserRouter>
     </AppProvider>
