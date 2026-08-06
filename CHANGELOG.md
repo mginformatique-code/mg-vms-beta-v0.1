@@ -30,8 +30,8 @@ Demande utilisateur d'unification finale de la navigation :
   * **Intelligence** — Événements IA, Recherche véhicule, Alertes,
     Zones intelligentes, Workflows.
   * **Administration** — Pipeline Center, Plugins, Utilisateurs.
-  * **Paramètres** *(nouveau)* — Paramètres, Rapports, Journal d'audit,
-    Journal de diagnostic, Notifications.
+  * **Journaux & Rapports** — Rapports, Journal d'audit, Journal de diagnostic.
+  * **Paramètres** — Paramètres, Notifications.
   Retirés de la sidebar : Ressources matérielles, Accélération GPU,
   Benchmark ANPR (accessibles via Pipeline Center + Plugin Manager).
 - **PipelineCenter** — deux nouveaux onglets : **Hardware** (Ressources

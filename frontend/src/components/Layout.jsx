@@ -38,11 +38,13 @@ const NAV = [
     { to: "/plugins", icon: Puzzle, key: "nav.plugins", role: "admin" },
     { to: "/users", icon: Users, key: "nav.users", role: "admin" },
   ]},
-  { group: "nav.settings_group", items: [
-    { to: "/settings", icon: Settings, key: "nav.settings" },
+  { group: "nav.logs_reports", items: [
     { to: "/reports", icon: FileText, key: "nav.reports", role: "technician" },
     { to: "/audit", icon: ScrollText, key: "nav.audit", role: "technician" },
     { to: "/diagnostics", icon: Activity, key: "nav.diagnostics", role: "technician" },
+  ]},
+  { group: "nav.settings_group", items: [
+    { to: "/settings", icon: Settings, key: "nav.settings" },
     { to: "/notifications", icon: BellRing, key: "nav.notifications", role: "technician" },
   ]},
 ];
