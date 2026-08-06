@@ -10,6 +10,7 @@ import asyncio
 import logging
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from database import create_indexes
 from auth import auth_router
@@ -100,6 +101,13 @@ app.include_router(reports_router)
 app.include_router(hardware_router)
 
 app.add_middleware(SecurityMiddleware)
+
+# v0.5.1.b · TrustedHost — bloque les requêtes avec Host header inconnu
+# (protection contre l'usurpation de Host, obligatoire derrière un reverse proxy).
+# En dev : "*" par défaut. En prod : configurer MGVMS_TRUSTED_HOSTS=vms.exemple.com.
+_trusted = [h.strip() for h in os.environ.get("MGVMS_TRUSTED_HOSTS", "*").split(",") if h.strip()]
+if _trusted and _trusted != ["*"]:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=_trusted)
 
 app.add_middleware(
     CORSMiddleware,

@@ -1,0 +1,86 @@
+# MG-VMS — Déploiement PRODUCTION (v0.5.1.b)
+# =========================================================================
+# Ajoute Nginx (TLS terminator) + Certbot (Let's Encrypt) devant la stack
+# de base définie dans docker-compose.yml. Utilisation :
+#
+#   cp .env.example .env               # adapter MGVMS_DOMAIN, secrets, paths
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Pré-requis host :
+#   - Ports 80 + 443 ouverts (Let's Encrypt HTTP-01 + HTTPS)
+#   - Domaine résolvant vers l'IP publique du serveur
+#   - Renouvellement certbot planifié via cron/systemd toutes les 60 j :
+#       docker compose -f docker-compose.prod.yml exec certbot certbot renew
+#       docker compose -f docker-compose.prod.yml exec nginx nginx -s reload
+
+services:
+  # ─── Reverse proxy TLS ──────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on: [backend, go2rtc, frontend]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/mgvms.conf:ro
+      - ./nginx-proxy_backend.conf:/etc/nginx/proxy_backend.conf:ro
+      # Volumes Let's Encrypt partagés avec certbot
+      - letsencrypt:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+      # Recordings alias (auth_request pointe vers backend)
+      - ${RECORDINGS_PATH:-./data/recordings}:/app/recordings:ro
+    networks: [mgvms]
+
+  # ─── Let's Encrypt ACME (auto-renew) ────────────────────────────
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    # Loop qui renouvelle tous les 12h (idempotent — no-op tant que non-expiré)
+    entrypoint: |
+      /bin/sh -c 'trap exit TERM;
+       while :; do certbot renew --webroot -w /var/www/certbot --quiet;
+                    sleep 12h & wait $${!}; done'
+
+  # ─── Backend : NE PAS exposer le port 8001 en production ────────
+  backend:
+    ports: !reset []       # override du docker-compose.yml (n'expose plus 8001 en direct)
+    environment:
+      # v0.5.1.b · Durcissement : ces valeurs DOIVENT venir de .env, pas de valeurs par défaut
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET requis (générer via openssl rand -hex 32)}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD requis (compte initial)}
+      MGVMS_DOMAIN: ${MGVMS_DOMAIN:?MGVMS_DOMAIN requis (ex: vms.exemple.com)}
+      # Force HTTPS-only cookies
+      MGVMS_COOKIE_SECURE: "true"
+      MGVMS_TRUSTED_HOSTS: ${MGVMS_DOMAIN}
+      CORS_ORIGINS: https://${MGVMS_DOMAIN}
+    networks: [mgvms]
+
+  # ─── go2rtc : NE PAS exposer les ports 1984/8554/8555 en direct ─
+  # WebRTC ports UDP passent par Nginx uniquement pour la signalisation ;
+  # les flux WebRTC réels tirent directement sur le host (ICE).
+  go2rtc:
+    ports: !reset
+      - "8554:8554"           # RTSP direct (VLC / clients LAN) — optionnel
+      - "8555:8555"           # WebRTC TCP fallback
+      - "8555:8555/udp"       # WebRTC UDP (ICE) — obligatoire pour direct connect
+    networks: [mgvms]
+
+  # ─── Frontend : NE PAS exposer le port 3000 en direct ───────────
+  frontend:
+    ports: !reset []
+    environment:
+      # Frontend appelle désormais /api/* via nginx (same-origin)
+      REACT_APP_BACKEND_URL: https://${MGVMS_DOMAIN}
+    networks: [mgvms]
+
+volumes:
+  letsencrypt:
+  certbot_www:
+
+networks:
+  mgvms:
+    external: false

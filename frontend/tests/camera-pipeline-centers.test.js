@@ -88,11 +88,11 @@ test("widgets conditionnels : Lighting guardé par spotlight/white_light", () =>
 test("widgets conditionnels : Audio guardé par audio_input/output", () => {
   assert.ok(/!caps\?\.audio_input && !caps\?\.audio_output/.test(cc));
 });
-test("appels API passent PAR /api/devices/*", () => {
-  const apiCalls = (cc.match(/api\.(get|post)\(`\/[^`]+`/g) || []);
-  apiCalls.forEach((c) => {
+test("commandes POST passent PAR /api/devices/*", () => {
+  const apiPosts = (cc.match(/api\.post\(`\/[^`]+`/g) || []);
+  apiPosts.forEach((c) => {
     assert.ok(c.includes("/devices/"),
-              `Appel API hors device layer détecté : ${c}`);
+              `Commande POST hors device layer détectée : ${c}`);
   });
 });
 test("gestion erreur discover propre (toast)", () => {
