@@ -46,6 +46,7 @@ const NAV = [
     { to: "/reports", icon: FileText, key: "nav.reports", role: "technician" },
     { to: "/notifications", icon: BellRing, key: "nav.notifications", role: "technician" },
     { to: "/plugins", icon: Puzzle, key: "nav.plugins", role: "admin" },
+    { to: "/anpr-benchmark", icon: Cpu, key: "nav.anpr_benchmark", role: "technician" },
     { to: "/users", icon: Users, key: "nav.users", role: "admin" },
     { to: "/settings", icon: Settings, key: "nav.settings" },
   ]},
@@ -95,7 +96,6 @@ export default function Layout({ children }) {
   const navigate = useNavigate();
   const [sys, setSys] = useState({ cpu: 0, ram: 0, storage: 0, gpu: { available: false } });
   const [alertCount, setAlertCount] = useState(0);
-  const [pluginPages, setPluginPages] = useState([]);
 
   const loadStats = () => {
     api.get("/dashboard/stats").then((r) => {
@@ -103,20 +103,10 @@ export default function Layout({ children }) {
       setAlertCount(r.data.alerts_active);
     }).catch(() => {});
   };
-  const loadPluginMenus = () => {
-    api.get("/plugins").then((r) => {
-      // Toutes les extensions actives (y compris ANPR) s'affichent dans la section
-      // dédiée « Extensions » — évite la dispersion des fonctions optionnelles.
-      const visible = (r.data || [])
-        .filter((p) => p.enabled && p.status !== "disabled" && p.status !== "error");
-      setPluginPages(visible);
-    }).catch(() => setPluginPages([]));
-  };
   useEffect(() => {
-    loadStats(); loadPluginMenus();
+    loadStats();
     const i = setInterval(loadStats, 30000);
-    const j = setInterval(loadPluginMenus, 30000);
-    return () => { clearInterval(i); clearInterval(j); };
+    return () => { clearInterval(i); };
   }, []);
 
   // Mise à jour live via WebSocket
@@ -152,45 +142,6 @@ export default function Layout({ children }) {
               ))}
             </div>
           ))}
-          {/* Section Extensions : alimentée dynamiquement par les plugins actifs */}
-          {pluginPages.length > 0 && (
-            <div className="mb-4" data-testid="nav-extensions">
-              <div className="px-4 mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground font-medium flex items-center gap-1">
-                <Puzzle size={10} /> Extensions
-              </div>
-              {pluginPages.map((p) => {
-                const Ic = PLUGIN_ICON[p.id] || Puzzle;
-                return (
-                  <React.Fragment key={p.id}>
-                    <NavLink to={p.route || `/plugins/${p.id}`}
-                      data-testid={`nav-plugin-${p.id}`}
-                      className={({ isActive }) =>
-                        `flex items-center gap-3 px-4 py-2 text-sm transition-colors border-l-2 ${
-                          isActive ? "border-l-[#0044FF] bg-secondary text-foreground font-medium"
-                                   : "border-l-transparent text-muted-foreground hover:bg-secondary hover:text-foreground"
-                        }`}>
-                      <Ic size={17} strokeWidth={1.5} />
-                      <span className="flex-1 truncate">{p.name}</span>
-                      {p.status === "not_configured" && <span className="w-1.5 h-1.5 rounded-full bg-[#FFB800]" title="À configurer" />}
-                      {p.status === "ok" && <span className="w-1.5 h-1.5 rounded-full bg-[#00E676]" title="Opérationnel" />}
-                    </NavLink>
-                    {/* Sous-liens ANPR : Benchmark (technicien seulement) */}
-                    {p.id === "anpr" && can("technician") && (
-                      <NavLink to="/anpr-benchmark" data-testid="nav-anpr_benchmark"
-                        className={({ isActive }) =>
-                          `flex items-center gap-3 pl-11 pr-4 py-1.5 text-xs transition-colors border-l-2 ${
-                            isActive ? "border-l-[#0044FF] bg-secondary text-foreground font-medium"
-                                     : "border-l-transparent text-muted-foreground/80 hover:bg-secondary hover:text-foreground"
-                          }`}>
-                        <Cpu size={13} strokeWidth={1.5} />
-                        {t("nav.anpr_benchmark")}
-                      </NavLink>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </div>
-          )}
         </nav>
         <div className="border-t border-border p-3">
           <div className="flex items-center gap-2 mb-2">

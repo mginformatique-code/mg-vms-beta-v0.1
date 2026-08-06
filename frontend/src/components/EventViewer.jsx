@@ -120,13 +120,18 @@ export default function EventViewer({ items, index, onClose, onIndex, kind = "ev
     // (ANPR + détecteurs + trackers + segmenters). Les événements pipeline
     // exposent `detectors`, `trackers`, `segmenters` (listes) ; les plaques
     // exposent `engine` (moteur ANPR).
+    // v0.5.1.c · Priorité au champ `plugins_used` unifié (backend downstream).
     const engineParts = [];
-    if (kind === "plate" || item.plate) {
-      engineParts.push(`ANPR: ${item.engine || "fast-alpr"}`);
+    if (item.plugins_used?.length) {
+      engineParts.push(item.plugins_used.join(", "));
+    } else {
+      if (kind === "plate" || item.plate) {
+        engineParts.push(`ANPR: ${item.engine || "fast-alpr"}`);
+      }
+      if (item.detectors?.length) engineParts.push(`Détection: ${item.detectors.join(", ")}`);
+      if (item.trackers?.length)  engineParts.push(`Tracking: ${item.trackers.join(", ")}`);
+      if (item.segmenters?.length) engineParts.push(`Segmentation: ${item.segmenters.join(", ")}`);
     }
-    if (item.detectors?.length) engineParts.push(`Détection: ${item.detectors.join(", ")}`);
-    if (item.trackers?.length)  engineParts.push(`Tracking: ${item.trackers.join(", ")}`);
-    if (item.segmenters?.length) engineParts.push(`Segmentation: ${item.segmenters.join(", ")}`);
     const pluginValue = engineParts.length
       ? engineParts.join(" · ")
       : (item.plugin || (kind === "plate" ? "ANPR (fast-alpr)" : item._bbox ? "YOLO" : "Détection"));

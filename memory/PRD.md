@@ -25,6 +25,27 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 
 ### État Feb 2026 — sessions successives
 
+**Session 41 (Feb 2026)** — v0.5.1.c · Multi-plugin events + UX corrections :
+- 🐛 Bug fix `TrackingPanel` (Pipeline Center) : `trackers` retourné comme
+  dict est maintenant normalisé en array côté frontend.
+- 🧹 Menu latéral : section "Extensions" dynamique **supprimée**. Tous les
+  plugins passent par `/plugins`. Sous-lien `/anpr-benchmark` déplacé en
+  Administration.
+- 📸 Recherche véhicule (`VehicleSearch.jsx`) : modal détail avec scène
+  complète (frame plein), crop véhicule (YOLO), crop OCR (plaque),
+  badges plugins et table des lectures multi-moteurs.
+- 🔀 Multi-plugin events (fix hardcode fast-alpr/yolo) :
+  * `_compute_plugins_used(cam)` → liste unifiée CORE + whitelist.
+  * `_prerun_multi_anpr()` extrait : dispatch multi-ANPR AVANT écriture
+    des events YOLO ⇒ corrélation par `track_id`.
+  * Events YOLO embarquent `plate`, `plate_confidence`, `anpr_readings`,
+    `plugins_used`, `track_id`.
+  * Plaques persistées embarquent `plugins_used`, `anpr_readings`, `track_id`.
+  * `EventViewer` : priorité au champ unifié `plugins_used`.
+- 🛡️ Fermeture stricte v0.4.3 **conservée** (whitelist vide ⇒ 0 dispatch).
+- 📊 Tests : 94/94 critiques verts (10 nouveaux tests multi-plugin +
+  ancien test isolation adapté au nouveau path).
+
 **Session 40 (Feb 2026)** — v0.5.1.a · Welcome Center + TESTING=1 bypass :
 - 🏠 **Welcome Center** livré comme écran d'accueil officiel (route `/`).
   Dashboard historique déplacé sur `/dashboard`. Un unique call

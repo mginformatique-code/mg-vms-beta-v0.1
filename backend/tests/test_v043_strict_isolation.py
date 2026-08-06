@@ -233,13 +233,15 @@ class TestCameraWorkerAnprIsolation:
 
 class TestDownstreamMultiAnprIsolation:
     def test_source_reads_strict_whitelist(self):
-        """Le code de downstream doit refléter la fermeture stricte."""
+        """Le code de downstream doit refléter la fermeture stricte.
+
+        v0.5.1.c : la logique multi-ANPR a été extraite dans
+        ``_prerun_multi_anpr`` (dispatch AVANT les events YOLO pour
+        corrélation). La fermeture stricte reste identique.
+        """
         import inspect
-        from pipeline_v2.downstream import run_downstream
-        src = inspect.getsource(run_downstream)
-        # v0.4.3 · doit contenir la fermeture explicite
+        from pipeline_v2.downstream import _prerun_multi_anpr
+        src = inspect.getsource(_prerun_multi_anpr)
         assert "if not _cam_whitelist" in src, (
             "downstream multi-ANPR doit fermer strictement quand whitelist vide")
-        # Il ne doit plus exister de branche où _anpr_entries est peuplé
-        # sans passer par le filtre `if e.name in _cam_whitelist`.
         assert "e.name in _cam_whitelist" in src

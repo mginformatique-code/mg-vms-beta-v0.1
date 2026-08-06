@@ -7,6 +7,73 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
 
+## [v0.5.1.c] — 2026-02 — Multi-plugin events + Recherche véhicule enrichie (Session 41)
+
+### Contexte
+Retour utilisateur post v0.5.1.a : (1) bug TypeError dans Pipeline Center /
+onglet Tracking, (2) demande de suppression du menu "Extensions" (tout via
+`/plugins`), (3) besoin de visualiser la scène complète + crop OCR dans la
+Recherche véhicule, (4) les événements et les plaques doivent refléter
+**tous les plugins** ayant contribué (pas uniquement fast-alpr et yolo
+hardcodés).
+
+### Fixed
+- **PipelineCenter · TrackingPanel** : le backend renvoie `runtime.trackers`
+  comme dict `{camera_id: {...}}` mais le frontend attendait un array
+  (`trackers.map`). Fix défensif : normalisation dict → array côté client.
+
+### Changed
+- **Menu latéral** : suppression complète de la section dynamique
+  "Extensions" (`Layout.jsx`). Tous les plugins sont accessibles depuis
+  l'entrée statique `/plugins` (Plugin Center). Le sous-lien
+  `/anpr-benchmark` (technicien) migre dans le groupe Administration.
+- **VehicleSearch** (Recherche véhicule) : cartes cliquables ouvrant un
+  **modal détail** avec :
+  - Scène complète (`frame_thumb`)
+  - Crop véhicule (YOLO)
+  - Crop OCR (plaque)
+  - Badges plugins utilisés + table des lectures multi-moteurs
+    (`engine` + plaque lue + confiance %)
+- **EventViewer** : priorité au champ unifié `plugins_used` pour afficher
+  la liste multi-plugins (au lieu des champs séparés detectors/trackers/
+  segmenters/engine).
+
+### Added (backend)
+- `pipeline_v2/downstream.py` :
+  - Helper `_compute_plugins_used(cam)` → liste ordonnée sans doublons
+    (CORE `yolov11`+`bytetrack`+`fast-alpr` + whitelist caméra).
+  - Fonction extraite `_prerun_multi_anpr()` : dispatch multi-moteurs
+    ANPR **AVANT** l'écriture des events YOLO, permettant la corrélation
+    par `track_id`.
+  - Index `result["_anpr_by_track"]` : par track véhicule, la liste de
+    toutes les lectures ANPR (moteur, plaque, confiance, crop).
+  - Chaque **event** (Mouvement / Visage / YOLO) reçoit désormais :
+    * `plugins_used: [...]`
+  - Chaque event YOLO reçoit en plus :
+    * `plate` (consensus, plus confiante)
+    * `plate_confidence`
+    * `anpr_readings: [{engine, plate, confidence, plate_crop}, ...]`
+    * `track_id`
+  - Chaque **plaque** persistée reçoit :
+    * `plugins_used`
+    * `anpr_readings` (toutes les lectures multi-moteurs pour ce track)
+    * `track_id`
+- La règle de fermeture stricte v0.4.3 est **conservée** dans le nouveau
+  helper `_prerun_multi_anpr` (whitelist vide ⇒ zéro dispatch, zéro plugin).
+
+### Tests
+- `tests/test_v051c_multi_plugin_events.py` — **10 tests** :
+  * `_compute_plugins_used` : CORE toujours présent, whitelist ajoutée,
+    pas de doublons, `enabled_plugins=None` supporté.
+  * `run_downstream` annote events + plaques avec `plugins_used`.
+  * Events YOLO embarquent `anpr_readings` + `plate` best-of.
+  * `_prerun_multi_anpr` existe et ferme strictement.
+  * Ordre : dispatch multi-ANPR AVANT écriture events YOLO.
+- `tests/test_v043_strict_isolation.py` : test source path mis à jour
+  (logique déplacée de `run_downstream` vers `_prerun_multi_anpr`).
+- 94/94 tests critiques v0.4.x/v0.5.1.x verts.
+
+
 ## [v0.5.1.a] — 2026-02 — Welcome Center + TESTING=1 bypass (Session 40)
 
 ### Contexte

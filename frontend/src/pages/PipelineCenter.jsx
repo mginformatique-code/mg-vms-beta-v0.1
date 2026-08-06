@@ -266,7 +266,19 @@ function TrackingPanel() {
   useEffect(() => {
     api.get("/diagnostics/pipeline-inspector").then((r) => setSnap(r.data)).catch(() => setSnap({}));
   }, []);
-  const trackers = snap?.runtime?.trackers || [];
+  // v0.5.1.c fix : `runtime.trackers` peut être un dict {camera_id: {...}} ou
+  // un array selon la version du backend. Normalise en array ici.
+  const raw = snap?.runtime?.trackers;
+  const trackers = Array.isArray(raw)
+    ? raw
+    : raw && typeof raw === "object"
+      ? Object.entries(raw).map(([camera_id, v]) => ({
+          camera_id,
+          algo: v?.algo || v?.type,
+          active_tracks: v?.active_tracks ?? v?.tracks ?? v?.count,
+          ...v,
+        }))
+      : [];
   return (
     <Card className="p-4" data-testid="tracking-panel">
       <div className="text-sm text-muted-foreground mb-3">

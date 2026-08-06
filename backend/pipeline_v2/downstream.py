@@ -42,6 +42,80 @@ def _det_thumb(det: dict):
     return det["thumbnail"]
 
 
+# ═══════════════════════════════════════════════════════════════════
+# v0.5.1.c · Multi-plugin tracking (events + plates)
+# ═══════════════════════════════════════════════════════════════════
+# Plugins CORE toujours actifs quand le pipeline tourne (ne dépendent pas de
+# la whitelist caméra). yolov11 = détection, bytetrack = tracking, fast-alpr =
+# OCR embarqué toujours dispatché sur les véhicules.
+_CORE_PLUGINS_ALWAYS_ON = ["yolov11", "bytetrack", "fast-alpr"]
+
+
+def _compute_plugins_used(cam: dict) -> list[str]:
+    """Retourne la liste UNIQUE et ordonnée des plugins actifs pour cette caméra.
+
+    - Plugins CORE (`yolov11`, `bytetrack`, `fast-alpr`) toujours listés.
+    - Plugins additionnels : la whitelist `enabled_plugins` de la caméra.
+
+    Cette liste est stockée dans chaque événement et chaque plaque, permettant
+    au frontend d'afficher des badges "multi-plugins" au lieu d'un seul champ
+    ``engine`` hardcodé sur ``fast-alpr``.
+    """
+    wl = cam.get("enabled_plugins") or []
+    out = list(_CORE_PLUGINS_ALWAYS_ON)
+    for name in wl:
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
+async def _prerun_multi_anpr(cam: dict, ctx, result: dict, now_iso: str) -> None:
+    """Dispatch multi-moteurs ANPR AVANT l'écriture des events YOLO.
+
+    Alimente ``result["plates"]`` avec les lectures de tous les moteurs
+    additionnels de la whitelist (openalpr, google-vision, azure, plate-
+    recognizer, codeproject…). Chaque moteur reçoit le MÊME objet Frame par
+    ROI véhicule (mêmes pixels, un seul encodage JPEG memoizé).
+
+    Fermeture stricte : whitelist vide/absente ⇒ aucun moteur dispatché.
+    """
+    try:
+        from plugin_manager.bus import bus as _plugin_bus_multi
+        from plugin_manager.interfaces import Frame as _MFrame
+        _cam_whitelist = set(cam.get("enabled_plugins") or [])
+        if not _cam_whitelist:
+            return
+        _anpr_entries = [e for e in _plugin_bus_multi.active("PlateRecognizer")
+                         if e.name != "fast-alpr" and e.name in _cam_whitelist]
+        _rois = (ctx.vehicle_rois if ctx else []) or []
+        if not _anpr_entries or not _rois:
+            return
+        _only = {e.name for e in _anpr_entries}
+        for _roi in _rois:
+            _mf = _MFrame(
+                camera_id=cam["id"], timestamp=now_iso,
+                numpy_bgr=_roi.crop,
+                width=int(_roi.crop.shape[1]), height=int(_roi.crop.shape[0]),
+            )
+            _multi_results = await _plugin_bus_multi.dispatch_plate(
+                _mf, vehicle_bbox=None, timeout_s=8.0, only=_only,
+            )
+            for engine_name, plate_results in _multi_results:
+                for pr in plate_results or []:
+                    result["plates"].append({
+                        "plate": (pr.text or "").upper().strip(),
+                        "confidence": round(float(getattr(pr, "confidence", 0.0)), 2),
+                        "plate_crop": None,
+                        "vehicle_crop": _roi.jpeg_data_uri(),
+                        "vehicle_type": _roi.owner.get("label"),
+                        "vehicle_color": _roi.owner.get("vehicle_color"),
+                        "track_id": _roi.track_id,
+                        "engine": engine_name,
+                    })
+    except Exception:
+        logger.exception("_prerun_multi_anpr dispatch error")
+
+
 async def run_downstream(cam: dict, frame, result: dict) -> None:
     """Corps du worker downstream (ex ``ai_engine._do_downstream_work``)."""
     import ai_engine as _ae
@@ -57,6 +131,13 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
     # Image partagée : FrameContext prioritaire, sinon legacy (ndarray ou None)
     img = ctx.image if ctx is not None else (frame if hasattr(frame, "shape") else None)
 
+    # ── v0.5.1.c · Multi-plugin tracking : plugins actifs pour cette caméra ──
+    # Liste UNIQUE de tous les plugins qui participent au pipeline (utilisée
+    # dans les events + plates pour l'affichage frontend "multi-plugins").
+    plugins_used = _compute_plugins_used(cam)
+    # Index track_id → lectures ANPR multi-moteurs (rempli en fin de fonction).
+    result.setdefault("_anpr_by_track", {})
+
     # ── Mouvement réel ───────────────────────────────────────────────
     if result["motion_pct"] >= _ae.MOTION_THRESHOLD_PCT and \
             cooldown_ok(f"{cam['id']}:motion", _ae.MOTION_COOLDOWN, now):
@@ -64,6 +145,7 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
             "id": str(uuid.uuid4()), "type": "Mouvement", **base,
             "confidence": None, "motion_pct": result["motion_pct"],
             "thumbnail": _ae._ensure_frame_thumb(result), "vehicle_color": None,
+            "plugins_used": plugins_used,
         })
 
     # ── Reconnaissance faciale ───────────────────────────────────────
@@ -100,6 +182,7 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
                         "face_id": m.get("face_id"),
                         "face_name": m.get("name"),
                         "watchlist": is_watch,
+                        "plugins_used": plugins_used,
                     })
                     if should_alert and is_watch:
                         await db.alerts.insert_one({
@@ -114,17 +197,45 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
             except Exception:
                 logger.exception("Face recognition : erreur d'analyse")
 
+    # ── v0.5.1.c · Multi-ANPR pré-collecté avant les events YOLO ─────
+    # On lance le dispatch multi-moteurs sur les VehicleROI IMMÉDIATEMENT
+    # après YOLO/tracking, avant d'écrire les événements de détection,
+    # afin que chaque événement puisse embarquer directement la lecture de
+    # plaque consensuelle et la liste des moteurs qui ont contribué.
+    await _prerun_multi_anpr(cam, ctx, result, now_iso)
+    # Consolidation fast-alpr (déjà présent dans result["plates"]) + multi
+    # dans un index track_id → readings (pour attacher aux events YOLO).
+    for p in result.get("plates", []):
+        tid = p.get("track_id")
+        if tid is None:
+            continue
+        entry = {
+            "engine": p.get("engine") or "fast-alpr",
+            "plate": p.get("plate"),
+            "confidence": p.get("confidence", 0.0),
+            "plate_crop": p.get("plate_crop"),
+        }
+        result["_anpr_by_track"].setdefault(tid, []).append(entry)
+
     # ── Détections YOLO → événements ─────────────────────────────────
     for det in result["detections"]:
         if not cooldown_ok(f"{cam['id']}:{det['class']}", _ae.EVENT_COOLDOWN, now):
             continue
+        tid = det.get("track_id")
+        anpr_readings = result["_anpr_by_track"].get(tid, []) if tid is not None else []
+        # Consensus plaque : la plus confiante parmi les lectures multi-moteurs
+        best_reading = max(anpr_readings, key=lambda r: r.get("confidence", 0), default=None)
         await db.events.insert_one({
             "id": str(uuid.uuid4()), "type": det["label"], **base,
             "confidence": det["confidence"],
             "thumbnail": _ae._ensure_frame_thumb(result) or _det_thumb(det),
             "crop_thumbnail": _det_thumb(det),
             "vehicle_color": det.get("vehicle_color"),
-            "track_id": det.get("track_id"),
+            "track_id": tid,
+            "plugins_used": plugins_used,
+            "plate": best_reading["plate"] if best_reading else None,
+            "plate_confidence": best_reading["confidence"] if best_reading else None,
+            "anpr_readings": anpr_readings,
         })
 
     # ── PluginBus per-camera (graph registry) — TRACKS PRÉ-CALCULÉS ──
@@ -270,57 +381,20 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
     await _evaluate_scenarios(cam, result, now)
     inspector.record(cam["id"], "scenarios", (time.perf_counter() - t_scen) * 1000)
 
-    # ── Multi-moteurs ANPR sur VehicleROI PARTAGÉS ───────────────────
-    # Chaque moteur (plate-recognizer, openalpr, google-vision, azure,
-    # codeproject…) reçoit LE MÊME objet Frame par ROI : mêmes pixels,
-    # UN SEUL encodage JPEG memoizé via Frame.jpeg(). Plus aucun crop ni
-    # imencode dupliqué dans les plugins.
+    # ── Multi-moteurs ANPR : DÉJÀ RUN plus haut (`_prerun_multi_anpr`) ──
+    # Bloc conservé désactivé pour clarté. Toutes les lectures multi-moteurs
+    # figurent maintenant dans `result["plates"]` avant même l'écriture des
+    # events YOLO. Voir _prerun_multi_anpr() en début de fonction.
+    inspector.record(cam["id"], "multi_anpr", 0.0)
+
+    # ── Persistance plaques + alertes liste noire ────────────────────
+    # ── Persistance plaques + alertes liste noire ────────────────────
+    # Charge la config ANPR caméra (whitelist/blacklist locales, override
+    # pays) juste avant la boucle de persistance.
     anpr_cfg_cam = _ae._camera_anpr_cfg.get(cam["id"], {}) or {}
     wl_local = set(anpr_cfg_cam.get("whitelist_local", []) or [])
     bl_local = set(anpr_cfg_cam.get("blacklist_local", []) or [])
 
-    t_multi = time.perf_counter()
-    try:
-        from plugin_manager.bus import bus as _plugin_bus_multi
-        from plugin_manager.interfaces import Frame as _MFrame
-        # v0.4.3 · Fermeture stricte : ``enabled_plugins`` est l'unique
-        # source d'autorité. Whitelist vide/null/absente ⇒ aucun moteur
-        # ANPR cloud dispatché.
-        _cam_whitelist = set(cam.get("enabled_plugins") or [])
-        if not _cam_whitelist:
-            _anpr_entries: list = []
-        else:
-            _anpr_entries = [e for e in _plugin_bus_multi.active("PlateRecognizer")
-                             if e.name != "fast-alpr" and e.name in _cam_whitelist]
-        _rois = (ctx.vehicle_rois if ctx else []) or []
-        if _anpr_entries and _rois:
-            _only = {e.name for e in _anpr_entries}
-            for _roi in _rois:
-                _mf = _MFrame(
-                    camera_id=cam["id"], timestamp=now_iso,
-                    numpy_bgr=_roi.crop,
-                    width=int(_roi.crop.shape[1]), height=int(_roi.crop.shape[0]),
-                )
-                _multi_results = await _plugin_bus_multi.dispatch_plate(
-                    _mf, vehicle_bbox=None, timeout_s=8.0, only=_only,
-                )
-                for engine_name, plate_results in _multi_results:
-                    for pr in plate_results or []:
-                        result["plates"].append({
-                            "plate": (pr.text or "").upper().strip(),
-                            "confidence": round(float(getattr(pr, "confidence", 0.0)), 2),
-                            "plate_crop": None,
-                            "vehicle_crop": _roi.jpeg_data_uri(),
-                            "vehicle_type": _roi.owner.get("label"),
-                            "vehicle_color": _roi.owner.get("vehicle_color"),
-                            "track_id": _roi.track_id,
-                            "engine": engine_name,
-                        })
-    except Exception:
-        logger.exception("multi_anpr dispatch error")
-    inspector.record(cam["id"], "multi_anpr", (time.perf_counter() - t_multi) * 1000)
-
-    # ── Persistance plaques + alertes liste noire ────────────────────
     t_persist = time.perf_counter()
     for p in result["plates"]:
         if "_emit" in p and not p["_emit"]:
@@ -339,6 +413,11 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
         else:
             wl = await db.watchlist.find_one({"plate": p["plate"]}, {"_id": 0})
             list_status = wl["list_type"] if wl else "none"
+        # Toutes les lectures multi-moteurs pour ce track_id (permet à
+        # l'UI Recherche véhicule d'afficher tous les moteurs qui ont
+        # contribué à cette plaque).
+        _tid = p.get("track_id")
+        all_readings = result["_anpr_by_track"].get(_tid, []) if _tid is not None else []
         doc = {
             "id": str(uuid.uuid4()), "plate": p["plate"], **base,
             "confidence": p["confidence"],
@@ -352,6 +431,9 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
             "vehicle_crop": p.get("vehicle_crop"), "plate_crop": p.get("plate_crop"),
             "frame_thumb": _ae._ensure_frame_thumb(result),
             "engine": p.get("engine", "fast-alpr"),
+            "plugins_used": plugins_used,
+            "anpr_readings": all_readings,
+            "track_id": _tid,
         }
         await db.plates.insert_one(dict(doc))
         doc.pop("_id", None)
