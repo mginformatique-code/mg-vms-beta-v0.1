@@ -16,6 +16,7 @@ import os
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import httpx
 
@@ -353,8 +354,15 @@ def _detect_motion(camera_id: str, img) -> float:
     return round(changed * 100.0 / diff.size, 2)
 
 
-def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
+def _analyze_frame(camera_id: str, frame_bytes: bytes, enabled_plugins: Optional[list[str]] = None) -> dict:
     """Mouvement + YOLO d'abord (rapide), puis ALPR uniquement si véhicule détecté et hors-cache.
+
+    v0.4.1 · **Fix bug critique** : ``enabled_plugins`` = whitelist des plugins IA
+    activés sur CETTE caméra. Si non vide et que ``fast-alpr`` n'y figure pas,
+    le bloc ANPR est **complètement court-circuité** — aucun OCR, aucune écriture
+    Mongo, aucun événement plaque. Répare le bug "FastALPR désactivé mais des
+    plaques sont malgré tout reconnues" (rapport audit v0.4.1).
+
     Retourne aussi les timings ms par étape et un snapshot pour le mode debug."""
     import cv2
     import numpy as np
@@ -409,7 +417,16 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes) -> dict:
     plate_debug = []
     anpr_cfg = _camera_anpr_cfg.get(camera_id, {}) or {}
     roi = anpr_cfg.get("roi_polygon") or []
-    if vehicles and _alpr:
+    # v0.4.1 · **BUG CRITIQUE FIX** — Respect strict de ``enabled_plugins``.
+    # Si l'utilisateur a désactivé ``fast-alpr`` sur cette caméra, on
+    # **court-circuite** tout le bloc OCR : zéro CPU/VRAM, zéro écriture
+    # Mongo, zéro événement plaque. Whitelist vide → comportement legacy.
+    _anpr_skipped = bool(enabled_plugins) and "fast-alpr" not in enabled_plugins
+    if _anpr_skipped:
+        logger.debug("ANPR skip %s : fast-alpr not in enabled_plugins %s",
+                     camera_id, enabled_plugins)
+        timings["alpr_ms"] = 0.0
+    if vehicles and _alpr and not _anpr_skipped:
         now = datetime.now(timezone.utc)
         # Purge cache expiré
         for k, exp in list(_plate_cache.items()):
@@ -937,7 +954,10 @@ async def _process_camera(cam: dict) -> None:
     t_fetch_ms = (time.perf_counter() - t_start) * 1000
 
     t_ai = time.perf_counter()
-    result = await asyncio.to_thread(_analyze_frame, cam["id"], frame)
+    # v0.4.1 · Passe la whitelist enabled_plugins à _analyze_frame pour
+    # court-circuiter le bloc ANPR si fast-alpr n'est pas activé sur cette caméra.
+    _enabled = cam.get("enabled_plugins") or []
+    result = await asyncio.to_thread(_analyze_frame, cam["id"], frame, _enabled)
     t_ai_ms = (time.perf_counter() - t_ai) * 1000
     dets = result.get("detections", [])
     plates = result.get("plates", [])

@@ -1,0 +1,57 @@
+{
+  "verdict": "not_fixed",
+  "user_reported_bug": "MG-VMS v0.4.1 · BUG CRITIQUE : FastALPR désactivé sur une caméra, des plaques sont MALGRÉ TOUT reconnues et écrites en base MongoDB. La whitelist enabled_plugins de la caméra n'est pas respectée par le pipeline ANPR. Le code ANPR historique (fast-alpr dans _analyze_frame) tournait indépendamment du filtrage Plugin Manager. Point #2 du rapport : 'Un plugin désactivé ne reçoit jamais de frame, ne consomme aucun CPU, ne consomme aucune VRAM, ne génère aucun événement, ne met jamais à jour MongoDB'.",
+  "summary": "No relevant testing skill found. Focused backend/API verification on demo-cam-002: login works, enabled_plugins without fast-alpr persisted, and no new plates were inserted over a 35s disabled window (700 -> 700). However the fix is not acceptable: /api/diagnostics/pipeline-metrics reported alpr_ms.avg=29.6ms instead of near 0 after disabling fast-alpr, and local code-level execution of _analyze_frame with enabled_plugins=['yolo-detection','bytetrack'] raises UnboundLocalError at ai_engine.py:428 because timings is written before initialization. Re-enabled fast-alpr during cleanup and regression endpoints passed.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/diagnostics/pipeline-metrics",
+        "issue": "After configuring demo-cam-002 with enabled_plugins=['yolo-detection','bytetrack'] and waiting 35s, alpr_ms.avg was 29.6ms, not close to 0 as required for a skipped disabled FastALPR plugin.",
+        "priority": "CRITICAL"
+      },
+      {
+        "endpoint": "ai_engine._analyze_frame",
+        "issue": "The disabled-FastALPR code path raises UnboundLocalError: cannot access local variable 'timings' where it is not associated with a value. ai_engine.py sets timings['alpr_ms']=0.0 before timings is created.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/test_v041_anpr_whitelist_api_final.py",
+    "/app/test_reports/test_v041_anpr_whitelist_local.py",
+    "/app/test_reports/test_v041_regressions_cleanup.py"
+  ],
+  "action_items": [
+    "Move/remove the premature timings['alpr_ms']=0.0 assignment in _analyze_frame; initialize timings only once after t_alpr is finalized or avoid referencing timings before line 522.",
+    "Retest demo-cam-002 with FastALPR excluded until pipeline-metrics for the disabled window records alpr_ms.avg near 0 and ai_debug shows recent successful analysis rather than crashed/stale cycles.",
+    "Review downstream multi-ANPR dispatch so PlateRecognizer plugins are also gated by the per-camera enabled_plugins whitelist before receiving frames or persisting plates."
+  ],
+  "critical_code_review_comments": [
+    "/app/backend/ai_engine.py:424-428: _anpr_skipped branch writes timings['alpr_ms'] before timings is defined, causing the disabled-plugin path to crash.",
+    "/app/backend/ai_engine.py:1471 uses asyncio.gather(..., return_exceptions=True) without logging returned camera exceptions, so per-camera _analyze_frame crashes can be hidden while metrics/debug remain missing or stale.",
+    "/app/backend/ai_engine.py:1267-1291 dispatches PlateRecognizer plugins in downstream work without an obvious enabled_plugins camera whitelist guard; currently bus reports 0 PlateRecognizer dispatchable, but this is a regression risk for the same contract."
+  ],
+  "updated_files": [
+    "/app/test_reports/test_v041_anpr_whitelist_api.py",
+    "/app/test_reports/test_v041_anpr_whitelist_api_final.py",
+    "/app/test_reports/test_v041_anpr_whitelist_local.py",
+    "/app/test_reports/test_v041_regressions_cleanup.py",
+    "/app/test_reports/bug_verification_37.json",
+    "/app/test_reports/iteration_37.json"
+  ],
+  "success_rate": {
+    "backend": "75%",
+    "frontend": "N/A (backend-only test requested)"
+  },
+  "seed_data_creation": "No new seed data created. demo-cam-002 was updated via API to exclude fast-alpr for the test window, then restored to ['yolo-detection','bytetrack','fast-alpr'] during cleanup.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Use /app/test_reports/test_v041_anpr_whitelist_api_final.py and /app/test_reports/test_v041_anpr_whitelist_local.py. Expected fixed behavior: no new plates while fast-alpr excluded, _analyze_frame returns normally, /api/diagnostics/pipeline-metrics has demo-cam-002 with alpr_ms.avg near 0 after a disabled window, and regression endpoints bus/frame-source/catalog still pass.",
+  "rca_of_the_issue": "The new skip guard was inserted before the timings dict exists. When enabled_plugins is non-empty and excludes fast-alpr, _anpr_skipped=True and ai_engine.py:428 attempts timings['alpr_ms']=0.0, raising UnboundLocalError. Runtime API testing also showed the disabled window did not produce new MongoDB plate rows, but ALPR timing was not skipped cleanly (29.6ms avg), so the full disabled-plugin contract is still not met. APIs are real; no mocked integrations were used."
+}
