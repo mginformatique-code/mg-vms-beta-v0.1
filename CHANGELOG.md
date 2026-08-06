@@ -7,6 +7,32 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
 
+## [v0.5.5.a] — 2026-02 — Sidebar sous-menus (Centre de sécurité + Paramètres)
+
+### Changed (frontend)
+- Le **Centre de sécurité** devient un sous-menu en cascade regroupant :
+  * Vue d'ensemble (`/security-center`) — score & critères
+  * Utilisateurs (`/users`) — anciennement top-level, désormais rattaché
+- Les **Paramètres** deviennent un sous-menu en cascade regroupant :
+  * Général (`/settings`) — apparence, langue, compte, stockage, DB
+  * MFA (`/settings#mfa`) — activation 2FA / QR code / TOTP
+  * Sessions actives (`/settings#sessions`) — timeout, sessions en cours
+- Navigation par ancre : cliquer sur MFA ou Sessions actives navigue vers
+  `/settings` puis auto-scroll (smooth) vers la section correspondante.
+- `NavGroupItem` reconnaît désormais les URLs contenant un `#hash` :
+  matching actif exact (pathname + hash) pour éviter que « Général » reste
+  actif quand l'utilisateur est sur un sous-menu ancré.
+- i18n FR/EN : nouvelles clés `nav.security_score`, `nav.settings_general`,
+  `nav.mfa`, `nav.sessions_active`.
+
+### Notes
+- Aucune route backend touchée, aucune régression fonctionnelle.
+- `data-testid` conservés (`nav-security_center`, `nav-users`, `nav-mfa`,
+  `nav-sessions_active`, `nav-settings`, `nav-security_score`,
+  `nav-settings_general`).
+
+---
+
 ## [v0.5.5] — 2026-02 — Assistant de découverte réseau avancée
 
 ### Added (backend)

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { Moon, Sun, Languages, ShieldCheck, Monitor, Loader2, HardDrive, Save, Trash2, PlayCircle, Database, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Clock, Wifi, LogOut } from "lucide-react";
@@ -6,9 +7,22 @@ import { toast } from "sonner";
 
 export default function SettingsPage() {
   const { t, theme, setTheme, lang, setLang, user, setUser } = useApp();
+  const location = useLocation();
   const [setup, setSetup] = useState(null);
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Scroll vers l'ancre (#mfa / #sessions) quand elle change.
+  useEffect(() => {
+    if (!location.hash) return;
+    const id = location.hash.slice(1);
+    // Petit délai pour laisser les Cards se monter.
+    const timer = setTimeout(() => {
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [location.hash]);
 
   const start2fa = async () => {
     setLoading(true);
@@ -21,8 +35,8 @@ export default function SettingsPage() {
   const disable2fa = async () => { await api.post("/auth/2fa/disable"); toast.success("2FA désactivée"); setUser({ ...user, twofa_enabled: false }); };
 
   // eslint-disable-next-line react/no-unstable-nested-components
-  const Card = ({ title, icon: Icon, children }) => (
-    <div className="bg-card border border-border p-5 mb-3">
+  const Card = ({ title, icon: Icon, children, id }) => (
+    <div id={id} className="bg-card border border-border p-5 mb-3 scroll-mt-4">
       <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-4"><Icon size={15} /> {title}</div>
       {children}
     </div>
@@ -51,7 +65,7 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      <Card title={t("settings.security")} icon={ShieldCheck}>
+      <Card title={t("settings.security")} icon={ShieldCheck} id="mfa">
         <div className="text-sm font-medium mb-1">{t("settings.twofa")}</div>
         <div className="text-xs text-muted-foreground mb-4">
           {user?.twofa_enabled ? <span className="mg-online">● Activée</span> : <span className="mg-offline">● Désactivée</span>}
@@ -557,7 +571,7 @@ function SecuritySessionsCard({ t, user, Card }) {
   };
 
   return (
-    <Card title={t("security.sessions_title")} icon={LogOut}>
+    <Card title={t("security.sessions_title")} icon={LogOut} id="sessions">
       {isAdmin && (
         <div className="mb-4 pb-3 border-b border-border">
           <div className="text-xs mb-2 flex items-center gap-1"><Clock size={12} /> {t("security.timeout_label")}</div>

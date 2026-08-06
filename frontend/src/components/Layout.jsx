@@ -40,10 +40,13 @@ const NAV = [
   ]},
   { group: "nav.admin", items: [
     { to: "/pipeline-center", icon: LineChart, key: "nav.pipeline_center", role: "technician" },
-    { to: "/security-center", icon: ShieldCheck, key: "nav.security_center", role: "admin" },
+    // Centre de sécurité — devient un vrai sous-menu (Vue d'ensemble + Utilisateurs)
+    { key: "nav.security_center", icon: ShieldCheck, role: "admin", children: [
+      { to: "/security-center", key: "nav.security_score", icon: ShieldCheck, end: true },
+      { to: "/users", key: "nav.users", icon: Users, role: "admin" },
+    ]},
     { to: "/network", icon: Network, key: "nav.network", role: "client" },
     { to: "/plugins", icon: Puzzle, key: "nav.plugins", role: "admin" },
-    { to: "/users", icon: Users, key: "nav.users", role: "admin" },
   ]},
   { group: "nav.logs_reports", items: [
     { to: "/reports", icon: FileText, key: "nav.reports", role: "technician" },
@@ -51,7 +54,12 @@ const NAV = [
     { to: "/diagnostics", icon: Activity, key: "nav.diagnostics", role: "technician" },
   ]},
   { group: "nav.settings_group", items: [
-    { to: "/settings", icon: Settings, key: "nav.settings" },
+    // Paramètres — devient un vrai sous-menu (Général + MFA + Sessions actives)
+    { key: "nav.settings", icon: Settings, children: [
+      { to: "/settings", key: "nav.settings_general", icon: Settings, end: true },
+      { to: "/settings#mfa", key: "nav.mfa", icon: ShieldCheck },
+      { to: "/settings#sessions", key: "nav.sessions_active", icon: Clock },
+    ]},
     { to: "/notifications", icon: BellRing, key: "nav.notifications", role: "technician" },
   ]},
 ];
@@ -121,7 +129,9 @@ function NavGroupItem({ item, t, can, hasPerm }) {
   const children = (item.children || []).filter(
     (c) => (!c.role || can(c.role)) && (!c.perm || hasPerm(c.perm))
   );
-  const activeChild = children.some((c) => location.pathname === c.to);
+  const pathOf = (to) => (to || "").split("#")[0];
+  const hashOf = (to) => { const i = (to || "").indexOf("#"); return i >= 0 ? (to || "").slice(i) : ""; };
+  const activeChild = children.some((c) => location.pathname === pathOf(c.to));
   const [open, setOpen] = useState(activeChild);
   useEffect(() => {
     if (activeChild) setOpen(true);
@@ -148,19 +158,31 @@ function NavGroupItem({ item, t, can, hasPerm }) {
         <div className="pb-1">
           {children.map((c) => {
             const CIc = c.icon;
+            // Détection d'active tenant compte du hash (`/settings#mfa`).
+            const childPath = pathOf(c.to);
+            const childHash = hashOf(c.to);
+            const isActive = location.pathname === childPath
+              && (childHash ? location.hash === childHash
+                            : (!location.hash || c.end !== false));
+            // Quand plusieurs enfants pointent vers le même pathname, on ne
+            // veut pas que "général" (sans hash) reste actif si un hash est
+            // présent dans l'URL.
+            const sameGroup = children.some((cc) => cc !== c && pathOf(cc.to) === childPath);
+            const finalActive = !sameGroup
+              ? location.pathname === childPath
+              : (location.pathname === childPath &&
+                 (childHash ? location.hash === childHash : !location.hash));
             return (
               <NavLink
                 key={c.to}
                 to={c.to}
                 end={c.end}
                 data-testid={`nav-${c.key.split(".")[1]}`}
-                className={({ isActive }) =>
-                  `flex items-center gap-2 pl-11 pr-4 py-1.5 text-[13px] transition-colors border-l-2 ${
-                    isActive
-                      ? "border-l-[#0044FF] bg-secondary text-foreground font-medium"
-                      : "border-l-transparent text-muted-foreground/90 hover:bg-secondary hover:text-foreground"
-                  }`
-                }
+                className={`flex items-center gap-2 pl-11 pr-4 py-1.5 text-[13px] transition-colors border-l-2 ${
+                  finalActive
+                    ? "border-l-[#0044FF] bg-secondary text-foreground font-medium"
+                    : "border-l-transparent text-muted-foreground/90 hover:bg-secondary hover:text-foreground"
+                }`}
               >
                 <CIc size={13} strokeWidth={1.5} />
                 {t(c.key)}
