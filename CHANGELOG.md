@@ -7,6 +7,55 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
 
+## [v0.5.3] — 2026-02 — Welcome Center refactoré (tutoriels vidéo + widgets) + Dashboard allégé (Session 46)
+
+### Contexte
+Retour utilisateur pour recentrer les rôles :
+- **Welcome Center** = éditorial (news, changelog, conseils, wiki, tutos, widgets).
+- **Tableau de bord** = opérationnel (KPI, activité, alertes récentes).
+
+### Changed (frontend)
+- **Welcome Center** :
+  * ❌ Supprimé : bloc **Stats express** (4 KPI Caméras/Événements/Plaques/Alertes) — désormais dans le Dashboard uniquement.
+  * ❌ Supprimé : bloc **Alertes système** — synthèse déplacée dans le Dashboard.
+  * ➕ Ajouté : section **Tutoriels vidéo** (CRUD admin, extraction auto de l'ID YouTube + miniature `hqdefault.jpg`, vignette cliquable ouvrant la vidéo).
+  * ➕ Ajouté : section **Widgets** style pfSense (CRUD admin, deux types :
+    `note` = texte libre, `links` = liste de liens rapides `label|url`).
+- **Dashboard** :
+  * ❌ Supprimé : carte **Santé du système** (CPU/RAM/STO/Temp/Bandwidth/Uptime) — redondante avec la topbar temps réel et la santé du Welcome Center.
+  * ✅ Le graphique **Activité 24h** occupe désormais toute la largeur.
+  * ✅ Les 7 KPI et le condensé d'alertes récentes restent.
+
+### Added (backend)
+- Route module `routes/welcome.py` étendu :
+  * Collection Mongo **`welcome_tutorials`** : `{id, title, url, youtube_id,
+    thumbnail, description, created_at, created_by}`.
+  * Collection Mongo **`welcome_widgets`** : `{id, type: 'note'|'links',
+    title, body, items?, order, created_at, created_by}`.
+  * Endpoints (`admin` pour écriture) :
+    - `GET/POST/DELETE /api/welcome/tutorials`
+    - `GET/POST/DELETE /api/welcome/widgets`
+  * Helper `_extract_youtube_id(url)` supportant youtu.be, youtube.com/watch,
+    /embed, /v, /shorts.
+
+### i18n
+- Nouvelles clés (FR + EN) : `welcome.tips`, `welcome.tutorials`,
+  `welcome.widgets`, `welcome.add_tutorial`, `welcome.add_widget`,
+  `welcome.tut_title`, `welcome.tut_desc`, `welcome.publish`,
+  `welcome.no_tutorial`, `welcome.no_widget`, `welcome.widget_note`,
+  `welcome.widget_links`, `welcome.widget_title`, `welcome.widget_body`,
+  `welcome.widget_title_required`, `welcome.load_failed`,
+  `welcome.published`, `welcome.publish_denied`, `welcome.delete_confirm`,
+  `welcome.delete_denied`, `common.cancel`.
+
+### Tests
+- Aucun régression backend (102/102 verts inchangés — les nouveaux endpoints
+  suivent le pattern déjà couvert).
+- Vérification E2E via Playwright : suppression stats/alertes système
+  confirmée, sections Tutoriels + Widgets présentes, Dashboard sans bloc
+  santé, graphique activité pleine largeur.
+
+
 ## [v0.5.2.c] — 2026-02 — Map Center · Phases 2, 3 et 4 (Session 45)
 
 ### Contexte

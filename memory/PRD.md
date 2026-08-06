@@ -25,6 +25,17 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 
 ### État Feb 2026 — sessions successives
 
+**Session 46 (Feb 2026)** — v0.5.3 · Welcome refactoré + Dashboard allégé :
+- 📝 Welcome Center recentré éditorial : suppression Stats+Alertes système,
+  ajout **Tutoriels vidéo YouTube** (CRUD admin, miniature auto) et
+  **Widgets** style pfSense (notes libres / liens rapides).
+- 📊 Dashboard allégé : suppression carte Santé du système (redondante
+  avec topbar+Welcome), graphique Activité en pleine largeur.
+- 🗄️ 2 nouvelles collections Mongo (`welcome_tutorials`, `welcome_widgets`)
+  + 6 endpoints admin.
+- 🌐 21 nouvelles clés i18n FR+EN.
+- 📊 Tests : aucune régression, 102/102 critiques verts.
+
 **Session 45 (Feb 2026)** — v0.5.2.c · **Map Center Phases 2/3/4** :
 - 🎨 Phase 2 : cônes de couverture colorés vert/jaune/rouge (heuristique
   angle+portée+hauteur), badges IA (ANPR/PTZ/TH/IA/REC) sous l'icône

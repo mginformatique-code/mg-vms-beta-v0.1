@@ -28,7 +28,7 @@ import {
   CheckCircle2, ChevronDown, ChevronUp, Cpu, Database, Github, HardDrive,
   Layers, Lightbulb, LifeBuoy, MemoryStick, Monitor, Newspaper, Package,
   PenSquare, Pin, PinOff, Puzzle, ScanLine, Server, Settings, Sparkles,
-  Sparkle, Trash2, Wifi, Zap,
+  Sparkle, Trash2, Wifi, Zap, PlayCircle, Link2, StickyNote, PlusCircle,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────────
@@ -268,18 +268,211 @@ function StatsSection({ stats }) {
   );
 }
 
-function TipsSection({ tips }) {
+function TipsSection({ tips, t }) {
   return (
     <div className="bg-card border border-border p-4" data-testid="welcome-tips">
-      <SectionHeader icon={Lightbulb} title="Conseils" />
+      <SectionHeader icon={Lightbulb} title={t("welcome.tips")} />
       <ul className="space-y-2">
-        {tips.map((t, i) => (
+        {tips.map((tip, i) => (
           <li key={i} className="flex items-start gap-2 text-xs text-muted-foreground" data-testid={`welcome-tip-${i}`}>
             <Sparkle size={12} className="text-[#0044FF] mt-0.5 shrink-0" />
-            <span>{t}</span>
+            <span>{tip}</span>
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// v0.5.3 · Tutoriels vidéo YouTube (admin CRUD)
+// ─────────────────────────────────────────────────────────────────────
+function TutorialsSection({ tutorials, isAdmin, onCreate, onDelete, t }) {
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState({ title: "", url: "", description: "" });
+  const submit = async () => {
+    if (!form.title.trim() || !form.url.trim()) { toast.error("Titre + URL requis"); return; }
+    await onCreate(form);
+    setForm({ title: "", url: "", description: "" });
+    setCreating(false);
+  };
+  return (
+    <div className="bg-card border border-border p-4" data-testid="welcome-tutorials">
+      <SectionHeader
+        icon={PlayCircle}
+        title={t("welcome.tutorials")}
+        right={isAdmin && (
+          <button
+            onClick={() => setCreating((v) => !v)}
+            className="text-xs text-[#0044FF] hover:underline flex items-center gap-1"
+            data-testid="welcome-tut-create-btn"
+          >
+            <PlusCircle size={12} /> {creating ? t("common.cancel") : t("welcome.add_tutorial")}
+          </button>
+        )}
+      />
+      {creating && (
+        <div className="mb-3 border border-border p-2 space-y-2" data-testid="welcome-tut-form">
+          <input className="w-full bg-background border border-border px-2 py-1.5 text-sm"
+            placeholder={t("welcome.tut_title")}
+            value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })}
+            data-testid="welcome-tut-title" />
+          <input className="w-full bg-background border border-border px-2 py-1.5 text-sm mono"
+            placeholder="https://youtu.be/..."
+            value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })}
+            data-testid="welcome-tut-url" />
+          <textarea className="w-full bg-background border border-border px-2 py-1.5 text-sm min-h-[50px]"
+            placeholder={t("welcome.tut_desc")}
+            value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
+            data-testid="welcome-tut-desc" />
+          <button onClick={submit}
+            className="w-full bg-[#0044FF] text-white px-3 py-1 text-xs uppercase tracking-wider"
+            data-testid="welcome-tut-submit">
+            {t("welcome.publish")}
+          </button>
+        </div>
+      )}
+      {tutorials.length === 0 ? (
+        <div className="text-xs text-muted-foreground py-2">{t("welcome.no_tutorial")}</div>
+      ) : (
+        <div className="space-y-2 max-h-72 overflow-y-auto">
+          {tutorials.map((tt) => (
+            <div key={tt.id} className="flex gap-2 group" data-testid={`welcome-tut-${tt.id}`}>
+              <a href={tt.url} target="_blank" rel="noopener noreferrer"
+                className="relative w-24 aspect-video shrink-0 bg-black overflow-hidden border border-border">
+                {tt.thumbnail ? (
+                  <img src={tt.thumbnail} alt={tt.title} className="w-full h-full object-cover opacity-90 group-hover:opacity-100" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center"><PlayCircle size={20} /></div>
+                )}
+                <PlayCircle size={16} className="absolute inset-0 m-auto text-white opacity-80" />
+              </a>
+              <div className="flex-1 min-w-0">
+                <a href={tt.url} target="_blank" rel="noopener noreferrer"
+                  className="text-xs font-medium hover:text-[#0044FF] truncate block">{tt.title}</a>
+                <div className="text-[10px] text-muted-foreground line-clamp-2">{tt.description}</div>
+              </div>
+              {isAdmin && (
+                <button onClick={() => onDelete(tt.id)}
+                  className="opacity-0 group-hover:opacity-100 text-[#FF3333]" title="Supprimer">
+                  <Trash2 size={12} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// v0.5.3 · Widgets custom (notes libres + liens rapides) — style pfSense
+// ─────────────────────────────────────────────────────────────────────
+function WidgetsSection({ widgets, isAdmin, onCreate, onDelete, t }) {
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState({ type: "note", title: "", body: "", items: "" });
+  const submit = async () => {
+    if (!form.title.trim()) { toast.error(t("welcome.widget_title_required")); return; }
+    let items = null;
+    if (form.type === "links") {
+      items = form.items.split("\n").map((l) => {
+        const [label, url] = l.split("|").map((s) => (s || "").trim());
+        return label && url ? { label, url } : null;
+      }).filter(Boolean);
+    }
+    await onCreate({
+      type: form.type, title: form.title.trim(),
+      body: form.type === "note" ? form.body : "",
+      items,
+      order: 0,
+    });
+    setForm({ type: "note", title: "", body: "", items: "" });
+    setCreating(false);
+  };
+  return (
+    <div className="bg-card border border-border p-4" data-testid="welcome-widgets">
+      <SectionHeader
+        icon={Layers}
+        title={t("welcome.widgets")}
+        right={isAdmin && (
+          <button
+            onClick={() => setCreating((v) => !v)}
+            className="text-xs text-[#0044FF] hover:underline flex items-center gap-1"
+            data-testid="welcome-widget-create-btn"
+          >
+            <PlusCircle size={12} /> {creating ? t("common.cancel") : t("welcome.add_widget")}
+          </button>
+        )}
+      />
+      {creating && (
+        <div className="mb-3 border border-border p-2 space-y-2" data-testid="welcome-widget-form">
+          <div className="flex gap-2">
+            <label className="text-xs flex items-center gap-1 cursor-pointer">
+              <input type="radio" name="wtype" value="note"
+                checked={form.type === "note"} onChange={() => setForm({ ...form, type: "note" })} />
+              {t("welcome.widget_note")}
+            </label>
+            <label className="text-xs flex items-center gap-1 cursor-pointer">
+              <input type="radio" name="wtype" value="links"
+                checked={form.type === "links"} onChange={() => setForm({ ...form, type: "links" })} />
+              {t("welcome.widget_links")}
+            </label>
+          </div>
+          <input className="w-full bg-background border border-border px-2 py-1.5 text-sm"
+            placeholder={t("welcome.widget_title")} value={form.title}
+            onChange={(e) => setForm({ ...form, title: e.target.value })} />
+          {form.type === "note" ? (
+            <textarea className="w-full bg-background border border-border px-2 py-1.5 text-sm min-h-[60px]"
+              placeholder={t("welcome.widget_body")} value={form.body}
+              onChange={(e) => setForm({ ...form, body: e.target.value })} />
+          ) : (
+            <textarea className="w-full bg-background border border-border px-2 py-1.5 text-xs mono min-h-[60px]"
+              placeholder="Label | https://…\nAutre lien | https://…"
+              value={form.items}
+              onChange={(e) => setForm({ ...form, items: e.target.value })} />
+          )}
+          <button onClick={submit}
+            className="w-full bg-[#0044FF] text-white px-3 py-1 text-xs uppercase tracking-wider">
+            {t("welcome.publish")}
+          </button>
+        </div>
+      )}
+      {widgets.length === 0 && !creating ? (
+        <div className="text-xs text-muted-foreground py-2">{t("welcome.no_widget")}</div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          {widgets.map((w) => (
+            <div key={w.id} className="border border-border p-3 group relative" data-testid={`welcome-widget-${w.id}`}>
+              <div className="flex items-center gap-1.5 mb-1.5">
+                {w.type === "links" ? <Link2 size={12} className="text-[#0044FF]" />
+                                      : <StickyNote size={12} className="text-[#FFB800]" />}
+                <span className="text-xs font-medium flex-1 truncate">{w.title}</span>
+                {isAdmin && (
+                  <button onClick={() => onDelete(w.id)}
+                    className="opacity-0 group-hover:opacity-100 text-[#FF3333]" title="Supprimer">
+                    <Trash2 size={11} />
+                  </button>
+                )}
+              </div>
+              {w.type === "note" ? (
+                <p className="text-xs text-muted-foreground whitespace-pre-wrap">{w.body}</p>
+              ) : (
+                <ul className="space-y-1">
+                  {(w.items || []).map((it, i) => (
+                    <li key={i}>
+                      <a href={it.url} target="_blank" rel="noopener noreferrer"
+                        className="text-xs text-[#0044FF] hover:underline flex items-center gap-1">
+                        <ArrowRight size={10} /> {it.label}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -575,18 +768,26 @@ function PrefsSection({ prefs, currentVersion, onSave }) {
 // ─────────────────────────────────────────────────────────────────────
 
 export default function WelcomeCenter() {
-  const { user } = useApp();
+  const { user, t } = useApp();
   const [data, setData] = useState(null);
+  const [tutorials, setTutorials] = useState([]);
+  const [widgets, setWidgets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [changelogExpanded, setChangelogExpanded] = useState(false);
   const isAdmin = user?.role === "admin";
 
   const load = async () => {
     try {
-      const r = await api.get("/welcome/summary");
+      const [r, rt, rw] = await Promise.all([
+        api.get("/welcome/summary"),
+        api.get("/welcome/tutorials"),
+        api.get("/welcome/widgets"),
+      ]);
       setData(r.data);
+      setTutorials(rt.data.items || []);
+      setWidgets(rw.data.items || []);
     } catch (e) {
-      toast.error("Impossible de charger le Welcome Center");
+      toast.error(t("welcome.load_failed"));
     } finally {
       setLoading(false);
     }
@@ -606,20 +807,41 @@ export default function WelcomeCenter() {
   const createNews = async (payload) => {
     try {
       await api.post("/welcome/news", payload);
-      toast.success("Actualité publiée");
+      toast.success(t("welcome.published"));
       await load();
     } catch (e) {
-      toast.error("Publication refusée");
+      toast.error(t("welcome.publish_denied"));
     }
   };
   const deleteNews = async (id) => {
-    if (!window.confirm("Supprimer cette actualité ?")) return;
+    if (!window.confirm(t("welcome.delete_confirm"))) return;
     try {
       await api.delete(`/welcome/news/${id}`);
       await load();
     } catch (e) {
-      toast.error("Suppression refusée");
+      toast.error(t("welcome.delete_denied"));
     }
+  };
+  const createTutorial = async (payload) => {
+    try {
+      await api.post("/welcome/tutorials", payload);
+      toast.success(t("welcome.published"));
+      await load();
+    } catch (e) { toast.error(t("welcome.publish_denied")); }
+  };
+  const deleteTutorial = async (id) => {
+    if (!window.confirm(t("welcome.delete_confirm"))) return;
+    try { await api.delete(`/welcome/tutorials/${id}`); await load(); }
+    catch (e) { toast.error(t("welcome.delete_denied")); }
+  };
+  const createWidget = async (payload) => {
+    try { await api.post("/welcome/widgets", payload); toast.success(t("welcome.published")); await load(); }
+    catch (e) { toast.error(t("welcome.publish_denied")); }
+  };
+  const deleteWidget = async (id) => {
+    if (!window.confirm(t("welcome.delete_confirm"))) return;
+    try { await api.delete(`/welcome/widgets/${id}`); await load(); }
+    catch (e) { toast.error(t("welcome.delete_denied")); }
   };
 
   const openChangelog = () => {
@@ -686,20 +908,22 @@ export default function WelcomeCenter() {
         />
       </div>
 
-      {/* Ligne 2 : Stats */}
-      <StatsSection stats={stats} />
-
-      {/* Ligne 3 : Alerts + News + Tips */}
+      {/* Ligne 2 : News + Tips + Tutoriels */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">
-        <AlertsSection alerts={alerts || []} />
         <NewsSection
           news={news || []}
           isAdmin={isAdmin}
           onCreate={createNews}
           onDelete={deleteNews}
         />
-        <TipsSection tips={tips || []} />
+        <TipsSection tips={tips || []} t={t} />
+        <TutorialsSection tutorials={tutorials} isAdmin={isAdmin} t={t}
+          onCreate={createTutorial} onDelete={deleteTutorial} />
       </div>
+
+      {/* Ligne 3 : Widgets custom (admin) */}
+      <WidgetsSection widgets={widgets} isAdmin={isAdmin} t={t}
+        onCreate={createWidget} onDelete={deleteWidget} />
 
       {/* Ligne 4 : Centers */}
       <CentersSection />

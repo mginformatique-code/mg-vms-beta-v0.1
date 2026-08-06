@@ -83,8 +83,8 @@ export default function Dashboard() {
         <Kpi icon={ScanLine} label={t("dash.plates")} value={stats.plates_today} delay={240} />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-2 mb-2">
-        <div className="xl:col-span-2 bg-card border border-border p-4">
+      <div className="grid grid-cols-1 gap-2 mb-2">
+        <div className="bg-card border border-border p-4">
           <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground mb-4">{t("dash.activity")}</div>
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={ts.hourly}>
@@ -96,22 +96,10 @@ export default function Dashboard() {
               <XAxis dataKey="time" stroke="#71717a" fontSize={10} tickLine={false} />
               <YAxis stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} />
               <Tooltip contentStyle={{ background: theme === "dark" ? "#0E0E0E" : "#fff", border: `1px solid ${grid}`, borderRadius: 0, fontSize: 12 }} />
-              <Area type="monotone" dataKey="events" stroke="#0044FF" fill="url(#g1)" strokeWidth={2} name="Événements" />
-              <Area type="monotone" dataKey="plates" stroke="#00E676" fill="url(#g2)" strokeWidth={2} name="Plaques" />
+              <Area type="monotone" dataKey="events" stroke="#0044FF" fill="url(#g1)" strokeWidth={2} name={t("dash.events")} />
+              <Area type="monotone" dataKey="plates" stroke="#00E676" fill="url(#g2)" strokeWidth={2} name={t("dash.plates")} />
             </AreaChart>
           </ResponsiveContainer>
-        </div>
-
-        <div className="bg-card border border-border p-4">
-          <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground mb-4">{t("dash.health")}</div>
-          <Health icon={Cpu} label={t("dash.cpu")} value={stats.system.cpu} unit="%" />
-          <Health icon={MemoryStick} label={t("dash.ram")} value={stats.system.ram} unit="%" />
-          <Health icon={HardDrive} label={t("dash.storage")} value={stats.system.storage} unit="%" />
-          <Health icon={Thermometer} label={t("dash.temp")} value={stats.system.temperature} unit="°C" max={90} />
-          <Health icon={Gauge} label={t("dash.bandwidth")} value={stats.system.bandwidth_mbps} unit=" Mb/s" max={1000} />
-          <div className="flex items-center gap-2 mt-4 pt-3 border-t border-border text-xs text-muted-foreground">
-            <Clock size={14} /> {t("dash.uptime")}: <span className="mono text-foreground">{stats.system.uptime_days}j</span>
-          </div>
         </div>
       </div>
 

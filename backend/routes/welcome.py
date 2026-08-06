@@ -80,6 +80,21 @@ class PrefsInput(BaseModel):
     important_only: Optional[bool] = None
 
 
+class TutorialInput(BaseModel):
+    title: str = Field(..., min_length=1, max_length=160)
+    url: str = Field(..., min_length=5, max_length=500)
+    description: str = ""
+
+
+class WidgetInput(BaseModel):
+    type: str = Field("note", pattern="^(note|links)$")
+    title: str = Field(..., min_length=1, max_length=120)
+    body: str = ""
+    # pour type=links, body est ignoré et items = liste de {label, url}
+    items: Optional[list] = None
+    order: int = 0
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Helpers
 # ═══════════════════════════════════════════════════════════════════
@@ -551,3 +566,76 @@ async def welcome_delete_news(
     if r.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Annonce introuvable")
     return {"ok": True, "deleted": news_id}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# v0.5.3 · Tutos vidéo (admin) + widgets custom
+# ═══════════════════════════════════════════════════════════════════
+
+_YT_ID_RE = re.compile(
+    r"(?:youtube\.com/(?:watch\?v=|embed/|v/|shorts/)|youtu\.be/)([A-Za-z0-9_-]{6,})"
+)
+
+
+def _extract_youtube_id(url: str) -> Optional[str]:
+    if not url:
+        return None
+    m = _YT_ID_RE.search(url)
+    return m.group(1) if m else None
+
+
+@welcome_router.get("/tutorials")
+async def list_tutorials(user: dict = Depends(get_current_user)):
+    docs = await db.welcome_tutorials.find({}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    return {"items": docs}
+
+
+@welcome_router.post("/tutorials")
+async def create_tutorial(payload: TutorialInput, user: dict = Depends(require_role("admin"))):
+    yid = _extract_youtube_id(payload.url)
+    doc = {
+        "id": str(uuid.uuid4()),
+        "title": payload.title.strip(),
+        "url": payload.url.strip(),
+        "youtube_id": yid,
+        "thumbnail": f"https://img.youtube.com/vi/{yid}/hqdefault.jpg" if yid else None,
+        "description": (payload.description or "").strip(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": user.get("email"),
+    }
+    await db.welcome_tutorials.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@welcome_router.delete("/tutorials/{tid}")
+async def delete_tutorial(tid: str, user: dict = Depends(require_role("admin"))):
+    r = await db.welcome_tutorials.delete_one({"id": tid})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Tuto introuvable")
+    return {"ok": True, "deleted": tid}
+
+
+@welcome_router.get("/widgets")
+async def list_widgets(user: dict = Depends(get_current_user)):
+    docs = await db.welcome_widgets.find({}, {"_id": 0}).sort("order", 1).to_list(50)
+    return {"items": docs}
+
+
+@welcome_router.post("/widgets")
+async def create_widget(payload: WidgetInput, user: dict = Depends(require_role("admin"))):
+    doc = payload.model_dump()
+    doc["id"] = str(uuid.uuid4())
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    doc["created_by"] = user.get("email")
+    await db.welcome_widgets.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@welcome_router.delete("/widgets/{wid}")
+async def delete_widget(wid: str, user: dict = Depends(require_role("admin"))):
+    r = await db.welcome_widgets.delete_one({"id": wid})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Widget introuvable")
+    return {"ok": True, "deleted": wid}
