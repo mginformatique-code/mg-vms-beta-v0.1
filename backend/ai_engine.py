@@ -1,47 +1,49 @@
-"""MG-VMS — Moteur IA RÉEL : YOLO + détection de mouvement + LAPI locale (fast-alpr).
+"""MG-VMS — Couche acquisition + modèles du moteur IA (v0.4.2 · Pipeline v2).
 
-Boucle d'analyse : pour chaque caméra avec `detect_enabled`, une frame réelle est
-extraite du flux (go2rtc) puis analysée :
-- détection de mouvement réelle (différence d'images consécutives) ;
-- détection d'objets YOLO (personnes, véhicules...) avec estimation réelle de la
-  couleur dominante des véhicules ;
-- LAPI locale (fast-alpr, ONNX) si un véhicule est présent : plaque + type +
-  couleur du véhicule associé.
-Événements, plaques et alertes liste noire sont réels (vignettes incluses).
+Depuis la refonte v0.4.2, ce module NE contient PLUS la logique métier.
+Ses seules responsabilités :
+  1. Acquisition RTSP (frame_source workers + fallback go2rtc)
+  2. Chargement des modèles (YOLO / fast-alpr) + santé IA
+  3. Config runtime (interval, confidence, ByteTrack, ANPR par caméra)
+  4. Boucle ``ai_loop`` : crée les FrameContext et démarre les CameraWorker
+
+Toute l'exécution du pipeline vit dans ``pipeline_v2`` :
+  PipelineRuntime → CameraWorker → FrameContext → Stages → PluginBus
+Les fonctions historiques (`_analyze_frame`, `_do_downstream_work`, scénarios…)
+sont conservées comme wrappers/re-exports de compatibilité.
 """
 import asyncio
-import base64
 import logging
 import os
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
 
 from database import db
 from pipeline_metrics import pipeline_metrics
-from realtime import broadcast_alert
 
 logger = logging.getLogger("ai-engine")
 
 GO2RTC_URL = os.environ.get("GO2RTC_URL", "http://localhost:1984")
 AI_INTERVAL = float(os.environ.get("AI_INTERVAL_SECONDS", "2"))
 AI_CONFIDENCE = float(os.environ.get("AI_CONFIDENCE", "0.45"))
-AI_MIN_PLATE_PX = int(os.environ.get("AI_MIN_PLATE_PX", "24"))  # côté min. plaque acceptée
+AI_MIN_PLATE_PX = int(os.environ.get("AI_MIN_PLATE_PX", "24"))
 AI_PLATE_CACHE_SECONDS = int(os.environ.get("AI_PLATE_CACHE_SECONDS", "8"))
-AI_DEVICE = os.environ.get("AI_DEVICE", "auto")  # 'cpu' | 'cuda' | 'auto'
+AI_DEVICE = os.environ.get("AI_DEVICE", "auto")
 EVENT_COOLDOWN = int(os.environ.get("AI_EVENT_COOLDOWN_SECONDS", "60"))
 MOTION_THRESHOLD_PCT = float(os.environ.get("MOTION_THRESHOLD_PCT", "1.5"))
 MOTION_COOLDOWN = int(os.environ.get("MOTION_COOLDOWN_SECONDS", "60"))
 
-# Réglages RUNTIME (surchargent les variables d'env quand présents en base)
+# ── Config runtime ──────────────────────────────────────────────────
 _runtime_config: dict = {}
+_bytetrack_cfg: dict = {}
+_camera_anpr_cfg: dict[str, dict] = {}
 
 
 def _cfg(key: str, default):
-    """Lit la config IA runtime (surchargée dynamiquement via /api/ai/config)."""
     return _runtime_config.get(key, default)
 
 
@@ -49,7 +51,6 @@ async def load_runtime_config():
     doc = await db.settings.find_one({"key": "ai_config"}, {"_id": 0})
     if doc and isinstance(doc.get("value"), dict):
         _runtime_config.update(doc["value"])
-    # Config ByteTrack (P0 finalisation)
     bt = await db.settings.find_one({"key": "bytetrack_config"}, {"_id": 0})
     if bt and isinstance(bt.get("value"), dict):
         _bytetrack_cfg.update(bt["value"])
@@ -58,7 +59,6 @@ async def load_runtime_config():
 
 
 async def refresh_per_camera_configs():
-    """Recharge les configs ANPR par caméra depuis la base (rafraîchi à chaque cycle IA)."""
     cams = await db.cameras.find({"detect_enabled": True},
                                   {"_id": 0, "id": 1, "anpr_config": 1}).to_list(500)
     _camera_anpr_cfg.clear()
@@ -66,23 +66,6 @@ async def refresh_per_camera_configs():
         cfg = c.get("anpr_config") or {}
         if cfg:
             _camera_anpr_cfg[c["id"]] = cfg
-
-
-def _point_in_polygon(x_norm: float, y_norm: float, poly: list) -> bool:
-    """Test point-in-polygon (algo ray casting) sur coordonnées normalisées 0-1."""
-    if not poly or len(poly) < 3:
-        return True  # pas de ROI → accepte partout
-    n = len(poly)
-    inside = False
-    j = n - 1
-    for i in range(n):
-        xi, yi = poly[i][0], poly[i][1]
-        xj, yj = poly[j][0], poly[j][1]
-        if ((yi > y_norm) != (yj > y_norm)) and \
-           (x_norm < (xj - xi) * (y_norm - yi) / ((yj - yi) or 1e-9) + xi):
-            inside = not inside
-        j = i
-    return inside
 
 
 async def update_runtime_config(patch: dict) -> dict:
@@ -105,17 +88,16 @@ def get_runtime_config() -> dict:
         "device_effective": _detected_device(),
     }
 
+
 CLASS_FR = {
     "person": "Personne", "car": "Voiture", "truck": "Camion", "bus": "Bus",
     "motorcycle": "Moto", "bicycle": "Vélo", "dog": "Animal", "cat": "Animal",
 }
 VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle"}
 
+# ── Modèles + santé IA ──────────────────────────────────────────────
 _model = None
 _alpr = None
-# ── Diagnostic IA : traçabilité des chargements de modèles (Phase 0 RCA) ──
-# Exposé via `GET /api/diagnostics/ai-health` — permet de savoir en prod quel
-# composant a échoué (YOLO, ALPR, torch, cuda) sans lire les logs.
 _ai_health: dict = {
     "yolo_loaded": False,
     "yolo_error": None,
@@ -139,25 +121,9 @@ _ai_health: dict = {
     "loop_alive": False,
     "loop_disabled_reason": None,
 }
-_cooldowns: dict[str, datetime] = {}
-_prev_gray: dict[str, "object"] = {}
-# Cache LAPI : {(camera_id, plate) -> expiry_datetime}
-_plate_cache: dict[tuple[str, str], datetime] = {}
-_last_debug: dict[str, dict] = {}  # per-camera debug snapshot (mode #4)
-
-# ByteTrack (P0 finalisation) : un tracker par caméra
-_trackers: dict[str, "object"] = {}
-_bytetrack_cfg: dict = {}
-# Config ANPR par caméra (chargée à chaud)
-_camera_anpr_cfg: dict[str, dict] = {}
 
 
 def _detected_device() -> str:
-    """Détecte la meilleure cible d'inférence : cuda si dispo, sinon cpu.
-
-    Bypass rapide en prod : `MGVMS_AI_FORCE_CPU=1` force CPU même si CUDA
-    est présent (utile pour isoler une régression GPU sans rebuild).
-    """
     if os.environ.get("MGVMS_AI_FORCE_CPU", "0") in ("1", "true", "yes"):
         return "cpu"
     pref = _cfg("device", AI_DEVICE)
@@ -173,7 +139,6 @@ def _detected_device() -> str:
 
 
 def _capture_torch_info() -> None:
-    """Enregistre les versions/état de torch dans _ai_health (une fois)."""
     if _ai_health["torch_available"] is not None:
         return
     try:
@@ -201,24 +166,13 @@ def _capture_torch_info() -> None:
 
 
 def _load_models():
-    """Chargement paresseux résilient (YOLO + ALPR) — cible GPU si dispo.
-
-    Contrat Phase 0 (v2.21.0) :
-    - YOLO et ALPR sont chargés INDÉPENDAMMENT : le crash de l'un n'affecte
-      pas l'autre. YOLO reste utilisable même si `fast_alpr` est cassé, et
-      inversement les caméras sans plaques (détection seule) fonctionnent.
-    - Chaque tentative est loguée dans `_ai_health` — l'endpoint
-      `/api/diagnostics/ai-health` expose l'état exact en prod.
-    - Ne throw JAMAIS. Toute erreur est capturée + tracée. L'appelant doit
-      vérifier `_model` / `_alpr` truthiness avant usage.
-    """
+    """Chargement paresseux résilient (YOLO + ALPR) — ne throw jamais."""
     global _model, _alpr
     _capture_torch_info()
     device = _detected_device()
     _ai_health["device_effective"] = device
     now = datetime.now(timezone.utc).isoformat()
 
-    # ── YOLO ────────────────────────────────────────────────────────────
     if _model is None:
         _ai_health["yolo_load_attempts"] += 1
         _ai_health["yolo_last_attempt_ts"] = now
@@ -247,8 +201,6 @@ def _load_models():
             logger.exception("YOLO indisponible — détection d'objets désactivée (essai #%d)",
                              _ai_health["yolo_load_attempts"])
 
-    # ── ALPR (fast-alpr) ───────────────────────────────────────────────
-    # `_alpr` peut être : None (jamais tenté) | False (échec, retry autorisé) | instance
     if _alpr is None or _alpr is False:
         _ai_health["alpr_load_attempts"] += 1
         _ai_health["alpr_last_attempt_ts"] = now
@@ -268,7 +220,6 @@ def _load_models():
 
 
 def get_ai_health() -> dict:
-    """Snapshot état IA — utilisé par `GET /api/diagnostics/ai-health`."""
     import copy
     snap = copy.deepcopy(_ai_health)
     snap["yolo_model"] = os.environ.get("AI_MODEL", "yolo11n.pt")
@@ -278,427 +229,65 @@ def get_ai_health() -> dict:
 
 
 def _model_name() -> str:
-    """Retourne le nom du modèle YOLO chargé (pour benchmark/diagnostic)."""
     return os.environ.get("AI_MODEL", "yolo11n.pt")
 
 
 def _alpr_model_name() -> str:
-    """Retourne les modèles ALPR utilisés (détecteur + OCR)."""
     return "fast-alpr · yolo-v9-t-384-license-plate-end2end + european-plates-mobile-vit-v2-model"
 
 
-def _jpeg_data_uri(bgr_img, max_width: int = 1280, quality: int = 85):
-    """Encode une image BGR en data-URI JPEG.
-
-    - `max_width` : largeur maximale — n'agrandit JAMAIS l'image (upscale non désiré).
-      Default = 1280 px pour permettre l'identification à l'œil (personnes, plaques, objets).
-    - `quality` : compression JPEG (85 par défaut — bon compromis qualité / taille).
-
-    Retourne `None` si l'image est vide ou l'encodage échoue.
-    """
-    import cv2
-    if bgr_img is None or bgr_img.size == 0:
-        return None
-    h, w = bgr_img.shape[:2]
-    if w > max_width:
-        bgr_img = cv2.resize(bgr_img, (max_width, int(h * max_width / w)),
-                              interpolation=cv2.INTER_AREA)
-    ok, buf = cv2.imencode(".jpg", bgr_img, [cv2.IMWRITE_JPEG_QUALITY, int(quality)])
-    return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode() if ok else None
+# ── Utilitaires image (implémentation dans pipeline_v2.frame_context) ─
+from pipeline_v2.frame_context import (encode_jpeg_data_uri as _jpeg_data_uri,  # noqa: E402
+                                        dominant_color_fr as _dominant_color_fr,
+                                        point_in_polygon as _point_in_polygon)
 
 
-def _dominant_color_fr(bgr_crop):
-    """Couleur dominante réelle (analyse HSV) — nommage français."""
-    import cv2
-    import numpy as np
-    if bgr_crop is None or bgr_crop.size == 0:
-        return None
-    hsv = cv2.cvtColor(bgr_crop, cv2.COLOR_BGR2HSV)
-    h, s, v = (hsv[:, :, i].astype(np.float32) for i in range(3))
-    mean_s, mean_v = float(s.mean()), float(v.mean())
-    if mean_v < 60:
-        return "Noir"
-    if mean_s < 45:
-        if mean_v > 170:
-            return "Blanc"
-        return "Gris"
-    # Teinte dominante (histogramme pondéré par la saturation)
-    hist = cv2.calcHist([hsv], [0], None, [180], [0, 180]).flatten()
-    hue = int(hist.argmax())
-    if hue < 8 or hue >= 168:
-        return "Rouge"
-    if hue < 20:
-        return "Orange"
-    if hue < 33:
-        return "Jaune"
-    if hue < 85:
-        return "Vert"
-    if hue < 130:
-        return "Bleu"
-    if hue < 150:
-        return "Violet"
-    return "Rose"
-
-
-def _detect_motion(camera_id: str, img) -> float:
-    """Détection de mouvement réelle : % de pixels changés entre deux frames."""
-    import cv2
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray, (21, 21), 0)
-    prev = _prev_gray.get(camera_id)
-    _prev_gray[camera_id] = gray
-    if prev is None or prev.shape != gray.shape:
-        return 0.0
-    diff = cv2.absdiff(prev, gray)
-    changed = (diff > 25).sum()
-    return round(changed * 100.0 / diff.size, 2)
-
-
-def _analyze_frame(camera_id: str, frame_bytes: bytes, enabled_plugins: Optional[list[str]] = None,
-                    camera: Optional[dict] = None) -> dict:
-    """Mouvement + YOLO d'abord (rapide), puis ALPR uniquement si véhicule détecté et hors-cache.
-
-    v0.4.1 · **Fix bug critique** : ``enabled_plugins`` = whitelist des plugins IA
-    activés sur CETTE caméra. Si non vide et que ``fast-alpr`` n'y figure pas,
-    le bloc ANPR est **complètement court-circuité** — aucun OCR, aucune écriture
-    Mongo, aucun événement plaque. Répare le bug "FastALPR désactivé mais des
-    plaques sont malgré tout reconnues" (rapport audit v0.4.1).
-
-    v0.4.2 · **ANPR Auto-suspension qualité** : si les conditions optiques
-    sont insuffisantes (nuit + capteur non-IR, flou, contre-jour...) pendant
-    N cycles consécutifs, l'OCR est automatiquement suspendu pour cette
-    caméra (état exposé via ``/api/diagnostics/anpr-quality``). Les caméras
-    spécialisées (Dahua ITC / Hikvision DeepInView) sont détectées par
-    ``camera.model`` et bypassent cette suspension (ANPR 24/7).
-
-    Retourne aussi les timings ms par étape et un snapshot pour le mode debug."""
-    import cv2
-    import numpy as np
-    import time
-    _load_models()
-    t0 = time.monotonic()
-    img = cv2.imdecode(np.frombuffer(frame_bytes, np.uint8), cv2.IMREAD_COLOR)
-    if img is None:
-        return {"detections": [], "plates": [], "motion_pct": 0.0}
-    h, w = img.shape[:2]
-
-    t_dec = (time.monotonic() - t0) * 1000
-    t1 = time.monotonic()
-    motion_pct = _detect_motion(camera_id, img)
-    t_motion = (time.monotonic() - t1) * 1000
-
-    # ---------- ÉTAPE 1 : YOLO (rapide) — skippé si modèle indisponible ----------
-    t2 = time.monotonic()
-    detections, vehicles = [], []
-    results = None
-    if _model is not None:
-        try:
-            results = _model.predict(img, conf=_cfg("confidence", AI_CONFIDENCE),
-                                     device=_detected_device(), verbose=False)[0]
-        except Exception as yolo_err:
-            _ai_health["last_cycle_error"] = f"yolo.predict: {type(yolo_err).__name__}: {str(yolo_err)[:200]}"
-            logger.exception("YOLO.predict a échoué sur %s — cycle sans détection", camera_id)
-            results = None
-    t_yolo = (time.monotonic() - t2) * 1000
-    if results is not None:
-        for box in results.boxes:
-            cls_name = _model.names[int(box.cls)]
-            if cls_name not in CLASS_FR:
-                continue
-            x1, y1, x2, y2 = (max(0, int(v)) for v in box.xyxy[0])
-            crop = img[y1:y2, x1:x2]
-            is_vehicle = cls_name in VEHICLE_CLASSES
-            det = {
-                "class": cls_name, "label": CLASS_FR[cls_name],
-                "confidence": round(float(box.conf), 2),
-                "thumbnail": _jpeg_data_uri(crop),
-                "vehicle_color": _dominant_color_fr(crop) if is_vehicle else None,
-                "bbox": (x1, y1, x2, y2),
-            }
-            detections.append(det)
-            if is_vehicle:
-                vehicles.append(det)
-
-    # ---------- ÉTAPE 2 : ALPR uniquement si véhicule + hors cache ----------
-    plates = []
-    t_alpr = 0.0
-    plate_debug = []
-    anpr_cfg = _camera_anpr_cfg.get(camera_id, {}) or {}
-    roi = anpr_cfg.get("roi_polygon") or []
-    # v0.4.1 · **BUG CRITIQUE FIX** — Respect strict de ``enabled_plugins``.
-    # Si l'utilisateur a désactivé ``fast-alpr`` sur cette caméra, on
-    # **court-circuite** tout le bloc OCR : zéro CPU/VRAM, zéro écriture
-    # Mongo, zéro événement plaque. Whitelist vide → comportement legacy.
-    _anpr_skipped = bool(enabled_plugins) and "fast-alpr" not in enabled_plugins
-    t_alpr = 0.0  # défaut si le bloc ANPR est skip
-    if _anpr_skipped:
-        logger.debug("ANPR skip %s : fast-alpr not in enabled_plugins %s",
-                     camera_id, enabled_plugins)
-
-    # v0.4.2 · **P1 · ANPR Auto-suspension qualité** — évaluation continue
-    # de la scène. Si nuit + faible luminosité + flou + contre-jour ⇒ on
-    # préfère suspendre l'OCR pour ne pas générer de fausses plaques
-    # (principe métier : "pas de plaque > fausse plaque").
-    # Les caméras spécialisées (Dahua ITC / Hikvision DeepInView) sont
-    # détectées via ``camera.model`` et échappent à la suspension.
-    _anpr_quality_state = None
-    _anpr_quality_score = None
-    if vehicles and _alpr and not _anpr_skipped:
-        try:
-            from pipeline_v2.anpr_quality import anpr_quality
-            should_run, _anpr_quality_state, _anpr_quality_score = \
-                anpr_quality.should_run_anpr(camera_id, img, camera=camera)
-            if not should_run:
-                _anpr_skipped = True
-                logger.info(
-                    "ANPR skip %s : qualité insuffisante (score=%.2f · %s)",
-                    camera_id, _anpr_quality_score.score,
-                    _anpr_quality_state.last_reason,
-                )
-        except Exception:
-            logger.exception("anpr_quality.should_run_anpr error — legacy path")
-
-    if vehicles and _alpr and not _anpr_skipped:
-        now = datetime.now(timezone.utc)
-        # Purge cache expiré
-        for k, exp in list(_plate_cache.items()):
-            if exp <= now:
-                _plate_cache.pop(k, None)
-        cache_ttl = int(_cfg("plate_cache_seconds", AI_PLATE_CACHE_SECONDS))
-        min_side = int(_cfg("min_plate_px", AI_MIN_PLATE_PX))
-        # Confiance minimum spécifique à cette caméra
-        min_conf = float(anpr_cfg.get("min_confidence", 0.0) or 0.0)
-        t3 = time.monotonic()
-        # v0.3 · OCR par crop véhicule (audit) — au lieu de balayer toute
-        # l'image, on limite fast-alpr aux ROI véhicules détectées par
-        # YOLO. Bénéfices : moins de faux positifs (ex : texte sur
-        # panneaux/pubs), meilleure lecture véhicules éloignés (plus de
-        # pixels utiles par pixel de plaque), et surtout, on associe
-        # naturellement chaque plate à son ``owner`` véhicule.
-        try:
-            for owner in vehicles:
-                vx1, vy1, vx2, vy2 = owner["bbox"]
-                # Marge de sécurité +8% autour du véhicule (les plaques
-                # dépassent souvent légèrement des bbox YOLO strictes).
-                pad_x = int((vx2 - vx1) * 0.08)
-                pad_y = int((vy2 - vy1) * 0.08)
-                cx1 = max(0, vx1 - pad_x)
-                cy1 = max(0, vy1 - pad_y)
-                cx2 = min(w, vx2 + pad_x)
-                cy2 = min(h, vy2 + pad_y)
-                if cx2 - cx1 < 40 or cy2 - cy1 < 40:
-                    continue  # crop trop petit
-                vehicle_crop = img[cy1:cy2, cx1:cx2]
-                try:
-                    alpr_results = list(_alpr.predict(vehicle_crop))
-                except Exception:
-                    logger.exception("fast-alpr predict sur crop véhicule")
-                    continue
-                for r in alpr_results:
-                    if not r.ocr or not r.ocr.text:
-                        continue
-                    bb = r.detection.bounding_box
-                    # Coord dans le crop → coord dans l'image entière
-                    abs_x1 = cx1 + bb.x1
-                    abs_y1 = cy1 + bb.y1
-                    abs_x2 = cx1 + bb.x2
-                    abs_y2 = cy1 + bb.y2
-                    pw, ph = abs_x2 - abs_x1, abs_y2 - abs_y1
-                    if pw < min_side or ph < min_side:
-                        plate_debug.append({"plate": r.ocr.text.upper(), "skipped": "trop petit",
-                                             "size": f"{pw}x{ph}"})
-                        continue
-                    # ROI polygonale (test sur le centre de la plaque en coords normalisées)
-                    cx_norm = ((abs_x1 + abs_x2) / 2) / w
-                    cy_norm = ((abs_y1 + abs_y2) / 2) / h
-                    if roi and not _point_in_polygon(cx_norm, cy_norm, roi):
-                        plate_debug.append({"plate": r.ocr.text.upper(), "skipped": "hors ROI",
-                                             "size": f"{pw}x{ph}"})
-                        continue
-                    if float(r.ocr.confidence) < min_conf:
-                        plate_debug.append({"plate": r.ocr.text.upper(), "skipped": "conf<seuil",
-                                             "size": f"{pw}x{ph}", "conf": round(float(r.ocr.confidence), 2)})
-                        continue
-                    plate_text = r.ocr.text.upper().strip()
-                    if not plate_text:
-                        continue
-                    if (camera_id, plate_text) in _plate_cache:
-                        # v0.3 · Cache court (1s max recommandé) : évite juste
-                        # le triple-append sur une même frame. L'anti-doublons
-                        # long-terme est géré par ``anpr_tracker`` via track_id
-                        # → plusieurs lectures OCR pour un même véhicule mobile
-                        # doivent être laissées passer pour construire le consensus.
-                        plate_debug.append({"plate": plate_text, "skipped": "cache",
-                                             "expires_in": int((_plate_cache[(camera_id, plate_text)] - now).total_seconds())})
-                        continue
-                    _plate_cache[(camera_id, plate_text)] = now + timedelta(seconds=min(cache_ttl, 1))
-                    plate_crop = img[max(0, abs_y1):abs_y2, max(0, abs_x1):abs_x2]
-                    plates.append({
-                        "plate": plate_text,
-                        "confidence": round(float(r.ocr.confidence), 2),
-                        "plate_crop": _jpeg_data_uri(plate_crop, 240),
-                        "vehicle_crop": _jpeg_data_uri(vehicle_crop),
-                        "vehicle_type": owner["label"],
-                        "vehicle_color": owner["vehicle_color"],
-                        "engine": "fast-alpr",
-                        # v0.3 : bbox du véhicule owner pour recouper avec ByteTrack ensuite
-                        "_owner_bbox": (vx1, vy1, vx2, vy2),
-                    })
-                    plate_debug.append({"plate": plate_text, "confidence": round(float(r.ocr.confidence), 2),
-                                         "size": f"{pw}x{ph}", "kept": True})
-        except Exception:
-            logger.exception("Erreur LAPI (crop véhicule)")
-        t_alpr = (time.monotonic() - t3) * 1000
-    for d in detections:
-        d["_bbox"] = d.pop("bbox", None)
-    timings = {"decode_ms": round(t_dec, 1), "motion_ms": round(t_motion, 1),
-               "yolo_ms": round(t_yolo, 1), "alpr_ms": round(t_alpr, 1),
-               "total_ms": round((time.monotonic() - t0) * 1000, 1)}
-    # Snapshot debug (mode #4)
-    _last_debug[camera_id] = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "resolution": f"{w}x{h}",
-        "device": _detected_device(),
-        "timings": timings,
-        "vehicles": [{"label": v["label"], "confidence": v["confidence"], "bbox": v["_bbox"] if "_bbox" in v else v.get("bbox"),
-                      "vehicle_color": v.get("vehicle_color")} for v in vehicles],
-        "plate_attempts": plate_debug,
-        "plates_ocr": [{"plate": p["plate"], "confidence": p["confidence"]} for p in plates],
-        "motion_pct": motion_pct,
-        # `frame_preview` : debug uniquement, quality 60 (économise ~15 ms/cycle vs q85)
-        "frame_preview": _jpeg_data_uri(img, 640, 60),
-    }
-    # Overlay LIVE (P0.2) : bboxes normalisées 0-1 pour scaling côté client
-    overlay_boxes = []
-    for d in detections:
-        bx = d.get("_bbox") or d.get("bbox")
-        if not bx:
-            continue
-        x1, y1, x2, y2 = bx
-        overlay_boxes.append({
-            "cls": d["class"], "label": d["label"], "confidence": d["confidence"],
-            "vehicle_color": d.get("vehicle_color"),
-            "bbox_norm": [round(x1 / w, 4), round(y1 / h, 4), round(x2 / w, 4), round(y2 / h, 4)],
-        })
-    counts: dict = {}
-    for d in detections:
-        counts[d["label"]] = counts.get(d["label"], 0) + 1
-
-    # ---------- ÉTAPE 3 : ByteTrack (tracking persistant si activé) ----------
-    tracks_map: dict = {}
-    t_track_start = time.monotonic()
-    # Défaut activé (P0 Feb 2026) : ByteTrack ON par défaut, params sains.
-    # Override via /api/ai/bytetrack POST { enabled, track_thresh, track_buffer, match_thresh }
-    _bt_enabled = _bytetrack_cfg.get("enabled", True)
-    if _bt_enabled and detections:
-        try:
-            import supervision as sv
-            import numpy as np
-            tracker = _trackers.get(camera_id)
-            if tracker is None:
-                tracker = sv.ByteTrack(
-                    track_activation_threshold=float(_bytetrack_cfg.get("track_thresh", 0.25)),
-                    lost_track_buffer=int(_bytetrack_cfg.get("track_buffer", 60)),
-                    minimum_matching_threshold=float(_bytetrack_cfg.get("match_thresh", 0.85)),
-                )
-                _trackers[camera_id] = tracker
-            # Construit Detections à partir des bboxes YOLO
-            xyxy = np.array([d["_bbox"] for d in detections], dtype=float)
-            confs = np.array([d["confidence"] for d in detections], dtype=float)
-            class_ids = np.array([hash(d["class"]) % 1000 for d in detections], dtype=int)
-            sv_dets = sv.Detections(xyxy=xyxy, confidence=confs, class_id=class_ids)
-            tracked = tracker.update_with_detections(sv_dets)
-            for i, tid in enumerate(tracked.tracker_id or []):
-                if tid is None:
-                    continue
-                bbox = tuple(int(v) for v in tracked.xyxy[i])
-                tracks_map[bbox] = int(tid)
-            # Attache track_id à chaque détection matchée (par bbox proche)
-            for d in detections:
-                bx = tuple(d["_bbox"])
-                d["track_id"] = tracks_map.get(bx)
-            # Overlay boxes: append track_id label
-            for i, ob in enumerate(overlay_boxes if False else []):
-                pass  # fait plus bas via reconstruction
-        except Exception:
-            logger.exception("ByteTrack : erreur (désactivation temporaire)")
-    # Attache track_id sur overlay_boxes également
-    for i, d in enumerate(detections):
-        if i < len(overlay_boxes):
-            overlay_boxes[i]["track_id"] = d.get("track_id")
-    t_tracking = (time.monotonic() - t_track_start) * 1000
-    timings["tracking_ms"] = round(t_tracking, 1)
-
-    # ---------- ÉTAPE 4 : ANPR Tracker (v0.3) — accumulateur par track_id ----------
-    # Chaque plaque lue est associée à son véhicule via bbox owner, dont on
-    # récupère le track_id ByteTrack. On l'ajoute à l'accumulateur qui décide
-    # si un événement doit être émis (première lecture consensuelle) ou pas.
-    # Anti-doublons pour véhicules stationnés + retente pour véhicules mobiles.
-    try:
-        from anpr_tracker import anpr_tracker, PlateReading
-        # Pour chaque plate détectée, retrouver son owner et son track_id
-        for p in plates:
-            owner = None
-            if "_owner_bbox" in p:
-                ob = p["_owner_bbox"]
-                for d in detections:
-                    if d.get("_bbox") == ob:
-                        owner = d
-                        break
-            tid = owner.get("track_id") if owner else None
-            reading = PlateReading(
-                plate=p["plate"], confidence=float(p["confidence"]),
-                ts=time.time(), plate_crop=p.get("plate_crop") or "",
-                vehicle_crop=p.get("vehicle_crop") or "",
-                vehicle_type=p.get("vehicle_type") or "",
-                vehicle_color=p.get("vehicle_color") or "",
-                engine=p.get("engine") or "fast-alpr",
-            )
-            emit = anpr_tracker.record_reading(camera_id, tid, reading)
-            p["_emit"] = emit          # signal au downstream : émettre l'event ?
-            p["track_id"] = tid
-        # Marque les tracks non revus (déclenche EXIT si dépassement seuil)
-        seen_tids = {d.get("track_id") for d in detections if d.get("track_id") is not None}
-        anpr_tracker.tick_missing(camera_id, seen_tids)
-    except Exception:
-        logger.exception("anpr_tracker: erreur")
-
-    # NOTE performance ANPR : `frame_thumb` n'est PLUS encodé ici.
-    # L'image numpy `img` (BGR) est retournée à la place et encodée LAZILY
-    # (via `_ensure_frame_thumb`) uniquement quand un événement est effectivement
-    # inséré. Sur un cycle sans détection, on économise ~30-80 ms d'encodage JPEG
-    # (surtout pour les caméras HD 2304×1296).
-    return {"detections": detections, "plates": plates, "motion_pct": motion_pct,
-            "_img_bgr": img, "timings": timings,
-            "overlay_boxes": overlay_boxes, "counts": counts,
-            # v0.4.2 · exposition de l'état ANPR qualité au downstream/UI
-            "anpr_quality": (_anpr_quality_score.to_dict() if _anpr_quality_score else None),
-            "anpr_state": (_anpr_quality_state.to_dict() if _anpr_quality_state else None)}
-
-
-def _ensure_frame_thumb(result: dict) -> str | None:
-    """Encode l'image en JPEG HD à la demande, avec mémoïsation dans `result`.
-
-    Appelé au moment de l'insertion d'un événement — évite l'encodage systématique
-    à chaque cycle IA (gain ~30-80 ms par cycle sur caméra 2K).
-    """
+def _ensure_frame_thumb(result: dict):
+    """Encode la scène HD à la demande, memoizé dans `result` (1 seul encodage)."""
     if "frame_thumb" in result:
         return result["frame_thumb"]
-    img = result.get("_img_bgr")
-    thumb = _jpeg_data_uri(img) if img is not None else None
-    result["frame_thumb"] = thumb  # cache — multiples events dans le même cycle = 1 seul encodage
+    ctx = result.get("_ctx")
+    if ctx is not None:
+        thumb = ctx.jpeg_data_uri()
+    else:
+        img = result.get("_img_bgr")
+        thumb = _jpeg_data_uri(img) if img is not None else None
+    result["frame_thumb"] = thumb
     return thumb
 
 
 def get_debug_snapshot(camera_id: str) -> dict:
-    """Retourne le dernier snapshot debug (mode #4) pour une caméra donnée."""
-    return _last_debug.get(camera_id, {})
+    from pipeline_v2.camera_worker import get_debug_snapshot as _snap
+    return _snap(camera_id)
+
+
+# ── Wrappers de compatibilité → pipeline_v2 ─────────────────────────
+
+def _analyze_frame(camera_id: str, frame_bytes: bytes,
+                   enabled_plugins: Optional[list] = None,
+                   camera: Optional[dict] = None) -> dict:
+    """Compat : délègue au CameraWorker de la caméra (pipeline v2)."""
+    from pipeline_v2.camera_worker import runtime as _runtime
+    return _runtime.worker(camera_id).analyze(
+        frame_bytes, enabled_plugins=enabled_plugins, camera=camera)
+
+
+async def _do_downstream_work(cam: dict, frame, result: dict) -> None:
+    """Compat : délègue au downstream pipeline v2."""
+    from pipeline_v2.downstream import run_downstream
+    await run_downstream(cam, frame, result)
+
+
+# Re-exports scénarios / armement (logique déplacée dans pipeline_v2.scenarios)
+from pipeline_v2.scenarios import (DEFAULT_ARMING, DEFAULT_SCENARIOS,  # noqa: E402,F401
+                                    _evaluate_scenarios, _get_scenario_rules,
+                                    _is_armed, _is_night, _iou,
+                                    _raise_blacklist_alert, _raise_scenario_alert,
+                                    cooldown_ok as _cooldown_ok, get_arming_config)
 
 
 def analyze_image_local(image_bytes: bytes) -> dict:
-    """Analyse LOCALE d'une image (upload manuel) : YOLO + fast-alpr.
-    Renvoie plate, country, vehicle_color, vehicle_make, vehicle_model, vehicle_type, confidence.
-    Aucune dépendance cloud."""
+    """Analyse LOCALE d'une image (upload manuel) : YOLO + fast-alpr."""
     import cv2
     import numpy as np
     _load_models()
@@ -707,7 +296,6 @@ def analyze_image_local(image_bytes: bytes) -> dict:
         return {"plate": "", "confidence": 0.0}
     result = {"plate": "", "country": "", "vehicle_color": "", "vehicle_make": "",
               "vehicle_model": "", "vehicle_type": "Inconnu", "confidence": 0.0, "plate_crop": ""}
-    # Détection véhicule (YOLO) → type + couleur
     yr = _model.predict(img, conf=AI_CONFIDENCE, verbose=False)[0]
     best_vehicle = None
     for box in yr.boxes:
@@ -722,7 +310,6 @@ def analyze_image_local(image_bytes: bytes) -> dict:
     if best_vehicle:
         result["vehicle_type"] = best_vehicle[2]
         result["vehicle_color"] = best_vehicle[3] or ""
-    # Plaque via fast-alpr
     if _alpr:
         try:
             for r in _alpr.predict(img):
@@ -739,34 +326,20 @@ def analyze_image_local(image_bytes: bytes) -> dict:
     return result
 
 
-async def _fetch_frame(camera_id: str) -> bytes | None:
-    """Récupère la frame la plus récente d'une caméra pour analyse IA.
+# ── Acquisition ─────────────────────────────────────────────────────
 
-    **Architecture v0.3 (Feb 2026)** — moteur IA découplé de go2rtc :
-      1. **frame_source** (RTSP direct persistant) : subprocess ffmpeg lit
-         directement le flux RTSP natif de la caméra. Cette source est
-         alimentée par un worker permanent → la frame est TOUJOURS en mémoire,
-         `get_latest_frame_async` retourne instantanément (<5 ms typique).
-      2. **Fallback go2rtc HTTP frame.jpeg** : UNIQUEMENT pour caméras démo
-         (mires testsrc2 générées par go2rtc, pas de flux RTSP externe) ou
-         caméras sans URL RTSP renseignée. Le fallback est **désactivé** en
-         prod pour les caméras réelles via ``MGVMS_AI_DIRECT_RTSP=1`` (défaut).
-    """
-    import cv2  # local import (cv2 chargé après _load_models)
-    # ── Chemin direct : frame_source worker (RTSP natif, ffmpeg persistant) ─
+async def _fetch_frame(camera_id: str) -> bytes | None:
+    """Frame la plus récente d'une caméra (frame_source RTSP direct, fallback go2rtc)."""
+    import cv2
     try:
         from frame_source import get_latest_frame_async
         frame = await get_latest_frame_async(camera_id, max_age_sec=5.0, wait_timeout=0.5)
         if frame is not None:
-            # Encode JPEG en mémoire (qualité 85 = bon compromis pour _analyze_frame)
             ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
             if ok:
                 return buf.tobytes()
     except Exception as e:
         logger.debug("_fetch_frame: frame_source indispo pour %s (%s)", camera_id, e)
-    # ── Fallback go2rtc frame.jpeg : uniquement pour démos ou caméras non-workerisées ─
-    # Note : on garde ce fallback pour ne pas casser les démos ; en prod avec
-    # RTSP natif configuré, on n'y arrive jamais.
     try:
         async with httpx.AsyncClient(timeout=12) as client:
             r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": f"cam_{camera_id}"})
@@ -777,230 +350,83 @@ async def _fetch_frame(camera_id: str) -> bytes | None:
     return None
 
 
-async def _raise_blacklist_alert(cam: dict, plate_doc: dict, reason: str):
-    from notifications import send_notification
-    alert = {
-        "id": str(uuid.uuid4()), "type": "anpr", "severity": "critical",
-        "message": f"Plaque en liste noire détectée : {plate_doc['plate']} ({reason})",
-        "camera_id": cam["id"], "camera_name": cam["name"],
-        "site_id": cam.get("site_id", ""), "site_name": cam.get("site_name", ""),
-        "plate": plate_doc["plate"], "plate_id": plate_doc["id"],
-        # Hybridation : scène HD complète pour identifier le contexte + crops nets
-        # (plaque lisible + véhicule). Le frontend affiche la scène en fond avec
-        # les crops en insets.
-        "thumbnail": plate_doc.get("frame_thumb") or plate_doc.get("vehicle_crop") or plate_doc.get("plate_crop"),
-        "plate_crop": plate_doc.get("plate_crop"),
-        "vehicle_crop": plate_doc.get("vehicle_crop"),
-        "acknowledged": False, "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.alerts.insert_one(dict(alert))
-    alert.pop("_id", None)
-    await broadcast_alert(alert)
-    try:
-        await send_notification("ALERTE LAPI — LISTE NOIRE",
-                                f"Plaque {plate_doc['plate']} détectée sur {cam['name']} ({alert['site_name']})\n{reason}")
-    except Exception:
-        pass
+async def _sync_frame_source_workers(cams: list[dict]) -> None:
+    """Synchronise les workers ffmpeg persistants avec les caméras actives."""
+    import frame_source
+    go2rtc_rtsp = os.environ.get("GO2RTC_RTSP", "rtsp://go2rtc:8554")
+    use_direct = os.environ.get("MGVMS_AI_DIRECT_RTSP", "1").lower() not in ("0", "false", "no")
 
+    active_ids = set()
+    for cam in cams:
+        cam_id = cam["id"]
+        ai_url = (cam.get("ai_rtsp_url") or "").strip()
+        native_url = (cam.get("rtsp_url") or "").strip()
+        is_demo = cam_id.startswith("demo-") or cam_id.startswith("demo_")
 
-def _cooldown_ok(key: str, seconds: int, now: datetime) -> bool:
-    if key in _cooldowns and now - _cooldowns[key] < timedelta(seconds=seconds):
-        return False
-    _cooldowns[key] = now
-    return True
+        if is_demo:
+            rtsp_url = f"{go2rtc_rtsp}/cam_{cam_id}"
+            source_type = "demo-go2rtc-relay"
+        elif use_direct and ai_url:
+            rtsp_url = ai_url
+            source_type = "direct-ai"
+        elif use_direct and native_url:
+            rtsp_url = native_url
+            source_type = "direct-native"
+        elif native_url or ai_url:
+            rtsp_url = f"{go2rtc_rtsp}/cam_{cam_id}"
+            source_type = "go2rtc-relay"
+        else:
+            logger.warning("frame_source: skip %s (aucune URL RTSP configurée)", cam_id)
+            continue
 
-
-# ============ Scénarios d'alertes IA (heuristiques réelles sur signaux YOLO/mouvement) ============
-DEFAULT_SCENARIOS = {
-    "intrusion_nocturne": {"enabled": True, "severity": "critical", "night_start": 22, "night_end": 6,
-                           "label": "Intrusion / effraction possible (présence nocturne)"},
-    "rodeur": {"enabled": True, "severity": "warning", "consecutive": 3,
-               "label": "Comportement suspect (personne qui s'attarde)"},
-    "attroupement": {"enabled": True, "severity": "warning", "min_persons": 4,
-                     "label": "Attroupement de personnes"},
-    "vive_allure": {"enabled": True, "severity": "warning", "motion_pct": 12.0,
-                    "label": "Véhicule à vive allure"},
-    "collision": {"enabled": True, "severity": "critical", "iou": 0.15,
-                  "label": "Collision possible entre véhicules (accident)"},
-    "enfant_route": {"enabled": True, "severity": "critical", "ratio": 0.55,
-                     "label": "Enfant possible sur la chaussée"},
-    "vol_vehicule": {"enabled": True, "severity": "critical", "night_start": 22, "night_end": 6,
-                     "label": "Vol / cambriolage possible (personne près d'un véhicule la nuit)"},
-}
-
-
-async def _get_scenario_rules() -> dict:
-    doc = await db.settings.find_one({"key": "ai_alert_rules"}, {"_id": 0})
-    rules = {k: dict(v) for k, v in DEFAULT_SCENARIOS.items()}
-    if doc:
-        for key, override in (doc.get("value") or {}).items():
-            if key in rules and isinstance(override, dict):
-                rules[key].update(override)
-    return rules
-
-
-def _iou(a, b) -> float:
-    ax1, ay1, ax2, ay2 = a
-    bx1, by1, bx2, by2 = b
-    ix1, iy1, ix2, iy2 = max(ax1, bx1), max(ay1, by1), min(ax2, bx2), min(ay2, by2)
-    if ix2 <= ix1 or iy2 <= iy1:
-        return 0.0
-    inter = (ix2 - ix1) * (iy2 - iy1)
-    union = (ax2 - ax1) * (ay2 - ay1) + (bx2 - bx1) * (by2 - by1) - inter
-    return inter / union if union else 0.0
-
-
-def _is_night(now: datetime, start_h: int, end_h: int) -> bool:
-    h = now.hour
-    return h >= start_h or h < end_h if start_h > end_h else start_h <= h < end_h
-
-
-_presence: dict[str, int] = {}
-
-
-async def _raise_scenario_alert(cam: dict, scenario: str, rule: dict, message: str, thumb) -> None:
-    now = datetime.now(timezone.utc)
-    if not _cooldown_ok(f"{cam['id']}:scenario:{scenario}", 180, now):
-        return
-    alert = {
-        "id": str(uuid.uuid4()), "type": "ai_scenario", "scenario": scenario,
-        "severity": rule.get("severity", "warning"),
-        "message": f"{rule['label']} — {cam['name']}" + (f" · {message}" if message else ""),
-        "camera_id": cam["id"], "camera_name": cam["name"],
-        "site_id": cam.get("site_id", ""), "site_name": cam.get("site_name", ""),
-        "thumbnail": thumb,
-        "acknowledged": False, "timestamp": now.isoformat(),
-    }
-    await db.alerts.insert_one(dict(alert))
-    alert.pop("_id", None)
-    await broadcast_alert(alert)
-    if alert["severity"] == "critical":
+        active_ids.add(cam_id)
+        codec = (cam.get("codec") or "auto").lower()
+        if codec not in ("h264", "h265", "hevc", "auto"):
+            codec = "auto"
+        if codec == "hevc":
+            codec = "h265"
         try:
-            from notifications import send_notification
-            await send_notification(f"ALERTE IA — {rule['label']}",
-                                    f"Caméra {cam['name']} ({cam.get('site_name','')})\n{message}")
+            frame_source.start(cam_id, rtsp_url, codec=codec, width=1280, height=720)
+            logger.info("frame_source.start %s src=%s codec=%s (%s)",
+                        cam_id, source_type, codec, rtsp_url[:60] + ("…" if len(rtsp_url) > 60 else ""))
+        except Exception as e:
+            logger.warning("frame_source.start(%s) échec: %s", cam_id, e)
+
+    current = set(frame_source.status().get("workers", {}).keys())
+    for stale in current - active_ids:
+        try:
+            frame_source.stop(stale)
         except Exception:
             pass
 
 
-# ============ Armement planifié (les scénarios ne sonnent que si le système est armé) ============
-DEFAULT_ARMING = {"mode": "always", "days": [0, 1, 2, 3, 4, 5, 6], "start_h": 0, "end_h": 24}
-
-
-async def get_arming_config() -> dict:
-    doc = await db.settings.find_one({"key": "arming_schedule"}, {"_id": 0})
-    return {**DEFAULT_ARMING, **((doc or {}).get("value") or {})}
-
-
-async def _is_armed(now: datetime) -> bool:
-    cfg = await get_arming_config()
-    if cfg["mode"] == "off":
-        return False
-    if cfg["mode"] == "always":
-        return True
-    if now.weekday() not in (cfg.get("days") or []):
-        return False
-    h, s, e = now.hour, int(cfg["start_h"]), int(cfg["end_h"])
-    return s <= h < e if s < e else (h >= s or h < e)
-
-
-async def _evaluate_scenarios(cam: dict, result: dict, now: datetime) -> None:
-    if not await _is_armed(now):
-        return
-    rules = await _get_scenario_rules()
-    dets = result["detections"]
-    persons = [d for d in dets if d["class"] == "person" and d.get("_bbox")]
-    vehicles = [d for d in dets if d["class"] in VEHICLE_CLASSES and d.get("_bbox")]
-    # Lazy : la miniature HD n'est PAS pré-encodée. Chaque branche appelle `thumb()`
-    # uniquement quand un scénario est déclenché et qu'une alerte va être insérée.
-    # Sans événement, on n'encode rien (cycle IA reste réactif, cf. régression ANPR).
-    thumb = lambda: _ensure_frame_thumb(result)  # noqa: E731
-
-    # Persistance de présence humaine (rôdeur)
-    _presence[cam["id"]] = _presence.get(cam["id"], 0) + 1 if persons else 0
-
-    r = rules["intrusion_nocturne"]
-    if r["enabled"] and persons and _is_night(now, int(r["night_start"]), int(r["night_end"])):
-        await _raise_scenario_alert(cam, "intrusion_nocturne", r,
-                                    f"{len(persons)} personne(s) détectée(s) en période de surveillance", thumb())
-
-    r = rules["vol_vehicule"]
-    if r["enabled"] and persons and vehicles and _is_night(now, int(r["night_start"]), int(r["night_end"])):
-        await _raise_scenario_alert(cam, "vol_vehicule", r,
-                                    "personne à proximité d'un véhicule en période nocturne", thumb())
-
-    r = rules["rodeur"]
-    if r["enabled"] and _presence[cam["id"]] >= int(r["consecutive"]):
-        await _raise_scenario_alert(cam, "rodeur", r,
-                                    f"présence continue depuis ~{_presence[cam['id']] * int(AI_INTERVAL)} s", thumb())
-
-    r = rules["attroupement"]
-    if r["enabled"] and len(persons) >= int(r["min_persons"]):
-        await _raise_scenario_alert(cam, "attroupement", r, f"{len(persons)} personnes simultanées", thumb())
-
-    r = rules["vive_allure"]
-    if r["enabled"] and vehicles and result["motion_pct"] >= float(r["motion_pct"]):
-        await _raise_scenario_alert(cam, "vive_allure", r,
-                                    f"mouvement {result['motion_pct']}% avec véhicule en scène", thumb())
-
-    r = rules["collision"]
-    if r["enabled"] and len(vehicles) >= 2:
-        for i in range(len(vehicles)):
-            done = False
-            for j in range(i + 1, len(vehicles)):
-                if _iou(vehicles[i]["_bbox"], vehicles[j]["_bbox"]) >= float(r["iou"]):
-                    await _raise_scenario_alert(cam, "collision", r,
-                                                f"chevauchement {vehicles[i]['label']}/{vehicles[j]['label']}", thumb())
-                    done = True
-                    break
-            if done:
-                break
-
-    r = rules["enfant_route"]
-    if r["enabled"] and vehicles and len(persons) >= 2:
-        heights = sorted((p["_bbox"][3] - p["_bbox"][1]) for p in persons)
-        median = heights[len(heights) // 2]
-        if median > 0 and heights[0] < median * float(r["ratio"]):
-            await _raise_scenario_alert(cam, "enfant_route", r,
-                                        "silhouette de petite taille détectée près de véhicules", thumb())
-
-
-# ============================================================================
-# P0 · Pipeline temps réel — architecture worker séparés (Feb 2026)
-# ----------------------------------------------------------------------------
-# La boucle vidéo _process_camera doit rester rapide (< 200 ms) :
-#   Phase A (SYNC per-frame): fetch → YOLO + ByteTrack → broadcast overlay → return
-#   Phase B (fire-and-forget): ANPR multi-moteurs, Smart Zones, Workflows,
-#                              Plugin bus, event persistence.
-# Backpressure: max 2 tâches downstream en vol par caméra. Sinon on drop
-# (frame trop récente prise en compte à la place — priorité au live).
-# ============================================================================
+# ── Boucle temps réel : Phase A sync + Phase B downstream ───────────
 _downstream_inflight: dict[str, int] = {}
 _MAX_DOWNSTREAM_INFLIGHT = int(os.environ.get("AI_MAX_DOWNSTREAM_INFLIGHT", "2"))
 
 
 async def _process_camera(cam: dict) -> None:
-    """Phase A: pipeline temps réel non-bloquant. YOLO + tracking + broadcast."""
+    """Phase A : acquisition + CameraWorker (pipeline v2) + broadcast overlay."""
+    from pipeline_v2.camera_worker import runtime as _runtime
+    from pipeline_v2.inspector import inspector as _inspector
+
     t_start = time.perf_counter()
     frame = await _fetch_frame(cam["id"])
     if frame is None:
         logger.info("IA · %s (%s) : frame indisponible (flux offline)", cam["name"], cam["id"])
         return
     t_fetch_ms = (time.perf_counter() - t_start) * 1000
+    _inspector.record(cam["id"], "fetch", t_fetch_ms)
 
-    t_ai = time.perf_counter()
-    # v0.4.1 · Passe la whitelist enabled_plugins à _analyze_frame pour
-    # court-circuiter le bloc ANPR si fast-alpr n'est pas activé sur cette caméra.
-    # v0.4.2 · Passe aussi le dict caméra complet pour la détection de modèle
-    # spécialisé (Dahua ITC / Hikvision DeepInView → bypass auto-suspension).
     _enabled = cam.get("enabled_plugins") or []
-    result = await asyncio.to_thread(_analyze_frame, cam["id"], frame, _enabled, cam)
-    t_ai_ms = (time.perf_counter() - t_ai) * 1000
+    worker = _runtime.worker(cam["id"])
+    result = await asyncio.to_thread(worker.analyze, frame, _enabled, cam)
     dets = result.get("detections", [])
     plates = result.get("plates", [])
     tim = result.get("timings", {})
 
-    # Broadcast overlay (léger, <5 ms — reste synchrone pour cohérence UI)
+    # Broadcast overlay (léger, <5 ms)
+    t_ws = time.perf_counter()
     try:
         from realtime import broadcast_ai_detections
         await broadcast_ai_detections(cam["id"], cam.get("site_id", ""), {
@@ -1011,9 +437,9 @@ async def _process_camera(cam: dict) -> None:
         })
     except Exception:
         logger.exception("broadcast_ai_detections error")
+    _inspector.record(cam["id"], "websocket", (time.perf_counter() - t_ws) * 1000)
 
     t_frontier_ms = (time.perf_counter() - t_start) * 1000
-    # Enregistre les métriques de la phase temps réel (sync)
     pipeline_metrics.record_stage(cam["id"], "fetch_ms", t_fetch_ms)
     pipeline_metrics.record_stage(cam["id"], "yolo_ms", tim.get("yolo_ms", 0))
     pipeline_metrics.record_stage(cam["id"], "tracking_ms", tim.get("tracking_ms", 0))
@@ -1030,7 +456,7 @@ async def _process_camera(cam: dict) -> None:
         tim.get("alpr_ms", 0), t_frontier_ms,
     )
 
-    # Phase B : downstream work en fire-and-forget (backpressure via compteur)
+    # Phase B : downstream fire-and-forget (backpressure)
     inflight = _downstream_inflight.get(cam["id"], 0)
     if inflight >= _MAX_DOWNSTREAM_INFLIGHT:
         pipeline_metrics.record_drop(cam["id"])
@@ -1044,489 +470,35 @@ async def _process_camera(cam: dict) -> None:
 
 
 async def _process_downstream(cam: dict, frame, result: dict) -> None:
-    """Phase B: workers indépendants — plugins + zones + workflows + events.
-
-    Cette fonction tourne en arrière-plan via asyncio.create_task. Elle peut
-    prendre plusieurs secondes sans bloquer le pipeline vidéo temps réel.
-    """
+    """Phase B : downstream pipeline v2 en arrière-plan."""
+    from pipeline_v2.inspector import inspector as _inspector
     t_down = time.perf_counter()
     try:
         await _do_downstream_work(cam, frame, result)
         t_down_ms = (time.perf_counter() - t_down) * 1000
         pipeline_metrics.record_stage(cam["id"], "downstream_ms", t_down_ms)
+        _inspector.record(cam["id"], "downstream", t_down_ms)
     except Exception:
+        _inspector.record(cam["id"], "downstream",
+                          (time.perf_counter() - t_down) * 1000, error=True)
         logger.exception("_process_downstream error for %s", cam.get("id"))
     finally:
         _downstream_inflight[cam["id"]] = max(0, _downstream_inflight.get(cam["id"], 1) - 1)
 
 
-async def _do_downstream_work(cam: dict, frame, result: dict) -> None:
-    """Corps du worker downstream — extrait de l'ancien _process_camera.
-
-    Fait TOUT le travail lourd hors chemin critique vidéo :
-      - Persistence événements Mouvement/YOLO/Face
-      - Plugin Manager NG dispatch_pipeline (2s timeout)
-      - Smart Zones + Workflow Engine
-      - Multi-moteurs ANPR (dispatch_plate)
-      - Persistence plaques + alertes liste noire
-      - Scénarios IA (rôdeur, intrusion, collision, …)
-    """
-    now = datetime.now(timezone.utc)
-    now_iso = now.isoformat()
-    base = {
-        "camera_id": cam["id"], "camera_name": cam["name"],
-        "site_id": cam.get("site_id", ""), "site_name": cam.get("site_name", ""),
-        "timestamp": now_iso,
-    }
-
-    # Mouvement réel
-    if result["motion_pct"] >= MOTION_THRESHOLD_PCT and _cooldown_ok(f"{cam['id']}:motion", MOTION_COOLDOWN, now):
-        await db.events.insert_one({
-            "id": str(uuid.uuid4()), "type": "Mouvement", **base,
-            "confidence": None, "motion_pct": result["motion_pct"],
-            "thumbnail": _ensure_frame_thumb(result), "vehicle_color": None,
-        })
-
-    # Reconnaissance faciale (si activée + visages en base)
-    face_cfg = await db.settings.find_one({"key": "face_recognition_config"}, {"_id": 0})
-    if (face_cfg or {}).get("value", {}).get("enabled"):
-        known = await db.faces.find({"encoding": {"$ne": None, "$exists": True}},
-                                     {"_id": 0, "id": 1, "name": 1, "watchlist": 1, "encoding": 1}).to_list(2000)
-        if known:
-            try:
-                from face_recognition_engine import analyze_frame as face_analyze
-                threshold = float(face_cfg["value"].get("distance_threshold", 0.55))
-                matches = face_analyze(frame, [{"id": k["id"], "name": k["name"],
-                                                  "watchlist": k.get("watchlist", False),
-                                                  "embedding": k["encoding"]} for k in known],
-                                        threshold=threshold)
-                for m in matches:
-                    key = f"{cam['id']}:face:{m.get('face_id') or 'unknown'}"
-                    if not _cooldown_ok(key, EVENT_COOLDOWN, now):
-                        continue
-                    is_watch = m.get("watchlist")
-                    is_unknown = m.get("face_id") is None
-                    should_alert = (is_watch and face_cfg["value"].get("alert_on_watchlist", True)) or \
-                                    (is_unknown and face_cfg["value"].get("alert_on_unknown", False))
-                    if is_unknown and not face_cfg["value"].get("alert_on_unknown"):
-                        continue
-                    await db.events.insert_one({
-                        "id": str(uuid.uuid4()),
-                        "type": f"Visage · {m.get('name')}",
-                        "plugin": "face_recognition",
-                        **base,
-                        "confidence": m.get("similarity"),
-                        "thumbnail": _ensure_frame_thumb(result),
-                        "vehicle_color": None,
-                        "face_id": m.get("face_id"),
-                        "face_name": m.get("name"),
-                        "watchlist": is_watch,
-                    })
-                    if should_alert and is_watch:
-                        await db.alerts.insert_one({
-                            "id": str(uuid.uuid4()),
-                            "type": "face_watchlist", **base,
-                            "severity": "critical",
-                            "message": f"Visage sur liste de surveillance : {m.get('name')}",
-                            "thumbnail": _ensure_frame_thumb(result),
-                            "acknowledged": False,
-                            "plugin": "face_recognition",
-                        })
-            except Exception:
-                logger.exception("Face recognition : erreur d'analyse")
-
-    # Détections YOLO
-    for det in result["detections"]:
-        if not _cooldown_ok(f"{cam['id']}:{det['class']}", EVENT_COOLDOWN, now):
-            continue
-        await db.events.insert_one({
-            "id": str(uuid.uuid4()), "type": det["label"], **base,
-            "confidence": det["confidence"],
-            # Miniature = image complète HD du flux principal (identification personnes/objets
-            # au visionnage plein écran). Le crop du bbox reste disponible en secondaire.
-            "thumbnail": _ensure_frame_thumb(result) or det["thumbnail"],
-            "crop_thumbnail": det["thumbnail"],
-            "vehicle_color": det.get("vehicle_color"),
-            "track_id": det.get("track_id"),
-        })
-
-    # ── Plugin Manager NG Pipeline (session 5+) ──────────────────────
-    # Chaque frame déjà décodée avec YOLO passe à travers le pipeline
-    # bus.dispatch_pipeline (Tracker → Segmenter → PipelineConsumer →
-    # EventConsumer). Court-circuite les FrameAnalyzers (détections déjà
-    # calculées par le core ai_engine).
-    #
-    # v0.4.1 · P0 · Pipeline per-camera :
-    # Le graph registry détermine si CETTE caméra a un pipeline "vide"
-    # (aucun plugin Tracker/Segmenter/PipelineConsumer activé dans sa
-    # whitelist). Dans ce cas → on skip totalement le bloc sans même
-    # importer le bus ni instancier un Frame. Gains attendus :
-    #   - Zéro CPU/VRAM sur les caméras dont l'utilisateur n'a activé
-    #     que fast-alpr (ou aucun plugin).
-    #   - Zéro compteur "calls" incrémenté sur les plugins qui ne
-    #     concernent pas cette caméra.
-    try:
-        pipeline_cfg = await db.settings.find_one(
-            {"key": "plugin_manager_pipeline"}, {"_id": 0}
-        )
-        if (pipeline_cfg or {}).get("value", {}).get("enabled", True):
-            from plugin_manager import bus as _plugin_bus, Frame as _Frame
-            from plugin_manager.interfaces import Detection as _Detection
-            from pipeline_v2.registry import registry as _graph_registry
-
-            # ► Graph per-camera : évalue en O(nb_plugins_actifs) si ce
-            #   pipeline a du travail à faire. Rebuild automatique si la
-            #   whitelist a changé (hash).
-            _graph = _graph_registry.get(
-                cam["id"],
-                enabled_plugins=cam.get("enabled_plugins") or [],
-                bus=_plugin_bus,
-            )
-            # Skip early si le pipeline plugin-manager n'a AUCUN stage
-            # actif pour cette caméra (tracking + segmenter + business
-            # tous vides). L'ANPR direct dans _analyze_frame reste géré
-            # séparément (whitelist "fast-alpr" évaluée là-bas).
-            _pipeline_plugins_active = (
-                _graph.needs_tracking or _graph.needs_segmentation
-                or _graph.needs_business
-            )
-            _pr = None
-            _pipeline_ok = True
-            if not _pipeline_plugins_active:
-                # Aucun plugin pipeline pertinent → zéro dispatch pour
-                # cette caméra. On log une fois par rebuild pour ne pas
-                # spammer, mais on ne consomme rien à chaque frame.
-                _pr = None
-            else:
-                # Reconstitue les Detection() à partir des dicts YOLO
-                det_objs = []
-                for d in result["detections"]:
-                    bb = d.get("bbox") or (0, 0, 0, 0)
-                    det_objs.append(_Detection(
-                        label=d.get("label", "?"),
-                        label_fr=d.get("label_fr"),
-                        confidence=float(d.get("confidence", 0.0)),
-                        bbox=tuple(bb),
-                        track_id=d.get("track_id"),
-                    ))
-                # Frame minimal (numpy_bgr optionnel — le tracking en a besoin, mais
-                # pour PipelineConsumer c'est facultatif). `frame` peut être un ndarray
-                # numpy ou bytes (JPEG) selon le chemin — protège l'accès .shape.
-                _has_shape = frame is not None and hasattr(frame, "shape")
-                _frame = _Frame(
-                    camera_id=cam["id"],
-                    timestamp=now_iso,
-                    numpy_bgr=frame if _has_shape else None,
-                    width=int(frame.shape[1]) if _has_shape else 0,
-                    height=int(frame.shape[0]) if _has_shape else 0,
-                )
-                # P9+ · Réactivité temps réel — le dispatch pipeline reste await mais
-                # avec un timeout resserré (2s max) pour ne pas bloquer la boucle vidéo.
-                _pipeline_t0 = time.perf_counter()
-                try:
-                    _pr = await _plugin_bus.dispatch_pipeline(
-                        _frame,
-                        camera_config={
-                            "camera_id": cam["id"],
-                            "site_id": cam.get("site_id"),
-                            # v0.3 · Config caméra modulaire : liste blanche des plugins
-                            # IA activés pour cette caméra (vide = tous les plugins actifs)
-                            "enabled_plugins": cam.get("enabled_plugins") or [],
-                        },
-                        precomputed_detections=det_objs,
-                        run_business=_graph.needs_business,
-                        run_segmentation=_graph.needs_segmentation,
-                        emit_events=True,
-                        timeout_s=2.0,
-                    )
-                    _pipeline_ms = (time.perf_counter() - _pipeline_t0) * 1000
-                    pipeline_metrics.record(cam["id"], _pipeline_ms,
-                                             plugins_used=_pr.plugins_used or {})
-                except Exception:
-                    _pipeline_ms = (time.perf_counter() - _pipeline_t0) * 1000
-                    pipeline_metrics.record_error(cam["id"], _pipeline_ms)
-                    logger.exception("dispatch_pipeline error — skip plugin block")
-                    _pipeline_ok = False
-                    _pr = None
-
-            if _pipeline_ok and _pr:
-                # Persistence des événements métier générés
-                for be in _pr.business_events:
-                    if not _cooldown_ok(f"{cam['id']}:{be.get('type', 'plugin')}", EVENT_COOLDOWN, now):
-                        continue
-                    await db.events.insert_one({
-                        "id": str(uuid.uuid4()), "type": be.get("type", "plugin.event"),
-                        **base,
-                        "confidence": (be.get("data") or {}).get("max_confidence"),
-                        "message": be.get("message"),
-                        "severity": be.get("severity", "info"),
-                        "plugin": be.get("source"),
-                        # Traçabilité pipeline complète (P8+ / demande CEO) : quels plugins
-                        # ont été utilisés pour produire cet événement ? Utile quand on
-                        # combine plusieurs détecteurs (YOLO + YOLOv8 + RT-DETR + …),
-                        # trackers (ByteTrack, BoTSORT, DeepSORT, …) et segmenters.
-                        "detectors": (_pr.plugins_used or {}).get("detectors", []),
-                        "trackers": (_pr.plugins_used or {}).get("trackers", []),
-                        "segmenters": (_pr.plugins_used or {}).get("segmenters", []),
-                        "thumbnail": _ensure_frame_thumb(result),
-                        "data": be.get("data"),
-                    })
-
-                # P3.c — Smart Zones : évaluation temps réel
-                # Convertit tracks/detections en format léger pour le moteur et
-                # déclenche les actions configurées (webhook / MQTT / HA / Tuya / …).
-                try:
-                    from smart_zones.engine import engine as _sz_engine
-                    _dets = [
-                        {"class": d.label, "confidence": d.confidence,
-                         "bbox": tuple(d.bbox) if hasattr(d, "bbox") else (0, 0, 0, 0)}
-                        for d in (_pr.detections or [])
-                    ]
-                    _tracks = [
-                        {"track_id": getattr(t, "track_id", None),
-                         "class": getattr(t, "label", None),
-                         "confidence": getattr(t, "confidence", None),
-                         "bbox": tuple(getattr(t, "bbox", (0, 0, 0, 0)))}
-                        for t in (_pr.tracks or [])
-                    ]
-                    _plates = [
-                        (be.get("data") or {})
-                        for be in _pr.business_events
-                        if be.get("type") == "plate_recognized"
-                    ]
-                    _sz_events = await _sz_engine.evaluate(cam["id"], _dets, _tracks, _plates)
-                    for zev in _sz_events:
-                        await db.events.insert_one({
-                            "id": str(uuid.uuid4()),
-                            "type": zev["type"], "message": zev["message"],
-                            "severity": zev.get("severity", "info"),
-                            **base,
-                            "plugin": "smart-zone",
-                            "data": zev.get("data"),
-                        })
-                        # P4 · Workflow Engine — chaque event de zone déclenche les workflows
-                        try:
-                            from workflow_engine import engine as _wf_engine
-                            await _wf_engine.on_event({
-                                "type": zev["type"], "camera_id": cam["id"],
-                                "timestamp": now.isoformat(), "data": zev.get("data"),
-                            })
-                        except Exception:
-                            logger.exception("workflow_engine dispatch error")
-                except Exception:
-                    logger.exception("smart_zones eval error")
-    except Exception:
-        logger.exception("plugin_manager pipeline error")
-
-    # Scénarios d'alertes IA (accident, rôdeur, intrusion nocturne, vive allure...)
-    await _evaluate_scenarios(cam, result, now)
-
-    # Plaques LAPI (fast-alpr local) + fan-out multi-moteurs via plugin_bus.dispatch_plate
-    anpr_cfg_cam = _camera_anpr_cfg.get(cam["id"], {}) or {}
-    wl_local = set(anpr_cfg_cam.get("whitelist_local", []) or [])
-    bl_local = set(anpr_cfg_cam.get("blacklist_local", []) or [])
-
-    # ── Multi-moteur ANPR (P8+ Feb 2026) ────────────────────────────
-    # Le local `fast-alpr` produit `result["plates"]` avec engine="fast-alpr".
-    # On délègue aussi aux PlateRecognizer plugins actifs (plate-recognizer,
-    # openalpr, paddle-ocr, easyocr, azure-vision, google-vision, tesseract…)
-    # et on ajoute leurs résultats à la liste — chacun persisté avec son engine.
-    #
-    # v0.4.1 · P0 · Whitelist per-camera : si la caméra a une liste
-    # ``enabled_plugins`` non vide, on ne dispatche qu'aux PlateRecognizer
-    # présents dans cette whitelist. Comportement legacy si whitelist vide.
-    try:
-        from plugin_manager.bus import bus as _plugin_bus_multi
-        from plugin_manager.interfaces import Frame as _MFrame
-        _cam_whitelist = set(cam.get("enabled_plugins") or [])
-        _anpr_entries = _plugin_bus_multi.active("PlateRecognizer")
-        if _cam_whitelist:
-            _anpr_entries = [e for e in _anpr_entries if e.name in _cam_whitelist]
-        if _anpr_entries:
-            _multi_frame = _MFrame(
-                camera_id=cam["id"], timestamp=now.isoformat(),
-                numpy_bgr=frame if hasattr(frame, "shape") else None,
-                width=int(frame.shape[1]) if hasattr(frame, "shape") else 0,
-                height=int(frame.shape[0]) if hasattr(frame, "shape") else 0,
-            )
-            _multi_results = await _plugin_bus_multi.dispatch_plate(
-                _multi_frame, vehicle_bbox=None, timeout_s=8.0,
-            )
-            # Applique aussi la whitelist aux résultats (au cas où active()
-            # aurait été inclusif pour d'autres appels concurrents).
-            for engine_name, plate_results in _multi_results:
-                if engine_name == "fast-alpr":
-                    continue  # déjà dans result["plates"]
-                if _cam_whitelist and engine_name not in _cam_whitelist:
-                    continue
-                for pr in plate_results or []:
-                    result["plates"].append({
-                        "plate": (pr.text or "").upper().strip(),
-                        "confidence": round(float(getattr(pr, "confidence", 0.0)), 2),
-                        "plate_crop": None, "vehicle_crop": None,
-                        "vehicle_type": None, "vehicle_color": None,
-                        "engine": engine_name,
-                    })
-    except Exception:
-        logger.exception("multi_anpr dispatch error")
-
-    for p in result["plates"]:
-        # v0.3 : filtrage par ANPR Tracker — n'émet la plaque que si le
-        # tracker le signale (première lecture consensuelle du véhicule
-        # tracké). Pour les plaques venues des multi-moteurs (pas de
-        # `_emit` set) on retombe sur le comportement historique.
-        if "_emit" in p and not p["_emit"]:
-            continue
-        recent = await db.plates.find_one({
-            "plate": p["plate"], "camera_id": cam["id"],
-            "engine": p.get("engine", "fast-alpr"),
-            "timestamp": {"$gte": (now - timedelta(seconds=EVENT_COOLDOWN)).isoformat()},
-        })
-        if recent:
-            continue
-        # Priorité liste locale caméra > liste globale watchlist
-        if p["plate"] in bl_local:
-            list_status = "black"; wl = {"reason": "Liste noire locale caméra"}
-        elif p["plate"] in wl_local:
-            list_status = "white"; wl = None
-        else:
-            wl = await db.watchlist.find_one({"plate": p["plate"]}, {"_id": 0})
-            list_status = wl["list_type"] if wl else "none"
-        doc = {
-            "id": str(uuid.uuid4()), "plate": p["plate"], **base,
-            "confidence": p["confidence"],
-            "vehicle_color": p.get("vehicle_color"), "vehicle_make": None, "vehicle_model": None,
-            "vehicle_type": p.get("vehicle_type"),
-            "country": (anpr_cfg_cam.get("country_override")
-                         or (await _get_global_anpr_country())),
-            "direction": None,
-            "lat": cam.get("lat"), "lng": cam.get("lng"),
-            "list_status": list_status,
-            "vehicle_crop": p.get("vehicle_crop"), "plate_crop": p.get("plate_crop"),
-            # Hybridation : scène HD complète (contexte visuel) — le frontend affiche
-            # la scène en fond avec plate_crop/vehicle_crop en insets pour la lisibilité OCR.
-            "frame_thumb": _ensure_frame_thumb(result),
-            # Traçabilité moteur (P8+ / demande CEO Feb 2026) : quel moteur ANPR a
-            # reconnu cette plaque ? Utile pour le multi-moteurs (fast-alpr, plate-recognizer,
-            # openalpr, paddle-ocr, easyocr, azure-vision, google-vision…).
-            "engine": p.get("engine", "fast-alpr"),
-        }
-        await db.plates.insert_one(dict(doc))
-        doc.pop("_id", None)
-        # v0.3 : purge des champs internes du tracker
-        for k in ("_emit", "_owner_bbox"):
-            p.pop(k, None)
-        if list_status == "black":
-            await _raise_blacklist_alert(cam, doc, (wl or {}).get("reason", ""))
-
-
-async def _get_global_anpr_country() -> str | None:
-    doc = await db.settings.find_one({"key": "anpr_config"}, {"_id": 0})
-    return ((doc or {}).get("value", {}) or {}).get("country")
-
-
-async def _sync_frame_source_workers(cams: list[dict]) -> None:
-    """Synchronise les workers ffmpeg persistants avec la liste des caméras actives.
-
-    **Architecture v0.3 (Feb 2026)** — SÉPARATION STRICTE moteur IA / streaming :
-      - Le pipeline IA ouvre sa **propre connexion RTSP native** sur la caméra
-        (via ffmpeg subprocess persistant, NVDEC si dispo).
-      - go2rtc ne sert **plus** à alimenter l'IA — il ne s'occupe QUE du live
-        WebRTC / diffusion RTSP aux clients.
-      - Résultat : le fetch_ms tombe à quelques millisecondes (frame déjà
-        décodée en mémoire), et l'IA n'est plus polluée par le transcodage
-        MJPEG intermédiaire.
-
-    Résolution de l'URL RTSP pour l'IA (par priorité) :
-      1. ``camera.ai_rtsp_url``   → URL dédiée IA (flux principal HD recommandé)
-      2. ``camera.rtsp_url``      → URL principale existante
-      3. Fallback go2rtc         → uniquement si aucune URL native trouvée
-                                    (compat démo mires + caméras non configurées)
-
-    Skip explicite pour :
-      - Caméras démo (``id`` commence par ``demo-``) → mires go2rtc.
-      - Caméras sans URL RTSP renseignée.
-    """
-    import frame_source
-    go2rtc_rtsp = os.environ.get("GO2RTC_RTSP", "rtsp://go2rtc:8554")
-    use_direct = os.environ.get("MGVMS_AI_DIRECT_RTSP", "1").lower() not in ("0", "false", "no")
-
-    active_ids = set()
-    for cam in cams:
-        cam_id = cam["id"]
-        # Résolution source RTSP pour l'IA (v0.3)
-        ai_url = (cam.get("ai_rtsp_url") or "").strip()
-        native_url = (cam.get("rtsp_url") or "").strip()
-        is_demo = cam_id.startswith("demo-") or cam_id.startswith("demo_")
-
-        if is_demo:
-            # Caméras démo : go2rtc génère localement la mire testsrc2.
-            # On lance quand même un worker persistant qui pointe vers le
-            # relais go2rtc RTSP → une seule connexion, tenue en permanence,
-            # au lieu du fallback HTTP /api/frame.jpeg qui prend 2-3 s.
-            rtsp_url = f"{go2rtc_rtsp}/cam_{cam_id}"
-            source_type = "demo-go2rtc-relay"
-        elif use_direct and ai_url:
-            rtsp_url = ai_url
-            source_type = "direct-ai"
-        elif use_direct and native_url:
-            rtsp_url = native_url
-            source_type = "direct-native"
-        elif native_url or ai_url:
-            # Fallback go2rtc relay uniquement si direct explicitement désactivé
-            rtsp_url = f"{go2rtc_rtsp}/cam_{cam_id}"
-            source_type = "go2rtc-relay"
-        else:
-            # Caméra sans URL RTSP → on skip (impossible de grabber)
-            logger.warning("frame_source: skip %s (aucune URL RTSP configurée)", cam_id)
-            continue
-
-        active_ids.add(cam_id)
-        codec = (cam.get("codec") or "auto").lower()
-        if codec not in ("h264", "h265", "hevc", "auto"):
-            codec = "auto"
-        if codec == "hevc":
-            codec = "h265"
-        # Résolution IA : 1280×720 par défaut (bon compromis YOLOv11 précision/vitesse)
-        try:
-            frame_source.start(cam_id, rtsp_url, codec=codec, width=1280, height=720)
-            logger.info("frame_source.start %s src=%s codec=%s (%s)",
-                        cam_id, source_type, codec, rtsp_url[:60] + ("…" if len(rtsp_url) > 60 else ""))
-        except Exception as e:
-            logger.warning("frame_source.start(%s) échec: %s", cam_id, e)
-
-    # Arrêter les workers pour caméras qui ne sont plus dans la liste active
-    current = set(frame_source.status().get("workers", {}).keys())
-    for stale in current - active_ids:
-        try:
-            frame_source.stop(stale)
-        except Exception:
-            pass
-
-
 async def ai_loop() -> None:
-    """Boucle IA : analyse en parallèle chaque caméra `detect_enabled`.
-
-    Contrat Phase 0 (v2.21.0) :
-    - Ne s'auto-désactive JAMAIS. Un échec de `_load_models` au boot est loggé
-      mais la boucle continue à tourner et retente le chargement à chaque cycle.
-      → En prod, si un modèle rate au boot (dépendance manquante, GPU KO, etc.)
-        et est réparé sans redémarrer le backend, l'IA reprend automatiquement.
-    - Le crash d'une caméra ne bloque pas les autres (asyncio.gather return_exceptions).
-    - `_ai_health` est mis à jour à chaque cycle pour l'endpoint `/api/diagnostics/ai-health`.
-    """
-    await asyncio.sleep(15)  # laisse les flux démarrer
+    """Boucle IA : un CameraWorker par caméra `detect_enabled`, en parallèle."""
+    await asyncio.sleep(15)
     _ai_health["loop_alive"] = True
     _ai_health["loop_disabled_reason"] = None
-    # Premier essai de chargement — NE PAS quitter en cas d'échec
     try:
         await asyncio.to_thread(_load_models)
     except Exception as e:
-        logger.exception("Premier chargement des modèles IA a échoué — la boucle continue et retentera à chaque cycle")
+        logger.exception("Premier chargement des modèles IA a échoué — la boucle continue")
         _ai_health["last_cycle_error"] = f"initial _load_models: {type(e).__name__}: {str(e)[:200]}"
     await load_runtime_config()
     logger.info(
-        "Moteur IA démarré (device=%s · intervalle=%.1fs · yolo=%s · alpr=%s)",
+        "Moteur IA démarré (device=%s · intervalle=%.1fs · yolo=%s · alpr=%s · pipeline=v2)",
         _detected_device(), _cfg("interval_seconds", AI_INTERVAL),
         "ok" if _ai_health["yolo_loaded"] else f"KO ({_ai_health['yolo_error']})",
         "ok" if _ai_health["alpr_loaded"] else f"KO ({_ai_health['alpr_error']})",
@@ -1535,21 +507,18 @@ async def ai_loop() -> None:
         _ai_health["cycles_total"] += 1
         _ai_health["last_cycle_ts"] = datetime.now(timezone.utc).isoformat()
         try:
-            # Retente périodiquement les modèles KO (retry silencieux si déjà chargés)
             if not _ai_health["yolo_loaded"] or not _ai_health["alpr_loaded"]:
                 try:
                     await asyncio.to_thread(_load_models)
                 except Exception as reload_err:
                     logger.debug("Retry _load_models: %s", reload_err)
             await refresh_per_camera_configs()
-            await load_runtime_config()  # rafraîchit bytetrack + IA globale
+            await load_runtime_config()
             cams = await db.cameras.find({"detect_enabled": True, "status": "online"}, {"_id": 0}).to_list(200)
-            # Synchronise les workers ffmpeg-CUDA persistants avec la liste actuelle
             await _sync_frame_source_workers(cams)
             if cams:
                 logger.info("IA · cycle : %d caméra(s) réelle(s) en parallèle %s",
                             len(cams), [c["name"] for c in cams])
-                # Workers indépendants : une caméra lente ne bloque pas les autres
                 await asyncio.gather(*[_process_camera(cam) for cam in cams], return_exceptions=True)
         except Exception as e:
             _ai_health["last_cycle_error"] = f"{type(e).__name__}: {str(e)[:200]}"

@@ -304,6 +304,7 @@ class PluginBus:
         timeout_s: Optional[float] = None,
         *,
         cascade_stop_at: Optional[float] = None,
+        only: Optional[set] = None,
     ) -> list[tuple[str, list]]:
         """Fan-out sur tous les `PlateRecognizer` actifs.
 
@@ -311,9 +312,14 @@ class PluginBus:
         résultat avec `confidence >= cascade_stop_at` (mode économie
         cloud/quota). Sinon appelle tous les moteurs en parallèle.
 
+        v0.4.2 · ``only`` : whitelist per-camera — SEULS les moteurs listés
+        sont dispatchés (zéro appel API, zéro CPU pour les autres).
+
         Retourne `[(engine_name, [PlateResult, ...]), ...]`.
         """
         entries = self.active("PlateRecognizer")
+        if only is not None:
+            entries = [e for e in entries if e.name in only]
         if not entries:
             return []
         _cam = getattr(frame, "camera_id", None)
@@ -370,6 +376,7 @@ class PluginBus:
         emit_events: bool = False,
         timeout_s: Optional[float] = None,
         precomputed_detections: Optional[list] = None,
+        precomputed_tracks: Optional[list] = None,
     ) -> PipelineResult:
         """Enchaîne détection → tracking → segmentation → consommateurs métier.
 
@@ -377,6 +384,10 @@ class PluginBus:
         est **court-circuitée** et les detections passées sont utilisées
         directement. Cas d'usage : ai_engine a déjà fait tourner YOLO et
         veut réutiliser les résultats sans double inférence.
+
+        v0.4.2 · Si `precomputed_tracks` est fourni, l'étape 2 (Tracker)
+        est **entièrement court-circuitée** : les plugins Tracker ne sont
+        JAMAIS appelés (tracking unique, fait par le TrackingStage core).
         """
         cfg = camera_config or {}
         # v0.3 · Config caméra modulaire : si la caméra a une liste
@@ -415,8 +426,16 @@ class PluginBus:
 
         # ── 2. Tracking ─────────────────────────────────
         t = time.perf_counter()
-        tracker_entries = _filter(self.active("Tracker"))
-        result.plugins_used["trackers"] = [e.name for e in tracker_entries]
+        if precomputed_tracks is not None:
+            # Tracking UNIQUE core (pipeline_v2.tracking.TrackerPool) — les
+            # plugins Tracker ne tournent pas : zéro double tracking.
+            result.tracks = list(precomputed_tracks)
+            result.plugins_used["trackers"] = ["core-tracking-stage"]
+            timing["tracking_ms"] = int((time.perf_counter() - t) * 1000)
+            tracker_entries = []
+        else:
+            tracker_entries = _filter(self.active("Tracker"))
+            result.plugins_used["trackers"] = [e.name for e in tracker_entries]
         if tracker_entries and result.detections:
             tr_results = await asyncio.gather(
                 *[self._call_one(e, lambda inst, f=frame, d=result.detections: inst.track(f, d),

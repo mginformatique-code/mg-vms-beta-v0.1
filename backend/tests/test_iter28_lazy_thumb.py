@@ -114,6 +114,11 @@ class TestEvaluateScenariosLazy:
         monkeypatch.setattr(AI, "_get_scenario_rules", AsyncMock(return_value=rules))
         monkeypatch.setattr(AI, "_raise_scenario_alert", AsyncMock())
         monkeypatch.setattr(AI, "_is_night", MagicMock(return_value=False))  # pas la nuit
+        # v0.4.2 : la logique vit dans pipeline_v2.scenarios — patcher aussi là
+        import pipeline_v2.scenarios as SC
+        monkeypatch.setattr(SC, "_get_scenario_rules", AsyncMock(return_value=rules))
+        monkeypatch.setattr(SC, "_raise_scenario_alert", AsyncMock())
+        monkeypatch.setattr(SC, "_is_night", MagicMock(return_value=False))
 
         # Instrumente `_ensure_frame_thumb` — doit être appelé 0 fois si pas d'alerte.
         original_ensure = AI._ensure_frame_thumb
@@ -130,7 +135,9 @@ class TestEvaluateScenariosLazy:
         }
         cam = {"id": "test-cam-1", "name": "Test", "site_id": "", "site_name": ""}
         from datetime import datetime
-        asyncio.get_event_loop().run_until_complete(
+        _loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_loop)
+        _loop.run_until_complete(
             AI._evaluate_scenarios(cam, result, datetime.now())
         )
         assert call_count["n"] == 0, f"_ensure_frame_thumb appelé {call_count['n']}× sans détection → régression ANPR persiste"
@@ -152,6 +159,11 @@ class TestEvaluateScenariosLazy:
         monkeypatch.setattr(AI, "_get_scenario_rules", AsyncMock(return_value=rules))
         monkeypatch.setattr(AI, "_raise_scenario_alert", AsyncMock())
         monkeypatch.setattr(AI, "_is_night", MagicMock(return_value=False))
+        # v0.4.2 : la logique vit dans pipeline_v2.scenarios — patcher aussi là
+        import pipeline_v2.scenarios as SC
+        monkeypatch.setattr(SC, "_get_scenario_rules", AsyncMock(return_value=rules))
+        monkeypatch.setattr(SC, "_raise_scenario_alert", AsyncMock())
+        monkeypatch.setattr(SC, "_is_night", MagicMock(return_value=False))
 
         original_ensure = AI._ensure_frame_thumb
         call_count = {"n": 0}
@@ -170,7 +182,9 @@ class TestEvaluateScenariosLazy:
         }
         cam = {"id": "test-cam-2", "name": "Test2", "site_id": "", "site_name": ""}
         from datetime import datetime
-        asyncio.get_event_loop().run_until_complete(
+        _loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_loop)
+        _loop.run_until_complete(
             AI._evaluate_scenarios(cam, result, datetime.now())
         )
         # 1 seul scénario matche → 1 appel à thumb() → 1 encodage

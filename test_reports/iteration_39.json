@@ -1,0 +1,34 @@
+{
+  "summary": "MG-VMS v0.4.2 backend testing completed. Pipeline v2 refactor (PipelineRuntime + CameraWorker + TrackerPool + PluginBus dispatch_pipeline) is fully operational. Created API-driven test file /app/backend/tests/test_v042_pipeline_inspector_api.py (12 tests) covering pipeline-inspector, reset endpoint, ai-health, pipeline-v2, anpr-quality, pipeline-metrics, /api/events, /api/plates and /api/ai/debug. Ran the full targeted pytest suite (v041/v042/v043 + pipeline_chain + pipeline_realtime + new inspector API tests) => 73/73 PASSED.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/diagnostics/pipeline-inspector",
+        "issue": "meta.tracker et runtime.trackers restent None/{} pour demo-cam-002 tant qu'aucune détection réelle n'a lieu (testsrc2 = pas de véhicules). Dans pipeline_v2/camera_worker.py:117, tracker_pool.update() est skippé si ctx.detections est vide, donc set_meta reçoit algo_effective=None (init à ligne 116) et TrackerPool ne crée jamais l'instance ByteTrack. Fonctionnellement OK (rien à tracker), mais l'exigence 'meta.tracker doit être bytetrack' de la review n'est vérifiable que lors d'un cycle avec détections. Recommandation optionnelle : pré-initialiser meta['algo_effective']='bytetrack' même quand detections=[] pour refléter la config active du stage."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_v042_pipeline_inspector_api.py",
+    "/app/test_reports/pytest/v042_iter39.xml"
+  ],
+  "action_items": [
+    "Optionnel : ajuster pipeline_v2/camera_worker.py::_stage_tracking pour que set_meta(tracker='bytetrack') soit émis même sans détection, afin de satisfaire l'exigence 'meta.tracker doit être bytetrack' de manière déterministe sur cameras à faible activité."
+  ],
+  "critical_code_review_comments": [
+    "TrackerPool._instances ne se peuple que lors du premier update() avec détections (tracking.py:99). Corollaire : runtime.trackers peut rester {} pour une caméra active mais sans véhicules. C'est correct sémantiquement mais peut prêter à confusion en diagnostic. Considérer un pré-warm au démarrage du worker.",
+    "camera_worker.py:117 - le gate 'ctx.detections' court-circuite l'appel tracker_pool.update. La meta.algo_effective devient None au lieu de refléter l'algo configuré. Voir action_items."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_v042_pipeline_inspector_api.py (nouveau)"
+  ],
+  "success_rate": {"backend": "100% (73/73 pytest)", "frontend": "n/a (skip demandé)"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026 (rate-limit 30 logins/60s respecté via fixture module-scope)",
+  "seed_data_creation": "aucune",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend tourne avec uvicorn --reload : ÉDITER des fichiers dans /app/backend déclenche un reload complet qui met ~10-15s à recharger YOLO+ALPR. Toujours attendre (sleep 15-20) après une modif de test avant de relancer pytest, sinon les endpoints /api/diagnostics/* retournent des états vides/froids (yolo_loaded=False, cameras={}, workers=[]). Localhost et URL externe pointent bien vers la même instance uvicorn (port 8001). demo-cam-002 est testsrc2 = jamais de véhicules détectés = tracker_pool reste vide et ANPR auto-suspendu (comportement attendu). GET /api/ai/debug (sans camera_id) retourne un snapshot global (l'endpoint /api/ai/debug/{camera_id} existe aussi et fonctionne).",
+  "rca of the issue": "N/A - aucun bug bloquant. La divergence mineure sur meta.tracker=None est un choix d'implémentation (skip tracking si pas de détections) et non un défaut du refactor pipeline-driven."
+}

@@ -15,12 +15,31 @@ from typing import Optional
 
 @dataclass
 class Frame:
-    """Une frame vidéo transmise à un plugin FrameAnalyzer."""
+    """Une frame vidéo transmise à un plugin FrameAnalyzer.
+
+    v0.4.2 : ``jpeg()`` fournit un encodage JPEG **partagé et memoizé** —
+    tous les plugins consommant la même Frame réutilisent le même buffer
+    (un seul ``cv2.imencode`` quel que soit le nombre de moteurs).
+    """
     camera_id: str
     timestamp: str  # ISO 8601 UTC
     numpy_bgr: object  # numpy.ndarray, opaque au niveau interface
     width: int
     height: int
+    _jpeg_cache: dict = field(default_factory=dict, repr=False)
+
+    def jpeg(self, quality: int = 85):
+        """JPEG bytes de la frame — encodé UNE seule fois par qualité."""
+        q = int(quality)
+        if q not in self._jpeg_cache:
+            img = self.numpy_bgr
+            if img is None or getattr(img, "size", 0) == 0:
+                self._jpeg_cache[q] = None
+            else:
+                import cv2
+                ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, q])
+                self._jpeg_cache[q] = buf.tobytes() if ok else None
+        return self._jpeg_cache[q]
 
 
 @dataclass

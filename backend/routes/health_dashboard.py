@@ -393,6 +393,32 @@ async def diagnostics_pipeline_v2_invalidate(
     return {"ok": True, "invalidated": camera_id or "all"}
 
 
+@health_dashboard_router.get("/diagnostics/pipeline-inspector")
+async def diagnostics_pipeline_inspector(user: dict = Depends(require_permission("view_live"))):
+    """v0.4.2 · **Pipeline Inspector** — diagnostic runtime par caméra × stage.
+
+    Pour chaque caméra : fetch → decode → motion → yolo → tracking → roi →
+    anpr → dispatch → multi_anpr → scenarios → persist → websocket, avec
+    temps moyen/max, appels, erreurs, timeouts, FPS effectif. Snapshot
+    système : CPU, RAM, GPU, VRAM. Inclut les workers et trackers actifs.
+    """
+    from pipeline_v2.inspector import inspector as _inspector
+    from pipeline_v2.camera_worker import runtime as _runtime
+    snap = _inspector.snapshot()
+    snap["runtime"] = _runtime.describe()
+    return snap
+
+
+@health_dashboard_router.post("/diagnostics/pipeline-inspector/reset")
+async def diagnostics_pipeline_inspector_reset(
+    camera_id: Optional[str] = None,
+    user: dict = Depends(require_permission("view_live")),
+):
+    from pipeline_v2.inspector import inspector as _inspector
+    _inspector.reset(camera_id)
+    return {"ok": True, "reset": camera_id or "all"}
+
+
 @health_dashboard_router.get("/diagnostics/anpr-quality")
 async def diagnostics_anpr_quality(user: dict = Depends(require_permission("view_live"))):
     """v0.4.2 · P1 · **ANPR Auto-suspension qualité** — état par caméra.

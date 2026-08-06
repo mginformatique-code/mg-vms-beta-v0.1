@@ -43,8 +43,12 @@ class OpenALPRPlugin(PlateRecognizer):
             crop = img[max(0, y1):y2, max(0, x1):x2]
             if crop.size > 0:
                 img = crop
-        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        if not ok:
+            ok, enc = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            buf = enc.tobytes() if ok else None
+        else:
+            # v0.4.2 · JPEG PARTAGÉ : encodé une seule fois pour tous les moteurs
+            buf = frame.jpeg(85)
+        if buf is None:
             return []
         b64 = base64.b64encode(bytes(buf)).decode()
 

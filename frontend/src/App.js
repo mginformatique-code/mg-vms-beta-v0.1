@@ -27,6 +27,7 @@ import AnprBenchmark from "@/pages/AnprBenchmark";
 import PipelineVideo from "@/pages/PipelineVideo";
 import AIPipelineMonitor from "@/pages/AIPipelineMonitor";
 import PipelineDesigner from "@/pages/PipelineDesigner";
+import PipelineInspector from "@/pages/PipelineInspector";
 import UsersPage from "@/pages/Users";
 import SettingsPage from "@/pages/Settings";
 import Notifications from "@/pages/Notifications";
@@ -72,6 +73,7 @@ function AppRoutes() {
       <Route path="/pipeline" element={<Protected><PipelineVideo /></Protected>} />
       <Route path="/pipeline-monitor" element={<Protected><AIPipelineMonitor /></Protected>} />
       <Route path="/pipeline-designer" element={<Protected><PipelineDesigner /></Protected>} />
+      <Route path="/pipeline-inspector" element={<Protected><PipelineInspector /></Protected>} />
       <Route path="/users" element={<Protected><UsersPage /></Protected>} />
       <Route path="/notifications" element={<Protected><Notifications /></Protected>} />
       <Route path="/plugins" element={<Protected><Plugins /></Protected>} />

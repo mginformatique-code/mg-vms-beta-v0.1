@@ -1,0 +1,106 @@
+{
+  "meta": {
+    "date": "2026-08-06 10:07:15",
+    "frame": "1920x1080",
+    "vehicles": 4,
+    "iterations": 30,
+    "system_start": {
+      "cpu_percent": 5.0,
+      "rss_mb": 55.9,
+      "vram_mb": null
+    },
+    "system_end": {
+      "cpu_percent": 2.5,
+      "rss_mb": 809.1,
+      "vram_mb": null
+    }
+  },
+  "before": {
+    "tracking": {
+      "avg_ms": 0.715,
+      "trackers_run": 2
+    },
+    "crops_1_engines": {
+      "avg_ms": 0.75,
+      "jpeg_encodes_per_cycle": 4
+    },
+    "crops_5_engines": {
+      "avg_ms": 3.68,
+      "jpeg_encodes_per_cycle": 20
+    },
+    "crops_10_engines": {
+      "avg_ms": 7.33,
+      "jpeg_encodes_per_cycle": 40
+    },
+    "crops_20_engines": {
+      "avg_ms": 14.65,
+      "jpeg_encodes_per_cycle": 80
+    },
+    "dispatch_1_plugins": {
+      "avg_ms": 1.15,
+      "plugins_registered": 1,
+      "plugins_dispatched": 1
+    },
+    "dispatch_5_plugins": {
+      "avg_ms": 1.2,
+      "plugins_registered": 5,
+      "plugins_dispatched": 5
+    },
+    "dispatch_10_plugins": {
+      "avg_ms": 1.25,
+      "plugins_registered": 10,
+      "plugins_dispatched": 10
+    },
+    "dispatch_20_plugins": {
+      "avg_ms": 1.42,
+      "plugins_registered": 20,
+      "plugins_dispatched": 20
+    }
+  },
+  "after": {
+    "tracking": {
+      "avg_ms": 0.367,
+      "trackers_run": 1
+    },
+    "crops_1_engines": {
+      "avg_ms": 0.74,
+      "jpeg_encodes_per_cycle": 4
+    },
+    "crops_5_engines": {
+      "avg_ms": 0.74,
+      "jpeg_encodes_per_cycle": 4
+    },
+    "crops_10_engines": {
+      "avg_ms": 0.74,
+      "jpeg_encodes_per_cycle": 4
+    },
+    "crops_20_engines": {
+      "avg_ms": 0.75,
+      "jpeg_encodes_per_cycle": 4
+    },
+    "dispatch_1_plugins": {
+      "avg_ms": 1.15,
+      "plugins_registered": 1,
+      "plugins_dispatched": 1
+    },
+    "dispatch_5_plugins": {
+      "avg_ms": 1.1,
+      "plugins_registered": 5,
+      "plugins_dispatched": 1
+    },
+    "dispatch_10_plugins": {
+      "avg_ms": 1.11,
+      "plugins_registered": 10,
+      "plugins_dispatched": 1
+    },
+    "dispatch_20_plugins": {
+      "avg_ms": 1.11,
+      "plugins_registered": 20,
+      "plugins_dispatched": 1
+    }
+  },
+  "yolo": {
+    "avg_ms": 263.5,
+    "max_ms": 405.3
+  }
+}

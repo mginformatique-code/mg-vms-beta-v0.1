@@ -28,10 +28,10 @@ class TestCameraModularConfig:
         assert '_filter' in src
 
     def test_ai_engine_passes_enabled_plugins(self):
-        """Vérifie que ai_engine._do_downstream_work injecte enabled_plugins dans camera_config."""
+        """Vérifie que le downstream v2 injecte enabled_plugins dans camera_config."""
         import inspect
-        from ai_engine import _do_downstream_work
-        src = inspect.getsource(_do_downstream_work)
+        from pipeline_v2.downstream import run_downstream
+        src = inspect.getsource(run_downstream)
         assert '"enabled_plugins": cam.get("enabled_plugins")' in src
 
 

@@ -43,14 +43,14 @@ class TestAuditFixes:
         assert 'record_stage(cam["id"], "alpr_ms"' in src
 
     def test_anpr_uses_vehicle_crops_not_full_image(self):
-        """ANPR doit itérer sur les véhicules et faire predict sur le crop."""
+        """ANPR doit itérer sur les ROI véhicules PARTAGÉS et faire predict sur le crop."""
         import inspect
-        from ai_engine import _analyze_frame
-        src = inspect.getsource(_analyze_frame)
-        # Nouvelle boucle explicite par véhicule
-        assert "for owner in vehicles:" in src
+        from pipeline_v2.camera_worker import CameraWorker
+        src = inspect.getsource(CameraWorker._stage_anpr)
+        # Boucle explicite par ROI véhicule (crop unique partagé)
+        assert "for roi in ctx.vehicle_rois:" in src
         # Crop véhicule injecté dans _alpr.predict
-        assert "_alpr.predict(vehicle_crop)" in src
+        assert "_alpr.predict(roi.crop)" in src
         # L'ancien "for r in _alpr.predict(img):" ne doit plus être là
         assert "_alpr.predict(img)" not in src
 

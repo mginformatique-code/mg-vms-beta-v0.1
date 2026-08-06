@@ -42,6 +42,7 @@ const NAV = [
     { to: "/pipeline", icon: Film, key: "nav.pipeline", role: "technician" },
     { to: "/pipeline-monitor", icon: Brain, key: "nav.pipeline_monitor", role: "technician" },
     { to: "/pipeline-designer", icon: Zap, key: "nav.pipeline_designer", role: "technician" },
+    { to: "/pipeline-inspector", icon: Activity, key: "nav.pipeline_inspector", role: "technician" },
     { to: "/reports", icon: FileText, key: "nav.reports", role: "technician" },
     { to: "/notifications", icon: BellRing, key: "nav.notifications", role: "technician" },
     { to: "/plugins", icon: Puzzle, key: "nav.plugins", role: "admin" },

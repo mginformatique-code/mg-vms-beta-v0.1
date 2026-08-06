@@ -1,1 +1,3 @@
 streams:
+        probe_1786011104617:
+          - rtsp://127.0.0.1:8554/cam_demo-cam-001
