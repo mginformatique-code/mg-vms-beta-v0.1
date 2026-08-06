@@ -19,15 +19,36 @@ KNOWN_TRACKER_PLUGINS = ("bytetrack", "botsort", "deepsort", "ocsort", "strongso
 SUPPORTED_ALGOS = {"bytetrack", "botsort"}
 
 
-def resolve_algo(enabled_plugins: Optional[list]) -> tuple[str, str]:
-    """Retourne (algo_demandé, algo_effectif) selon la whitelist caméra."""
+def resolve_algo(enabled_plugins: Optional[list]) -> tuple[str, str, Optional[str]]:
+    """Retourne (algo_demandé, algo_effectif, warning_ou_None).
+
+    v0.5.6 P0-3 · Le fallback silencieux vers ByteTrack était trompeur pour
+    l'opérateur. Désormais :
+
+    * Aucun tracker plugin activé (whitelist standard) → bytetrack (défaut
+      historique) sans warning : c'est le comportement documenté.
+    * Un tracker plugin explicitement demandé mais non implémenté (deepsort,
+      ocsort, strongsort) → on continue avec bytetrack MAIS on retourne un
+      message d'avertissement clair qui sera loggué + exposé côté API
+      (`inspector`) pour surfacer l'écart dans l'UI et éviter que
+      l'opérateur croie que DeepSORT tourne alors que ByteTrack est actif.
+    """
     requested = "bytetrack"
     for name in (enabled_plugins or []):
         if name in KNOWN_TRACKER_PLUGINS:
             requested = name
             break
-    effective = requested if requested in SUPPORTED_ALGOS else "bytetrack"
-    return requested, effective
+    if requested in SUPPORTED_ALGOS:
+        return requested, requested, None
+    # Tracker demandé mais pas implémenté par le core → warning explicite.
+    warning = (
+        f"Tracker '{requested}' non implémenté par le core "
+        f"(implémentés: {sorted(SUPPORTED_ALGOS)}). "
+        f"Fallback vers 'bytetrack'. Retirez ce plugin de la whitelist "
+        f"ou activez un tracker supporté pour supprimer cet avertissement."
+    )
+    logger.warning("[Tracker] %s", warning)
+    return requested, "bytetrack", warning
 
 
 class TrackerPool:
@@ -91,8 +112,10 @@ class TrackerPool:
         Modifie ``ctx.detections`` en place (champ ``track_id``) et remplit
         ``ctx.tracks``. Retourne des métadonnées ({algo, tracked}).
         """
-        requested, effective = resolve_algo(enabled_plugins)
+        requested, effective, warning = resolve_algo(enabled_plugins)
         meta = {"algo_requested": requested, "algo_effective": effective, "tracked": 0}
+        if warning:
+            meta["warning"] = warning
         detections = ctx.detections
         if not detections:
             return meta

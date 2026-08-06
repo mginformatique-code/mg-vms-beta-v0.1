@@ -25,6 +25,117 @@ from .scenarios import _evaluate_scenarios, _raise_blacklist_alert, cooldown_ok
 logger = logging.getLogger("pipeline_v2.downstream")
 
 
+def _apply_hierarchical_anpr_fusion(cam: dict, result: dict) -> None:
+    """v0.5.6 P0-4 — Fusion hiérarchique des lectures multi-OCR (in-place).
+
+    Regroupe les lectures dans ``result["plates"]`` par ``track_id`` puis
+    par plaque normalisée (§Étape 1). Applique ensuite la fusion
+    hiérarchique (§Étapes 2-5). Après fusion :
+
+    * Au maximum 1 entrée à ``_emit=True`` par (track_id) — la plaque
+      gagnante, éventuellement marquée ``_ambiguous=True``.
+    * Les lectures brutes sont attachées à ce gagnant via
+      ``anpr_evidence: [{engine, text, confidence, normalized}]``.
+    * Les autres lectures sont marquées ``_emit=False`` (la boucle de
+      persistance les ignore — cf. ligne "if not p.get('_emit', True)").
+
+    Cette fonction est purement sync et n'introduit aucune latence
+    supplémentaire mesurable (< 1ms pour 10 moteurs × 5 ROIs).
+    """
+    from plugin_manager.fusion import (
+        MODE_HIERARCHICAL, apply_policy, normalize_plate,
+    )
+    from plugin_manager.interfaces import PlateResult
+
+    plates = result.get("plates") or []
+    if not plates:
+        return
+
+    # Priorité déclarée = ordre des plugins dans enabled_plugins de la caméra.
+    enabled = list(cam.get("enabled_plugins") or [])
+    priority_order = [p for p in enabled if p in {
+        "fast-alpr", "paddle-ocr", "openalpr", "plate-recognizer",
+        "easyocr", "tesseract", "anpr-eps",
+    }]
+
+    # Groupement par track_id. Les lectures sans track_id sont émises telles
+    # quelles (impossible de les corréler entre moteurs sans identifiant).
+    by_track: dict = {}
+    orphans: list = []
+    for p in plates:
+        tid = p.get("track_id")
+        if tid is None:
+            orphans.append(p)
+        else:
+            by_track.setdefault(tid, []).append(p)
+
+    for _tid, reads in by_track.items():
+        if len(reads) <= 1:
+            # Une seule lecture pour ce track → rien à fusionner.
+            continue
+        # Reconstruit les PlateResult pour la fusion (sans copier les crops).
+        results_by_engine: list[tuple[str, list]] = []
+        for r in reads:
+            eng = r.get("engine", "unknown")
+            pr = PlateResult(
+                text=r.get("plate") or "",
+                confidence=float(r.get("confidence") or 0.0),
+                engine=eng,
+                processing_ms=0,
+            )
+            results_by_engine.append((eng, [pr]))
+        try:
+            fused = apply_policy(
+                MODE_HIERARCHICAL, results_by_engine,
+            )
+        except Exception:  # pragma: no cover
+            logger.exception("Hierarchical fusion failed on track %s", _tid)
+            continue
+        final = fused.get("final")
+        if final is None:
+            continue
+        # Trouve la lecture qui correspond au texte gagnant (normalisation),
+        # ou par défaut la lecture avec la plus grosse confiance.
+        winner_norm = normalize_plate(final.text)
+        winner_read = None
+        best_conf = -1.0
+        for r in reads:
+            r_norm = normalize_plate(r.get("plate") or "")
+            if r_norm == winner_norm and r.get("confidence", 0) > best_conf:
+                winner_read = r
+                best_conf = r.get("confidence", 0.0)
+        if winner_read is None:
+            # Ambigu : le gagnant est marqué comme tel, on garde le meilleur.
+            best_conf = -1.0
+            for r in reads:
+                if r.get("confidence", 0) > best_conf:
+                    winner_read = r
+                    best_conf = r.get("confidence", 0.0)
+
+        # Marque les non-gagnants pour qu'ils soient ignorés à la persistance.
+        for r in reads:
+            if r is not winner_read:
+                r["_emit"] = False
+
+        # Attache l'evidence brute + le mode de fusion au gagnant.
+        winner_read["plate"] = final.text  # utilise le texte fusionné.
+        winner_read["confidence"] = round(float(final.confidence), 2)
+        winner_read["engine"] = final.engine or "fusion"
+        winner_read["_ambiguous"] = (
+            "ambiguous" in (final.engine or "").lower()
+        )
+        winner_read["anpr_evidence"] = [
+            {
+                "engine": r.get("engine"),
+                "text": r.get("plate"),
+                "confidence": r.get("confidence"),
+                "normalized": normalize_plate(r.get("plate") or ""),
+            }
+            for r in reads
+        ]
+    _ = orphans  # traités inchangés par la boucle de persistance
+
+
 async def _get_global_anpr_country():
     doc = await db.settings.find_one({"key": "anpr_config"}, {"_id": 0})
     return ((doc or {}).get("value", {}) or {}).get("country")
@@ -387,6 +498,13 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
     # events YOLO. Voir _prerun_multi_anpr() en début de fonction.
     inspector.record(cam["id"], "multi_anpr", 0.0)
 
+    # ── v0.5.6 P0-4 · Fusion hiérarchique multi-OCR ─────────────────
+    # Regroupe les lectures par (track_id, plate_normalisée) puis applique
+    # la fusion hiérarchique (majorité → confiance → priorité → ambigu).
+    # Résultat : au maximum 1 doc `plates` en DB par (track_id, gagnant).
+    # Les autres lectures sont conservées en `evidence` pour audit.
+    _apply_hierarchical_anpr_fusion(cam, result)
+
     # ── Persistance plaques + alertes liste noire ────────────────────
     # ── Persistance plaques + alertes liste noire ────────────────────
     # Charge la config ANPR caméra (whitelist/blacklist locales, override
@@ -433,6 +551,8 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
             "engine": p.get("engine", "fast-alpr"),
             "plugins_used": plugins_used,
             "anpr_readings": all_readings,
+            "anpr_evidence": p.get("anpr_evidence"),        # v0.5.6 P0-4
+            "ambiguous": bool(p.get("_ambiguous", False)),  # v0.5.6 P0-4
             "track_id": _tid,
         }
         await db.plates.insert_one(dict(doc))

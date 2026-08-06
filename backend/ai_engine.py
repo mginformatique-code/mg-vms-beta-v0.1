@@ -15,6 +15,7 @@ sont conservées comme wrappers/re-exports de compatibilité.
 import asyncio
 import logging
 import os
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -28,6 +29,21 @@ from pipeline_metrics import pipeline_metrics
 logger = logging.getLogger("ai-engine")
 
 GO2RTC_URL = os.environ.get("GO2RTC_URL", "http://localhost:1984")
+
+# v0.5.6 P0-1 · Verrous globaux protégeant les singletons YOLO/ALPR.
+#
+# Contexte : `_model` et `_alpr` sont des singletons partagés par toutes les
+# caméras (`_stage_detection` dans `camera_worker.py` et `_stage_anpr_fast`
+# les appellent en concurrence via `asyncio.to_thread`). Ultralytics et
+# fast-alpr mutent leur état interne (batch buffers, predictor state) à
+# chaque `predict()` — sans verrou, on risque des détections mélangées
+# entre caméras voire des crashes CUDA à haute charge.
+#
+# Ces locks *threading* sont acquis SYNC dans le thread où l'inférence
+# tourne (via `asyncio.to_thread`), donc ils ne bloquent PAS l'event loop
+# asyncio principal. Sérialisent uniquement les appels au modèle.
+YOLO_INFERENCE_LOCK = threading.Lock()
+ALPR_INFERENCE_LOCK = threading.Lock()
 AI_INTERVAL = float(os.environ.get("AI_INTERVAL_SECONDS", "0.15"))  # v0.4.5.a · ~6-7 FPS/cam
 AI_CONFIDENCE = float(os.environ.get("AI_CONFIDENCE", "0.45"))
 AI_MIN_PLATE_PX = int(os.environ.get("AI_MIN_PLATE_PX", "24"))

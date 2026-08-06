@@ -89,9 +89,12 @@ class CameraWorker:
         results = None
         if _ae._model is not None:
             try:
-                results = _ae._model.predict(
-                    ctx.image, conf=_ae._cfg("confidence", _ae.AI_CONFIDENCE),
-                    device=_ae._detected_device(), verbose=False)[0]
+                # v0.5.6 P0-1 · Sérialisation stricte des appels YOLO — le
+                # modèle est un singleton partagé, non thread-safe.
+                with _ae.YOLO_INFERENCE_LOCK:
+                    results = _ae._model.predict(
+                        ctx.image, conf=_ae._cfg("confidence", _ae.AI_CONFIDENCE),
+                        device=_ae._detected_device(), verbose=False)[0]
             except Exception as e:
                 _ae._ai_health["last_cycle_error"] = \
                     f"yolo.predict: {type(e).__name__}: {str(e)[:200]}"
@@ -125,8 +128,10 @@ class CameraWorker:
         import ai_engine as _ae
         from .tracking import resolve_algo
         t0 = time.monotonic()
-        _req, _eff = resolve_algo(enabled_plugins)
+        _req, _eff, _warn = resolve_algo(enabled_plugins)
         meta = {"algo_requested": _req, "algo_effective": _eff, "tracked": 0}
+        if _warn:
+            meta["warning"] = _warn
         if _ae._bytetrack_cfg.get("enabled", True) and ctx.detections:
             meta = tracker_pool.update(self.camera_id, ctx, _ae._bytetrack_cfg,
                                        enabled_plugins=enabled_plugins)
@@ -212,7 +217,9 @@ class CameraWorker:
             for roi in ctx.vehicle_rois:
                 cx1, cy1, cx2, cy2 = roi.bbox
                 try:
-                    alpr_results = list(_ae._alpr.predict(roi.crop))
+                    # v0.5.6 P0-1 · Sérialisation stricte des appels ALPR.
+                    with _ae.ALPR_INFERENCE_LOCK:
+                        alpr_results = list(_ae._alpr.predict(roi.crop))
                 except Exception:
                     logger.exception("fast-alpr predict sur crop véhicule")
                     continue
@@ -245,7 +252,7 @@ class CameraWorker:
                             "plate": plate_text, "skipped": "cache",
                             "expires_in": int((self._plate_cache[plate_text] - now).total_seconds())})
                         continue
-                    self._plate_cache[plate_text] = now + timedelta(seconds=min(cache_ttl, 1))
+                    self._plate_cache[plate_text] = now + timedelta(seconds=max(cache_ttl, 1))
                     plate_crop = ctx.image[max(0, abs_y1):abs_y2, max(0, abs_x1):abs_x2]
                     ctx.plates.append({
                         "plate": plate_text,

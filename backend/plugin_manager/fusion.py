@@ -30,8 +30,15 @@ MODE_CASCADE = "cascade"
 MODE_HIGHEST = "highest"
 MODE_COMPARE = "compare"
 MODE_VOTE = "vote"
+# v0.5.6 P0-4 · Mode « hiérarchique » (`hybrid` dans le vocabulaire user) —
+# stratégie recommandée par défaut : normalisation → majorité → confiance
+# → priorité déclarée → ambigu. Ne remplace jamais silencieusement une
+# lecture par une autre : si plusieurs textes distincts survivent aux
+# étapes 1-4, la lecture est marquée `ambiguous=True` et TOUS les
+# candidats sont conservés en `evidence` pour analyse manuelle.
+MODE_HIERARCHICAL = "hierarchical"
 
-VALID_MODES = {MODE_CASCADE, MODE_HIGHEST, MODE_COMPARE, MODE_VOTE}
+VALID_MODES = {MODE_CASCADE, MODE_HIGHEST, MODE_COMPARE, MODE_VOTE, MODE_HIERARCHICAL}
 
 DEFAULT_CASCADE_THRESHOLD = 0.85
 
@@ -72,6 +79,100 @@ def vote_by_character(results: list[PlateResult]) -> Optional[PlateResult]:
         confidence=round(avg_conf, 4),
         engine=f"fusion({len(plates)})",
         processing_ms=max(p.processing_ms for p in plates),
+    )
+
+
+def normalize_plate(text: str) -> str:
+    """Normalise un texte de plaque pour comparaison inter-moteurs.
+
+    v0.5.6 P0-4 — Étape 1 de la fusion hiérarchique.
+    Règles :
+      * Upper-case
+      * Suppression des caractères non-alphanumériques (espaces, tirets, points)
+      * Confusion visuelle homogène : `O`↔`0`, `I`↔`1`, `Z`↔`2` ne sont PAS
+        remplacés (perte d'information) — on préfère laisser distincts et
+        laisser la majorité départager si un moteur fait l'erreur.
+    """
+    import re
+    if not text:
+        return ""
+    return re.sub(r"[^A-Z0-9]", "", text.upper())
+
+
+def hierarchical_fusion(
+    results_by_engine: list[tuple[str, list[PlateResult]]],
+    priority_order: Optional[list[str]] = None,
+) -> tuple[Optional[PlateResult], bool]:
+    """Fusion hiérarchique multi-étapes (§Phase A P0-4).
+
+    Étape 1 · Normalisation (uppercase + alphanumérique uniquement).
+    Étape 2 · Vote majoritaire — si un texte normalisé apparaît chez ≥ 2
+              moteurs, il gagne immédiatement (retourne PlateResult avec la
+              MEILLEURE confiance parmi les moteurs qui l'ont proposé).
+    Étape 3 · Si égalité de majorité (ex : 2 moteurs pour A, 2 pour B) →
+              on prend le camp avec la meilleure confiance moyenne.
+    Étape 4 · Si toujours indécidable OU chaque moteur propose un texte
+              différent : on utilise `priority_order` (ordre des moteurs
+              tel que déclaré dans la config caméra) pour trancher.
+    Étape 5 · Si aucune décision possible → retourne (best_confidence, True)
+              marquant la lecture comme AMBIGÜE. Ne jamais inventer une
+              plaque : on préserve TOUJOURS le meilleur candidat brut.
+
+    Retourne (final_PlateResult | None, ambiguous: bool).
+    """
+    # Meilleur candidat par moteur (une seule proposition par moteur).
+    top_per_engine: list[tuple[str, Optional[PlateResult]]] = [
+        (name, pick_highest(plates)) for name, plates in results_by_engine
+    ]
+    valid = [(name, r) for name, r in top_per_engine if r and r.text]
+    if not valid:
+        return None, False
+    if len(valid) == 1:
+        return valid[0][1], False
+
+    # Étape 1 — Normalisation.
+    norm_map: dict[str, list[tuple[str, PlateResult]]] = {}
+    for name, r in valid:
+        n = normalize_plate(r.text)
+        if not n:
+            continue
+        norm_map.setdefault(n, []).append((name, r))
+
+    if not norm_map:
+        return None, False
+
+    # Étape 2 — Vote majoritaire (au moins 2 moteurs pour le même texte).
+    counts = {n: len(voters) for n, voters in norm_map.items()}
+    max_count = max(counts.values())
+    if max_count >= 2:
+        winners = [n for n, c in counts.items() if c == max_count]
+        if len(winners) == 1:
+            # Consensus clair. Prend la meilleure conf dans ce groupe.
+            best = pick_highest([r for _n, r in norm_map[winners[0]]])
+            if best:
+                return replace(best, engine=f"fusion(majority×{max_count})"), False
+
+        # Étape 3 — Égalité de majorité, on départage par confidence moy.
+        best_group = max(
+            winners,
+            key=lambda n: sum(r.confidence for _e, r in norm_map[n]) / len(norm_map[n]),
+        )
+        best = pick_highest([r for _n, r in norm_map[best_group]])
+        if best:
+            return replace(best, engine=f"fusion(tie-break-conf)"), False
+
+    # Étape 4 — Chaque moteur propose un texte différent : priorité déclarée.
+    if priority_order:
+        for eng in priority_order:
+            for name, r in valid:
+                if name == eng:
+                    return replace(r, engine=f"fusion(priority:{eng})"), False
+
+    # Étape 5 — Ambigu : conserve le meilleur candidat brut, drapeau levé.
+    fallback = pick_highest([r for _n, r in valid])
+    return (
+        replace(fallback, engine=f"fusion(ambiguous)") if fallback else None,
+        True,
     )
 
 
@@ -121,6 +222,8 @@ def apply_policy(
     elif mode == MODE_COMPARE:
         # En mode compare on ne fixe pas de gagnant — le client décide
         final = pick_highest(all_flat)
+    elif mode == MODE_HIERARCHICAL:
+        final, _amb = hierarchical_fusion(results_by_engine)
 
     # Divergence = au moins 2 moteurs ont retourné des textes différents
     texts = {r.text for r in all_flat if r.text}
