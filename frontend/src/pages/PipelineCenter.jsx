@@ -22,12 +22,14 @@ import { Button } from "@/components/ui/button";
 import api from "@/lib/api";
 import {
   Activity, Camera, Cpu, GitBranch, Layers, LineChart, Puzzle,
-  ScrollText, Terminal, Workflow, RefreshCw,
+  ScrollText, Server, Terminal, Workflow, RefreshCw, Zap,
 } from "lucide-react";
 
 import PipelineInspector from "./PipelineInspector";
 import PipelineDesigner from "./PipelineDesigner";
 import AIPipelineMonitor from "./AIPipelineMonitor";
+import Hardware from "./Hardware";
+import GPUStatus from "./GPUStatus";
 
 const TABS = [
   { id: "overview",    label: "Overview",    icon: Layers },
@@ -39,6 +41,8 @@ const TABS = [
   { id: "designer",    label: "Designer",    icon: GitBranch },
   { id: "inspector",   label: "Inspector",   icon: Activity },
   { id: "performance", label: "Performance", icon: LineChart },
+  { id: "hardware",    label: "Hardware",    icon: Server },
+  { id: "gpu",         label: "GPU",         icon: Zap },
   { id: "debug",       label: "Debug",       icon: Terminal },
 ];
 
@@ -79,6 +83,8 @@ export default function PipelineCenter() {
         <TabsContent value="designer"><PipelineDesigner /></TabsContent>
         <TabsContent value="inspector"><PipelineInspector /></TabsContent>
         <TabsContent value="performance"><AIPipelineMonitor /></TabsContent>
+        <TabsContent value="hardware"><Hardware /></TabsContent>
+        <TabsContent value="gpu"><GPUStatus /></TabsContent>
         <TabsContent value="debug"><DebugPanel /></TabsContent>
       </Tabs>
     </div>

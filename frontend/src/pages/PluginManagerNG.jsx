@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -8,7 +9,7 @@ import { Slider } from "@/components/ui/slider";
 import {
   Boxes, Zap, GitBranch, Trophy, Vote, ClipboardList, RefreshCw, PlayCircle,
   AlertTriangle, CheckCircle2, XCircle, Clock, FileJson, Package, Settings2, PackageX, WrenchIcon,
-  Download, ChevronDown, ChevronRight,
+  Download, ChevronDown, ChevronRight, Gauge,
 } from "lucide-react";
 import { toast } from "sonner";
 import PluginConfigDialog from "@/pages/PluginConfigDialog";
@@ -423,6 +424,16 @@ export default function PluginManagerNG() {
                                 </div>
                               </div>
                               <div className="flex items-center gap-2 shrink-0">
+                                {e.interface === "PlateRecognizer" && (
+                                  <Link
+                                    to="/anpr-benchmark"
+                                    className="flex items-center gap-1 px-2 py-1 text-[11px] border border-[#FFB800]/60 text-[#FFB800] hover:bg-[#FFB800]/10 transition-colors"
+                                    data-testid={`bus-benchmark-${e.name}`}
+                                    title="Ouvrir le Benchmark ANPR"
+                                  >
+                                    <Gauge size={11} /> Benchmark
+                                  </Link>
+                                )}
                                 {canInstall && (
                                   <button
                                     onClick={() => installDeps(e.name)}

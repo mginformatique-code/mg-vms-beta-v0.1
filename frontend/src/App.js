@@ -34,7 +34,7 @@ import CameraCenter from "@/pages/CameraCenter";
 import UsersPage from "@/pages/Users";
 import SettingsPage from "@/pages/Settings";
 import Notifications from "@/pages/Notifications";
-import Plugins from "@/pages/Plugins";
+import Plugins from "@/pages/PluginManagerNG";
 import PluginPage from "@/pages/PluginPage";
 import SmartZones from "@/pages/SmartZones";
 import Timeline from "@/pages/Timeline";

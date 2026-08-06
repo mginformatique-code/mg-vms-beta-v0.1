@@ -25,6 +25,20 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 
 ### État Feb 2026 — sessions successives
 
+**Session 42 (Feb 2026)** — v0.5.1.d · Réorganisation menu final + Plugin Manager unifié :
+- 🧩 Route `/plugins` = **PluginManagerNG** directement (fin du split
+  cards + NG). Bouton **Benchmark** ajouté sur chaque plugin d'interface
+  `PlateRecognizer` (Gauge → `/anpr-benchmark`).
+- 🧭 Sidebar réorganisée en 4 groupes cohérents :
+  * Opérations · Intelligence · Administration · **Paramètres** (nouveau).
+  * Rapports, Journal d'audit, Journal de diagnostic, Notifications
+    déplacés dans le groupe Paramètres.
+- 🖥️ Ressources matérielles + Accélération GPU **retirées** de la sidebar :
+  accessibles uniquement via 2 nouveaux onglets `Hardware` + `GPU` dans
+  le Pipeline Center.
+- 🧹 Cleanup : loader dynamique `pluginPages` (Extensions) supprimé.
+- 📊 80/80 tests critiques verts, zéro régression.
+
 **Session 41 (Feb 2026)** — v0.5.1.c · Multi-plugin events + UX corrections :
 - 🐛 Bug fix `TrackingPanel` (Pipeline Center) : `trackers` retourné comme
   dict est maintenant normalisé en array côté frontend.

@@ -21,7 +21,8 @@ const NAV = [
     { to: "/recordings", icon: Film, key: "nav.recordings", perm: "view_recordings" },
     { to: "/cameras", icon: Cctv, key: "nav.cameras" },
     { to: "/network", icon: Network, key: "nav.network", role: "client" },
-    { to: "/hardware", icon: Server, key: "nav.hardware", role: "technician" },
+    // v0.5.1.d · Ressources matérielles + Accélération GPU accessibles
+    // uniquement depuis le Pipeline Center (onglets dédiés).
     { to: "/sites", icon: Building2, key: "nav.sites" },
     { to: "/map", icon: Map, key: "nav.map" },
   ]},
@@ -31,24 +32,18 @@ const NAV = [
     { to: "/alerts", icon: Bell, key: "nav.alerts" },
     { to: "/smart-zones", icon: MapPin, key: "nav.smart_zones" },
     { to: "/workflows", icon: Zap, key: "nav.workflows" },
-    // Timeline est intégrée dans la LiveView (FocusTimeline) — pas de menu dédié
-    // NOTE : ANPR est déplacé dans la section "Extensions" (voir plus bas) pour
-    // regrouper logiquement les extensions activables (ANPR, IA détection avancée,
-    // reconnaissance faciale, contrôle d'accès, etc.). Cf. plugins.py.
   ]},
   { group: "nav.admin", items: [
+    { to: "/pipeline-center", icon: Layers, key: "nav.pipeline_center", role: "technician" },
+    { to: "/plugins", icon: Puzzle, key: "nav.plugins", role: "admin" },
+    { to: "/users", icon: Users, key: "nav.users", role: "admin" },
+  ]},
+  { group: "nav.settings_group", items: [
+    { to: "/settings", icon: Settings, key: "nav.settings" },
+    { to: "/reports", icon: FileText, key: "nav.reports", role: "technician" },
     { to: "/audit", icon: ScrollText, key: "nav.audit", role: "technician" },
     { to: "/diagnostics", icon: Activity, key: "nav.diagnostics", role: "technician" },
-    { to: "/gpu", icon: Zap, key: "nav.gpu", role: "technician" },
-    // v0.5.0.b · UX Unification — Pipeline devient la porte d'entrée unique.
-    // Anciennes routes conservées via alias mais retirées du menu principal.
-    { to: "/pipeline-center", icon: Layers, key: "nav.pipeline_center", role: "technician" },
-    { to: "/reports", icon: FileText, key: "nav.reports", role: "technician" },
     { to: "/notifications", icon: BellRing, key: "nav.notifications", role: "technician" },
-    { to: "/plugins", icon: Puzzle, key: "nav.plugins", role: "admin" },
-    { to: "/anpr-benchmark", icon: Cpu, key: "nav.anpr_benchmark", role: "technician" },
-    { to: "/users", icon: Users, key: "nav.users", role: "admin" },
-    { to: "/settings", icon: Settings, key: "nav.settings" },
   ]},
 ];
 

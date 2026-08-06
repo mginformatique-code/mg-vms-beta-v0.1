@@ -7,6 +7,51 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
 
+## [v0.5.1.d] — 2026-02 — Réorganisation menu + unification Plugin Manager (Session 42)
+
+### Contexte
+Demande utilisateur d'unification finale de la navigation :
+1. Plugins + Modules doivent tous vivre dans `PluginManagerNG` (fin du split).
+2. `Benchmark ANPR` accessible depuis le menu ANPR **du plugin** (plus en sidebar).
+3. Rapports / Audit / Diagnostic / Notifications = **sous-menu** de Paramètres.
+4. Ressources matérielles + Accélération GPU accessibles **uniquement** depuis
+   le Pipeline Center (retirés de la sidebar).
+
+### Changed
+- **Route `/plugins`** pointe directement sur `PluginManagerNG` (l'ancien
+  wrapper `Plugins.jsx` cardé n'est plus utilisé — l'UI unique est le
+  Plugin Manager NG avec ses groupes ANPR/Detection/Tracking/etc.).
+- **PluginManagerNG** : ajout d'un bouton **Benchmark** (icône Gauge) sur
+  chaque plugin d'interface `PlateRecognizer` → navigation vers
+  `/anpr-benchmark`.
+- **Sidebar (`Layout.jsx`)** — nouvelle structure à 4 groupes :
+  * **Opérations** — Accueil, Tableau de bord, Mur vidéo, Enregistrements,
+    Caméras, Supervision réseau, Sites, Carte.
+  * **Intelligence** — Événements IA, Recherche véhicule, Alertes,
+    Zones intelligentes, Workflows.
+  * **Administration** — Pipeline Center, Plugins, Utilisateurs.
+  * **Paramètres** *(nouveau)* — Paramètres, Rapports, Journal d'audit,
+    Journal de diagnostic, Notifications.
+  Retirés de la sidebar : Ressources matérielles, Accélération GPU,
+  Benchmark ANPR (accessibles via Pipeline Center + Plugin Manager).
+- **PipelineCenter** — deux nouveaux onglets : **Hardware** (Ressources
+  matérielles) et **GPU** (Accélération GPU). Portes d'entrée uniques
+  vers ces vues.
+- **i18n** : nouvelle clé `nav.settings_group` (FR : "PARAMÈTRES" / EN :
+  "SETTINGS").
+
+### Removed
+- Section dynamique "Extensions" (déjà retirée en v0.5.1.c).
+- Loader `loadPluginMenus` / state `pluginPages` dans Layout (nettoyage).
+
+### Tests
+- 80/80 tests critiques v0.4.x + v0.5.1.x verts (isolation stricte,
+  latence, drivers, Welcome, TESTING bypass, multi-plugin events).
+- Vérification E2E via Playwright : sidebar sans les 4 entrées retirées,
+  groupe PARAMÈTRES présent, `/plugins` = Plugin Manager NG, onglets
+  Hardware + GPU visibles dans Pipeline Center.
+
+
 ## [v0.5.1.c] — 2026-02 — Multi-plugin events + Recherche véhicule enrichie (Session 41)
 
 ### Contexte
