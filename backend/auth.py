@@ -112,9 +112,12 @@ def create_access_token(user_id: str, email: str, role: str, hours: int = 8, jti
 
 
 def create_refresh_token(user_id: str) -> str:
+    import uuid as _uuid
     payload = {
         "sub": user_id,
+        "jti": str(_uuid.uuid4()),
         "exp": datetime.now(timezone.utc) + timedelta(days=7),
+        "iat": datetime.now(timezone.utc),
         "type": "refresh",
     }
     return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
@@ -289,8 +292,27 @@ async def login(data: LoginInput, request: Request, response: Response):
         if not data.totp_code:
             return {"requires_2fa": True}
         totp = pyotp.TOTP(user["twofa_secret"])
+        # v0.5.4-C · Accepte aussi un code de récupération (jetable).
+        used_recovery = False
         if not totp.verify(data.totp_code, valid_window=1):
-            raise HTTPException(status_code=401, detail="Code 2FA invalide")
+            # Essai en tant que code de récupération
+            hashes = user.get("twofa_recovery_hashes") or []
+            match_idx = None
+            for i, h in enumerate(hashes):
+                try:
+                    if bcrypt.checkpw(data.totp_code.strip().upper().encode(), h.encode()):
+                        match_idx = i
+                        break
+                except Exception:
+                    continue
+            if match_idx is None:
+                await _register_failure(identifier)
+                raise HTTPException(status_code=401, detail="Code 2FA invalide")
+            # Retire le code utilisé (usage unique)
+            new_hashes = hashes[:match_idx] + hashes[match_idx + 1:]
+            await db.users.update_one({"id": user["id"]},
+                                       {"$set": {"twofa_recovery_hashes": new_hashes}})
+            used_recovery = True
 
     await _clear_attempts(identifier)
     # v0.5.4 · Session tracking + timeout configurable
@@ -309,6 +331,8 @@ async def login(data: LoginInput, request: Request, response: Response):
         "revoked": False,
     })
     response.set_cookie("access_token", access, httponly=True, secure=True, samesite="lax", max_age=hours * 3600, path="/")
+    if used_recovery if 'used_recovery' in locals() else False:
+        await log_audit(user, "2fa_recovery_used", email, "Login via recovery code", ip)
     await log_audit(user, "login", email, f"Connexion réussie (session {hours}h)", ip)
     return {"access_token": access, "refresh_token": refresh, "user": public_user(user)}
 
@@ -393,7 +417,7 @@ async def register(data: RegisterInput, current: dict = Depends(require_role("ad
 
 
 @auth_router.post("/refresh")
-async def refresh_token(request: Request):
+async def refresh_token(request: Request, response: Response):
     token = request.cookies.get("refresh_token")
     body_token = None
     auth_header = request.headers.get("Authorization", "")
@@ -406,11 +430,37 @@ async def refresh_token(request: Request):
         payload = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
         if payload.get("type") != "refresh":
             raise HTTPException(status_code=401, detail="Invalid token type")
+        # v0.5.4-C · Blacklist du refresh consommé (rotation).
+        old_jti = payload.get("jti") or payload.get("sub")
+        used = await db.refresh_blacklist.find_one({"jti": old_jti})
+        if used:
+            # Réutilisation détectée → possible token stealing : révoque tout.
+            await db.sessions.update_many({"user_id": payload["sub"]},
+                                            {"$set": {"revoked": True}})
+            raise HTTPException(status_code=401, detail="Refresh token réutilisé - toutes les sessions révoquées")
+        await db.refresh_blacklist.insert_one({"jti": old_jti,
+                                                 "used_at": datetime.now(timezone.utc).isoformat()})
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
-        access = create_access_token(user["id"], user["email"], user["role"])
-        return {"access_token": access}
+        hours = await _get_session_hours()
+        import uuid as _uuid
+        new_jti = str(_uuid.uuid4())
+        access = create_access_token(user["id"], user["email"], user["role"], hours=hours, jti=new_jti)
+        new_refresh = create_refresh_token(user["id"])
+        # Nouvelle session (le client peut avoir plusieurs onglets)
+        await db.sessions.insert_one({
+            "jti": new_jti, "user_id": user["id"], "email": user["email"],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "last_seen_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat(),
+            "ip": request.client.host if request.client else "?",
+            "user_agent": request.headers.get("user-agent", "")[:250],
+            "revoked": False, "via_refresh": True,
+        })
+        response.set_cookie("access_token", access, httponly=True, secure=True,
+                             samesite="lax", max_age=hours * 3600, path="/")
+        return {"access_token": access, "refresh_token": new_refresh}
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
@@ -443,9 +493,31 @@ async def verify_2fa(data: TwoFAVerify, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="2FA non initialisé")
     if not pyotp.TOTP(secret).verify(data.code, valid_window=1):
         raise HTTPException(status_code=401, detail="Code invalide")
-    await db.users.update_one({"id": user["id"]}, {"$set": {"twofa_enabled": True}})
+    # v0.5.4-C · Génère 10 codes de récupération (une seule fois, à conserver).
+    # Stockage haché bcrypt côté DB, retour clair côté client.
+    import secrets as _secrets
+    plain = [_secrets.token_hex(4).upper() for _ in range(10)]
+    hashes = [bcrypt.hashpw(p.encode(), bcrypt.gensalt()).decode() for p in plain]
+    await db.users.update_one({"id": user["id"]}, {
+        "$set": {"twofa_enabled": True, "twofa_recovery_hashes": hashes},
+    })
     await log_audit(user, "2fa_enabled", user["email"])
-    return {"ok": True}
+    return {"ok": True, "recovery_codes": plain}
+
+
+@auth_router.post("/2fa/recovery-regenerate")
+async def regenerate_recovery_codes(user: dict = Depends(get_current_user)):
+    """Régénère 10 nouveaux codes de récupération (invalide les anciens)."""
+    fresh = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+    if not fresh.get("twofa_enabled"):
+        raise HTTPException(status_code=400, detail="2FA non activée")
+    import secrets as _secrets
+    plain = [_secrets.token_hex(4).upper() for _ in range(10)]
+    hashes = [bcrypt.hashpw(p.encode(), bcrypt.gensalt()).decode() for p in plain]
+    await db.users.update_one({"id": user["id"]},
+                               {"$set": {"twofa_recovery_hashes": hashes}})
+    await log_audit(user, "2fa_recovery_regen", user["email"])
+    return {"recovery_codes": plain}
 
 
 @auth_router.post("/2fa/disable")

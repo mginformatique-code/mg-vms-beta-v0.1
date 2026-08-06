@@ -43,6 +43,7 @@ from routes.site_manager import site_manager_router
 from routes.security import security_router
 from routes.camera_control import camera_control_router
 from routes.devices import devices_router
+from routes.discovery import discovery_router
 from wsdl_path import validate_wsdl_dir
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -94,6 +95,7 @@ app.include_router(workflows_router)
 app.include_router(timeline_router)
 app.include_router(camera_control_router)
 app.include_router(devices_router)
+app.include_router(discovery_router)
 app.include_router(api_router)
 app.include_router(notif_router)
 app.include_router(realtime_router)

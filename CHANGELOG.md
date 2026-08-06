@@ -7,6 +7,74 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
 
+## [v0.5.5] — 2026-02 — Assistant de découverte réseau avancée
+
+### Added (backend)
+- Nouveau module `/app/backend/routes/discovery.py` — assistant de découverte
+  réseau nouvelle génération pour le bouton « Scan ONVIF » :
+  * `GET  /api/discovery/interfaces` — liste des interfaces IPv4 avec IP,
+    netmask, CIDR, gateway, vitesse Mbps, état up/down, MAC, flag virtual.
+  * `POST /api/discovery/start` — démarre un scan asynchrone (task_id).
+    Accepte `networks: [CIDR]`, `interfaces: [name]`, `max_hosts_per_network`.
+  * `GET  /api/discovery/{task_id}/stream` — flux SSE temps réel émettant
+    les événements `log`, `progress`, `device`, `summary`, `done`. Auth via
+    query param `?token=` (car EventSource n'envoie pas d'`Authorization`).
+  * `POST /api/discovery/{task_id}/cancel` — annulation propre.
+  * `GET  /api/discovery/{task_id}/result` — résumé final (persistance 15 min).
+- Pipeline de scan combinant :
+  * WS-Discovery multicast (rapide, Reolink/Hikvision/Axis/Uniview…).
+  * Scan CIDR ciblé : TCP-connect sur les ports 80/554/8000/8080/8899/2020/8081
+    puis probe SOAP `GetDeviceInformation` sur les ports ONVIF probables.
+  * Best-effort de reconnaissance fabricant via banner HTTP (Hikvision,
+    Reolink, Dahua, Axis, Uniview, Hanwha, Synology, QNAP, MikroTik, Ubiquiti).
+  * Classification `camera` / `nas` / `printer` / `network` / `other` — les
+    équipements non-caméras sont rapportés séparément avec le message
+    « Équipement détecté mais non compatible avec MG-VMS ».
+- Concurrence contrôlée par `asyncio.Semaphore(64)` et chunks de 128 IPs.
+- Audit trail : `discovery_scan_start` + `discovery_scan_cancel`.
+
+### Added (frontend)
+- Refonte complète du composant `<OnvifDiscovery/>` dans `Cameras.jsx` :
+  * **Phase configuration** : tableau des interfaces avec checkboxes,
+    toggle « Afficher les interfaces virtuelles », champ multi-CIDR
+    personnalisé (192.168.50.0/24, 172.16.1.0/24…). Sélection auto des
+    interfaces physiques UP avec CIDR utile.
+  * **Phase scanning** : compteurs live (testées / caméras / écoulé / ETA),
+    barre de progression, **console noire style IBM FlashSystem** (fond
+    noir, texte vert, horodatage `[HH:MM:SS]`, auto-scroll, curseur clignotant).
+  * **Bouton « Annuler le scan »** — arrêt propre côté serveur.
+  * **Actions journal** : Copier / Vider / Sauver en `.txt` ou `.log`.
+  * **Phase done** : résumé final (interfaces, adresses testées, caméras
+    détectées, ONVIF count, par-fabricant, autres équipements, erreurs,
+    durée, statut), liste des caméras avec bouton « Utiliser cette IP »
+    (badge `ONVIF`, `auth`, `déjà ajoutée`) + section « Autres équipements
+    réseau » grisée pour les NVR/NAS/imprimantes.
+- Le bouton « Scan ONVIF » du formulaire caméra ouvre désormais cet
+  assistant (aucun autre changement UX ailleurs).
+
+### Added (bonus)
+- Logo MG-VMS + texte « MG Informatique » dans la sidebar (Layout.jsx)
+  transformés en lien externe vers **https://mg-vms.com** (nouveau
+  data-testid `sidebar-brand-link`).
+
+### Tests
+- Nouveau fichier `test_v055_discovery.py` — 7 tests couvrant :
+  * Authentification requise (`401` sans token).
+  * Listing des interfaces (structure + présence de `lo`).
+  * Refus des CIDR invalides et réseaux vides (`400`).
+  * Scan complet + polling du résultat (statut `completed`).
+  * Annulation propre → statut `cancelled`.
+  * `404` sur `task_id` inconnu.
+- 108 tests backend précédents non impactés (rétro-compatibilité totale
+  de l'endpoint historique `/api/cameras/discover`, préservé intact).
+
+### Notes
+- Aucune modification de l'architecture existante — le nouveau module
+  vit à côté de l'API historique. Aucune nouvelle page ajoutée.
+- Le scan reste asynchrone, non bloquant et annulable via `task.cancel()`.
+
+---
+
 ## [v0.5.4-B] — 2026-02 — Security Center + Security Score (Session 48)
 
 ### Added (backend)

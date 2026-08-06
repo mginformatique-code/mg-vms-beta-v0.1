@@ -25,6 +25,23 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 
 ### État Feb 2026 — sessions successives
 
+**Session 49 (Feb 2026)** — v0.5.5 · Assistant de découverte réseau avancée :
+- 🌐 Nouveau module `/app/backend/routes/discovery.py` : listing des
+  interfaces (IP, netmask, CIDR, gateway, vitesse, état, virtual),
+  démarrage/annulation/résultat de scan, flux SSE temps réel.
+- 🖥️ Refonte complète du dialog « Scan ONVIF » côté frontend
+  (`OnvifDiscovery` dans `Cameras.jsx`) : sélection multi-interfaces,
+  CIDR personnalisés, console noire style IBM FlashSystem, barre de
+  progression + compteurs live, résumé final, export TXT/LOG, annulation.
+- 🕵️ Découverte hybride : WS-Discovery multicast + scan CIDR ciblé
+  (ports 80/554/8000/8080/8899/2020/8081) + probe SOAP GetDeviceInformation.
+- 🏷️ Reconnaissance fabricant (Hikvision, Reolink, Dahua, Axis, Uniview,
+  Hanwha, Synology, QNAP, MikroTik, Ubiquiti) via banner HTTP + ONVIF.
+- 🖨️ Section « Équipement détecté mais non compatible » (NVR/NAS/imprimantes).
+- 🔗 Logo + « MG Informatique » sidebar → lien externe vers mg-vms.com.
+- 📊 7/7 tests v0.5.5 verts. Zéro régression sur l'endpoint historique
+  `/api/cameras/discover` (préservé intact).
+
 **Session 48 (Feb 2026)** — v0.5.4-B · Security Center + Security Score :
 - 🛡️ Nouvelle page `/security-center` avec ring score 0-100 + grade A-E.
 - 📋 10 critères pondérés (HTTPS, JWT env, mots de passe, MFA, backups,

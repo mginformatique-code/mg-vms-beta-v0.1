@@ -788,43 +788,316 @@ function streamLabel(key) {
 }
 
 function OnvifDiscovery({ open, onClose, onPick }) {
-  const [scanning, setScanning] = useState(false);
-  const [devices, setDevices] = useState(null);
-  const [hint, setHint] = useState("");
+  // ─────────────── State ───────────────
+  const [phase, setPhase] = useState("config"); // config | scanning | done
+  const [interfaces, setInterfaces] = useState([]);
+  const [selected, setSelected] = useState({}); // {ifname: true}
+  const [showVirtual, setShowVirtual] = useState(false);
+  const [customCidrs, setCustomCidrs] = useState([""]);
+  const [logs, setLogs] = useState([]); // [{time, line}]
+  const [progress, setProgress] = useState({ tested: 0, total: 0, percent: 0, elapsed_sec: 0, eta_sec: 0 });
+  const [devices, setDevices] = useState([]); // caméras
+  const [others, setOthers] = useState([]);   // équipements non-caméras
+  const [summary, setSummary] = useState(null);
+  const [taskId, setTaskId] = useState(null);
+  const [error, setError] = useState("");
+  const consoleRef = React.useRef(null);
+  const esRef = React.useRef(null);
 
-  const scan = async () => {
-    setScanning(true); setDevices(null); setHint("");
-    try { const { data } = await api.post("/cameras/discover"); setDevices(data.devices); setHint(data.hint || ""); }
-    catch (e) { toast.error("Échec de la découverte ONVIF"); }
-    finally { setScanning(false); }
+  // ─────────────── Load interfaces on open ───────────────
+  useEffect(() => {
+    if (!open) return;
+    resetAll();
+    (async () => {
+      try {
+        const { data } = await api.get("/discovery/interfaces");
+        setInterfaces(data.interfaces || []);
+        // Sélectionne par défaut les physiques 'up' avec CIDR /16 à /30
+        const pre = {};
+        (data.interfaces || []).forEach((i) => {
+          if (!i.virtual && i.state === "up" && i.cidr) {
+            const mask = parseInt(i.cidr.split("/")[1] || "0", 10);
+            if (mask >= 16 && mask <= 30) pre[i.name] = true;
+          }
+        });
+        setSelected(pre);
+      } catch (e) {
+        setError("Impossible de récupérer les interfaces réseau");
+      }
+    })();
+    return () => { cleanupStream(); };
+  }, [open]);
+
+  useEffect(() => {
+    // Auto-scroll console.
+    if (consoleRef.current) consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
+  }, [logs]);
+
+  const resetAll = () => {
+    setPhase("config"); setLogs([]); setDevices([]); setOthers([]);
+    setSummary(null); setTaskId(null); setError(""); setProgress({ tested: 0, total: 0, percent: 0, elapsed_sec: 0, eta_sec: 0 });
   };
 
+  const cleanupStream = () => {
+    if (esRef.current) { try { esRef.current.close(); } catch (_) {/* ignore */} esRef.current = null; }
+  };
+
+  const visibleIfaces = interfaces.filter((i) => showVirtual || !i.virtual);
+
+  // ─────────────── Start scan ───────────────
+  const startScan = async () => {
+    const nets = [];
+    interfaces.forEach((i) => { if (selected[i.name] && i.cidr) nets.push(i.cidr); });
+    customCidrs.forEach((c) => { const v = c.trim(); if (v) nets.push(v); });
+    if (nets.length === 0) { toast.error("Sélectionnez au moins un réseau"); return; }
+
+    resetAll();
+    setPhase("scanning");
+    setLogs([{ time: hms(), line: "Preparing scan..." }]);
+
+    try {
+      const ifNames = interfaces.filter((i) => selected[i.name]).map((i) => i.name);
+      const { data } = await api.post("/discovery/start", {
+        networks: nets, interfaces: ifNames, max_hosts_per_network: 256,
+      });
+      setTaskId(data.task_id);
+      openStream(data.task_id);
+    } catch (e) {
+      setError("Échec démarrage : " + (e?.response?.data?.detail || e.message));
+      setPhase("config");
+    }
+  };
+
+  // ─────────────── SSE stream ───────────────
+  const openStream = (tid) => {
+    const token = localStorage.getItem("mg_token");
+    const url = `${process.env.REACT_APP_BACKEND_URL}/api/discovery/${tid}/stream?token=${encodeURIComponent(token)}`;
+    const es = new EventSource(url);
+    esRef.current = es;
+
+    const pushLog = (time, line) => setLogs((prev) => [...prev, { time, line }]);
+
+    es.addEventListener("hello", () => { pushLog(hms(), "Connected to scan stream."); });
+    es.addEventListener("log", (ev) => {
+      try { const d = JSON.parse(ev.data); pushLog(d.time || hms(), d.line); } catch (_) {/* ignore */}
+    });
+    es.addEventListener("progress", (ev) => {
+      try { setProgress(JSON.parse(ev.data)); } catch (_) {/* ignore */}
+    });
+    es.addEventListener("device", (ev) => {
+      try {
+        const d = JSON.parse(ev.data);
+        if (d.type === "camera") setDevices((prev) => [...prev, d]);
+        else setOthers((prev) => [...prev, d]);
+      } catch (_) {/* ignore */}
+    });
+    es.addEventListener("summary", (ev) => {
+      try { setSummary(JSON.parse(ev.data)); } catch (_) {/* ignore */}
+    });
+    es.addEventListener("done", () => {
+      setPhase("done"); cleanupStream();
+    });
+    es.onerror = () => {
+      // Le stream se ferme naturellement en fin — ne pas afficher d'erreur si done.
+      if (phase === "scanning") pushLog(hms(), "Stream error / disconnected.");
+    };
+  };
+
+  // ─────────────── Cancel ───────────────
+  const cancelScan = async () => {
+    if (!taskId) return;
+    try {
+      await api.post(`/discovery/${taskId}/cancel`);
+      setLogs((prev) => [...prev, { time: hms(), line: "Cancellation requested..." }]);
+    } catch (_) {/* ignore */}
+  };
+
+  // ─────────────── Export logs ───────────────
+  const logText = () => logs.map((l) => `[${l.time}] ${l.line}`).join("\n");
+  const copyLog = async () => {
+    try { await navigator.clipboard.writeText(logText()); toast.success("Journal copié"); }
+    catch (_) { toast.error("Échec de la copie"); }
+  };
+  const clearLog = () => setLogs([]);
+  const downloadLog = (ext) => {
+    const blob = new Blob([logText()], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url;
+    a.download = `mgvms-discovery-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.${ext}`;
+    a.click(); URL.revokeObjectURL(url);
+  };
+
+  // ─────────────── Custom CIDR helpers ───────────────
+  const updCidr = (i, v) => setCustomCidrs((prev) => prev.map((c, k) => (k === i ? v : c)));
+  const addCidr = () => setCustomCidrs((prev) => [...prev, ""]);
+  const rmCidr = (i) => setCustomCidrs((prev) => prev.filter((_, k) => k !== i));
+
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="rounded-none border-border max-w-2xl">
-        <DialogHeader><DialogTitle className="font-head flex items-center gap-2"><Radar size={18} /> Découverte ONVIF (WS-Discovery)</DialogTitle></DialogHeader>
-        <div className="space-y-3">
-          <button onClick={scan} disabled={scanning} data-testid="onvif-scan-btn" className="px-4 py-2 bg-[#0044FF] text-white text-sm flex items-center gap-2">
-            {scanning && <Loader2 size={15} className="animate-spin" />}{scanning ? "Scan en cours (multicast)..." : "Lancer le scan"}
-          </button>
-          {devices !== null && (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) { cleanupStream(); onClose(); } }}>
+      <DialogContent className="rounded-none border-border max-w-4xl" data-testid="onvif-discover-dialog">
+        <DialogHeader>
+          <DialogTitle className="font-head flex items-center gap-2">
+            <Radar size={18} /> Assistant de découverte réseau
+          </DialogTitle>
+        </DialogHeader>
+
+        {/* ═══════════════ Phase 1 : Configuration ═══════════════ */}
+        {phase === "config" && (
+          <div className="space-y-3 max-h-[70vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">Sélectionnez les interfaces et/ou ajoutez des réseaux personnalisés à scanner.</p>
+              <label className="flex items-center gap-2 text-xs cursor-pointer" data-testid="show-virtual-toggle">
+                <input type="checkbox" checked={showVirtual} onChange={(e) => setShowVirtual(e.target.checked)} />
+                Afficher les interfaces virtuelles
+              </label>
+            </div>
+
+            {/* Interfaces */}
             <div className="border border-border">
-              {devices.length === 0 && (
-                <div className="p-3 space-y-1.5">
-                  <p className="text-sm text-muted-foreground" data-testid="onvif-no-devices">Aucun appareil ONVIF détecté sur ce réseau.</p>
-                  {hint && <p className="text-[11px] text-[#FFB800] border border-[#FFB800]/40 bg-[#FFB800]/10 p-2" data-testid="onvif-discover-hint">{hint}</p>}
-                </div>
-              )}
-              {devices.map((d) => (
-                <div key={d.xaddr} className="flex items-center justify-between px-3 py-2 border-b border-border last:border-0" data-testid="onvif-device-row">
-                  <div><span className="mono text-sm">{d.ip}:{d.port}</span>{d.already_added && <span className="ml-2 text-[10px] px-1.5 py-0.5 border border-border text-muted-foreground">déjà ajoutée</span>}</div>
-                  <button onClick={() => onPick(d)} className="px-3 py-1 bg-[#0044FF] text-white text-xs">Utiliser cette IP</button>
+              <div className="grid grid-cols-[24px_1fr_140px_140px_100px_70px] gap-2 px-3 py-2 bg-muted text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border">
+                <div></div><div>Interface</div><div>Adresse / CIDR</div><div>Passerelle</div><div>Vitesse</div><div>État</div>
+              </div>
+              {visibleIfaces.length === 0 && <div className="p-3 text-sm text-muted-foreground">Aucune interface détectée.</div>}
+              {visibleIfaces.map((i) => (
+                <label key={i.name} className={`grid grid-cols-[24px_1fr_140px_140px_100px_70px] gap-2 items-center px-3 py-2 border-b border-border last:border-0 cursor-pointer hover:bg-secondary/50 ${i.virtual ? "opacity-60" : ""}`} data-testid={`iface-row-${i.name}`}>
+                  <input type="checkbox" checked={!!selected[i.name]} onChange={(e) => setSelected((s) => ({ ...s, [i.name]: e.target.checked }))} disabled={!i.cidr} />
+                  <div className="text-sm font-mono flex items-center gap-2">
+                    <span>{i.name}</span>
+                    {i.virtual && <span className="text-[9px] px-1 border border-border text-muted-foreground">virtual</span>}
+                  </div>
+                  <div className="text-xs font-mono">{i.cidr || i.ip}</div>
+                  <div className="text-xs font-mono text-muted-foreground">{i.gateway || "—"}</div>
+                  <div className="text-xs font-mono text-muted-foreground">{i.speed_mbps ? `${i.speed_mbps} Mb/s` : "—"}</div>
+                  <div className={`text-xs font-mono ${i.state === "up" ? "text-[#00CC66]" : "text-muted-foreground"}`}>{i.state}</div>
+                </label>
+              ))}
+            </div>
+
+            {/* Custom networks */}
+            <div className="border border-border p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Réseaux personnalisés (CIDR)</div>
+                <button onClick={addCidr} className="text-[11px] px-2 py-1 border border-border hover:bg-secondary" data-testid="add-custom-cidr">+ Ajouter</button>
+              </div>
+              {customCidrs.map((c, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input value={c} onChange={(e) => updCidr(i, e.target.value)} placeholder="192.168.50.0/24"
+                    className="inp font-mono text-sm flex-1" data-testid={`custom-cidr-${i}`} />
+                  {customCidrs.length > 1 && <button onClick={() => rmCidr(i)} className="px-2 py-1 border border-border text-xs hover:bg-secondary">−</button>}
                 </div>
               ))}
             </div>
+
+            {error && <p className="text-xs text-[#FF4C4C] border border-[#FF4C4C]/40 bg-[#FF4C4C]/10 p-2">{error}</p>}
+          </div>
+        )}
+
+        {/* ═══════════════ Phase 2/3 : Console ═══════════════ */}
+        {(phase === "scanning" || phase === "done") && (
+          <div className="space-y-3">
+            {/* Progress bar */}
+            <div className="grid grid-cols-4 gap-3 text-xs">
+              <div className="border border-border p-2"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Testées</div><div className="font-mono text-sm">{progress.tested} / {progress.total || "?"}</div></div>
+              <div className="border border-border p-2"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Caméras</div><div className="font-mono text-sm text-[#00CC66]">{devices.length}</div></div>
+              <div className="border border-border p-2"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Écoulé</div><div className="font-mono text-sm">{progress.elapsed_sec}s</div></div>
+              <div className="border border-border p-2"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Restant</div><div className="font-mono text-sm">{phase === "done" ? "—" : `${progress.eta_sec}s`}</div></div>
+            </div>
+            <div className="h-2 bg-muted relative overflow-hidden border border-border">
+              <div className="h-full bg-[#0044FF] transition-all" style={{ width: `${Math.min(progress.percent, 100)}%` }} data-testid="scan-progress-bar" />
+            </div>
+
+            {/* Console */}
+            <div ref={consoleRef} className="bg-black text-[#4bff4b] font-mono text-[11px] p-3 h-[300px] overflow-y-auto border border-border" data-testid="scan-console">
+              {logs.map((l, i) => (
+                <div key={i}><span className="text-[#6d6d6d]">[{l.time}]</span> <span className={l.line.includes("Camera detected") ? "text-white" : ""}>{l.line}</span></div>
+              ))}
+              {phase === "scanning" && <div className="text-[#4bff4b] animate-pulse">▋</div>}
+            </div>
+
+            {/* Console actions */}
+            <div className="flex items-center gap-2 flex-wrap text-xs">
+              <button onClick={copyLog} className="px-2 py-1 border border-border hover:bg-secondary" data-testid="log-copy">Copier</button>
+              <button onClick={clearLog} className="px-2 py-1 border border-border hover:bg-secondary" data-testid="log-clear">Vider</button>
+              <button onClick={() => downloadLog("txt")} className="px-2 py-1 border border-border hover:bg-secondary" data-testid="log-save-txt">Sauver .txt</button>
+              <button onClick={() => downloadLog("log")} className="px-2 py-1 border border-border hover:bg-secondary" data-testid="log-save-log">Sauver .log</button>
+              <div className="flex-1" />
+              {phase === "scanning" && <button onClick={cancelScan} className="px-3 py-1 border border-[#FF4C4C]/40 text-[#FF4C4C] hover:bg-[#FF4C4C]/10" data-testid="cancel-scan-btn">Annuler le scan</button>}
+            </div>
+
+            {/* Summary */}
+            {phase === "done" && summary && (
+              <div className="border border-border p-3 text-xs space-y-1" data-testid="scan-summary">
+                <div className="font-semibold text-sm uppercase tracking-widest mb-1">Résumé</div>
+                <div>Interfaces analysées : <span className="font-mono">{summary.interfaces_scanned}</span></div>
+                <div>Adresses testées : <span className="font-mono">{summary.addresses_tested}</span></div>
+                <div>Caméras détectées : <span className="font-mono text-[#00CC66]">{summary.cameras_found}</span> (ONVIF : {summary.onvif_count})</div>
+                {Object.entries(summary.by_manufacturer || {}).map(([k, v]) => (<div key={k} className="pl-3 text-muted-foreground">• {k} : {v}</div>))}
+                <div>Équipements non-caméras : <span className="font-mono">{summary.other_devices_found}</span></div>
+                <div>Erreurs : <span className="font-mono">{summary.errors}</span></div>
+                <div>Durée : <span className="font-mono">{summary.elapsed_sec}s</span> · Statut : <span className="font-mono">{summary.status}</span></div>
+              </div>
+            )}
+
+            {/* Devices found */}
+            {phase === "done" && devices.length > 0 && (
+              <div className="border border-border" data-testid="scan-devices-cameras">
+                <div className="px-3 py-2 bg-muted text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border">Caméras détectées</div>
+                {devices.map((d, i) => (
+                  <div key={i} className="flex items-center justify-between px-3 py-2 border-b border-border last:border-0">
+                    <div className="flex items-center gap-3 text-xs">
+                      <span className="font-mono">{d.ip}</span>
+                      <span>{d.manufacturer || "ONVIF"}</span>
+                      {d.model && <span className="text-muted-foreground">{d.model}</span>}
+                      {d.onvif && <span className="text-[9px] px-1 border border-[#00CC66]/40 text-[#00CC66]">ONVIF</span>}
+                      {d.auth_required && <span className="text-[9px] px-1 border border-[#FFB800]/40 text-[#FFB800]">auth</span>}
+                      {d.already_added && <span className="text-[9px] px-1 border border-border text-muted-foreground">déjà ajoutée</span>}
+                    </div>
+                    <button onClick={() => onPick({ ip: d.ip, port: d.onvif_port || 80 })} className="px-3 py-1 bg-[#0044FF] text-white text-xs" data-testid={`pick-device-${d.ip}`}>Utiliser cette IP</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {phase === "done" && others.length > 0 && (
+              <div className="border border-border" data-testid="scan-devices-others">
+                <div className="px-3 py-2 bg-muted text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border">Autres équipements réseau</div>
+                {others.map((d, i) => (
+                  <div key={i} className="flex items-center gap-3 px-3 py-2 border-b border-border last:border-0 text-xs opacity-70">
+                    <span className="font-mono">{d.ip}</span>
+                    <span>{d.manufacturer || "Unknown"}</span>
+                    <span className="text-muted-foreground">Équipement détecté mais non compatible avec MG-VMS</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <DialogFooter className="pt-3">
+          {phase === "config" && (
+            <>
+              <button onClick={onClose} className="px-3 py-2 border border-border text-sm hover:bg-secondary">Fermer</button>
+              <button onClick={startScan} className="px-4 py-2 bg-[#0044FF] text-white text-sm flex items-center gap-2" data-testid="onvif-scan-btn">
+                <Radar size={15} /> Lancer la découverte
+              </button>
+            </>
           )}
-        </div>
+          {phase === "scanning" && (
+            <button onClick={onClose} className="px-3 py-2 border border-border text-sm hover:bg-secondary">Masquer</button>
+          )}
+          {phase === "done" && (
+            <>
+              <button onClick={() => { resetAll(); }} className="px-3 py-2 border border-border text-sm hover:bg-secondary" data-testid="rescan-btn">Nouveau scan</button>
+              <button onClick={onClose} className="px-3 py-2 bg-[#0044FF] text-white text-sm">Fermer</button>
+            </>
+          )}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
+}
+
+function hms() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }

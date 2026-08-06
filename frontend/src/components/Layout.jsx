@@ -199,13 +199,15 @@ export default function Layout({ children }) {
     <div className="h-screen flex overflow-hidden bg-background text-foreground">
       {/* Sidebar */}
       <aside className="w-60 shrink-0 border-r border-border bg-card flex flex-col" data-testid="sidebar">
-        <div className="h-14 flex items-center gap-2.5 px-4 border-b border-border">
+        <a href="https://mg-vms.com" target="_blank" rel="noopener noreferrer"
+           className="h-14 flex items-center gap-2.5 px-4 border-b border-border hover:bg-secondary/40 transition-colors"
+           data-testid="sidebar-brand-link" title="mg-vms.com">
           <Logo size={36} className="w-9 h-9 shrink-0" data-testid="sidebar-logo" />
           <div className="leading-none">
             <div className="font-head font-black text-base tracking-tight">MG-VMS</div>
             <div className="text-[9px] uppercase tracking-[0.2em] text-muted-foreground">MG Informatique</div>
           </div>
-        </div>
+        </a>
         <nav className="flex-1 overflow-y-auto py-3">
           {NAV.map((g) => (
             <div key={g.group} className="mb-4">

@@ -195,10 +195,15 @@ async def _score_mfa() -> dict:
     total = await db.users.count_documents({"active": {"$ne": False}})
     admins = await db.users.count_documents({"role": "admin"})
     with_2fa = await db.users.count_documents({"twofa_enabled": True})
-    ok = admins > 0 and with_2fa >= admins  # tous les admins ont 2FA
-    return {"ok": ok,
-            "detail": f"{with_2fa}/{total} utilisateurs (2FA), {admins} admin(s)",
-            "advice": None if ok else "Activer la 2FA sur au moins tous les comptes admin."}
+    # Bonus : les admins doivent aussi avoir des codes de récupération
+    admins_with_recovery = await db.users.count_documents({
+        "role": "admin", "twofa_enabled": True,
+        "twofa_recovery_hashes": {"$exists": True, "$type": "array", "$ne": []},
+    })
+    ok = admins > 0 and with_2fa >= admins and admins_with_recovery >= admins
+    detail = f"{with_2fa}/{total} avec 2FA · {admins_with_recovery}/{admins} admin(s) avec codes"
+    return {"ok": ok, "detail": detail,
+            "advice": None if ok else "Activer la 2FA + générer les codes de récupération pour tous les admins."}
 
 
 async def _score_backups() -> dict:
