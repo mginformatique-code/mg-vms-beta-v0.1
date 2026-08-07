@@ -66,3 +66,18 @@ async def bootstrap_bundle():
     logger.info("plugin_bootstrap.done registered=%s dynamic=%s",
                 [e.name for e in bus.list_entries()],
                 [p["name"] for p in loader.loaded() if p["loaded"]])
+
+    # v1.0-rc4 · P0-3 : warm-up différé des états paresseux (fast-alpr charge
+    # son modèle après le bootstrap — sans ça le 1er GET /plugins/bus d'un
+    # consommateur API externe verrait encore un état périmé).
+    import asyncio
+
+    async def _delayed_state_refresh():
+        for delay in (20, 60):
+            await asyncio.sleep(delay)
+            try:
+                bus.refresh_lazy_states()
+            except Exception:  # pragma: no cover
+                pass
+
+    asyncio.create_task(_delayed_state_refresh())

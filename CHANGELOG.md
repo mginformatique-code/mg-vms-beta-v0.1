@@ -2466,3 +2466,14 @@ docstring de `pipeline_v2/__init__.py`.
 - Mur vidéo (1→64), dashboard (KPI + graphiques), ANPR (recherche, watchlist, export CSV, analyse IA d'image), recherche véhicule, alertes, carte OSM, audit, gestion utilisateurs, paramètres.
 - Bilingue FR/EN, thèmes clair/sombre.
 - Tests : 30/30 backend + parcours frontend.
+
+## [1.0-rc4] — 2026-08 — Fusion Événements/Véhicules + Plugins OCR réparés
+### Ajouté
+- **Vue Événements unifiée** : chips de filtre (Tous, Plaques, Véhicules, Personnes, Camions, Bus, Deux roues, Animaux). Le chip « Plaques » embarque tout le module Véhicules (recherche IA, identités, fiches complètes). `/vehicles` → redirection.
+- **Recherche IA globale** sur la vue Événements (« personne à 12h au téléphone », « voiture devant la cam 12 à 12h ») — `smart-search` retourne des fiches événement complètes.
+- **Benchmark multi-moteurs OCR** : FastALPR, PaddleOCR, EasyOCR, OpenCV OCR, Tesseract, Tous + Fusion Multi OCR (temps, CPU, RAM, plaques lues par moteur).
+- **EventViewer** : boutons « Historique du véhicule » et « Voir dans la Timeline ».
+### Corrigé
+- **Installation plugins** : fini le `--no-deps` (faux succès « DEP MANQUANTE ») — install complète protégée par contraintes + deps système apt + vérification post-install de l'état réel.
+- **États plugins temps réel** : rafraîchissement paresseux (fast-alpr passait « ERREUR modèle non chargé » à tort après démarrage).
+- **paddle-ocr** : sonde d'init en sous-processus isolé — un crash natif C++ (aarch64) ne peut plus tuer le backend.

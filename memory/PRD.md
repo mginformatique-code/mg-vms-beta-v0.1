@@ -691,3 +691,29 @@ Prioritisé par ROI décroissant (détails dans le rapport v0.8-rc1) :
 - Fichiers : `pipeline_v2/stability_watcher.py` (230 l),
   `stress/chaos.py` (200 l), `server.py` (+3), `health_dashboard.py`
   (+45), tests (+190)
+
+## v1.0-rc4 · P0 Fusion Événements/Véhicules + Réparation Plugins OCR (2026-08)
+### P0-1 — Fusion UI (FAIT, testé iter_41 100%)
+- UNE seule vue `/events` : chips Tous/Plaques/Véhicules/Personnes/Camions/Bus/Deux roues/Animaux.
+- Chip « Plaques » = intégralité de l'ancien module Véhicules (`VehiclesSection embedded` — recherche IA groupée, identités, anomalies, drawer 6 onglets). Zéro perte de fonctionnalité.
+- `/vehicles` redirige vers `/events?filtre=plaques` ; entrée « Véhicules » retirée de la sidebar.
+- EventViewer enrichi : bouton « Historique du véhicule » (ouvre VehicleDrawer), « Voir dans la Timeline », Analyser OCR (existant).
+- Recherche IA sur TOUTE la vue Événements (`/api/smart-search` retourne désormais `events[]` complets ; time-only ⇒ date du jour ; camera_hint ; plaque ; couleurs).
+- `GET /api/events` accepte `types=` (multi-types CSV).
+
+### P0-2 — Plugins OCR (FAIT, testé)
+- CAUSE RACINE : installeur pip `--no-deps` ⇒ paquet installé mais deps transitives absentes ⇒ import KO ⇒ « DEP MANQUANTE » persistait malgré un toast succès.
+- FIX `loader.install_dependencies` : install AVEC deps + fichier de contraintes (numpy/torch/opencv/ultralytics figés) + install apt des deps système + VÉRIFICATION post-install (`verified_state`) — plus jamais de faux succès.
+- Environnement preview : easyocr READY, tesseract READY (binaire apt installé), opencv-ocr READY (opencv-contrib), fast-alpr READY.
+- paddle-ocr : paddlepaddle/paddleocr/paddlex installés MAIS segfault C++ du moteur d'inférence sur **aarch64** (preview ARM). Plugin blindé par sonde sous-processus (`_probe_isolated`) → état `error` honnête, backend JAMAIS crashé. Sur le build Docker x86_64 client : fonctionnel (deps dans requirements.txt + tesseract-ocr dans Dockerfile backend).
+- Benchmark multi-moteurs : `POST /api/system/anpr-benchmark?engines=...&fusion=true` → par moteur : avg/min/max ms, cpu_pct, ram_delta_mb, plaques lues, meilleure lecture + fusion vote majoritaire. UI `/anpr-benchmark` : cases YOLO/FastALPR/PaddleOCR/EasyOCR/OpenCV OCR/Tesseract/Tous + case Fusion Multi OCR + tableau résultats.
+
+### P0-3 — UI = état réel backend (FAIT, testé)
+- CAUSE RACINE fast-alpr : état évalué UNE fois au bootstrap AVANT le chargement paresseux du modèle ALPR ⇒ « ERREUR modèle non chargé » figé.
+- FIX : `bus.refresh_lazy_states()` (opt-in `refresh_state_lazy()` par plugin) appelé par GET /plugins/bus, le benchmark, et warm-up différé 20s/60s au bootstrap.
+
+### Restant / Backlog
+- P0 HTTPS ERR_SSL_PROTOCOL_ERROR (vérif TLS nginx docker) — NON TRAITÉ cette session.
+- Mocks HTTP caméras RTSP physiques (tests skippés).
+- P1 : VirtualGrid sur Events/Timeline ; Pipeline Auto Optimizer ; migration routers.py → routes/.
+- Rapport de tests : /app/test_reports/iteration_41.json (backend 7/7, frontend 100%).
