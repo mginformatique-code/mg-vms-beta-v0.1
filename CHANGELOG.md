@@ -7,6 +7,25 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
 
+## [v0.7.c] — 2026-06 — Hotfix régressions P0 (démarrage Docker)
+
+### Fixed (backend) — P0-1 Healthcheck Docker
+- Ajout de la route racine `GET /health` dans `server.py` (hors préfixe `/api`,
+  `include_in_schema=False`) retournant `{"status": "ok"}`
+- Route volontairement minimale : aucune requête MongoDB, aucune dépendance IA,
+  aucune vérification matérielle — réponse garantie < 100 ms
+- Le healthcheck Docker repasse en `healthy` ; plus de timeout au démarrage
+
+### Fixed (frontend) — P0-3 Lockfile Yarn
+- Vérification et validation du `yarn.lock` : `yarn install --frozen-lockfile`
+  passe sans erreur, lockfile synchronisé avec `package.json`
+
+### Notes
+- Correctif strict : aucune nouvelle fonctionnalité, aucune modification
+  d'architecture ni altération du code existant
+
+---
+
 ## [v0.7.b] — 2026-02 — Smart Search cross-domain (personnes) + Historique recherches
 
 ### Added (backend) — Recherche IA étendue aux événements humains
