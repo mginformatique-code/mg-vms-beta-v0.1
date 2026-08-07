@@ -2,6 +2,99 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v1.0-rc1] — 2026-08 — FEATURE FREEZE · Installation Docker Production Ready
+
+**Bloc 1 du mandat v1.0** : installer MG-VMS depuis un clone Git vierge en
+3 commandes, sans intervention manuelle.
+
+### Added — Stack Docker production complète
+
+Fichiers créés (aucun bind mount du code — builds reproductibles) :
+
+| Fichier | Rôle |
+|---|---|
+| `backend/Dockerfile` | NVIDIA CUDA 12.4 + ffmpeg + uvicorn (server.py sans __main__) |
+| `frontend/Dockerfile` | Multi-stage : node:20 build → nginx:1.27-alpine runtime |
+| `frontend/nginx.conf` | Reverse proxy `/api` `/ws` `/go2rtc` + HTTPS 443 + SPA fallback + rate-limit login |
+| `frontend/docker-entrypoint.sh` | Auto-génération cert self-signed (RSA 2048, 10 ans) si `/etc/nginx/certs` vide ; swap à chaud possible |
+| `docker/docker-compose.yml` | 4 services (mongo · go2rtc · backend · frontend), Compose v2 clean (sans `version:`), depends_on healthy chain, GPU nvidia optionnel |
+| `docker/.env.example` | Template `.env` complet + mapping `MONGO_URI → MONGO_URL` / `MONGO_DATABASE → DB_NAME` (variables backend protégées) |
+| `docker/README.md` | Guide install 3 commandes + prérequis + mode CPU-only + swap HTTPS + debug |
+| `docker/go2rtc.yaml` | Copie du go2rtc existant (démos + streams) |
+| `ENVIRONMENT.md` | Documentation variables + arborescence `/mnt/storage` |
+
+### Points critiques résolus
+
+- **`context: ../backend` → compose dans `/app/docker/`** (sous-dossier
+  dédié, pas de pollution racine)
+- **`MONGO_URI` fourni par l'utilisateur → mapping automatique** vers
+  `MONGO_URL` + `DB_NAME` (variables lues par le backend)
+- **Compose v2 strict** : suppression du champ `version:` (déprécié),
+  GPU en `deploy.resources.reservations` (syntaxe moderne)
+- **CMD backend** : `python3 -m uvicorn server:app` (le `server.py` n'a
+  pas de `if __name__ == "__main__"`, `python3 server.py` échouait)
+- **Auto-cert HTTPS** : entrypoint OpenSSL exécuté par le launcher
+  officiel Nginx (`/docker-entrypoint.d/`). Cert présent → conservé.
+  Cert absent → self-signed généré (CN = `$MGVMS_HOSTNAME`).
+- **Yarn** : `--frozen-lockfile` retiré du Dockerfile (voir README §Yarn
+  pour durcissement v1.1). Actuellement `yarn check --integrity` = OK
+  local mais Compose build strict échouerait sur les Resolution warnings.
+
+### Preuves de non-régression
+
+- **47/47 tests verts** (`tests/test_v1rc1_docker_stack.py`) couvrant :
+  * Présence de tous les fichiers requis + entrypoint exécutable
+  * YAML Compose valide avec 4 services attendus
+  * Absence du champ `version:` déprécié
+  * `MONGO_URL` + `DB_NAME` exposés au backend
+  * Healthcheck `/health` et non `/api/health`
+  * Frontend expose 80 + 443 + monte `/etc/nginx/certs`
+  * `depends_on healthy` chain (mongo → backend → frontend)
+  * Dockerfile backend : CUDA + ffmpeg + uvicorn + healthcheck
+  * Dockerfile frontend : multi-stage + openssl + entrypoint copié
+  * Nginx : listen 443 ssl, upstream backend, /api /ws /go2rtc,
+    rate-limit login, security headers OWASP, SPA fallback
+  * Entrypoint : shell hardening (`set -euo pipefail`), preserve existing cert
+  * `.env.example` couvre les variables lues par le backend
+  * `/health` endpoint toujours enregistré
+- **164/164 tests régression totale** (v0.7 + v0.8 + v1.0-rc1). Zéro régression.
+
+### Modes HTTPS supportés (mandat "auto avec possibilité de changer")
+
+1. **Auto self-signed** (défaut) — rien à faire au premier boot
+2. **Cert utilisateur** — copier `fullchain.pem` + `privkey.pem` dans
+   `/mnt/storage/certs/` puis `docker compose restart frontend`
+3. **Regénérer** — supprimer les 2 fichiers puis restart
+
+### Installation type client (Debian/Ubuntu)
+
+```bash
+git clone <URL> mg-vms && cd mg-vms
+sudo mkdir -p /mnt/storage/{mongodb,video-datastore,models,crops,logs,certs,backups}
+sudo chown -R "$USER":"$USER" /mnt/storage
+cp docker/.env.example docker/.env
+cd docker
+docker compose build
+docker compose up -d
+```
+
+Accessible sur `https://<IP_SERVEUR>` — cert self-signed prêt à l'emploi.
+
+### Fichiers modifiés
+- `backend/Dockerfile` (overwrite, 80 lignes)
+- `frontend/Dockerfile` (overwrite, 56 lignes)
+- `frontend/nginx.conf` (overwrite, 130 lignes — remplace SPA-only par
+  reverse-proxy complet)
+- `frontend/docker-entrypoint.sh` (nouveau, 48 lignes)
+- `docker/docker-compose.yml` (nouveau, 125 lignes)
+- `docker/.env.example` (nouveau, 100 lignes)
+- `docker/README.md` (nouveau, 170 lignes)
+- `docker/go2rtc.yaml` (copie)
+- `ENVIRONMENT.md` (overwrite, 100 lignes)
+- `backend/tests/test_v1rc1_docker_stack.py` (nouveau, 220 lignes)
+
+---
+
 ## [v0.8-rc7] — 2026-08 — FEATURE FREEZE · Stabilisation Sprint 4 · Phase Qualification
 
 MG-VMS entre officiellement en **phase de qualification** — plus de

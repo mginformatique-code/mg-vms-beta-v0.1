@@ -1,0 +1,149 @@
+# ==============================================================================
+# MG-VMS · Docker Compose v1.0 · Production ready
+# ==============================================================================
+# Installation en 3 commandes depuis un clone Git vierge :
+#
+#   1. cd docker && cp .env.example .env       # (adapter si besoin)
+#   2. docker compose build
+#   3. docker compose up -d
+#
+# L'application est alors accessible sur https://<host>  (cert auto-signé
+# généré au premier boot dans /mnt/storage/certs).
+#
+# ─── Compose v2 · pas de champ `version:` (déprécié depuis Compose v1.28) ──
+
+services:
+
+  # ─── MongoDB · stockage documents ────────────────────────────────
+  mongo:
+    image: mongo:7.0
+    container_name: mgvms-mongo
+    restart: unless-stopped
+    command:
+      - --wiredTigerCacheSizeGB=2
+    ports:
+      - "27017:27017"
+    volumes:
+      - ${MONGO_PATH:-/mnt/storage/mongodb}:/data/db
+    healthcheck:
+      test: ["CMD","mongosh","--quiet","--eval","db.runCommand({ping:1})"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks: [mgvms]
+
+  # ─── go2rtc · producer RTSP · HLS · WebRTC ───────────────────────
+  go2rtc:
+    image: alexxit/go2rtc:1.9.9
+    container_name: mgvms-go2rtc
+    restart: unless-stopped
+    ports:
+      - "1984:1984"
+      - "8554:8554"
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml:ro
+      - ${VIDEO_DATASTORE:-/mnt/storage/video-datastore}:/video-datastore
+      - ../media:/demo-media:ro
+    healthcheck:
+      test: ["CMD","wget","-qO-","http://localhost:1984/api"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks: [mgvms]
+
+  # ─── Backend FastAPI + Pipeline IA ───────────────────────────────
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    image: mgvms-backend:latest
+    container_name: mgvms-backend
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      go2rtc:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-Europe/Paris}
+      # Le backend lit MONGO_URL + DB_NAME (protégés)
+      # Le .env.example expose aussi MONGO_URI (alias)
+      MONGO_URL: ${MONGO_URL:-mongodb://mongo:27017}
+      DB_NAME: ${MONGO_DATABASE:-mgvms}
+      GO2RTC_API: ${GO2RTC_API:-http://go2rtc:1984}
+      GO2RTC_RTSP: ${GO2RTC_RTSP:-rtsp://go2rtc:8554}
+      VIDEO_DATASTORE: /video-datastore
+      MODEL_PATH: /models
+      CROP_PATH: /crops
+      CERT_PATH: /certificates
+      LOG_PATH: /logs
+      # GPU (ignoré si le service tourne sans nvidia-runtime)
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,video,utility}
+    ports:
+      - "${BACKEND_PORT:-8001}:8001"
+    volumes:
+      # Uniquement les DONNÉES · le code est embarqué dans l'image
+      - ${VIDEO_DATASTORE:-/mnt/storage/video-datastore}:/video-datastore
+      - ${MODEL_PATH:-/mnt/storage/models}:/models
+      - ${CROP_PATH:-/mnt/storage/crops}:/crops
+      - ${LOG_PATH:-/mnt/storage/logs}:/logs
+      - ${CERT_PATH:-/mnt/storage/certs}:/certificates
+      - ${BACKUP_PATH:-/mnt/storage/backups}:/backups
+    healthcheck:
+      test: ["CMD","curl","-fs","http://localhost:8001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    # GPU NVIDIA · Compose v2 syntax officielle
+    # Commenter ce bloc entier si serveur CPU-only
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks: [mgvms]
+
+  # ─── Frontend React + Nginx reverse proxy HTTPS ──────────────────
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      args:
+        # Le SPA appelle /api sur le même host (Nginx proxy) → URL vide.
+        REACT_APP_BACKEND_URL: ""
+    image: mgvms-frontend:latest
+    container_name: mgvms-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      MGVMS_HOSTNAME: ${MGVMS_HOSTNAME:-mg-vms.local}
+      HTTPS_FORCE: ${HTTPS_FORCE:-false}
+    ports:
+      - "${FRONTEND_HTTP_PORT:-80}:80"
+      - "${FRONTEND_HTTPS_PORT:-443}:443"
+    volumes:
+      # Certificats montés en RW : l'entrypoint génère un self-signed si vide.
+      # L'utilisateur peut remplacer fullchain.pem/privkey.pem à chaud puis
+      # `docker compose restart frontend`.
+      - ${CERT_PATH:-/mnt/storage/certs}:/etc/nginx/certs
+    healthcheck:
+      test: ["CMD","curl","-fs","-o","/dev/null","http://localhost/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks: [mgvms]
+
+networks:
+  mgvms:
+    driver: bridge
+    name: mgvms
