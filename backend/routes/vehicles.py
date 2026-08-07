@@ -441,6 +441,193 @@ async def vehicle_identity(plate: str,
 
 
 # ═══════════════════════════════════════════════════════════════════
+# 8b. Anomalies (Habitudes → Alertes) — v0.6b
+# ═══════════════════════════════════════════════════════════════════
+async def _compute_anomaly(plate: str, user: dict) -> dict:
+    """Calcule un rapport d'anomalie pour la **dernière** passe d'un véhicule.
+
+    Compare le dernier timestamp aux habitudes calculées (arrivée typique,
+    départ typique, jours prédominants, historique nocturne) et renvoie :
+
+        {
+          "plate": "...",
+          "last_seen": "...",
+          "anomalies": ["off_hours", "off_days", "nocturnal_first", ...],
+          "severity": "info" | "warning" | "high",
+          "message": "phrase explicative",
+          "habits": {typical_arrival, typical_departure, typical_days, ...},
+        }
+    """
+    normalized = plate.upper().replace(" ", "").replace("-", "")
+    q = await _base_match(user)
+    q["plate"] = {"$regex": normalized, "$options": "i"}
+
+    docs = await db.plates.find(
+        q, {"_id": 0, "timestamp": 1, "camera_name": 1}
+    ).sort("timestamp", -1).limit(2000).to_list(2000)
+    if not docs:
+        return {"plate": normalized, "anomalies": [], "severity": "info",
+                "message": "aucune donnée"}
+
+    last_iso = docs[0].get("timestamp")
+    last_dt = _iso_to_dt(last_iso)
+    if not last_dt:
+        return {"plate": normalized, "anomalies": [], "severity": "info",
+                "message": "timestamp illisible"}
+
+    # Historique (hors dernière passe) pour calcul de norme.
+    history = [d for d in docs[1:] if _iso_to_dt(d.get("timestamp"))]
+    if len(history) < 5:
+        return {
+            "plate": normalized, "last_seen": last_iso,
+            "anomalies": ["insufficient_history"], "severity": "info",
+            "message": "Historique insuffisant pour évaluer les habitudes (< 5 passes).",
+            "habits": None,
+        }
+
+    hist_dts = [_iso_to_dt(d["timestamp"]) for d in history]
+    hours = [d.hour * 60 + d.minute for d in hist_dts]
+    dows = Counter(d.weekday() for d in hist_dts)
+    total = len(hist_dts)
+
+    # Arrivées/départs habituels
+    arrivals = [h for h, dt in zip(hours, hist_dts) if dt.hour < 12]
+    departures = [h for h, dt in zip(hours, hist_dts) if dt.hour >= 12]
+    arr_min = min(arrivals) if arrivals else None
+    arr_max = max(arrivals) if arrivals else None
+    dep_min = min(departures) if departures else None
+    dep_max = max(departures) if departures else None
+
+    labels = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+    typical_days = [labels[d] for d, c in dows.items() if c / total >= 0.10]
+
+    # Analyse du LAST passage
+    last_min = last_dt.hour * 60 + last_dt.minute
+    last_dow = last_dt.weekday()
+    anomalies = []
+    reasons = []
+
+    # 1. Hors des heures habituelles ? (>60 min hors fenêtre arr/dep)
+    in_arr = arr_min is not None and arr_max is not None and arr_min - 60 <= last_min <= arr_max + 60
+    in_dep = dep_min is not None and dep_max is not None and dep_min - 60 <= last_min <= dep_max + 60
+    if not in_arr and not in_dep and last_dt.hour >= 6 and last_dt.hour < 22:
+        anomalies.append("off_hours")
+        reasons.append(f"Passage à {last_dt.strftime('%H:%M')} hors des créneaux habituels")
+
+    # 2. Jour inhabituel ? (dow avec < 5 % de l'historique)
+    if dows[last_dow] / total < 0.05:
+        anomalies.append("off_days")
+        reasons.append(f"Passage un {labels[last_dow]} — jour rarement observé")
+
+    # 3. Nocturne (22h–06h) alors que rarement observé nocturne ?
+    if last_dt.hour >= 22 or last_dt.hour < 6:
+        nocturnal_count = sum(1 for d in hist_dts if d.hour >= 22 or d.hour < 6)
+        if nocturnal_count == 0:
+            anomalies.append("nocturnal_first")
+            reasons.append("Première apparition nocturne (22h–06h) jamais observée auparavant")
+        elif nocturnal_count / total < 0.05:
+            anomalies.append("nocturnal_rare")
+            reasons.append("Passage nocturne rare")
+
+    # Sévérité
+    if "nocturnal_first" in anomalies or ("off_hours" in anomalies and "off_days" in anomalies):
+        severity = "high"
+    elif anomalies:
+        severity = "warning"
+    else:
+        severity = "info"
+
+    return {
+        "plate": normalized,
+        "last_seen": last_iso,
+        "camera_name": docs[0].get("camera_name"),
+        "anomalies": anomalies,
+        "severity": severity,
+        "message": " · ".join(reasons) if reasons else "Aucune anomalie détectée.",
+        "habits": {
+            "typical_arrival": (
+                f"{arr_min//60:02d}:{arr_min%60:02d} → {arr_max//60:02d}:{arr_max%60:02d}"
+                if arr_min is not None else None),
+            "typical_departure": (
+                f"{dep_min//60:02d}:{dep_min%60:02d} → {dep_max//60:02d}:{dep_max%60:02d}"
+                if dep_min is not None else None),
+            "typical_days": typical_days,
+        },
+    }
+
+
+@vehicles_router.get("/{plate}/anomaly")
+async def vehicle_anomaly(plate: str,
+                           user: dict = Depends(require_permission("read_plates"))):
+    """Analyse d'anomalie de la dernière passe (lecture seule)."""
+    await _plate_or_404(plate, user)
+    return await _compute_anomaly(plate, user)
+
+
+@vehicles_router.get("/anomalies/recent")
+async def vehicles_anomalies_recent(
+    since_hours: int = Query(24, ge=1, le=720),
+    limit: int = Query(20, ge=1, le=100),
+    user: dict = Depends(require_permission("read_plates")),
+):
+    """Liste des véhicules avec anomalies détectées sur les X dernières heures.
+
+    Retourne uniquement ceux dont le rapport a une sévérité `warning` ou `high`.
+    """
+    since_dt = datetime.now(timezone.utc).timestamp() - since_hours * 3600
+    match = await _base_match(user)
+    # Distinct plates seen since_hours ago
+    pipe = [
+        {"$match": match},
+        {"$sort": {"timestamp": -1}},
+        {"$group": {"_id": "$plate", "last_seen": {"$first": "$timestamp"}}},
+        {"$sort": {"last_seen": -1}},
+        {"$limit": 300},  # borne dure pour la charge CPU
+    ]
+    recent_plates = await db.plates.aggregate(pipe).to_list(300)
+    out = []
+    for row in recent_plates:
+        last = _iso_to_dt(row.get("last_seen"))
+        if not last or last.timestamp() < since_dt:
+            continue
+        try:
+            report = await _compute_anomaly(row["_id"], user)
+        except Exception:
+            continue
+        if report.get("severity") in ("warning", "high"):
+            out.append(report)
+        if len(out) >= limit:
+            break
+    # Sort by severity + last_seen
+    order = {"high": 0, "warning": 1, "info": 2}
+    out.sort(key=lambda r: (order.get(r["severity"], 3), -(_iso_to_dt(r["last_seen"]).timestamp())))
+    return {"count": len(out), "items": out}
+
+
+@vehicles_router.post("/{plate}/notify-anomaly")
+async def vehicle_notify_anomaly(plate: str,
+                                  user: dict = Depends(require_permission("read_plates"))):
+    """Envoie une notification (SMTP/Discord/Telegram) sur les anomalies
+    détectées pour ce véhicule. Ne modifie pas le pipeline OCR — appel manuel
+    depuis le drawer véhicule."""
+    await _plate_or_404(plate, user)
+    report = await _compute_anomaly(plate, user)
+    if not report.get("anomalies") or report["severity"] == "info":
+        raise HTTPException(status_code=400,
+                            detail={"error": "no_anomaly",
+                                    "message": "Aucune anomalie à notifier."})
+
+    from notifications import send_notification
+    subject = f"Anomalie véhicule {plate} · {report['severity'].upper()}"
+    body = (f"Plaque : {plate}\n"
+            f"Dernière détection : {report.get('last_seen')} sur {report.get('camera_name') or 'caméra inconnue'}\n"
+            f"Anomalies : {', '.join(report['anomalies'])}\n"
+            f"{report['message']}")
+    results = await send_notification(subject=subject, body=body)
+    return {"sent": results, "report": report}
+
+
+# ═══════════════════════════════════════════════════════════════════
 # 9. Thumbnail binaire — /passage/{id}/thumb
 # ═══════════════════════════════════════════════════════════════════
 @vehicles_router.get("/passage/{passage_id}/thumb")

@@ -8,6 +8,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Search, Car, Camera as CameraIcon, Clock, Route as RouteIcon,
   Activity, BarChart3, Loader2, Info, ChevronDown, ChevronRight,
+  AlertTriangle, ShieldAlert, ShieldCheck, Shield, Bell, X as XIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -24,6 +25,14 @@ export default function Vehicles() {
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
   const [openPlate, setOpenPlate] = useState(null);
+  const [anomalies, setAnomalies] = useState([]);
+
+  const loadAnomalies = useCallback(async () => {
+    try {
+      const { data } = await api.get("/vehicles/anomalies/recent", { params: { since_hours: 48, limit: 8 } });
+      setAnomalies(data.items || []);
+    } catch { /* silent */ }
+  }, []);
 
   const load = useCallback(async (search = "") => {
     setLoading(true);
@@ -41,12 +50,12 @@ export default function Vehicles() {
   }, []);
 
   // Chargement initial + refresh 30 s (pausé si le drawer est ouvert)
-  useEffect(() => { load(""); }, [load]);
+  useEffect(() => { load(""); loadAnomalies(); }, [load, loadAnomalies]);
   useEffect(() => {
     if (openPlate) return; // pause pendant l'ouverture du drawer
-    const iv = setInterval(() => load(q), 30000);
+    const iv = setInterval(() => { load(q); loadAnomalies(); }, 30000);
     return () => clearInterval(iv);
-  }, [openPlate, q, load]);
+  }, [openPlate, q, load, loadAnomalies]);
 
   return (
     <div className="p-4" data-testid="vehicles-page">
@@ -85,6 +94,10 @@ export default function Vehicles() {
         {items.length} véhicule{items.length > 1 ? "s" : ""} affiché{items.length > 1 ? "s" : ""} sur {total}
       </div>
 
+      {anomalies.length > 0 && (
+        <AnomaliesBanner items={anomalies} onOpen={(p) => setOpenPlate(p)} onDismiss={() => setAnomalies([])} />
+      )}
+
       {items.length === 0 && !loading && (
         <div className="border border-border p-8 text-center text-muted-foreground">
           <Car size={48} className="mx-auto mb-2 opacity-30" />
@@ -98,7 +111,13 @@ export default function Vehicles() {
         ))}
       </div>
 
-      <VehicleDrawer plate={openPlate} onClose={() => setOpenPlate(null)} />
+      <VehicleDrawer
+        plate={openPlate}
+        onClose={() => setOpenPlate(null)}
+        onWatchChanged={(plate, status) => {
+          setItems((prev) => prev.map((it) => it.plate === plate ? { ...it, list_status: status } : it));
+        }}
+      />
     </div>
   );
 }
@@ -183,15 +202,24 @@ function VehicleCard({ v, onOpen }) {
 // ═══════════════════════════════════════════════════════════════════
 // VehicleDrawer — panneau latéral avec 6 onglets
 // ═══════════════════════════════════════════════════════════════════
-function VehicleDrawer({ plate, onClose }) {
+function VehicleDrawer({ plate, onClose, onWatchChanged }) {
   const open = !!plate;
   const [detail, setDetail] = useState(null);
-  useEffect(() => {
-    if (!plate) { setDetail(null); return; }
+  const reload = useCallback(() => {
+    if (!plate) return;
     api.get(`/vehicles/${encodeURIComponent(plate)}`)
       .then(({ data }) => setDetail(data))
       .catch(() => toast.error("Impossible de charger la fiche véhicule"));
   }, [plate]);
+  useEffect(() => {
+    if (!plate) { setDetail(null); return; }
+    reload();
+  }, [plate, reload]);
+
+  const handleWatchChanged = (newStatus) => {
+    setDetail((d) => d ? { ...d, list_status: newStatus } : d);
+    onWatchChanged && onWatchChanged(plate, newStatus);
+  };
 
   return (
     <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
@@ -219,7 +247,7 @@ function VehicleDrawer({ plate, onClose }) {
               <TabsTrigger value="journey"   className="rounded-none text-xs py-2" data-testid="tab-journey">Parcours</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="overview" className="mt-4"><TabOverview d={detail} /></TabsContent>
+            <TabsContent value="overview" className="mt-4"><TabOverview d={detail} onWatchChanged={handleWatchChanged} /></TabsContent>
             <TabsContent value="gallery"  className="mt-4"><TabGallery plate={plate} /></TabsContent>
             <TabsContent value="timeline" className="mt-4"><TabTimeline plate={plate} /></TabsContent>
             <TabsContent value="heatmap"  className="mt-4"><TabHeatmap plate={plate} /></TabsContent>
@@ -233,11 +261,49 @@ function VehicleDrawer({ plate, onClose }) {
 }
 
 // ─── Tabs contents ───────────────────────────────────────────────
-function TabOverview({ d }) {
+function TabOverview({ d, onWatchChanged }) {
   const [habits, setHabits] = useState(null);
+  const [anomaly, setAnomaly] = useState(null);
+  const [wlSaving, setWlSaving] = useState(false);
+  const [notifSending, setNotifSending] = useState(false);
   useEffect(() => {
     api.get(`/vehicles/${encodeURIComponent(d.plate)}/habits`).then(({ data }) => setHabits(data)).catch(() => {});
+    api.get(`/vehicles/${encodeURIComponent(d.plate)}/anomaly`).then(({ data }) => setAnomaly(data)).catch(() => {});
   }, [d.plate]);
+
+  const setWatch = async (listType) => {
+    setWlSaving(true);
+    try {
+      // Retirer d'abord l'entrée existante pour cette plaque
+      const { data: list } = await api.get("/watchlist");
+      const existing = (list || []).find((w) => (w.plate || "").toUpperCase() === d.plate.toUpperCase());
+      if (existing) {
+        await api.delete(`/watchlist/${existing.id}`);
+      }
+      if (listType) {
+        await api.post("/watchlist", { plate: d.plate, list_type: listType, reason: "" });
+      }
+      toast.success(listType ? `Plaque ajoutée à la liste ${listType === "black" ? "noire" : "blanche"}` : "Plaque retirée");
+      onWatchChanged && onWatchChanged(listType || "none");
+    } catch (e) {
+      toast.error("Échec de la mise à jour de la liste");
+    } finally { setWlSaving(false); }
+  };
+
+  const sendNotif = async () => {
+    setNotifSending(true);
+    try {
+      const { data } = await api.post(`/vehicles/${encodeURIComponent(d.plate)}/notify-anomaly`);
+      const channels = Object.entries(data.sent || {}).filter(([_, v]) => v === "sent").map(([k]) => k);
+      if (channels.length) toast.success(`Notification envoyée sur : ${channels.join(", ")}`);
+      else toast.info("Aucun canal de notification actif — configurez SMTP/Discord/Telegram dans les Notifications.");
+    } catch (e) {
+      const detail = e.response?.data?.detail;
+      toast.error(detail?.message || "Notification impossible");
+    } finally { setNotifSending(false); }
+  };
+
+  const current = d.list_status || "none";
   return (
     <div className="space-y-4" data-testid="drawer-overview">
       {d.best_thumb_id && (
@@ -248,6 +314,84 @@ function TabOverview({ d }) {
           onError={(e) => { e.target.style.display = "none"; }}
         />
       )}
+
+      {/* Anomalie du dernier passage */}
+      {anomaly && anomaly.severity !== "info" && anomaly.anomalies?.length > 0 && (
+        <div
+          className="border p-3 space-y-2 text-xs"
+          style={{
+            borderColor: anomaly.severity === "high" ? "#FF3333" : "#FFB800",
+            background: anomaly.severity === "high" ? "rgba(255,51,51,0.06)" : "rgba(255,184,0,0.06)",
+          }}
+          data-testid="anomaly-block"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5 font-medium" style={{ color: anomaly.severity === "high" ? "#FF3333" : "#FFB800" }}>
+              <AlertTriangle size={13} /> Anomalie détectée
+              <span className="text-[10px] uppercase tracking-wider mono ml-1">
+                [{anomaly.severity}]
+              </span>
+            </div>
+            <button
+              onClick={sendNotif} disabled={notifSending}
+              data-testid="notify-anomaly-btn"
+              className="flex items-center gap-1 px-2 py-1 border text-[10px] uppercase tracking-wider hover:bg-secondary/60"
+              style={{ borderColor: anomaly.severity === "high" ? "#FF3333" : "#FFB800" }}
+            >
+              {notifSending ? <Loader2 size={11} className="animate-spin" /> : <Bell size={11} />}
+              Créer une alerte
+            </button>
+          </div>
+          <div className="text-muted-foreground">{anomaly.message}</div>
+          <div className="flex flex-wrap gap-1 pt-1">
+            {anomaly.anomalies.map((a) => (
+              <span key={a} className="text-[9px] mono uppercase px-1.5 py-0.5 border border-border">{a}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Actions Watchlist */}
+      <div className="border border-border p-3 space-y-2" data-testid="watchlist-actions">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+          <Shield size={11} /> Watchlist
+          <span className="ml-auto text-[10px] mono px-1.5 py-0.5"
+                style={{
+                  color: current === "black" ? "#FF3333" : current === "white" ? "#00E676" : "#888",
+                  borderColor: current === "black" ? "#FF3333" : current === "white" ? "#00E676" : "#333",
+                  border: "1px solid",
+                }}>
+            {current === "black" ? "LISTE NOIRE" : current === "white" ? "LISTE BLANCHE" : "AUCUNE"}
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            onClick={() => setWatch("black")}
+            disabled={wlSaving || current === "black"}
+            data-testid="watch-blacklist-btn"
+            className={`flex items-center justify-center gap-1 px-2 py-2 border text-xs transition-colors ${current === "black" ? "border-[#FF3333] bg-[#FF3333]/10 text-[#FF3333]" : "border-border hover:border-[#FF3333] hover:text-[#FF3333]"}`}
+          >
+            <ShieldAlert size={12} /> Blacklist
+          </button>
+          <button
+            onClick={() => setWatch("white")}
+            disabled={wlSaving || current === "white"}
+            data-testid="watch-whitelist-btn"
+            className={`flex items-center justify-center gap-1 px-2 py-2 border text-xs transition-colors ${current === "white" ? "border-[#00E676] bg-[#00E676]/10 text-[#00E676]" : "border-border hover:border-[#00E676] hover:text-[#00E676]"}`}
+          >
+            <ShieldCheck size={12} /> Whitelist
+          </button>
+          <button
+            onClick={() => setWatch(null)}
+            disabled={wlSaving || current === "none"}
+            data-testid="watch-remove-btn"
+            className="flex items-center justify-center gap-1 px-2 py-2 border border-border text-xs hover:bg-secondary disabled:opacity-40"
+          >
+            {wlSaving ? <Loader2 size={11} className="animate-spin" /> : <XIcon size={12} />} Retirer
+          </button>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-2 text-sm">
         <Stat label="Passages" value={d.passages_count} />
         <Stat label="Caméras" value={d.cameras_count} />
@@ -275,6 +419,44 @@ function TabOverview({ d }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Bandeau d'anomalies récentes (en tête de la grille)
+// ═══════════════════════════════════════════════════════════════════
+function AnomaliesBanner({ items, onOpen, onDismiss }) {
+  return (
+    <div className="border border-[#FFB800]/60 bg-[#FFB800]/5 p-3 mb-4" data-testid="anomalies-banner">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-1.5 text-[#FFB800] text-xs uppercase tracking-wider font-medium">
+          <AlertTriangle size={14} /> Anomalies récentes ({items.length})
+        </div>
+        <button onClick={onDismiss}
+                data-testid="anomalies-dismiss"
+                className="text-[10px] text-muted-foreground hover:text-foreground uppercase tracking-wider">
+          Masquer
+        </button>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {items.map((a) => (
+          <button
+            key={a.plate}
+            onClick={() => onOpen(a.plate)}
+            data-testid={`anomaly-chip-${a.plate}`}
+            className="flex items-center gap-2 border px-2 py-1 text-xs hover:bg-secondary/40 transition-colors"
+            style={{ borderColor: a.severity === "high" ? "#FF3333" : "#FFB800",
+                     color: a.severity === "high" ? "#FF3333" : "#FFB800" }}
+          >
+            <span className="mono font-semibold">{a.plate}</span>
+            <span className="text-[10px] uppercase">{a.severity}</span>
+            <span className="text-muted-foreground truncate max-w-[200px]">
+              {a.anomalies.slice(0, 2).join(" · ")}
+            </span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
