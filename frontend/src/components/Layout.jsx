@@ -31,7 +31,8 @@ const NAV = [
     { key: "nav.events_root", icon: Zap, children: [
       { to: "/events", key: "nav.events_item", icon: Zap },
       { to: "/alerts", key: "nav.alerts", icon: Bell },
-      { to: "/vehicles", key: "nav.vehicles", icon: Car, perm: "read_plates" },
+      { to: "/vehicles", key: "nav.vehicle_timeline", icon: Car, perm: "read_plates" },
+      { to: "/vehicles/search", key: "nav.vehicles", icon: Car, perm: "read_plates" },
     ]},
   ]},
   { group: "nav.intelligence", items: [

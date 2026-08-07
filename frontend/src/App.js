@@ -26,6 +26,7 @@ import RbacCenter from "@/pages/RbacCenter";
 import Anpr from "@/pages/Anpr";
 import Events from "@/pages/Events";
 import VehicleSearch from "@/pages/VehicleSearch";
+import Vehicles from "@/pages/Vehicles";
 import Alerts from "@/pages/Alerts";
 import Audit from "@/pages/Audit";
 import Diagnostics from "@/pages/Diagnostics";
@@ -80,7 +81,8 @@ function AppRoutes() {
       <Route path="/workflows" element={<Protected><Workflows /></Protected>} />
       <Route path="/timeline" element={<Protected><Timeline /></Protected>} />
       <Route path="/events" element={<Protected><Events /></Protected>} />
-      <Route path="/vehicles" element={<Protected><VehicleSearch /></Protected>} />
+      <Route path="/vehicles" element={<Protected><Vehicles /></Protected>} />
+      <Route path="/vehicles/search" element={<Protected><VehicleSearch /></Protected>} />
       <Route path="/alerts" element={<Protected><Alerts /></Protected>} />
       <Route path="/audit" element={<Protected><Audit /></Protected>} />
       <Route path="/diagnostics" element={<Protected><Diagnostics /></Protected>} />
