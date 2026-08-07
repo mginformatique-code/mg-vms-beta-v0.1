@@ -57,10 +57,16 @@ class CropQuality:
             "contrast": round(self.contrast, 1),
             "skew_deg": round(self.skew_deg, 1),
             "score": round(self.score, 2),
+            "score_100": self.score_100,   # v0.7.h · Axe QoS · OCR Quality Score 0-100
             "should_enhance": self.should_enhance,
             "skip": self.skip,
             "reason": self.reason,
         }
+
+    @property
+    def score_100(self) -> int:
+        """OCR Quality Score sur 0-100 (facile à lire dans l'UI)."""
+        return int(round(self.score * 100))
 
 
 def crop_hash(crop: np.ndarray, downsize: int = 16) -> str:

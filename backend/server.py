@@ -180,6 +180,9 @@ async def on_startup():
     asyncio.create_task(camera_status_loop())
     asyncio.create_task(recorder_loop())
     asyncio.create_task(ai_loop())
+    # v0.7.h · Wave I · Axe QoS · Surveillance permanente + alertes Ops Center
+    from pipeline_v2.qos_alerts import qos_watcher_loop
+    asyncio.create_task(qos_watcher_loop())
     logger.info("MG-VMS API démarré - données initialisées + broadcaster temps réel actif")
 
 

@@ -2,6 +2,55 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v0.7.h] — 2026-06 — Wave I · QoS & Production Hardening (delta)
+
+### Added — OCR Quality Score 0-100
+- `pipeline_v2/plate_quality.py::CropQuality.score_100` — propriété
+  calculée qui expose le score composite (sharpness × 0.5 + contrast ×
+  0.3 + skew × 0.2) en 0-100. Visible dans `to_dict()` et prêt pour
+  affichage direct dans l'UI
+
+### Added — OCR Engine Reliability (apprentissage online)
+- Nouveau module `pipeline_v2/engine_reliability.py` (110 lignes) :
+  suit `(camera_id, engine_name) → {reads_total, rolling_accuracy 100,
+  avg_time_ms, reliability_mult 0.5-1.5}`
+- Fonctions publiques : `record_engine_reading`, `reliability_mult`,
+  `snapshot`, `reset`
+- Neutre (mult = 1.0) tant que < 10 lectures, puis
+  `0.5 + accuracy × 1.0`
+- Nouveau `GET /api/diagnostics/engine-reliability` (view_live)
+- Intégration dans la fusion pondérée déférée à v0.7.i (préserver
+  tests existants)
+
+### Added — Surveillance permanente + Alertes QoS automatiques
+- Nouveau module `pipeline_v2/qos_alerts.py` (170 lignes) : boucle
+  background 15 s qui inspecte l'`inspector.snapshot()` + system info
+  et émet des `qos_alert` dans la collection `events` (visibles dans
+  Ops Center)
+- Seuils configurables via `settings.qos_thresholds` :
+  `pipeline_total_ms=200`, `yolo_ms=50`, `tracking_ms=5`, `anpr_ms=120`,
+  `fps_min=5`, `ram_percent=85`, `gpu_vram_percent=90`
+- **Anti-flap 30 s** par `(camera_id, kind)` pour éviter le spam
+- Nouveaux endpoints `GET/PUT /api/diagnostics/qos-thresholds`
+- Preuve live : 6 alertes émises en 20 s sur `demo-cam-002` en preview
+  CPU-only (`yolo_slow p95=232ms`, `pipeline_slow avg=250.7ms`,
+  `fps_low 0.43<5`)
+
+### Added — Audit MongoDB (indexes / TTL / tailles)
+- Nouveau script `backend/stress/mongo_audit.py` (140 lignes)
+- Détecte : `missing_index` (index attendu absent), `missing_ttl`
+  (rétention non configurée sur events/audit_logs/sessions),
+  `large_no_time_index` (collections > 100k docs sans index temporel)
+- Produit `/app/memory/MONGO_AUDIT_v0.7.h.json` + rapport console
+- Preuve preview : 17 recommandations trouvées (5 index events,
+  5 plates/recordings, 3 TTL à ajouter, 2 tls_certificates)
+
+### Tests
+- Nouveau `tests/test_v07h_qos_hardening.py` : 10 tests verts
+- **Total v0.7 : 136 / 136 verts**
+
+---
+
 ## [v0.7.g] — 2026-06 — Wave H · Pipeline Inspector Live + Robustesse globale
 
 ### Added — Axe 1+2 · Percentiles p50/p95/p99 dans `pipeline_v2/inspector.py`

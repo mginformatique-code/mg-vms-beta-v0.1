@@ -542,14 +542,28 @@ Ordre officiel confirmé par le CEO :
 ## Rapport Wave H : /app/memory/WAVE_H_INSPECTOR_ROBUSTESSE_v0.7.g.md
 Répond aux 10 axes de l'audit demandé et aux 9 critères de validation, avec preuves.
 
-## Backlog v0.7.h (optionnel)
-- useTrackedInterval hook : instrumenter les gros polleurs frontend pour peupler active_intervals
-- Script `stress/go2rtc_health.py` : simulation add/remove/modif caméras 5 min avec vérif frame.jpeg 200
-- Lien Pipeline Inspector visible dans HealthDashboard
-- Nginx auto-reload sur activation cert TLS (Wave G suite)
-- Let's Encrypt bouton (Wave G suite)
+## v0.7.h Wave I · QoS & Production Hardening (2026-06)
+- OCR Quality Score 0-100 : `CropQuality.score_100` propriété + `to_dict()` — score composite lisible UI/events
+- OCR Engine Reliability : nouveau module `pipeline_v2/engine_reliability.py` (110l) — apprentissage online rolling accuracy 100 lectures × (camera, engine), mult 0.5-1.5 neutre <10 lectures. Endpoint `GET /api/diagnostics/engine-reliability`. Intégration fusion deferred v0.7.i
+- Surveillance permanente + alertes QoS : `pipeline_v2/qos_alerts.py` (170l) — boucle 15s scan inspector + system, émet `qos_alert` dans `events` (visible Ops Center). Seuils configurables (pipeline_total_ms=200, yolo=50, anpr=120, fps_min=5, ram=85%, gpu_vram=90%). Anti-flap 30s. `GET/PUT /api/diagnostics/qos-thresholds`
+- Preuve live : 6 alertes émises en 20s sur demo-cam-002 preview CPU-only (`yolo_slow p95=232ms`, `pipeline_slow avg=250.7ms`, `fps_low 0.43<5`)
+- Audit MongoDB : `stress/mongo_audit.py` (140l) — détecte missing_index / missing_ttl / large_no_time_index. Rapport JSON `/app/memory/MONGO_AUDIT_v0.7.h.json`. 17 recommandations preview (5 events, 5 plates/recordings, 3 TTL, 2 tls_certificates)
+- Tests : 10 verts (test_v07h_qos_hardening.py). Total v0.7 : **136/136 verts**
+- Fichiers : plate_quality.py (+8), engine_reliability.py (nouveau, 110l), qos_alerts.py (nouveau, 170l), server.py (+3), routes/health_dashboard.py (+40), stress/mongo_audit.py (nouveau, 140l)
+
+## Rapport Wave I : /app/memory/WAVE_I_QOS_HARDENING_v0.7.h.md
+
+## Backlog v0.7.i (session dédiée requise pour ces items lourds)
+- Intégrer reliability_mult dans anpr_tracker.best_reading (nécessite MAJ tests fusion)
+- Recrop auto multi-marges si Quality Score < 60 (nouvelle boucle retry _stage_anpr)
+- Virtualisation React (react-window) pages Vehicles/Events/Cameras pour tenir 100k+ items
+- Frontend ErrorBoundary par section (isole chaque tab)
+- Stress-test panne : Mongo down / go2rtc down / caméra reboot
+- Job cron 24h simulation preview avec logs perf p95/p99 par heure
+- Création auto indexes Mongo au bootstrap
+- useTrackedInterval hook (backlog Wave H)
+- Nginx auto-reload sur activation cert TLS (backlog Wave G)
+- Let's Encrypt bouton (backlog Wave G)
 - Alerte 30j/7j avant expiration cert TLS
-- Performance Gate : alerte Ops Center si total_ms > 200ms avec stage responsable
-- Refactor routers.py legacy → routes/*.py modulaire
+- Refactor routers.py legacy → routes/*.py
 - Concrete drivers Reolink/Hikvision/Dahua/Axis
-- Storage roadmap, AI vision persons, Saved searches, Export PDF
