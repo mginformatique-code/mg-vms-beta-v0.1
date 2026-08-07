@@ -81,7 +81,7 @@ class CameraWorker:
         ctx.timings["motion_ms"] = round(ms, 1)
         inspector.record(self.camera_id, "motion", ms)
 
-    def _stage_detection(self, ctx: FrameContext) -> None:
+    def _stage_detection(self, ctx: FrameContext, camera: Optional[dict] = None) -> None:
         """Detection — exécutée exactement UNE fois par frame via le
         registry d'abstraction (`pipeline_v2.detector.registry`).
 
@@ -104,7 +104,7 @@ class CameraWorker:
         from .detector import registry as _detector_registry
         t0 = time.monotonic()
 
-        detector, det_name, det_warning = _detector_registry.get_active(None)
+        detector, det_name, det_warning = _detector_registry.get_active(camera)
         objects = []
         detect_error = False
         if ctx.image is not None:
@@ -150,13 +150,14 @@ class CameraWorker:
                 "_detector": det_name,
             })
 
-    def _stage_tracking(self, ctx: FrameContext, enabled_plugins: Optional[list]) -> None:
+    def _stage_tracking(self, ctx: FrameContext, enabled_plugins: Optional[list],
+                         camera: Optional[dict] = None) -> None:
         """Tracking UNIQUE — un seul tracker par caméra (TrackerPool).
         Les plugins tracker sont convertis en choix d'algorithme du stage."""
         import ai_engine as _ae
         from .tracking import resolve_algo
         t0 = time.monotonic()
-        _req, _eff, _warn = resolve_algo(enabled_plugins)
+        _req, _eff, _warn = resolve_algo(enabled_plugins, camera)
         meta = {"algo_requested": _req, "algo_effective": _eff, "tracked": 0}
         if _warn:
             meta["warning"] = _warn
@@ -243,7 +244,7 @@ class CameraWorker:
         # v0.5.6 Phase B suite · L'OCR core est demandé au registry —
         # le pipeline ne connaît plus fast-alpr directement.
         from .plate_recognizer import plate_registry as _plate_registry
-        _ocr, _ocr_name, _ocr_warning = _plate_registry.get_active(None)
+        _ocr, _ocr_name, _ocr_warning = _plate_registry.get_active(camera)
         ctx.metadata["ocr_core"] = {"name": _ocr_name, "warning": _ocr_warning}
         inspector.set_meta(self.camera_id, ocr_core=_ocr_name)
 
@@ -368,8 +369,8 @@ class CameraWorker:
         if not self._stage_decode(ctx, frame_input):
             return {"detections": [], "plates": [], "motion_pct": 0.0}
         self._stage_motion(ctx)
-        self._stage_detection(ctx)
-        self._stage_tracking(ctx, enabled_plugins)
+        self._stage_detection(ctx, camera)
+        self._stage_tracking(ctx, enabled_plugins, camera)
         self._stage_roi(ctx)
         self._stage_anpr(ctx, enabled_plugins, camera)
 

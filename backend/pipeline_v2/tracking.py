@@ -19,33 +19,34 @@ KNOWN_TRACKER_PLUGINS = ("bytetrack", "botsort", "deepsort", "ocsort", "strongso
 SUPPORTED_ALGOS = {"bytetrack", "botsort"}
 
 
-def resolve_algo(enabled_plugins: Optional[list]) -> tuple[str, str, Optional[str]]:
+def resolve_algo(enabled_plugins: Optional[list],
+                  camera: Optional[dict] = None) -> tuple[str, str, Optional[str]]:
     """Retourne (algo_demandé, algo_effectif, warning_ou_None).
 
-    v0.5.6 P0-3 · Le fallback silencieux vers ByteTrack était trompeur pour
-    l'opérateur. Désormais :
-
-    * Aucun tracker plugin activé (whitelist standard) → bytetrack (défaut
-      historique) sans warning : c'est le comportement documenté.
-    * Un tracker plugin explicitement demandé mais non implémenté (deepsort,
-      ocsort, strongsort) → on continue avec bytetrack MAIS on retourne un
-      message d'avertissement clair qui sera loggué + exposé côté API
-      (`inspector`) pour surfacer l'écart dans l'UI et éviter que
-      l'opérateur croie que DeepSORT tourne alors que ByteTrack est actif.
+    v0.5.6 Phase C · Priorité de lecture :
+      1. ``camera['pipeline_config']['tracker']`` (config par caméra).
+      2. Premier plugin tracker dans ``enabled_plugins`` (whitelist historique).
+      3. Défaut ``bytetrack``.
     """
     requested = "bytetrack"
-    for name in (enabled_plugins or []):
-        if name in KNOWN_TRACKER_PLUGINS:
-            requested = name
-            break
+    # 1. Config caméra
+    if camera and isinstance(camera, dict):
+        pc = camera.get("pipeline_config") or {}
+        wanted = pc.get("tracker")
+        if isinstance(wanted, str) and wanted:
+            requested = wanted
+    # 2. Sinon whitelist plugins historique
+    if requested == "bytetrack":
+        for name in (enabled_plugins or []):
+            if name in KNOWN_TRACKER_PLUGINS:
+                requested = name
+                break
     if requested in SUPPORTED_ALGOS:
         return requested, requested, None
-    # Tracker demandé mais pas implémenté par le core → warning explicite.
     warning = (
         f"Tracker '{requested}' non implémenté par le core "
         f"(implémentés: {sorted(SUPPORTED_ALGOS)}). "
-        f"Fallback vers 'bytetrack'. Retirez ce plugin de la whitelist "
-        f"ou activez un tracker supporté pour supprimer cet avertissement."
+        f"Fallback vers 'bytetrack'."
     )
     logger.warning("[Tracker] %s", warning)
     return requested, "bytetrack", warning

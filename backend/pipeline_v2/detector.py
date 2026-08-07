@@ -176,18 +176,30 @@ class DetectorRegistry:
     def get_active(self, cam_config: dict | None = None) -> tuple[Detector, str, str | None]:
         """Retourne (detector_actif, name_effectif, warning_ou_None).
 
-        En Phase B, ``cam_config`` est ignoré (config globale uniquement).
-        En Phase C, on lira ``cam_config['pipeline_config']['detector']``.
+        v0.5.6 Phase C · lecture de la config par caméra :
+          ``cam_config['pipeline_config']['detector']``. Si absent →
+          détecteur par défaut (yolov11) sans warning. Si présent mais
+          non enregistré → fallback vers le default AVEC warning explicite.
         """
-        # TODO Phase C : lire cam_config['pipeline_config']['detector'].
         requested = self._default
+        warning = None
+        if cam_config:
+            pc = (cam_config.get("pipeline_config") or {}) if isinstance(cam_config, dict) else {}
+            wanted = pc.get("detector")
+            if isinstance(wanted, str) and wanted:
+                if wanted in self._factories:
+                    requested = wanted
+                else:
+                    warning = (
+                        f"Détecteur '{wanted}' demandé par la caméra mais non "
+                        f"enregistré (connus: {self.known()}). Fallback vers "
+                        f"'{self._default}'."
+                    )
         det = self.get(requested)
         if det is not None:
-            return det, requested, None
-        # Le default lui-même est indisponible → erreur logique.
+            return det, requested, warning
         return _NULL_DETECTOR, requested, (
-            f"Détecteur '{requested}' introuvable dans le registry — "
-            f"pipeline en mode dégradé."
+            warning or f"Détecteur '{requested}' introuvable dans le registry."
         )
 
     def known(self) -> list[str]:

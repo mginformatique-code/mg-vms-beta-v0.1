@@ -119,17 +119,31 @@ class PlateRecognizerRegistry:
     def get_active(self, cam_config: dict | None = None) -> tuple[PlateRecognizer, str, str | None]:
         """Retourne (recognizer, name_effectif, warning_ou_None).
 
-        En Phase B suite, ``cam_config`` est ignoré (config globale).
-        En Phase C, on lira ``cam_config['pipeline_config']['anpr'][0]``.
+        v0.5.6 Phase C · lecture de la config par caméra :
+          ``cam_config['pipeline_config']['anpr'][0]`` (moteur core) — les
+          suivants sont dispatchés par le plugin bus (multi-OCR).
         """
-        # TODO Phase C : lire cam_config['pipeline_config']['anpr'][0].
         requested = self._default
+        warning = None
+        if cam_config:
+            pc = (cam_config.get("pipeline_config") or {}) if isinstance(cam_config, dict) else {}
+            anpr_list = pc.get("anpr") or []
+            if isinstance(anpr_list, list) and anpr_list:
+                wanted = anpr_list[0]
+                if isinstance(wanted, str) and wanted:
+                    if wanted in self._factories:
+                        requested = wanted
+                    else:
+                        warning = (
+                            f"OCR core '{wanted}' demandé par la caméra mais "
+                            f"non enregistré (connus: {self.known()}). "
+                            f"Fallback vers '{self._default}'."
+                        )
         rec = self.get(requested)
         if rec is not None:
-            return rec, requested, None
+            return rec, requested, warning
         return _NULL_PLATE_RECOGNIZER, requested, (
-            f"OCR core '{requested}' introuvable dans le registry — "
-            f"aucune lecture ANPR ne sera émise."
+            warning or f"OCR core '{requested}' introuvable dans le registry."
         )
 
     def known(self) -> list[str]:

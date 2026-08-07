@@ -88,21 +88,28 @@ class PipelineMetrics:
                 for stage in self._STAGES:
                     vals = list(s["stages"][stage])
                     if not vals:
-                        stage_stats[stage] = {"avg": 0.0, "max": 0.0, "p95": None}
+                        stage_stats[stage] = {"avg": 0.0, "min": 0.0, "max": 0.0, "p95": None, "p99": None, "count": 0}
                         continue
                     ordered = sorted(vals)
-                    p95_idx = min(len(ordered) - 1, int(len(ordered) * 0.95))
+                    n = len(ordered)
+                    p95_idx = min(n - 1, int(n * 0.95))
+                    p99_idx = min(n - 1, int(n * 0.99))
                     stage_stats[stage] = {
-                        "avg": round(sum(vals) / len(vals), 1),
+                        "avg": round(sum(vals) / n, 1),
+                        "min": round(min(vals), 1),
                         "max": round(max(vals), 1),
-                        "p95": round(ordered[p95_idx], 1) if len(vals) >= 5 else None,
+                        "p95": round(ordered[p95_idx], 1) if n >= 5 else None,
+                        "p99": round(ordered[p99_idx], 1) if n >= 20 else None,
+                        "count": n,
                     }
                 out[cid] = {
                     "fps_5s": round(len(fps_ts) / 5.0, 1),
                     "drops_5s": len(drop_ts),
                     "pipeline_ms_avg": round(sum(lat) / len(lat), 1) if lat else 0.0,
+                    "pipeline_ms_min": round(min(lat), 1) if lat else 0.0,
                     "pipeline_ms_max": round(max(lat), 1) if lat else 0.0,
                     "pipeline_ms_p95": round(sorted(lat)[int(len(lat) * 0.95)], 1) if len(lat) >= 20 else None,
+                    "pipeline_ms_p99": round(sorted(lat)[int(len(lat) * 0.99)], 1) if len(lat) >= 100 else None,
                     "success_count": s["success"],
                     "error_count": s["errors"],
                     "drop_count": s["drops"],

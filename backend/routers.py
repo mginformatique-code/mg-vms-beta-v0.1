@@ -259,6 +259,66 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
     return doc
 
 
+@api_router.put("/cameras/{camera_id}/pipeline-config")
+async def update_pipeline_config_endpoint(camera_id: str, data: dict,
+                                            user: dict = Depends(require_role("technician"))):
+    """v0.5.6 Phase C — Met à jour la config pipeline IA d'une caméra.
+
+    Champs acceptés (tous optionnels, patch partiel) :
+      * ``detector`` : yolov11 / rt-detr / tensorrt / …
+      * ``tracker``  : bytetrack / botsort / …
+      * ``anpr``     : liste ordonnée [core, additionnels…]
+      * ``fusion``   : hierarchical / highest / majority / cascade / vote
+    """
+    from pipeline_v2.detector import registry as _det_registry
+    from pipeline_v2.plate_recognizer import plate_registry as _ocr_registry
+    from pipeline_v2.tracking import SUPPORTED_ALGOS
+    from plugin_manager.fusion import VALID_MODES
+
+    existing = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Caméra introuvable")
+
+    current = existing.get("pipeline_config") or {}
+    patch = {k: v for k, v in (data or {}).items()
+             if k in {"detector", "tracker", "anpr", "fusion"} and v is not None}
+
+    if "detector" in patch and patch["detector"] not in _det_registry.known():
+        raise HTTPException(400, f"Détecteur '{patch['detector']}' non enregistré. Connus: {_det_registry.known()}")
+    if "tracker" in patch and patch["tracker"] not in SUPPORTED_ALGOS:
+        raise HTTPException(400, f"Tracker '{patch['tracker']}' non supporté. Supportés: {sorted(SUPPORTED_ALGOS)}")
+    if "anpr" in patch:
+        if not isinstance(patch["anpr"], list) or not patch["anpr"]:
+            raise HTTPException(400, "'anpr' doit être une liste non vide")
+        unknown = [n for n in patch["anpr"] if n not in _ocr_registry.known()]
+        if unknown:
+            raise HTTPException(400, f"OCR non enregistrés: {unknown}. Connus: {_ocr_registry.known()}")
+    if "fusion" in patch and patch["fusion"] not in VALID_MODES:
+        raise HTTPException(400, f"Mode fusion '{patch['fusion']}' invalide. Valides: {sorted(VALID_MODES)}")
+
+    merged = {**current, **patch}
+    await db.cameras.update_one({"id": camera_id}, {"$set": {"pipeline_config": merged}})
+    await log_audit(user, "camera_pipeline_config_updated", camera_id, details=str(patch))
+    return {"ok": True, "pipeline_config": merged}
+
+
+@api_router.get("/cameras/{camera_id}/pipeline-config")
+async def get_pipeline_config_endpoint(camera_id: str,
+                                         user: dict = Depends(require_role("technician"))):
+    """Retourne la config pipeline effective de la caméra (avec défauts)."""
+    existing = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Caméra introuvable")
+    cfg = existing.get("pipeline_config") or {}
+    effective = {
+        "detector": cfg.get("detector", "yolov11"),
+        "tracker":  cfg.get("tracker", "bytetrack"),
+        "anpr":     cfg.get("anpr", ["fast-alpr"]),
+        "fusion":   cfg.get("fusion", "hierarchical"),
+    }
+    return {"pipeline_config": effective, "explicit": cfg}
+
+
 @api_router.put("/cameras/{camera_id}")
 async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(require_role("technician"))):
     existing = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
