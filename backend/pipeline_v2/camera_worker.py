@@ -240,25 +240,30 @@ class CameraWorker:
         min_conf = float(anpr_cfg.get("min_confidence", 0.0) or 0.0)
         w, h = ctx.width, ctx.height
 
+        # v0.5.6 Phase B suite · L'OCR core est demandé au registry —
+        # le pipeline ne connaît plus fast-alpr directement.
+        from .plate_recognizer import plate_registry as _plate_registry
+        _ocr, _ocr_name, _ocr_warning = _plate_registry.get_active(None)
+        ctx.metadata["ocr_core"] = {"name": _ocr_name, "warning": _ocr_warning}
+        inspector.set_meta(self.camera_id, ocr_core=_ocr_name)
+
         t0 = time.monotonic()
         try:
             for roi in ctx.vehicle_rois:
                 cx1, cy1, cx2, cy2 = roi.bbox
                 try:
-                    # v0.5.6 P0-1 · Sérialisation stricte des appels ALPR.
-                    with _ae.ALPR_INFERENCE_LOCK:
-                        alpr_results = list(_ae._alpr.predict(roi.crop))
+                    # Le lock ALPR est appliqué en interne par le recognizer
+                    # (v0.5.6 P0-1). Le pipeline ne connaît plus le lock.
+                    ocr_results = _ocr.recognize(roi.crop)
                 except Exception:
-                    logger.exception("fast-alpr predict sur crop véhicule")
+                    logger.exception("OCR core '%s' recognize sur crop véhicule", _ocr_name)
                     continue
-                for r in alpr_results:
-                    if not r.ocr or not r.ocr.text:
-                        continue
-                    bb = r.detection.bounding_box
-                    abs_x1, abs_y1 = cx1 + bb.x1, cy1 + bb.y1
-                    abs_x2, abs_y2 = cx1 + bb.x2, cy1 + bb.y2
+                for r in ocr_results:
+                    bx1, by1, bx2, by2 = r.bbox_in_roi
+                    abs_x1, abs_y1 = cx1 + bx1, cy1 + by1
+                    abs_x2, abs_y2 = cx1 + bx2, cy1 + by2
                     pw, ph = abs_x2 - abs_x1, abs_y2 - abs_y1
-                    plate_text = r.ocr.text.upper().strip()
+                    plate_text = (r.text or "").upper().strip()
                     if pw < min_side or ph < min_side:
                         plate_debug.append({"plate": plate_text, "skipped": "trop petit",
                                              "size": f"{pw}x{ph}"})
@@ -268,10 +273,10 @@ class CameraWorker:
                         plate_debug.append({"plate": plate_text, "skipped": "hors ROI",
                                              "size": f"{pw}x{ph}"})
                         continue
-                    if float(r.ocr.confidence) < min_conf:
+                    if float(r.confidence) < min_conf:
                         plate_debug.append({"plate": plate_text, "skipped": "conf<seuil",
                                              "size": f"{pw}x{ph}",
-                                             "conf": round(float(r.ocr.confidence), 2)})
+                                             "conf": round(float(r.confidence), 2)})
                         continue
                     if not plate_text:
                         continue
@@ -281,21 +286,21 @@ class CameraWorker:
                             "expires_in": int((self._plate_cache[plate_text] - now).total_seconds())})
                         continue
                     self._plate_cache[plate_text] = now + timedelta(seconds=max(cache_ttl, 1))
-                    plate_crop = ctx.image[max(0, abs_y1):abs_y2, max(0, abs_x1):abs_x2]
+                    plate_crop = ctx.image[max(0, int(abs_y1)):int(abs_y2), max(0, int(abs_x1)):int(abs_x2)]
                     ctx.plates.append({
                         "plate": plate_text,
-                        "confidence": round(float(r.ocr.confidence), 2),
+                        "confidence": round(float(r.confidence), 2),
                         "plate_crop": encode_jpeg_data_uri(plate_crop, 240),
                         # Crop véhicule PARTAGÉ (memoizé) — encodé une seule fois
                         "vehicle_crop": roi.jpeg_data_uri(),
                         "vehicle_type": roi.owner["label"],
                         "vehicle_color": roi.owner["vehicle_color"],
-                        "engine": "fast-alpr",
+                        "engine": _ocr_name,  # v0.5.6 : nom depuis le registry
                         "track_id": roi.track_id,
                         "_owner_bbox": tuple(roi.owner["_bbox"]),
                     })
                     plate_debug.append({"plate": plate_text,
-                                         "confidence": round(float(r.ocr.confidence), 2),
+                                         "confidence": round(float(r.confidence), 2),
                                          "size": f"{pw}x{ph}", "kept": True})
         except Exception:
             logger.exception("Erreur LAPI (crop véhicule)")

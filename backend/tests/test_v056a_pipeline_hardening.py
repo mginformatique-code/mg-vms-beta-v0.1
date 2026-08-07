@@ -59,13 +59,17 @@ def test_p0_1_alpr_inference_lock_exists():
 
 
 def test_p0_1_locks_are_used_in_camera_worker():
-    """YOLO_INFERENCE_LOCK doit être acquis avant _model.predict, ALPR_INFERENCE_LOCK
-    avant _alpr.predict — que ce soit dans camera_worker.py ou dans le module
-    detector.py (Phase B a migré YOLO vers l'abstraction).
+    """YOLO_INFERENCE_LOCK acquis avant _model.predict, ALPR_INFERENCE_LOCK
+    avant _alpr.predict — quel que soit le module où ils vivent (Phase B a
+    migré YOLO dans detector.py, Phase B suite a migré ALPR dans
+    plate_recognizer.py).
     """
-    cw = Path("/app/backend/pipeline_v2/camera_worker.py").read_text()
-    det = Path("/app/backend/pipeline_v2/detector.py").read_text()
-    combined = cw + "\n" + det
+    files = [
+        "/app/backend/pipeline_v2/camera_worker.py",
+        "/app/backend/pipeline_v2/detector.py",
+        "/app/backend/pipeline_v2/plate_recognizer.py",
+    ]
+    combined = "\n".join(Path(f).read_text() for f in files)
     assert "with _ae.YOLO_INFERENCE_LOCK" in combined, \
         "YOLO_INFERENCE_LOCK doit être acquis autour de _model.predict"
     assert "with _ae.ALPR_INFERENCE_LOCK" in combined, \
