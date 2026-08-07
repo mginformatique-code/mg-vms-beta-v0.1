@@ -185,6 +185,307 @@ async def list_vehicles(
 
 
 # ═══════════════════════════════════════════════════════════════════
+# 1b. Vehicle Identities (cross-plate matching · v0.7)
+# ═══════════════════════════════════════════════════════════════════
+class IdentityBody(BaseModel):
+    name: str = ""
+    plates: list[str]
+    vehicle_make: Optional[str] = None
+    vehicle_color: Optional[str] = None
+    vehicle_type: Optional[str] = None
+    notes: Optional[str] = ""
+
+
+@vehicles_router.get("/identities")
+async def list_identities(user: dict = Depends(require_permission("read_plates"))):
+    """Liste toutes les identités véhicule (regroupement cross-plate)."""
+    docs = await db.vehicle_identities.find({}, {"_id": 0}).sort("updated_at", -1) \
+                                       .to_list(length=500)
+    return {"count": len(docs), "items": docs}
+
+
+@vehicles_router.get("/identities/detect")
+async def detect_identity_candidates(
+    min_plates: int = Query(2, ge=2, le=10),
+    user: dict = Depends(require_permission("read_plates")),
+):
+    """Détecte les groupes de plaques appartenant potentiellement au même véhicule
+    (mêmes make + color + type observés sur au moins ``min_plates`` plaques
+    distinctes). Suggestion pour l'utilisateur — validation manuelle requise.
+    """
+    match = await _base_match(user)
+    pipe = [
+        {"$match": match},
+        {"$match": {"vehicle_make": {"$ne": None}, "vehicle_color": {"$ne": None}}},
+        {"$group": {
+            "_id": {"make": "$vehicle_make", "color": "$vehicle_color",
+                    "type": "$vehicle_type"},
+            "plates": {"$addToSet": "$plate"},
+            "reads": {"$sum": 1},
+            "cameras": {"$addToSet": "$camera_id"},
+            "first_seen": {"$min": "$timestamp"},
+            "last_seen": {"$max": "$timestamp"},
+        }},
+        {"$match": {f"plates.{min_plates - 1}": {"$exists": True}}},
+        {"$sort": {"reads": -1}},
+        {"$limit": 30},
+    ]
+    docs = await db.plates.aggregate(pipe).to_list(30)
+    items = []
+    for d in docs:
+        # Retire les groupes déjà couverts par une identité existante.
+        existing = await db.vehicle_identities.find_one(
+            {"plates": {"$all": d["plates"][:2]}}
+        )
+        if existing:
+            continue
+        items.append({
+            "signature": d["_id"],
+            "plates": d["plates"],
+            "plates_count": len(d["plates"]),
+            "reads": d["reads"],
+            "cameras_count": len(d["cameras"] or []),
+            "first_seen": d.get("first_seen"),
+            "last_seen": d.get("last_seen"),
+        })
+    return {"count": len(items), "items": items}
+
+
+@vehicles_router.post("/identities")
+async def create_identity(body: IdentityBody,
+                           user: dict = Depends(require_permission("read_plates"))):
+    """Crée une identité véhicule cross-plate."""
+    import uuid as _uuid
+    plates = sorted({_norm_plate(p) for p in body.plates if p})
+    if len(plates) < 1:
+        raise HTTPException(status_code=400,
+                            detail={"error": "empty_plates",
+                                    "message": "Au moins une plaque est requise."})
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": str(_uuid.uuid4()),
+        "name": (body.name or plates[0]).strip(),
+        "plates": plates,
+        "vehicle_make": body.vehicle_make,
+        "vehicle_color": body.vehicle_color,
+        "vehicle_type": body.vehicle_type,
+        "notes": body.notes or "",
+        "created_by": user.get("email"),
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.vehicle_identities.insert_one(doc.copy())
+    doc.pop("_id", None)
+    return doc
+
+
+@vehicles_router.get("/identities/{identity_id}")
+async def get_identity(identity_id: str,
+                        user: dict = Depends(require_permission("read_plates"))):
+    doc = await db.vehicle_identities.find_one({"id": identity_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail={"error": "identity_not_found"})
+    # Statistiques agrégées sur toutes les plaques de l'identité
+    match = await _base_match(user)
+    match["plate"] = {"$in": doc.get("plates", [])}
+    stats_pipe = [
+        {"$match": match},
+        {"$group": {
+            "_id": None,
+            "passages_count": {"$sum": 1},
+            "cameras": {"$addToSet": "$camera_id"},
+            "first_seen": {"$min": "$timestamp"},
+            "last_seen": {"$max": "$timestamp"},
+        }},
+    ]
+    stat = (await db.plates.aggregate(stats_pipe).to_list(1)) or [{}]
+    s = stat[0]
+    doc["stats"] = {
+        "passages_count": s.get("passages_count", 0),
+        "cameras_count": len(s.get("cameras") or []),
+        "first_seen": s.get("first_seen"),
+        "last_seen": s.get("last_seen"),
+    }
+    return doc
+
+
+@vehicles_router.delete("/identities/{identity_id}")
+async def delete_identity(identity_id: str,
+                           user: dict = Depends(require_permission("read_plates"))):
+    res = await db.vehicle_identities.delete_one({"id": identity_id})
+    return {"ok": True, "deleted": res.deleted_count}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 1c. Smart Search (langage naturel → filtres) · v0.7
+# ═══════════════════════════════════════════════════════════════════
+class SmartSearchBody(BaseModel):
+    query: str
+
+
+@vehicles_router.post("/smart-search")
+async def smart_search(body: SmartSearchBody,
+                        user: dict = Depends(require_permission("read_plates"))):
+    """Traduit une requête en langage naturel en filtres structurés et exécute
+    la recherche. Utilise Claude Sonnet 5 via Emergent LLM Key pour le parsing.
+
+    Exemples de requêtes utilisateur :
+      · « trouve moi la plaque AA-123-CD ce matin »
+      · « voitures rouges hier »
+      · « camions passés à l'entrée nord entre 8h et 10h »
+    """
+    import os
+    import json
+    import uuid as _uuid
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+
+    q_text = (body.query or "").strip()
+    if not q_text:
+        raise HTTPException(status_code=400,
+                            detail={"error": "empty_query", "message": "Requête vide"})
+
+    key = os.environ.get("EMERGENT_LLM_KEY")
+    if not key:
+        raise HTTPException(status_code=500,
+                            detail={"error": "no_llm_key", "message": "EMERGENT_LLM_KEY manquante."})
+
+    system = (
+        "Tu es un parseur qui convertit une requête utilisateur en JSON strict "
+        "pour filtrer une base de lectures ANPR (plaques d'immatriculation). "
+        "Réponds UNIQUEMENT avec un objet JSON valide, aucun texte autre.\n\n"
+        "Schéma :\n"
+        "{\n"
+        '  "plate": string|null,          // fragment de plaque\n'
+        '  "colors": [string],            // ex: ["rouge","noir"] (français ou anglais)\n'
+        '  "makes": [string],             // marques\n'
+        '  "types": [string],             // "voiture", "camion", "moto", "bus"\n'
+        '  "date_from": "YYYY-MM-DD"|null,\n'
+        '  "date_to":   "YYYY-MM-DD"|null,\n'
+        '  "time_from": "HH:MM"|null,\n'
+        '  "time_to":   "HH:MM"|null,\n'
+        '  "camera_hint": string|null,    // nom/mot-clé caméra si présent\n'
+        '  "person_description": string|null  // si la requête concerne une personne\n'
+        "}\n\n"
+        f"Date courante : {datetime.now(timezone.utc).date().isoformat()}.\n"
+        "« ce matin » = 06:00-12:00 aujourd'hui. « hier » = date - 1. « cette semaine » = 7 derniers jours."
+    )
+
+    try:
+        chat = LlmChat(api_key=key, session_id=f"smart-search-{_uuid.uuid4().hex[:8]}",
+                        system_message=system).with_model("anthropic", "claude-sonnet-5")
+        raw = await chat.send_message(UserMessage(text=q_text))
+    except Exception as e:
+        logger.warning("smart-search LLM failed: %s", e)
+        raise HTTPException(status_code=502,
+                            detail={"error": "llm_error", "message": str(e)[:200]})
+
+    # Nettoyage de la réponse LLM (peut contenir ```json ... ```)
+    txt = (raw or "").strip()
+    if txt.startswith("```"):
+        txt = txt.strip("`")
+        if txt.startswith("json"):
+            txt = txt[4:].strip()
+    try:
+        filters = json.loads(txt)
+    except Exception:
+        raise HTTPException(status_code=502,
+                            detail={"error": "llm_parse_error",
+                                    "message": "Impossible d'interpréter la réponse du LLM.",
+                                    "raw": txt[:300]})
+
+    # ── Exécute la recherche depuis les filtres extraits ──
+    match = await _base_match(user)
+    if filters.get("plate"):
+        match["plate"] = {"$regex": _norm_plate(filters["plate"]), "$options": "i"}
+    if filters.get("colors"):
+        # Traduction FR→EN basique + case-insensitive
+        color_map = {"rouge": "red", "noir": "black", "blanc": "white", "bleu": "blue",
+                     "vert": "green", "jaune": "yellow", "gris": "gray", "argent": "silver",
+                     "orange": "orange", "marron": "brown"}
+        colors_all = set()
+        for c in filters["colors"]:
+            if not c: continue
+            colors_all.add(c.lower())
+            mapped = color_map.get(c.lower())
+            if mapped: colors_all.add(mapped)
+            # Reverse : si l'user a écrit "red", ajouter "rouge"
+            for fr, en in color_map.items():
+                if en == c.lower(): colors_all.add(fr)
+        regex = "|".join([f"^{c}$" for c in colors_all])
+        match["vehicle_color"] = {"$regex": regex, "$options": "i"}
+    if filters.get("makes"):
+        regex = "|".join([f"^{m}$" for m in filters["makes"] if m])
+        if regex: match["vehicle_make"] = {"$regex": regex, "$options": "i"}
+    if filters.get("types"):
+        # types courants FR→EN
+        type_map = {"voiture": "car", "camion": "truck", "moto": "motorcycle", "bus": "bus"}
+        types_all = set()
+        for t in filters["types"]:
+            if not t: continue
+            types_all.add(t.lower())
+            mapped = type_map.get(t.lower())
+            if mapped: types_all.add(mapped)
+            for fr, en in type_map.items():
+                if en == t.lower(): types_all.add(fr)
+        regex = "|".join([f"^{t}$" for t in types_all])
+        match["vehicle_type"] = {"$regex": regex, "$options": "i"}
+    date_from = filters.get("date_from")
+    date_to = filters.get("date_to")
+    time_from = filters.get("time_from") or "00:00"
+    time_to = filters.get("time_to") or "23:59"
+    if date_from or date_to:
+        rng = {}
+        if date_from:
+            rng["$gte"] = f"{date_from}T{time_from}:00"
+        if date_to:
+            rng["$lte"] = f"{date_to}T{time_to}:59.999Z"
+        match["timestamp"] = rng
+    if filters.get("camera_hint"):
+        # Match sur le nom de caméra (regex insensible)
+        match["camera_name"] = {"$regex": filters["camera_hint"], "$options": "i"}
+
+    # Agrégat par plaque comme dans /vehicles (top 30)
+    pipe = [
+        {"$match": match},
+        {"$sort": {"timestamp": -1}},
+        {"$group": {
+            "_id": "$plate",
+            "passages_count": {"$sum": 1},
+            "last_seen":  {"$first": "$timestamp"},
+            "first_seen": {"$last":  "$timestamp"},
+            "cameras":    {"$addToSet": "$camera_id"},
+            "makes":      {"$push": "$vehicle_make"},
+            "models":     {"$push": "$vehicle_model"},
+            "colors":     {"$push": "$vehicle_color"},
+            "types":      {"$push": "$vehicle_type"},
+            "best":       {"$first": "$id"},
+        }},
+        {"$sort": {"last_seen": -1}},
+        {"$limit": 30},
+    ]
+    docs = await db.plates.aggregate(pipe).to_list(30)
+    items = [{
+        "plate": d["_id"],
+        "passages_count": d["passages_count"],
+        "first_seen": d.get("first_seen"),
+        "last_seen": d.get("last_seen"),
+        "cameras_count": len(d.get("cameras") or []),
+        "vehicle_make": _majority(d.get("makes") or []),
+        "vehicle_model": _majority(d.get("models") or []),
+        "vehicle_color": _majority(d.get("colors") or []),
+        "vehicle_type": _majority(d.get("types") or []),
+        "best_thumb_id": d.get("best"),
+    } for d in docs]
+
+    return {
+        "query": q_text,
+        "filters": filters,
+        "count": len(items),
+        "items": items,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
 # 2. Fiche véhicule — /api/vehicles/{plate}
 # ═══════════════════════════════════════════════════════════════════
 @vehicles_router.get("/{plate}")

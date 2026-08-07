@@ -9,7 +9,7 @@ import {
   Search, Car, Camera as CameraIcon, Clock, Route as RouteIcon,
   Activity, BarChart3, Loader2, Info, ChevronDown, ChevronRight,
   AlertTriangle, ShieldAlert, ShieldCheck, Shield, Bell, X as XIcon,
-  CheckCircle2, GitMerge,
+  CheckCircle2, GitMerge, Sparkles, Users, Link2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -27,6 +27,16 @@ export default function Vehicles() {
   const [loading, setLoading] = useState(false);
   const [openPlate, setOpenPlate] = useState(null);
   const [anomalies, setAnomalies] = useState([]);
+  // Smart search
+  const [smart, setSmart] = useState(""); // AI query
+  const [smartLoading, setSmartLoading] = useState(false);
+  const [smartResult, setSmartResult] = useState(null); // {filters, items}
+  const [advOpen, setAdvOpen] = useState(false);
+  const [adv, setAdv] = useState({ colors: "", makes: "", types: "", date_from: "", date_to: "" });
+  // Identities
+  const [identities, setIdentities] = useState([]);
+  const [identityCandidates, setIdentityCandidates] = useState([]);
+  const [showCandidates, setShowCandidates] = useState(false);
 
   const loadAnomalies = useCallback(async () => {
     try {
@@ -34,6 +44,43 @@ export default function Vehicles() {
       setAnomalies(data.items || []);
     } catch { /* silent */ }
   }, []);
+
+  const loadIdentities = useCallback(async () => {
+    try {
+      const [{ data: list }, { data: cand }] = await Promise.all([
+        api.get("/vehicles/identities"),
+        api.get("/vehicles/identities/detect", { params: { min_plates: 2 } }),
+      ]);
+      setIdentities(list.items || []);
+      setIdentityCandidates(cand.items || []);
+    } catch { /* silent */ }
+  }, []);
+
+  const runSmartSearch = useCallback(async () => {
+    if (!smart.trim()) { setSmartResult(null); return; }
+    setSmartLoading(true);
+    try {
+      const { data } = await api.post("/vehicles/smart-search", { query: smart });
+      setSmartResult(data);
+      toast.success(`${data.count} véhicule${data.count > 1 ? "s" : ""} trouvé${data.count > 1 ? "s" : ""}`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail?.message || "Recherche IA impossible");
+    } finally { setSmartLoading(false); }
+  }, [smart]);
+
+  const clearSmart = () => { setSmart(""); setSmartResult(null); };
+
+  const runAdvancedSearch = useCallback(async () => {
+    // Applique les filtres avancés au load classique en construisant une query simple.
+    const parts = [];
+    if (adv.colors) parts.push(adv.colors);
+    if (adv.makes) parts.push(adv.makes);
+    if (adv.types) parts.push(adv.types);
+    let query = parts.join(" ") || q;
+    if (adv.date_from) query += ` du ${adv.date_from}`;
+    if (adv.date_to) query += ` au ${adv.date_to}`;
+    if (query.trim()) { setSmart(query); setTimeout(runSmartSearch, 50); }
+  }, [adv, q, runSmartSearch]);
 
   const load = useCallback(async (search = "") => {
     setLoading(true);
@@ -51,7 +98,7 @@ export default function Vehicles() {
   }, []);
 
   // Chargement initial + refresh 30 s (pausé si le drawer est ouvert)
-  useEffect(() => { load(""); loadAnomalies(); }, [load, loadAnomalies]);
+  useEffect(() => { load(""); loadAnomalies(); loadIdentities(); }, [load, loadAnomalies, loadIdentities]);
   useEffect(() => {
     if (openPlate) return; // pause pendant l'ouverture du drawer
     const iv = setInterval(() => { load(q); loadAnomalies(); }, 30000);
@@ -69,31 +116,110 @@ export default function Vehicles() {
             Historique par véhicule — cliquez sur une carte pour ouvrir la fiche complète.
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-1 max-w-lg">
+        <div className="flex items-center gap-2 flex-1 max-w-2xl">
           <div className="relative flex-1">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Sparkles size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#0044FF]" />
             <input
-              value={q}
-              onChange={(e) => setQ(e.target.value.toUpperCase())}
-              onKeyDown={(e) => e.key === "Enter" && load(q)}
-              data-testid="vehicles-search"
-              placeholder="Rechercher une plaque…"
-              className="w-full pl-9 pr-3 py-2 bg-card border border-input outline-none text-sm focus:border-[#0044FF] mono uppercase"
+              value={smart}
+              onChange={(e) => setSmart(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && runSmartSearch()}
+              data-testid="smart-search-input"
+              placeholder="Recherche IA : « voitures rouges hier », « plaque L3863 », « camions ce matin »…"
+              className="w-full pl-9 pr-24 py-2 bg-card border border-input outline-none text-sm focus:border-[#0044FF]"
             />
+            {smart && (
+              <button onClick={clearSmart}
+                      data-testid="smart-clear"
+                      className="absolute right-14 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs">
+                <XIcon size={13} />
+              </button>
+            )}
+            <button
+              onClick={() => setAdvOpen((o) => !o)}
+              data-testid="adv-toggle"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground border border-border px-1.5 py-0.5"
+              title="Filtres avancés"
+            >
+              Filtres
+            </button>
           </div>
           <button
-            onClick={() => load(q)}
-            data-testid="vehicles-search-btn"
-            className="px-4 py-2 bg-[#0044FF] text-white text-sm"
+            onClick={runSmartSearch}
+            disabled={smartLoading || !smart.trim()}
+            data-testid="smart-search-btn"
+            className="flex items-center gap-1 px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40"
           >
-            {loading ? <Loader2 size={14} className="animate-spin" /> : "Rechercher"}
+            {smartLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={13} />}
+            Recherche IA
           </button>
         </div>
       </div>
 
-      <div className="text-xs text-muted-foreground mono mb-3" data-testid="vehicles-count">
-        {items.length} véhicule{items.length > 1 ? "s" : ""} affiché{items.length > 1 ? "s" : ""} sur {total}
+      {advOpen && (
+        <div className="border border-border bg-card p-3 mb-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs" data-testid="advanced-search">
+          <div>
+            <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Couleur</label>
+            <input value={adv.colors} onChange={(e) => setAdv({ ...adv, colors: e.target.value })} placeholder="rouge, noir…" className="w-full px-2 py-1.5 bg-background border border-input outline-none" data-testid="adv-colors" />
+          </div>
+          <div>
+            <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Marque</label>
+            <input value={adv.makes} onChange={(e) => setAdv({ ...adv, makes: e.target.value })} placeholder="Toyota, Peugeot…" className="w-full px-2 py-1.5 bg-background border border-input outline-none" />
+          </div>
+          <div>
+            <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Type</label>
+            <input value={adv.types} onChange={(e) => setAdv({ ...adv, types: e.target.value })} placeholder="voiture, camion…" className="w-full px-2 py-1.5 bg-background border border-input outline-none" />
+          </div>
+          <div>
+            <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Du</label>
+            <input type="date" value={adv.date_from} onChange={(e) => setAdv({ ...adv, date_from: e.target.value })} className="w-full px-2 py-1.5 bg-background border border-input outline-none mono" />
+          </div>
+          <div>
+            <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Au</label>
+            <input type="date" value={adv.date_to} onChange={(e) => setAdv({ ...adv, date_to: e.target.value })} className="w-full px-2 py-1.5 bg-background border border-input outline-none mono" />
+          </div>
+          <div className="col-span-2 md:col-span-5 flex justify-end">
+            <button onClick={runAdvancedSearch}
+                    data-testid="adv-apply"
+                    className="text-[10px] uppercase tracking-wider px-3 py-1.5 border border-[#0044FF] text-[#0044FF] hover:bg-[#0044FF]/10">
+              Appliquer les filtres
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="text-xs text-muted-foreground mono mb-3 flex items-center justify-between" data-testid="vehicles-count">
+        <span>
+          {smartResult
+            ? `${smartResult.count} résultat${smartResult.count > 1 ? "s" : ""} pour « ${smartResult.query} »`
+            : `${items.length} véhicule${items.length > 1 ? "s" : ""} affiché${items.length > 1 ? "s" : ""} sur ${total}`}
+        </span>
+        {smartResult && (
+          <button onClick={clearSmart} data-testid="smart-clear-inline"
+                  className="text-[10px] uppercase tracking-wider text-[#0044FF] hover:underline">
+            Réinitialiser la recherche
+          </button>
+        )}
       </div>
+
+      {smartResult?.filters && (
+        <div className="border border-[#0044FF]/40 bg-[#0044FF]/5 p-2 mb-3 text-[11px] mono flex flex-wrap gap-2 items-center" data-testid="smart-filters">
+          <span className="text-[#0044FF] font-medium">Filtres IA :</span>
+          {Object.entries(smartResult.filters).filter(([_, v]) => v && (Array.isArray(v) ? v.length : true)).map(([k, v]) => (
+            <span key={k} className="px-1.5 py-0.5 border border-[#0044FF]/40 text-[#0044FF]">
+              {k}: {Array.isArray(v) ? v.join(",") : String(v)}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <IdentitiesPanel
+        identities={identities}
+        candidates={identityCandidates}
+        show={showCandidates}
+        onToggle={() => setShowCandidates((s) => !s)}
+        onReload={loadIdentities}
+        onOpenPlate={(p) => setOpenPlate(p)}
+      />
 
       {anomalies.length > 0 && (
         <AnomaliesBanner items={anomalies} onOpen={(p) => setOpenPlate(p)} onDismiss={() => setAnomalies([])} />
@@ -107,7 +233,7 @@ export default function Vehicles() {
       )}
 
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {items.map((v) => (
+        {(smartResult ? smartResult.items : items).map((v) => (
           <VehicleCard key={v.plate} v={v} onOpen={() => setOpenPlate(v.plate)} />
         ))}
       </div>
@@ -421,6 +547,100 @@ function TabOverview({ d, onWatchChanged }) {
               🌙 {habits.nocturnal_note} ({fmtDateTime(habits.nocturnal_first_seen)})
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Panneau Identités véhicule (cross-plate) · v0.7
+// ═══════════════════════════════════════════════════════════════════
+function IdentitiesPanel({ identities, candidates, show, onToggle, onReload, onOpenPlate }) {
+  const [creating, setCreating] = useState(null); // signature en cours de création
+  if (!identities.length && !candidates.length) return null;
+
+  const promote = async (c) => {
+    setCreating(c.signature);
+    try {
+      const name = [c.signature.make, c.signature.color, c.signature.type].filter(Boolean).join(" ").trim() || c.plates[0];
+      await api.post("/vehicles/identities", {
+        name, plates: c.plates,
+        vehicle_make: c.signature.make,
+        vehicle_color: c.signature.color,
+        vehicle_type: c.signature.type,
+        notes: "Créée depuis la détection auto",
+      });
+      toast.success(`Identité créée : ${name}`);
+      onReload();
+    } catch { toast.error("Création impossible"); }
+    finally { setCreating(null); }
+  };
+
+  return (
+    <div className="border border-border bg-secondary/30 p-3 mb-4" data-testid="identities-panel">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
+          <Users size={13} className="text-[#0044FF]" />
+          Identités véhicule
+          <span className="mono">{identities.length}</span>
+          {candidates.length > 0 && (
+            <span className="text-[#FFB800] ml-2 flex items-center gap-1">
+              <Link2 size={11} /> {candidates.length} candidat{candidates.length > 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
+        {candidates.length > 0 && (
+          <button onClick={onToggle}
+                  data-testid="toggle-identity-candidates"
+                  className="text-[10px] uppercase tracking-wider text-[#0044FF] hover:underline">
+            {show ? "Masquer les candidats" : "Afficher les candidats"}
+          </button>
+        )}
+      </div>
+
+      {identities.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-2">
+          {identities.slice(0, 6).map((id) => (
+            <div key={id.id} className="border border-[#0044FF]/40 bg-card px-2 py-1 text-[11px]" data-testid={`identity-${id.id}`}>
+              <div className="font-medium">{id.name}</div>
+              <div className="text-muted-foreground text-[10px]">
+                {id.plates.length} plaque{id.plates.length > 1 ? "s" : ""} · {id.vehicle_make || "—"} {id.vehicle_color || ""}
+              </div>
+              <div className="flex flex-wrap gap-1 mt-1">
+                {id.plates.slice(0, 4).map((p) => (
+                  <button key={p} onClick={() => onOpenPlate(p)}
+                          className="mono text-[9px] px-1 py-0.5 border border-border hover:bg-secondary"
+                          data-testid={`identity-plate-${p}`}>
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {show && candidates.length > 0 && (
+        <div className="border-t border-border pt-2 space-y-1.5">
+          {candidates.slice(0, 5).map((c, idx) => (
+            <div key={idx} className="flex items-center gap-2 text-[11px]" data-testid={`identity-candidate-${idx}`}>
+              <span className="text-muted-foreground w-40 truncate">
+                {[c.signature.make, c.signature.color, c.signature.type].filter(Boolean).join(" · ")}
+              </span>
+              <span className="text-[10px] text-muted-foreground">{c.plates_count} plaques · {c.reads} lectures</span>
+              <div className="flex flex-wrap gap-1 flex-1">
+                {c.plates.slice(0, 6).map((p) => (
+                  <span key={p} className="mono text-[9px] px-1 py-0.5 border border-border">{p}</span>
+                ))}
+              </div>
+              <button onClick={() => promote(c)} disabled={creating === c.signature}
+                      data-testid={`promote-identity-${idx}`}
+                      className="text-[9px] uppercase tracking-wider px-2 py-1 border border-[#00E676] text-[#00E676] hover:bg-[#00E676]/10">
+                {creating === c.signature ? <Loader2 size={10} className="animate-spin" /> : "Créer l'identité"}
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </div>
