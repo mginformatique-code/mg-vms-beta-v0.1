@@ -452,3 +452,7 @@ Ordre officiel confirmé par le CEO :
 - P0-4: vérifié UI 100% capability-driven (caps.* partout, zéro logique marque)
 - Tests: WSDL parse 7/7, ONVIF init sans FileNotFoundError, P0-1 unit online/offline, battery endpoints sans 500, régression IA/plugins/UI OK
 - Limite: appels ONVIF réels (GetServices etc.) non testables sans caméra physique — définitions validées offline
+
+## v0.7.d (2026-06)
+- Fix "unknown version"/changelog vide une fois installé : CHANGELOG.md absent de l'image Docker (COPY backend/ . seulement) → ajout `COPY CHANGELOG.md ./CHANGELOG.md` dans backend/Dockerfile. welcome.py lit /app/CHANGELOG.md (OK image + preview).
+- Entrée changelog v0.7.c+1 renommée v0.7.d. /api/welcome/summary → installed=v0.7.d, changelog 30 entrées.
