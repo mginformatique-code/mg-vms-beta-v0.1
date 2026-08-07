@@ -431,3 +431,16 @@ Ordre officiel confirmé par le CEO :
 - P0-5 frame-source: _MAX_CONSECUTIVE_FAILURES=10, arrêt propre + gave_up dans status(); fix churn démo dans _ensure_frame_source_running (GO2RTC_RTSP)
 - Fichiers: backend/Dockerfile, backend/ai_engine.py, backend/frame_source.py, deploy-app/docker-compose.yml, deploy-app/go2rtc.yaml, go2rtc/go2rtc.yaml (preview: flux démo de base ajoutés)
 - Validé: /health 1.6ms local, login/me/docs 200, WS OK, demo-cam online, worker 12FPS restart_count=1, gave_up testé (10 échecs → stop propre)
+
+## Validation exhaustive v0.7.b→v0.7.c (2026-06, audit read-only)
+- API: 10/10 endpoints OK (system-health n'existe pas → health-dashboard). Login/me/WS/docs/openapi OK.
+- IA lazy: validé (0 cam → aucun chargement; réactivation → load au 1er traitement depuis cache).
+- go2rtc: 6 streams, frame.jpeg/RTSP/ports 1984-8554-8555 OK. Snapshot = POST /api/cameras/{id}/snapshot.
+- Pipeline: Voiture/Personne/Vélo détectés, bytetrack, fusion hiérarchique en prod (downstream:506), _emit anti-doublons (:518). p95/p99 via /api/diagnostics/pipeline-metrics.
+- ANPR: crop mutualisé (VehicleROI = vue numpy, JPEG memoizé), fanout dispatch_plate = asyncio.gather. Gate qualité auto-suspend OCR sur vidéo démo floue (sharpness 21<100) = comportement conçu.
+- Mémoire: RSS 1186→1200Mo sur 22min (stable, pas de fuite). CPU-only preview (pas de GPU/VRAM).
+- ANOMALIES DOCUMENTÉES (non corrigées, sur consigne):
+  A1: deploy-app/docker-compose.prod.yml:55 YAML INVALIDE — `${MGVMS_DOMAIN:?...(ex: vms.exemple.com)}` le `: ` non quoté casse le parse → docker compose config échoue avec l'overlay prod. Fix: quoter la ligne.
+  A2: fast-alpr état bus "error·modèle non chargé" figé au bootstrap (pas de refresh après _load_models). Cosmétique, dispatchable=false sans impact (core via plate_registry).
+  A3: devices API map unsupported_capability→400 (pas 501 demandé) — routes/devices.py:80-95. Jamais de 500 ✓.
+- Backlog v1.0: Performance Gate (seuil 200ms configurable → event Operations Center avec stage responsable).
