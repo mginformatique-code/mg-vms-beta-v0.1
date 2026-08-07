@@ -50,9 +50,12 @@ services:
     ports: !reset []       # override du docker-compose.yml (n'expose plus 8001 en direct)
     environment:
       # v0.5.1.b · Durcissement : ces valeurs DOIVENT venir de .env, pas de valeurs par défaut
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET requis (générer via openssl rand -hex 32)}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD requis (compte initial)}
-      MGVMS_DOMAIN: ${MGVMS_DOMAIN:?MGVMS_DOMAIN requis (ex: vms.exemple.com)}
+      # v0.7.f · Wave G · Quoting explicite : le `:` interne au message d'erreur
+      # (`(ex: vms.exemple.com)`) cassait le parsing YAML avant fix — la valeur
+      # doit être entre guillemets pour rester un scalaire unique.
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET requis (générer via openssl rand -hex 32)}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:?ADMIN_PASSWORD requis (compte initial)}"
+      MGVMS_DOMAIN: "${MGVMS_DOMAIN:?MGVMS_DOMAIN requis (ex vms.exemple.com)}"
       # Force HTTPS-only cookies
       MGVMS_COOKIE_SECURE: "true"
       MGVMS_TRUSTED_HOSTS: ${MGVMS_DOMAIN}

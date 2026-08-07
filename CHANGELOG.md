@@ -2,6 +2,89 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v0.7.g] — 2026-06 — Wave H · Pipeline Inspector Live + Robustesse globale
+
+### Added — Axe 1+2 · Percentiles p50/p95/p99 dans `pipeline_v2/inspector.py`
+- `_StageStat.to_dict()` calcule désormais `p50_60s`, `p95_60s`, `p99_60s`
+  + `samples_60s` sur la fenêtre glissante 60 s
+- Tests unitaires vérifient les bornes (100 × 10 ms + 5 × 500 ms → p99 ≥ 500)
+
+### Added — Axe 1 UI · Page `/diagnostics/pipeline-inspector` (Pipeline Inspector Live)
+- Auto-refresh 2 s togglable, consommation parallèle des 3 endpoints
+  diagnostic (`pipeline-inspector`, `hot-reload`, `plate-quality`)
+- 6 tuiles system (CPU système/process, RAM %, RSS, GPU/VRAM avec `N/A`
+  documenté), bande Hot Reload (cycles, sync full/partiel, fs starts/stops),
+  bande Gate qualité crop (seuils + poids OCR + debug toggle)
+- Par caméra : FPS + Σ avg + max p95 + tableau détaillé
+  (avg 60s · p50 · p95 · p99 · max · calls · err · **barre budget colorée**
+  vert/jaune/rouge selon dépassement)
+- 13 stages détectés en live sur `demo-cam-002` (fetch, decode, motion,
+  yolo, tracking, roi, anpr, dispatch, multi_anpr, scenarios, persist)
+
+### Added — Axe 10 · Robustesse frontend globale
+- Nouveau composant `ErrorBoundary` monté à la racine (avant
+  `QueryClientProvider`) — attrape toutes les erreurs React remontant
+  jusqu'à la racine + fallback sobre avec boutons Réessayer/Recharger
+- Handlers `window` : `unhandledrejection` + `error` incrémentent
+  `window.__mgvms_unhandled_rejections` + `.__mgvms_window_errors` +
+  `.__mgvms_react_errors` (visibles depuis DevTools)
+
+### Verified — Axe 4/10 · Audit backend robustesse (aucune correction nécessaire)
+- 0 `.acquire()` sans timeout dans les paths async
+- 0 `time.sleep` dans coroutines
+- 0 blocking sync call dans routes async
+- Les 2 `threading.Lock` YOLO/ALPR sont acquis dans `to_thread` — pas de
+  deadlock possible depuis l'event loop
+
+### Tests
+- Nouveau `tests/test_v07g_pipeline_inspector.py` : 6 verts
+- Total suite v0.7 : **126 / 126 tests verts**
+
+---
+
+## [v0.7.f] — 2026-06 — Wave G · YAML Prod Fix + HTTPS / TLS Settings
+
+### Fixed — `docker-compose.prod.yml` lignes 53-55 (blocker prod TLS)
+- Cause racine : les valeurs `${VAR:?message: hint}` non-quotées cassaient
+  le parsing YAML au premier `:` interne au message d'erreur
+- Fix : quoting explicite `"${VAR:?…}"` sur `JWT_SECRET`, `ADMIN_PASSWORD`,
+  `MGVMS_DOMAIN`. Message reformulé sans `:` interne
+- Test `TestDockerComposeProdYaml` verrouille + guard anti-régression
+  pour tout futur ajout de ce pattern dangereux
+
+### Added — Nouveau router backend `/api/security/tls/*`
+- 8 endpoints (permission `admin`) : GET/PUT domains, list/get/upload/
+  self-signed/activate/delete certificates, GET pem export audité
+- Clé privée **chiffrée AES-GCM 256** avant persistance Mongo (nonce 96 b
+  + AAD `mgvms-tls-key`, dérivée de `JWT_SECRET` via SHA-256) — jamais
+  stockée en clair
+- Match cert/key vérifié à l'upload
+- Validation hostname RFC 1123 stricte
+- Suppression cert actif refusée 409
+
+### Added — Nouvelle page frontend `TlsSettings.jsx` (route `/security-center/tls`)
+- 4 tuiles résumé (Domaine externe/local, Force HTTPS, Let's Encrypt)
+- Panneau Domaines & routing (LAN + Internet + Force HTTPS + HSTS +
+  max-age configurable)
+- Panneau Certificats stockés avec badges statut/expiration/self-signed/
+  actif + boutons Activer / Exporter / Supprimer
+- Panneau Générer certificat auto-signé (CN + SAN DNS/IP + wildcards +
+  organisation + pays + validité + taille RSA 2048/3072/4096)
+- Panneau Importer PEM existant (drag & drop file OR paste)
+- Aide contextuelle (LAN / Prod Internet / HSTS)
+- **80 data-testid** dont 30+ préfixés `tls-`
+
+### Added — Action rapide dans SecurityCenter
+- Nouvelle tuile "HTTPS / TLS · Domaines & certificats" en tête de la
+  grille Actions rapides (data-testid `secc-action-tls`)
+
+### Tests
+- Nouveau `tests/test_v07f_tls_settings.py` : 8 tests verts
+- Suite existante v0.7.e : 112 tests verts
+- **Total v0.7 : 120 / 120 tests verts**
+
+---
+
 ## [v0.7.e] — 2026-06 — Wave A · Hot Reload + Wave B · Frontend + Wave C · Multi-OCR + Wave D · ONVIF hardening + Wave E · Timeline Reolink + Wave F · Stress-test (P0)
 
 ### Added — Wave F · Stress-test 1 → 50 caméras reproductible

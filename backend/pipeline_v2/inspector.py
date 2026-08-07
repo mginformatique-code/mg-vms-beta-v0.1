@@ -44,6 +44,14 @@ class _StageStat:
         # Moyenne fenêtre glissante (60 s) — plus fidèle que la moyenne globale
         cutoff = time.time() - 60
         recent = [ms for ts, ms in self.window if ts >= cutoff]
+        # v0.7.g · Axe 1+2 · Percentiles p50/p95/p99 sur la fenêtre 60s
+        p50 = p95 = p99 = 0.0
+        if recent:
+            s = sorted(recent)
+            def _pct(p):
+                k = max(0, min(len(s) - 1, int(round(p * (len(s) - 1)))))
+                return round(s[k], 2)
+            p50, p95, p99 = _pct(0.50), _pct(0.95), _pct(0.99)
         return {
             "calls": self.count,
             "errors": self.errors,
@@ -52,6 +60,10 @@ class _StageStat:
             "avg_ms_60s": round(sum(recent) / len(recent), 2) if recent else 0.0,
             "max_ms": round(self.max_ms, 2),
             "last_ms": round(self.last_ms, 2),
+            "p50_60s": p50,
+            "p95_60s": p95,
+            "p99_60s": p99,
+            "samples_60s": len(recent),
         }
 
 

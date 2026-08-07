@@ -135,6 +135,11 @@ export default function SecurityCenter() {
           <ShieldAlert size={12} /> Actions rapides
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <Link to="/security-center/tls" className="border border-border p-3 hover:border-[#0044FF] hover:bg-secondary/40 transition" data-testid="secc-action-tls">
+            <Lock size={14} className="text-[#0044FF] mb-1" />
+            <div className="text-xs font-medium">HTTPS / TLS</div>
+            <div className="text-[10px] text-muted-foreground">Domaines &amp; certificats</div>
+          </Link>
           <Link to="/settings" className="border border-border p-3 hover:border-[#0044FF] hover:bg-secondary/40 transition" data-testid="secc-action-sessions">
             <LogOut size={14} className="text-muted-foreground mb-1" />
             <div className="text-xs font-medium">Sessions actives</div>

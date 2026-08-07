@@ -520,14 +520,36 @@ Ordre officiel confirmé par le CEO :
 - 4 endpoints diagnostic runtime : /api/diagnostics/hot-reload, /api/diagnostics/plate-quality[/debug], window.__mgvms_perf.snapshot()
 - 8 rapports MD dédiés dans /app/memory/
 
-## Backlog v0.7.f (non-P0 restants du v0.7.d handoff)
-- Performance Gate : alerte Operations Center si total_ms > 200 ms sur une cam avec stage responsable
-- YAML fix deploy-app/docker-compose.prod.yml:55 (blocker prod TLS)
+## v0.7.f Wave G · YAML Prod Fix + HTTPS/TLS UI (2026-06)
+- YAML fix `deploy-app/docker-compose.prod.yml` lignes 53-55 : quoting explicite des `${VAR:?message}` (le `:` dans `(ex: vms.exemple.com)` cassait le parsing). Test `TestDockerComposeProdYaml` verrouille + guard anti-régression pour tout `${VAR:?message: hint}` non-quoté
+- Nouveau router backend `/api/security/tls/*` (8 endpoints, permission admin) : GET/PUT domains, GET/upload/self-signed/activate/delete certificates, GET pem export audité
+- Clé privée chiffrée AES-GCM 256 avant persistance Mongo (nonce 96b + AAD `mgvms-tls-key`, dérivée de JWT_SECRET SHA-256) — jamais stockée en clair
+- Match cert/key vérifié à l'upload (public_numbers comparaison). Hostname RFC 1123 strict (regex). Suppression du cert actif refusée 409
+- Nouvelle page frontend `TlsSettings.jsx` (route `/security-center/tls`) : 4 tuiles résumé + panneau Domaines/Routing + panneau Certs stockés (badges statut/expiration) + panneau Génération auto-signée (CN + SAN DNS/IP wildcards + validité + taille RSA) + panneau Import PEM (drag&drop file) + aide contextuelle. 80 data-testid dont 30+ tls-*
+- Action rapide "HTTPS / TLS · Domaines & certificats" ajoutée dans SecurityCenter
+- Tests : 8 verts (test_v07f_tls_settings.py). Total v0.7 : 120/120 verts
+- Fichiers : deploy-app/docker-compose.prod.yml (+5/-3), backend/routes/tls.py (nouveau, 340l), backend/server.py (+2), frontend/src/pages/TlsSettings.jsx (nouveau, 477l), frontend/src/pages/SecurityCenter.jsx (+6/-1), frontend/src/App.js (+2)
+
+## v0.7.g Wave H · Pipeline Inspector Live + Robustesse globale (2026-06)
+- Axe 1 UI : nouvelle page `/diagnostics/pipeline-inspector` (PipelineInspectorLive.jsx, 260 lignes) — auto-refresh 2s, consomme 3 endpoints diagnostic en parallèle, affiche System (CPU/RAM/RSS/GPU) + Hot Reload (Wave A) + Gate qualité (Wave C) + tableau détaillé par caméra (avg 60s · p50 · p95 · p99 · max · calls · err · budget bar colorée)
+- Axe 1 backend : `pipeline_v2/inspector.py::_StageStat.to_dict()` ajoute p50_60s/p95_60s/p99_60s/samples_60s sur fenêtre 60s
+- Axe 10 : ErrorBoundary React racine (fallback sobre + retry/reload) + handlers window (unhandledrejection + error) → compteurs `window.__mgvms_react_errors` / `_unhandled_rejections` / `_window_errors`
+- Axe 4/10 audit backend : 0 pattern dangereux (locks sans timeout / sleep dans coroutine / blocking sync dans routes async / requests bloquant) — aucune correction nécessaire
+- Preuve Playwright : 13 stages actifs mesurés en live sur `demo-cam-002` (fetch/decode/motion/yolo/tracking/roi/anpr/dispatch/multi_anpr/scenarios/persist) avec bars colorées et percentiles
+- Tests : 6 verts (test_v07g_pipeline_inspector.py) — total v0.7 : **126/126**
+- Fichiers : pipeline_v2/inspector.py (+18), pages/PipelineInspectorLive.jsx (nouveau, 260l), components/ErrorBoundary.jsx (nouveau, 55l), index.js (+20), App.js (+2)
+
+## Rapport Wave H : /app/memory/WAVE_H_INSPECTOR_ROBUSTESSE_v0.7.g.md
+Répond aux 10 axes de l'audit demandé et aux 9 critères de validation, avec preuves.
+
+## Backlog v0.7.h (optionnel)
+- useTrackedInterval hook : instrumenter les gros polleurs frontend pour peupler active_intervals
+- Script `stress/go2rtc_health.py` : simulation add/remove/modif caméras 5 min avec vérif frame.jpeg 200
+- Lien Pipeline Inspector visible dans HealthDashboard
+- Nginx auto-reload sur activation cert TLS (Wave G suite)
+- Let's Encrypt bouton (Wave G suite)
+- Alerte 30j/7j avant expiration cert TLS
+- Performance Gate : alerte Ops Center si total_ms > 200ms avec stage responsable
 - Refactor routers.py legacy → routes/*.py modulaire
-- Validation stricte enabled_plugins (empêcher noms inexistants)
-- Concrete drivers Reolink/Hikvision/Dahua/Axis suivant CameraDriverProtocol
-- Storage roadmap : "Mount a disk" wizard, SMART indicators, bulk/backup DB migration
-- AI vision Claude Vision sur person crops, filtres visuels rapides
-- Saved searches Smart Search
-- Bulk OCR variant retroactive cleanup
-- Export AI folders PDF (véhicules + persons + timeline)
+- Concrete drivers Reolink/Hikvision/Dahua/Axis
+- Storage roadmap, AI vision persons, Saved searches, Export PDF

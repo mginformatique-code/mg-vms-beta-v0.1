@@ -41,6 +41,7 @@ from routes.timeline import timeline_router
 from routes.welcome import welcome_router
 from routes.site_manager import site_manager_router
 from routes.security import security_router
+from routes.tls import tls_router
 from routes.camera_control import camera_control_router
 from routes.devices import devices_router
 from routes.vehicles import vehicles_router
@@ -111,6 +112,7 @@ app.include_router(hardware_router)
 app.include_router(welcome_router)
 app.include_router(site_manager_router)
 app.include_router(security_router)
+app.include_router(tls_router)   # v0.7.f · Wave G · sous-menu HTTPS/TLS
 
 app.add_middleware(SecurityMiddleware)
 
