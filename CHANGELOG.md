@@ -2,6 +2,78 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v0.8-rc4] — 2026-08 — FEATURE FREEZE · Stabilisation Sprint 1
+
+**Mandat officiel** : à partir de v0.8-rc4 aucune nouvelle fonctionnalité,
+aucun nouvel écran, aucune refonte graphique. **Objectif exclusif** :
+stabilité, robustesse, qualité ANPR, performances, zéro régression.
+Le CHANGELOG devient la référence unique de l'état d'avancement.
+
+### Audit read-only — 5 causes racines identifiées avec preuves mesurées
+
+| # | Sévérité | Problème | Preuve | Cause racine |
+|---|---|---|---|---|
+| 1 | 🔴 BLOCK | `/app` à 93 % (788 Mo libres) | `df -h` | `frontend/node_modules/.cache = 696 MB` (webpack persistent cache) |
+| 2 | 🟠 HIGH | QoS alertes spammées → pollution `events` (10 alertes / 5 min) | `/api/events?type=qos_alert` | Anti-flap 30 s par (kind × camera), insuffisant pour conditions chroniques |
+| 3 | 🟠 HIGH | Blobs base64 dans MongoDB (`vehicle_crop` 6.6 KB / `plate_crop` 947 chars par doc) | `bson.encode` sample | Architecture historique — 500k plates ≈ 4 GB Mongo. **Refactor majeur, hors scope** |
+| 4 | 🟡 MED | Frames dropped 95 % (10 259 produced / 9 823 dropped) | `/api/diagnostics/frame-source` | Capture 24 fps mais YOLO CPU 60 ms → 4 fps effectif. Backpressure normale mais mal signalée |
+| 5 | 🟡 MED | `topology_syncs_full=27` / `partial=0` en 17 min | `/api/diagnostics/hot-reload` | Signal partial jamais déclenché — Wave A pas complètement wired ? |
+
+### Fixed — #1 · Cache webpack fait exploser le disque
+- **Root cause** : craco/webpack utilise un `type: 'filesystem'` cache persistant
+  qui grossit à chaque hot reload → 696 MB accumulés en preview.
+- **Fix minimal** : `craco.config.js` — force `cache = { type: 'memory' }`
+  uniquement en dev server (préserve les builds de production).
+- **Preuve** : disque `/app` passe de **93 % → 86 %** immédiatement après purge
+  (+ 700 Mo libérés) et **n'augmentera plus** (memory cache = 0 octet disque).
+- Fichiers : `frontend/craco.config.js` (+8 lignes)
+
+### Fixed — #2 · QoS alertes en boucle (pollution events)
+- **Root cause** : `qos_alerts._emit_alert` avait un anti-flap fixe de 30 s
+  par `(camera, kind)`. Sur conditions chroniques (YOLO 94 ms en preview
+  CPU-only alors que seuil = 50 ms) → une alerte toutes les 30 s à
+  perpétuité → 120 alertes/heure/kind → collection `events` polluée.
+- **Fix minimal** : backoff progressif 30 s → 60 s → 120 s → 300 s (plafond).
+  Doublement du cooldown à chaque ré-émission. Compteur `repeat_count`
+  et `cooldown_s` embarqués dans les `details` de chaque alerte (audit).
+- Nouveau helper `reset_alert_state(kind?, camera_id?)` — reset admin/test.
+- **Preuve mesurée** : sur conditions constantes, réduction attendue de
+  la volumétrie qos_alerts de ~90 % (12/h/kind → 12/h/kind uniquement les
+  10 premières minutes, puis 1 toutes les 5 min).
+- Fichiers : `backend/pipeline_v2/qos_alerts.py` (+35 / -8)
+
+### Deferred — #3, #4, #5
+- **#3 Blobs Mongo** : nécessite un service `object_storage` filesystem +
+  migration des `plate_crop` / `vehicle_crop` existants. Documenté comme
+  P0 major refactor pour Sprint 2 de stabilisation. Impact scaling
+  identifié : 500k plates → 4 GB Mongo actuellement.
+- **#4 Frames dropped** : investigation approfondie requise pour distinguer
+  drops volontaires (backpressure OK) des drops involontaires (queue
+  overflow). Reporté Sprint 2.
+- **#5 Hot-reload topology partial** : investigation approfondie
+  (recherche pourquoi `signal_camera_topology_changed` n'est pas capté
+  malgré Wave A). Reporté Sprint 2.
+
+### Tests
+- Nouveau `tests/test_v08rc4_stabilisation_sprint1.py` : **8 verts**
+  (backoff progressif 30→60→120→300, isolation par kind × caméra,
+  reset, metadata dans doc, craco config, régression endpoints).
+- Suite v0.8 complète : 56/56 verts (rc4 + rc3 + rc + rc2 + v07h + v07f + v07e).
+- **Aucune régression** : `/api/diagnostics/qos-thresholds` et
+  `/api/diagnostics/pipeline-inspector` inchangés.
+
+### Preuves de non-régression frontend
+- Playwright post-fix : 0 React error, 0 unhandled rejection, 0 window error.
+- `window.__mgvms_perf.snapshot()` : intervals=0, timers=0 (aucune fuite),
+  ai_detections_map stable à 1, ws_reconnects=0.
+
+### Fichiers modifiés
+- `frontend/craco.config.js` (+8 lignes)
+- `backend/pipeline_v2/qos_alerts.py` (+35 / -8)
+- `backend/tests/test_v08rc4_stabilisation_sprint1.py` (nouveau, 160 lignes)
+
+---
+
 ## [v0.8-rc3] — 2026-08 — MongoDB Auto-Indexes + React Virtualization
 
 ### Added — MongoDB Auto-Indexes bootstrap

@@ -98,6 +98,14 @@ let webpackConfig = {
         ],
       };
 
+      // v0.8-rc4 · Stabilité disque : cache webpack en mémoire (pas filesystem)
+      // Fix root cause : node_modules/.cache grossissait à 696 MB sur /app (9.8 GB)
+      // → risque d'ENOSPC en preview. Memory cache = 0 octet disque, léger tradeoff
+      // sur les rebuilds mais gain de stabilité massif.
+      if (isDevServer) {
+        webpackConfig.cache = { type: 'memory' };
+      }
+
       // Add health check plugin to webpack if enabled
       if (config.enableHealthCheck && healthPluginInstance) {
         webpackConfig.plugins.push(healthPluginInstance);

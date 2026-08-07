@@ -42,6 +42,18 @@ DEFAULT_THRESHOLDS = {
 }
 
 _last_notified: dict[tuple[str, str], float] = {}  # (camera_id, kind) → epoch
+_repeat_count: dict[tuple[str, str], int] = {}     # v0.8-rc4 · backoff progressif
+
+# v0.8-rc4 · Anti-spam QoS : backoff progressif pour alertes chroniques.
+# Une même alerte (kind × camera) subit un cooldown qui double à chaque
+# ré-occurrence : 30s → 60s → 120s → 300s (plafond). Résout la pollution
+# des events par des alertes permanentes en preview CPU-only.
+_BACKOFF_STEPS_SEC = [30.0, 60.0, 120.0, 300.0]
+
+
+def _current_cooldown(key: tuple[str, str]) -> float:
+    n = _repeat_count.get(key, 0)
+    return _BACKOFF_STEPS_SEC[min(n, len(_BACKOFF_STEPS_SEC) - 1)]
 
 
 async def _read_thresholds() -> dict:
@@ -53,12 +65,18 @@ async def _read_thresholds() -> dict:
 
 async def _emit_alert(camera_id: Optional[str], kind: str, severity: str,
                        message: str, details: dict) -> None:
-    """Écrit dans `events` (Ops Center) avec anti-flap 30 s."""
+    """Écrit dans `events` (Ops Center) avec anti-flap progressif.
+
+    v0.8-rc4 · Backoff : 30s → 60s → 120s → 300s (plafond). Empêche la
+    pollution des events par des alertes chroniques (ex : preview CPU-only).
+    """
     now = time.time()
     key = (camera_id or "system", kind)
-    if key in _last_notified and (now - _last_notified[key]) < 30.0:
+    cooldown = _current_cooldown(key)
+    if key in _last_notified and (now - _last_notified[key]) < cooldown:
         return
     _last_notified[key] = now
+    _repeat_count[key] = _repeat_count.get(key, 0) + 1
     doc = {
         "type": "qos_alert",
         "kind": kind,
@@ -66,15 +84,37 @@ async def _emit_alert(camera_id: Optional[str], kind: str, severity: str,
         "camera_id": camera_id,
         "camera_name": camera_id or "system",
         "message": message,
-        "details": details,
+        "details": {**details, "repeat_count": _repeat_count[key],
+                    "cooldown_s": cooldown},
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "resolved": False,
     }
     try:
         await db.events.insert_one(doc)
-        logger.info("QoS alert emitted: %s / %s / %s", kind, severity, message)
+        logger.info("QoS alert emitted: %s / %s / %s (repeat=%d cooldown=%.0fs)",
+                    kind, severity, message, _repeat_count[key], cooldown)
     except Exception:
         logger.exception("Insertion QoS alert échouée (non bloquant)")
+
+
+def reset_alert_state(kind: Optional[str] = None,
+                       camera_id: Optional[str] = None) -> int:
+    """v0.8-rc4 · Reset compteurs backoff (test/admin). Retourne nb entrées purgées."""
+    global _last_notified, _repeat_count
+    if kind is None and camera_id is None:
+        n = len(_last_notified)
+        _last_notified.clear()
+        _repeat_count.clear()
+        return n
+    keys_to_del = [
+        k for k in list(_last_notified.keys())
+        if (kind is None or k[1] == kind)
+        and (camera_id is None or k[0] == camera_id)
+    ]
+    for k in keys_to_del:
+        _last_notified.pop(k, None)
+        _repeat_count.pop(k, None)
+    return len(keys_to_del)
 
 
 def _check_camera_stages(cam_id: str, stages: dict, thresholds: dict) -> list[dict]:

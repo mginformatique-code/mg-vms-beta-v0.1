@@ -621,3 +621,20 @@ Prioritisé par ROI décroissant (détails dans le rapport v0.8-rc1) :
 - `frontend/src/pages/Vehicles.jsx` (+8 / -5, intégration)
 - `frontend/package.json` (+1 dep : react-window@2.3.0)
 - `backend/tests/test_v08rc3_mongo_indexes_virtualization.py` (nouveau, 130 lignes)
+
+## v0.8-rc4 · FEATURE FREEZE · Stabilisation Sprint 1 (2026-08)
+- 🧊 **Mandat** : plus aucune nouvelle feature/écran/refonte. Focus exclusif
+  stabilité + qualité ANPR + performances + zéro régression.
+- **Audit read-only** : 5 causes racines mesurées (disque plein 93 %, QoS
+  spam 10/5min, blobs Mongo 6.6 KB/plate, frames drop 95 %, hot-reload
+  partial jamais déclenché).
+- **Fix #1 disque** : craco memory cache → 93 % → 86 % + prévention permanente
+- **Fix #2 QoS spam** : backoff progressif 30s → 60s → 120s → 300s (réduction
+  volumétrie ~90 % attendue)
+- **Deferred Sprint 2** : #3 blobs Mongo (major refactor), #4 frames drops
+  (investigation queue), #5 hot-reload topology partial signal
+- Tests : 8 nouveaux verts (test_v08rc4_stabilisation_sprint1.py). Total : 56/56
+- Preuves runtime : 0 React error / 0 unhandled rejection / 0 window error
+  (Playwright post-fix)
+- Fichiers : `frontend/craco.config.js` (+8), `backend/pipeline_v2/qos_alerts.py`
+  (+35 / -8), tests (+160)
