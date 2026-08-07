@@ -283,6 +283,10 @@ def _analyze_frame(camera_id: str, frame_bytes: bytes,
                    enabled_plugins: Optional[list] = None,
                    camera: Optional[dict] = None) -> dict:
     """Compat : délègue au CameraWorker de la caméra (pipeline v2)."""
+    # P0-2 (v0.7.c) : garde lazy — appelé via asyncio.to_thread par les routes
+    # on-demand (benchmark, test-détection) ; charge les modèles si absents.
+    if _model is None or _alpr is None or _alpr is False:
+        _load_models()
     from pipeline_v2.camera_worker import runtime as _runtime
     return _runtime.worker(camera_id).analyze(
         frame_bytes, enabled_plugins=enabled_plugins, camera=camera)
@@ -311,6 +315,10 @@ def analyze_image_local(image_bytes: bytes) -> dict:
     thin autour de `CameraWorker("__upload__").analyze(bytes,
     enabled_plugins=["fast-alpr"])`.
     """
+    # P0-2 (v0.7.c) : garde lazy — l'analyse d'upload doit fonctionner même si
+    # aucune caméra detect_enabled n'a déclenché le chargement des modèles.
+    if _model is None or _alpr is None or _alpr is False:
+        _load_models()
     from pipeline_v2.camera_worker import CameraWorker
     worker = CameraWorker("__upload__")
     # Enable fast-alpr explicitement : le CameraWorker est fail-safe strict —
@@ -437,7 +445,15 @@ def _ensure_frame_source_running(cam: dict) -> None:
     """
     try:
         from frame_source import start as _fs_start
-        rtsp_url = cam.get("ai_rtsp_url") or cam.get("rtsp_url")
+        # P0-5 (v0.7.c) : les caméras démo sont servies par go2rtc — utiliser le
+        # relais GO2RTC_RTSP (même logique que _sync_frame_source_workers). Sinon,
+        # en Docker, l'URL seedée 127.0.0.1 pointe hors du conteneur backend et
+        # provoque un churn stop/recréation du worker à chaque cycle IA.
+        cam_id = cam["id"]
+        if cam_id.startswith("demo-") or cam_id.startswith("demo_"):
+            rtsp_url = f"{os.environ.get('GO2RTC_RTSP', 'rtsp://go2rtc:8554')}/cam_{cam_id}"
+        else:
+            rtsp_url = cam.get("ai_rtsp_url") or cam.get("rtsp_url")
         if not rtsp_url:
             return
         codec = (cam.get("ai_codec") or cam.get("codec") or "auto").lower()
@@ -541,11 +557,20 @@ async def ai_loop() -> None:
     await asyncio.sleep(15)
     _ai_health["loop_alive"] = True
     _ai_health["loop_disabled_reason"] = None
+    # P0-2 (v0.7.c) : chargement LAZY — YOLO + fast-alpr (et leurs téléchargements
+    # de modèles) ne sont chargés QUE si au moins une caméra detect_enabled existe.
     try:
-        await asyncio.to_thread(_load_models)
-    except Exception as e:
-        logger.exception("Premier chargement des modèles IA a échoué — la boucle continue")
-        _ai_health["last_cycle_error"] = f"initial _load_models: {type(e).__name__}: {str(e)[:200]}"
+        _n_detect = await db.cameras.count_documents({"detect_enabled": True})
+    except Exception:
+        _n_detect = 0
+    if _n_detect:
+        try:
+            await asyncio.to_thread(_load_models)
+        except Exception as e:
+            logger.exception("Premier chargement des modèles IA a échoué — la boucle continue")
+            _ai_health["last_cycle_error"] = f"initial _load_models: {type(e).__name__}: {str(e)[:200]}"
+    else:
+        logger.info("IA · aucune caméra detect_enabled — chargement des modèles différé (lazy)")
     await load_runtime_config()
     logger.info(
         "Moteur IA démarré (device=%s · intervalle=%.1fs · yolo=%s · alpr=%s · pipeline=v2)",
@@ -557,14 +582,15 @@ async def ai_loop() -> None:
         _ai_health["cycles_total"] += 1
         _ai_health["last_cycle_ts"] = datetime.now(timezone.utc).isoformat()
         try:
-            if not _ai_health["yolo_loaded"] or not _ai_health["alpr_loaded"]:
+            await refresh_per_camera_configs()
+            await load_runtime_config()
+            cams = await db.cameras.find({"detect_enabled": True, "status": "online"}, {"_id": 0}).to_list(200)
+            # P0-2 (v0.7.c) : retry de chargement UNIQUEMENT si des caméras l'exigent
+            if cams and (not _ai_health["yolo_loaded"] or not _ai_health["alpr_loaded"]):
                 try:
                     await asyncio.to_thread(_load_models)
                 except Exception as reload_err:
                     logger.debug("Retry _load_models: %s", reload_err)
-            await refresh_per_camera_configs()
-            await load_runtime_config()
-            cams = await db.cameras.find({"detect_enabled": True, "status": "online"}, {"_id": 0}).to_list(200)
             await _sync_frame_source_workers(cams)
             if cams:
                 logger.info("IA · cycle : %d caméra(s) réelle(s) en parallèle %s",

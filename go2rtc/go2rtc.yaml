@@ -1,9 +1,16 @@
 streams:
-        cam_demo-cam-001_sd:
-          - ffmpeg:cam_demo-cam-001#video=mjpeg#width=640#low_latency
-        cam_demo-cam-002_hd:
-          - ffmpeg:cam_demo-cam-002#video=mjpeg#low_latency
-        cam_demo-cam-002_sd:
-          - ffmpeg:cam_demo-cam-002#video=mjpeg#width=640#low_latency
-        cam_demo-cam-001_hd:
-          - ffmpeg:cam_demo-cam-001#video=mjpeg#low_latency
+  # Caméra démo 1 : mire H.264 réelle générée localement (validation du pipeline)
+  cam_demo-cam-001:
+    - exec:ffmpeg -re -f lavfi -i testsrc2=size=1280x720:rate=15 -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -g 30 -f rtsp {output}
+  cam_demo-cam-001_hd:
+    - ffmpeg:cam_demo-cam-001#video=mjpeg#low_latency
+  cam_demo-cam-001_sd:
+    - ffmpeg:cam_demo-cam-001#video=mjpeg#width=640#low_latency
+
+  # Caméra démo 2 : scène de rue réelle en boucle → IA YOLO + LAPI
+  cam_demo-cam-002:
+    - exec:ffmpeg -stream_loop -1 -re -i /app/media/street-demo.mp4 -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -g 30 -an -f rtsp {output}
+  cam_demo-cam-002_hd:
+    - ffmpeg:cam_demo-cam-002#video=mjpeg#low_latency
+  cam_demo-cam-002_sd:
+    - ffmpeg:cam_demo-cam-002#video=mjpeg#width=640#low_latency

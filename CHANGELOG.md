@@ -15,6 +15,39 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 - Route volontairement minimale : aucune requête MongoDB, aucune dépendance IA,
   aucune vérification matérielle — réponse garantie < 100 ms
 - Le healthcheck Docker repasse en `healthy` ; plus de timeout au démarrage
+- **Audit v0.7.c** : le `HEALTHCHECK` du `backend/Dockerfile` probait encore
+  `/api/` — pointé sur `/health` + ajout `--start-period=90s` (couvre le
+  premier boot : imports torch + chargement des 51 plugins)
+
+### Fixed (backend) — P0-2 Initialisation IA lazy
+- `ai_loop` chargeait YOLO + fast-alpr (téléchargements yolo11n.pt + modèles
+  ONNX) inconditionnellement au boot, même sans caméra `detect_enabled`
+- Désormais : chargement UNIQUEMENT si ≥1 caméra `detect_enabled` existe ;
+  retry limité aux cycles où des caméras actives l'exigent
+- Gardes lazy ajoutées dans `_analyze_frame` et `analyze_image_local` (routes
+  on-demand : benchmark, test-détection, analyse d'upload restent fonctionnelles)
+
+### Fixed (deploy) — P0-4 Demo Camera 002 (go2rtc HTTP 500)
+- Cause racine : `go2rtc.yaml` référençait `/app/media/street-demo.mp4` mais le
+  conteneur go2rtc montait `RECORDINGS_PATH` sur `/app/media` — le fichier démo
+  du repo n'était jamais présent → `exec ffmpeg` échouait → HTTP 500 → timeouts
+- Fix : montage `../media:/demo-media:ro` + chemin `/demo-media/street-demo.mp4`
+
+### Fixed (backend) — P0-5 Boucle de redémarrage frame-source
+- `_reader_loop` redémarrait indéfiniment (backoff 1→5s, aucun plafond)
+- Ajout `_MAX_CONSECUTIVE_FAILURES=10` : arrêt propre + log ERROR après 10
+  tentatives consécutives sans frame ; champs `gave_up`/`consecutive_failures`
+  exposés dans `frame_source.status()` (diagnostics)
+- Relance automatique quand la caméra repasse online (stop/start par
+  `_sync_frame_source_workers`) ou si la config du flux change
+- `_ensure_frame_source_running` : les caméras démo utilisent désormais le
+  relais `GO2RTC_RTSP` (même logique que `_sync`) — supprime le churn
+  stop/recréation en Docker où l'URL seedée `127.0.0.1` pointait hors conteneur
+
+### Documented — P0-3 TensorRT (aucun code modifié)
+- `libnvinfer.so.10 not found` est ATTENDU : onnxruntime-gpu tente
+  TensorrtExecutionProvider en premier ; sans TensorRT installé il bascule sur
+  CUDAExecutionProvider — warning sans impact, l'inférence CUDA fonctionne
 
 ### Fixed (frontend) — P0-3 Lockfile Yarn
 - Vérification et validation du `yarn.lock` : `yarn install --frozen-lockfile`

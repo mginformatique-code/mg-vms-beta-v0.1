@@ -47,6 +47,10 @@ _FFMPEG_PATH = os.environ.get("MGVMS_FFMPEG_PATH", shutil.which("ffmpeg") or "ff
 _RESTART_BACKOFF_SEC = 1.0     # attente initiale entre 2 tentatives de restart
 _RESTART_MAX_BACKOFF_SEC = 5.0 # v0.4.5.a — de 30s à 5s (moins d'accumulation de latence)
 _READ_TIMEOUT_SEC = 20.0       # si aucune frame lue en 20s → considérer mort et redémarrer
+# P0-5 (v0.7.c) : arrêt propre après N tentatives CONSÉCUTIVES sans aucune frame
+# (au lieu d'une boucle infinie). Le worker est relancé quand la caméra repasse
+# online (stop() + start() par _sync_frame_source_workers) ou si sa config change.
+_MAX_CONSECUTIVE_FAILURES = 10
 
 
 def _ffmpeg_supports_cuvid() -> bool:
@@ -103,6 +107,9 @@ class _Worker:
     reader_thread: Optional[threading.Thread] = None
     restart_count: int = 0
     last_error: str = ""
+    # P0-5 (v0.7.c) : compteur d'échecs consécutifs (0 frame produite) + drapeau
+    consecutive_failures: int = 0
+    gave_up: bool = False
     # ── métriques v0.4.5.a ─────────────────────────────
     frames_produced: int = 0         # total depuis start()
     frames_dropped: int = 0          # frames écrasées avant lecture par le consommateur
@@ -190,6 +197,12 @@ def _reader_loop(w: _Worker):
         except Exception as e:
             w.last_error = f"spawn error: {e}"
             logger.warning("frame-source: impossible de démarrer ffmpeg pour %s: %s", w.camera_id, e)
+            w.consecutive_failures += 1
+            if w.consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
+                w.gave_up = True
+                logger.error("frame-source: %s ARRÊTÉ après %d échecs consécutifs (spawn) — dernière erreur: %s",
+                             w.camera_id, w.consecutive_failures, w.last_error)
+                break
             if not w.stop_event.wait(backoff):
                 backoff = min(backoff * 1.5, _RESTART_MAX_BACKOFF_SEC)
             continue
@@ -206,6 +219,7 @@ def _reader_loop(w: _Worker):
         last_read_ts = time.monotonic()
         w.started_at = w.started_at or last_read_ts
         prev_frame_ts = 0.0
+        frames_before_attempt = w.frames_produced
         try:
             while not w.stop_event.is_set() and w.proc.poll() is None:
                 # Lecture bloquante d'une frame complète
@@ -255,6 +269,16 @@ def _reader_loop(w: _Worker):
 
         if w.stop_event.is_set():
             break
+        # P0-5 (v0.7.c) : condition d'arrêt — N tentatives consécutives sans frame
+        if w.frames_produced > frames_before_attempt:
+            w.consecutive_failures = 0
+        else:
+            w.consecutive_failures += 1
+            if w.consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
+                w.gave_up = True
+                logger.error("frame-source: %s ARRÊTÉ après %d tentatives consécutives sans frame — dernière erreur: %s",
+                             w.camera_id, w.consecutive_failures, w.last_error or "aucune frame reçue")
+                break
         # Backoff progressif entre redémarrages
         logger.info("frame-source: %s en attente %.1fs avant redémarrage", w.camera_id, backoff)
         if not w.stop_event.wait(backoff):
@@ -424,6 +448,8 @@ def status() -> dict:
             "last_capture_interval_ms": round(w.last_capture_ms, 1) if w.last_capture_ms else None,
             "last_frame_age_ms": last_age_ms,
             "alive": bool(w.reader_thread and w.reader_thread.is_alive()),
+            "gave_up": w.gave_up,
+            "consecutive_failures": w.consecutive_failures,
             "last_error": w.last_error,
         }
     return {"workers": out, "cuvid_available": _HAS_CUVID, "mode": _HWACCEL_MODE}

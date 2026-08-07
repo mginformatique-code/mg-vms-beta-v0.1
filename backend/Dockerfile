@@ -77,7 +77,9 @@ RUN plugin_count=$(ls -d /app/data/plugins/*/ 2>/dev/null | wc -l) && \
     (echo "❌ Seulement $plugin_count plugins trouvés (attendu >= 40). Build échoué." && exit 1)
 
 EXPOSE 8001
-HEALTHCHECK --interval=30s --timeout=5s --retries=5 \
-    CMD curl -fsS http://localhost:8001/api/ || exit 1
+# P0-1 (v0.7.c) : probe sur /health (route dédiée, zéro dépendance Mongo/go2rtc/IA)
+# au lieu de /api/. `start-period` couvre le premier boot (imports torch/plugins lents).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=5 \
+    CMD curl -fsS http://localhost:8001/health || exit 1
 
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8001"]

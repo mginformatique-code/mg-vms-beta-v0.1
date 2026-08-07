@@ -422,3 +422,12 @@ Ordre officiel confirmé par le CEO :
 - Reconnaissance faciale immédiate (P7 prépare seulement le terrain)
 - Concurrence directe avec Frigate/Blue Iris/Milestone
 - Nouvelles features avant que P1 stabilisation ne soit garantie
+
+## Audit v0.7.c — P0 démarrage (2026-06)
+- P0-1 Healthcheck: Dockerfile probait /api/ → pointé sur /health + start-period=90s
+- P0-2 IA lazy: _load_models conditionné à ≥1 caméra detect_enabled (+ gardes lazy _analyze_frame/analyze_image_local)
+- P0-3 TensorRT: libnvinfer.so.10 manquant = warning ATTENDU, fallback CUDAExecutionProvider OK (documenté, zéro code)
+- P0-4 Demo cam 002: /app/media du conteneur go2rtc = RECORDINGS_PATH → fichier démo absent → fix montage ../media:/demo-media:ro + chemin go2rtc.yaml
+- P0-5 frame-source: _MAX_CONSECUTIVE_FAILURES=10, arrêt propre + gave_up dans status(); fix churn démo dans _ensure_frame_source_running (GO2RTC_RTSP)
+- Fichiers: backend/Dockerfile, backend/ai_engine.py, backend/frame_source.py, deploy-app/docker-compose.yml, deploy-app/go2rtc.yaml, go2rtc/go2rtc.yaml (preview: flux démo de base ajoutés)
+- Validé: /health 1.6ms local, login/me/docs 200, WS OK, demo-cam online, worker 12FPS restart_count=1, gave_up testé (10 échecs → stop propre)

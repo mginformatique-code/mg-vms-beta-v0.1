@@ -49,6 +49,10 @@ services:
       # deux services en lecture (go2rtc pour streaming des replays,
       # backend pour l'écriture des enregistrements et vignettes).
       - ${RECORDINGS_PATH:-./data/recordings}:/app/media:ro
+      # P0-4 (v0.7.c) · vidéos des caméras démo (street-demo.mp4) : le repo
+      # `media/` n'était PAS monté dans le conteneur → exec ffmpeg échouait
+      # (fichier introuvable) → go2rtc HTTP 500 sur cam_demo-cam-002.
+      - ../media:/demo-media:ro
     ports:
       - "1984:1984"       # HTTP API + WebSocket
       - "8554:8554"       # RTSP (VLC / clients directs)
