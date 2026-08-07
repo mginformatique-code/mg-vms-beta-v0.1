@@ -42,6 +42,10 @@ class CameraWorker:
         self.camera_id = camera_id
         self._prev_gray = None
         self._plate_cache: dict[str, datetime] = {}
+        # v0.7.e · Wave C · Cache OCR par (track_id, crop_hash) — évite
+        # de relancer les moteurs sur un crop quasi-identique du même
+        # véhicule tracké (typique d'un véhicule stationné).
+        self._crop_cache: dict[tuple, datetime] = {}
         self._last_ts: float = 0.0
 
     # ── Stages ───────────────────────────────────────────────────────
@@ -287,7 +291,47 @@ class CameraWorker:
                             "expires_in": int((self._plate_cache[plate_text] - now).total_seconds())})
                         continue
                     self._plate_cache[plate_text] = now + timedelta(seconds=max(cache_ttl, 1))
-                    plate_crop = ctx.image[max(0, int(abs_y1)):int(abs_y2), max(0, int(abs_x1)):int(abs_x2)]
+                    # v0.7.e · Wave C · extraction du crop plaque HD sur
+                    # ``ctx.image`` (HD, jamais preview MJPEG) + gate qualité
+                    # + amélioration (deskew/CLAHE/sharpen) si utile + cache
+                    # (track_id, hash). Le résultat est stocké tel quel dans
+                    # `plate_crop` (crop optimal utilisé pour l'affichage et
+                    # partagé par les moteurs OCR additionnels).
+                    from .plate_quality import (assess_crop_quality, enhance_plate_crop,
+                                                 crop_hash, save_debug_bundle)
+                    raw_plate_crop = ctx.image[max(0, int(abs_y1)):int(abs_y2),
+                                                max(0, int(abs_x1)):int(abs_x2)]
+                    q = assess_crop_quality(raw_plate_crop)
+                    enhanced_crop = raw_plate_crop
+                    if q.should_enhance and not q.skip:
+                        enhanced_crop = enhance_plate_crop(raw_plate_crop, q)
+                    plate_crop = enhanced_crop
+                    # Cache (track_id, hash) — évite le re-OCR de crops
+                    # quasi-identiques (véhicule stationné, faible mouvement).
+                    ch = crop_hash(enhanced_crop)
+                    cache_key = (roi.track_id, ch) if roi.track_id is not None else (None, ch)
+                    if cache_key in self._crop_cache and self._crop_cache[cache_key] > now:
+                        plate_debug.append({
+                            "plate": plate_text, "skipped": "cache_crop_hash",
+                            "hash": ch})
+                        continue
+                    self._crop_cache[cache_key] = now + timedelta(seconds=max(cache_ttl, 1))
+                    # Debug bundle (activable via env MGVMS_DEBUG_OCR=1 ou API)
+                    save_debug_bundle(
+                        self.camera_id, roi.track_id,
+                        original_frame=ctx.image,
+                        vehicle_crop=roi.crop,
+                        raw_plate_crop=raw_plate_crop,
+                        enhanced_plate_crop=enhanced_crop if q.should_enhance else None,
+                        quality=q,
+                        ocr_results_by_engine={_ocr_name: {
+                            "plate": plate_text,
+                            "confidence": round(float(r.confidence), 2),
+                        }},
+                        final_decision={"plate": plate_text,
+                                         "confidence": round(float(r.confidence), 2),
+                                         "engine": _ocr_name},
+                    )
                     ctx.plates.append({
                         "plate": plate_text,
                         "confidence": round(float(r.confidence), 2),
@@ -299,10 +343,14 @@ class CameraWorker:
                         "engine": _ocr_name,  # v0.5.6 : nom depuis le registry
                         "track_id": roi.track_id,
                         "_owner_bbox": tuple(roi.owner["_bbox"]),
+                        "_plate_crop_np": enhanced_crop,   # Wave C · partagé pour multi-OCR aval
+                        "_plate_quality": q.to_dict(),
+                        "_crop_hash": ch,
                     })
                     plate_debug.append({"plate": plate_text,
                                          "confidence": round(float(r.confidence), 2),
-                                         "size": f"{pw}x{ph}", "kept": True})
+                                         "size": f"{pw}x{ph}", "kept": True,
+                                         "quality": q.to_dict()})
         except Exception:
             logger.exception("Erreur LAPI (crop véhicule)")
         ms = (time.monotonic() - t0) * 1000

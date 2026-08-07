@@ -53,11 +53,17 @@ class TestRuntimeStateExposed:
         assert '_bytetrack_cfg' in src
 
     def test_bytetrack_put_syncs_runtime(self):
-        """v0.4 · PUT /tracking/config appelle load_runtime_config() pour sync."""
+        """v0.4 → v0.7.e · PUT /tracking/config déclenche le rechargement runtime.
+
+        Avant v0.7.e : appel bloquant direct ``await load_runtime_config()``.
+        Depuis v0.7.e (Wave A · Hot Reload chirurgical) : pose un signal
+        ``signal_config_changed()`` — la boucle IA rechargera au prochain
+        cycle sans bloquer la réponse HTTP.
+        """
         import inspect
         from plugin_config import tracking_config_put
         src = inspect.getsource(tracking_config_put)
-        assert 'load_runtime_config' in src
+        assert 'signal_config_changed' in src or 'load_runtime_config' in src
 
 
 class TestOnvifClearErrors:

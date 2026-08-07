@@ -557,7 +557,12 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
         }
         await db.plates.insert_one(dict(doc))
         doc.pop("_id", None)
-        for k in ("_emit", "_owner_bbox"):
+        # v0.7.e · Wave C · nettoyage des champs internes (ndarray non
+        # sérialisables, dict quality volumineux) — jamais persistés en Mongo
+        # (le doc est construit champ par champ ci-dessus), on les retire
+        # aussi de p pour libérer la mémoire du result dict.
+        for k in ("_emit", "_owner_bbox", "_plate_crop_np",
+                  "_plate_quality", "_crop_hash"):
             p.pop(k, None)
         if list_status == "black":
             await _raise_blacklist_alert(cam, doc, (wl or {}).get("reason", ""))

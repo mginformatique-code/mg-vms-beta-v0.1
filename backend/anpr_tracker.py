@@ -80,24 +80,42 @@ class TrackedVehicle:
         self.lost_cycles = 0
 
     def best_reading(self) -> Optional[PlateReading]:
-        """Sélectionne la meilleure lecture : consensus + confiance max.
+        """Sélectionne la meilleure lecture : consensus pondéré par moteur.
 
-        Algorithme :
-          1. Groupe les lectures par ``plate`` (texte normalisé).
-          2. Choisit le texte le plus fréquent (consensus).
-          3. Dans ce groupe, retourne la lecture avec la meilleure confiance
-             et un crop non-vide.
+        v0.7.e · Wave C · Fusion pondérée par moteur :
+          1. Groupe par ``plate`` (texte normalisé).
+          2. Score par groupe = Σ (confidence × engine_weight).
+          3. Retient le groupe au meilleur score.
+          4. Dans ce groupe, retourne la lecture avec confiance max
+             (plate_crop non vide prioritaire).
+
+        Pour un poids par moteur, cf. ``pipeline_v2.plate_quality.ENGINE_WEIGHTS``.
+        Résultat : plus robuste qu'un simple vote majoritaire — un moteur
+        peu fiable (tesseract) ne peut pas emporter la décision face à
+        deux lectures fast-alpr/plate-recognizer même s'il vote plus souvent.
         """
         if not self.readings:
             return None
-        # 1. Consensus par texte
-        texts = [r.plate for r in self.readings if r.plate]
-        if not texts:
+        try:
+            from pipeline_v2.plate_quality import engine_weight
+        except Exception:  # pragma: no cover
+            def engine_weight(_):
+                return 1.0
+        # 1. Regrouper par texte + calculer un score pondéré
+        groups: dict = {}
+        for r in self.readings:
+            if not r.plate:
+                continue
+            g = groups.setdefault(r.plate, {"score": 0.0, "readings": []})
+            g["score"] += float(r.confidence) * engine_weight(r.engine)
+            g["readings"].append(r)
+        if not groups:
             return None
-        top_text, _ = Counter(texts).most_common(1)[0]
-        # 2. Meilleure lecture pour ce texte
-        same = [r for r in self.readings if r.plate == top_text]
-        # Priorité : plate_crop non-vide, puis confidence max
+        # 2. Meilleur groupe (score max, tie-break sur count)
+        top_text = max(groups.keys(),
+                       key=lambda k: (groups[k]["score"], len(groups[k]["readings"])))
+        same = groups[top_text]["readings"]
+        # 3. Priorité : plate_crop non-vide, puis confidence max
         same.sort(key=lambda r: (bool(r.plate_crop), r.confidence), reverse=True)
         return same[0]
 

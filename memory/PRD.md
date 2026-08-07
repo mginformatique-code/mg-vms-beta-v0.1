@@ -456,3 +456,28 @@ Ordre officiel confirmé par le CEO :
 ## v0.7.d (2026-06)
 - Fix "unknown version"/changelog vide une fois installé : CHANGELOG.md absent de l'image Docker (COPY backend/ . seulement) → ajout `COPY CHANGELOG.md ./CHANGELOG.md` dans backend/Dockerfile. welcome.py lit /app/CHANGELOG.md (OK image + preview).
 - Entrée changelog v0.7.c+1 renommée v0.7.d. /api/welcome/summary → installed=v0.7.d, changelog 30 entrées.
+
+## v0.7.e Wave A · Hot Reload chirurgical (2026-06)
+- Cause racine : `ai_loop` rechargeait config Mongo + `_sync_frame_source_workers` à chaque cycle (~6×/sec). Fix : signal-driven + TTL 10s. 4,3× moins de queries Mongo mesurées sur 25s.
+- Signaux publics dans `ai_engine` : signal_config_changed / signal_camera_config_changed / signal_camera_topology_changed / get_hot_reload_metrics
+- Routes camera POST/PUT/DELETE + pipeline-config + anpr-camera-put + bytetrack-config posent le signal approprié
+- `_sync_frame_source_workers(cams, only={ids})` — sync ciblé, 1 modif caméra = 1 seul worker. Preuve mesurée : create camera → topology_syncs_partial +1, 0 impact autres workers
+- Nouveau `GET /api/diagnostics/hot-reload` (view_live) : compteurs runtime
+- Tests : 16 verts (test_v07e_hot_reload_wave_a.py) + 68 régression existants
+- Fichiers : ai_engine.py, routers.py, plugin_config.py, plugin_manager/bus.py, routes/health_dashboard.py
+
+## v0.7.e Wave C · Multi-OCR / Crop optimal (2026-06)
+- Nouveau module `pipeline_v2/plate_quality.py` : assess_crop_quality (sharpness Laplacien + contraste std + skew Hough), enhance_plate_crop (deskew + CLAHE + unsharp), crop_hash (aHash 16×16), engine_weight (fast-alpr=1.0, tesseract=0.55...), save_debug_bundle
+- CameraWorker._stage_anpr : gate qualité + enhance auto + cache (track_id, crop_hash) + debug bundle facultatif
+- anpr_tracker.best_reading v2 : fusion pondérée score = Σ (conf × engine_weight). Fast-alpr bat tesseract à confidence égale, mais accumulation tesseract peut battre fast-alpr isolé (robustesse)
+- Nouveau `GET/PUT /api/diagnostics/plate-quality[/debug]` : seuils + poids + toggle debug à chaud
+- Mode debug (env MGVMS_DEBUG_OCR=1 ou API) sauvegarde bundle /tmp/mgvms_debug_ocr/<cam>_<track>_<ts>/ : frame_full.jpg, vehicle.jpg, plate_raw.jpg, plate_enhanced.jpg, bundle.json
+- Cleanup dict result plates : `_plate_crop_np`, `_plate_quality`, `_crop_hash` ne fuient pas en Mongo
+- Tests : 19 verts (test_v07e_multi_ocr_wave_c.py). Total : 94/94 verts (16 A + 19 C + 59 régression)
+- Fichiers : pipeline_v2/plate_quality.py (nouveau), pipeline_v2/camera_worker.py, anpr_tracker.py, pipeline_v2/downstream.py, routes/health_dashboard.py
+
+## Vagues restantes v0.7.e (backlog)
+- Wave B : Frontend fuites / re-renders / WebSockets / polling / timers (mesures chiffrées)
+- Wave D : go2rtc + Camera API + ONVIF (auto-détection capabilities réelles, snapshots, previews stables pendant modif)
+- Wave E : Timeline type Reolink (couleurs par type d'événement) + miniatures véhicules (photo complète + crop véhicule + crop plaque) + fix boucle vidéo
+- Wave F : Stress-test 1/5/10/20/30/50 caméras avec FPS/CPU/GPU/VRAM/RAM/p95/p99/OCR moyen/temps détection/temps crop/temps OCR/total pipeline + rapport final

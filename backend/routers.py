@@ -244,6 +244,15 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
     await log_audit(user, "camera_created", data.name, f"Site: {site['name']} · Mode: {data.mode}")
     from streaming import register_camera_stream
     registered = await register_camera_stream(doc, caller=f"POST /api/cameras user={user.get('email','?')}")
+    # v0.7.e · Wave A · Hot Reload chirurgical : signale l'ajout au moteur IA
+    # pour qu'il ne resynchronise QUE cette caméra au prochain cycle
+    # (aucun impact sur les autres caméras / le pipeline global).
+    try:
+        from ai_engine import signal_camera_topology_changed, signal_camera_config_changed
+        signal_camera_topology_changed(doc["id"])
+        signal_camera_config_changed(doc["id"])
+    except Exception:
+        pass
     if not registered:
         # Si ONVIF a réussi mais go2rtc n'arrive pas à ouvrir le flux, autoriser la création si demandé
         if data.mode == "onvif" and data.allow_rtsp_override:
@@ -298,6 +307,13 @@ async def update_pipeline_config_endpoint(camera_id: str, data: dict,
 
     merged = {**current, **patch}
     await db.cameras.update_one({"id": camera_id}, {"$set": {"pipeline_config": merged}})
+    # v0.7.e · Wave A : signale la modification pipeline pour rebuild lazy
+    # du CameraGraph de cette caméra uniquement (pas de global reload).
+    try:
+        from ai_engine import signal_camera_config_changed
+        signal_camera_config_changed(camera_id)
+    except Exception:
+        pass
     await log_audit(user, "camera_pipeline_config_updated", camera_id, details=str(patch))
     return {"ok": True, "pipeline_config": merged}
 
@@ -409,6 +425,15 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
     # (skip si config identique). Cela évite de déconnecter les consommateurs actifs
     # quand l'utilisateur modifie une prop non-streaming (ex : nom, coordonnées lat/lng).
     registered = await register_camera_stream(updated, caller=f"PUT /api/cameras/{camera_id} user={user.get('email','?')}")
+    # v0.7.e · Wave A · Hot Reload chirurgical : signale la modification au
+    # moteur IA — seule CETTE caméra sera re-synchronisée (worker ffmpeg
+    # relancé UNIQUEMENT si l'URL / codec / résolution ont changé).
+    try:
+        from ai_engine import signal_camera_topology_changed, signal_camera_config_changed
+        signal_camera_topology_changed(camera_id)
+        signal_camera_config_changed(camera_id)
+    except Exception:
+        pass
     if not registered and camera_id not in {"demo-cam-001", "demo-cam-002"}:
         raise HTTPException(400, "Impossible de mettre à jour le flux dans go2rtc")
     updated.pop("password", None)
@@ -421,6 +446,14 @@ async def delete_camera(camera_id: str, user: dict = Depends(require_role("techn
     await db.cameras.delete_one({"id": camera_id})
     from streaming import unregister_camera_stream
     await unregister_camera_stream(camera_id, caller=f"DELETE /api/cameras user={user.get('email','?')}")
+    # v0.7.e · Wave A · Hot Reload chirurgical : signale la suppression au
+    # moteur IA — seul le worker de cette caméra sera stoppé (les autres
+    # workers ffmpeg continuent à tourner sans interruption).
+    try:
+        from ai_engine import signal_camera_topology_changed
+        signal_camera_topology_changed(camera_id, removed=True)
+    except Exception:
+        pass
     await log_audit(user, "camera_deleted", cam["name"] if cam else camera_id)
     return {"ok": True}
 

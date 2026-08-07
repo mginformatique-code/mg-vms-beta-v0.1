@@ -522,6 +522,11 @@ def _bump_graph_registry() -> None:
     Appelé sur register / unregister / set_enabled pour que la prochaine
     frame reconstruise le graphe avec la nouvelle réalité du bus.
     Import local pour éviter les cycles.
+
+    v0.7.e · Wave A · Le rebuild reste **lazy et per-camera** : bumper
+    le ``_bus_version`` ne force AUCUN rebuild immédiat. Le prochain appel
+    ``registry.get(camera_id)`` détectera le mismatch de hash et rebâtira
+    UNIQUEMENT le graphe demandé. Pas de restart global du pipeline.
     """
     try:
         from pipeline_v2.registry import registry

@@ -393,6 +393,58 @@ async def diagnostics_pipeline_v2_invalidate(
     return {"ok": True, "invalidated": camera_id or "all"}
 
 
+@health_dashboard_router.get("/diagnostics/hot-reload")
+async def diagnostics_hot_reload(user: dict = Depends(require_permission("view_live"))):
+    """v0.7.e · Wave A · Preuve du Hot Reload chirurgical.
+
+    Retourne les compteurs qui prouvent que :
+      * une modification caméra = 1 seul worker rechargé (``topology_syncs_partial``)
+      * aucun restart global (``topology_syncs_full`` ≈ 1 par TTL cycle)
+      * les reloads de config sont signal-driven (``config_reloads`` +
+        ``camera_config_reloads`` restent bornés par les signaux reçus)
+      * pas de churn frame_source (``frame_source_starts / stops`` restent bas)
+    """
+    try:
+        from ai_engine import get_hot_reload_metrics
+        return get_hot_reload_metrics()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@health_dashboard_router.get("/diagnostics/plate-quality")
+async def diagnostics_plate_quality(user: dict = Depends(require_permission("view_live"))):
+    """v0.7.e · Wave C · État du gate qualité crop plaque + mode debug."""
+    from pipeline_v2 import plate_quality as pq
+    return {
+        "thresholds": {
+            "min_plate_side_px": pq.MIN_PLATE_SIDE_PX,
+            "min_sharpness": pq.MIN_SHARPNESS,
+            "min_contrast": pq.MIN_CONTRAST,
+            "max_skew_deg": pq.MAX_SKEW_DEG,
+            "good_enough_sharpness": pq.GOOD_ENOUGH_SHARPNESS,
+            "good_enough_contrast": pq.GOOD_ENOUGH_CONTRAST,
+        },
+        "engine_weights": pq.ENGINE_WEIGHTS,
+        "debug_mode": {
+            "enabled": pq.debug_enabled(),
+            "output_dir": pq._DEBUG_DIR,
+            "env_var": "MGVMS_DEBUG_OCR",
+        },
+    }
+
+
+@health_dashboard_router.put("/diagnostics/plate-quality/debug")
+async def diagnostics_plate_quality_debug_toggle(
+    enabled: bool,
+    user: dict = Depends(require_permission("technician")),
+):
+    """v0.7.e · Active/désactive le mode debug OCR (bundle images + JSON)."""
+    from pipeline_v2 import plate_quality as pq
+    pq.set_debug_enabled(enabled)
+    return {"enabled": pq.debug_enabled(), "output_dir": pq._DEBUG_DIR}
+
+
+
 @health_dashboard_router.get("/diagnostics/pipeline-inspector")
 async def diagnostics_pipeline_inspector(user: dict = Depends(require_permission("view_live"))):
     """v0.4.2 · **Pipeline Inspector** — diagnostic runtime par caméra × stage.

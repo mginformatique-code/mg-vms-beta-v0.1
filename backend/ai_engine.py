@@ -58,23 +58,127 @@ _runtime_config: dict = {}
 _bytetrack_cfg: dict = {}
 _camera_anpr_cfg: dict[str, dict] = {}
 
+# v0.7.e · Hot Reload chirurgical — signal-driven reloads.
+#   * `_config_dirty` : mis à True par les routes qui touchent ai_config /
+#     bytetrack_config → la boucle IA rechargera au prochain cycle uniquement.
+#   * `_camera_config_dirty` : idem pour anpr_config par-caméra.
+#   * `_cameras_topology_dirty` : signale que la liste des workers doit être
+#     resynchronisée (ajout / suppression / changement d'URL RTSP).
+#   * `_camera_dirty_set` : quand un seul cam_id est ciblé (ajout/PUT/DELETE),
+#     seul ce worker est re-synchronisé — pas de balayage global.
+#   * `_last_*_reload_ts` : TTL de sûreté (10s) — si aucun signal reçu depuis
+#     N secondes on rescanne quand même (défense en profondeur pour rattraper
+#     un changement externe passé sous le radar).
+_config_dirty: bool = True                # rechargé au 1er cycle
+_camera_config_dirty: bool = True         # idem
+_cameras_topology_dirty: bool = True      # idem
+_camera_dirty_set: set[str] = set()
+_last_config_reload_ts: float = 0.0
+_last_camera_config_reload_ts: float = 0.0
+_last_topology_sync_ts: float = 0.0
+_HOT_RELOAD_TTL_SEC = float(os.environ.get("MGVMS_HOT_RELOAD_TTL_SEC", "10.0"))
+
+# Compteurs de preuve (exposés par get_hot_reload_metrics)
+_hot_reload_metrics: dict = {
+    "config_reloads": 0,
+    "camera_config_reloads": 0,
+    "topology_syncs_full": 0,
+    "topology_syncs_partial": 0,
+    "frame_source_starts": 0,
+    "frame_source_stops": 0,
+    "cycles_since_boot": 0,
+    "signals_received": {
+        "config": 0,
+        "camera_config": 0,
+        "camera_topology": 0,
+    },
+}
+
+
+def signal_config_changed() -> None:
+    """Signale qu'un paramètre IA global (ai_config / bytetrack_config) a changé.
+
+    Le prochain cycle de la boucle IA rechargera la config depuis Mongo.
+    """
+    global _config_dirty
+    _config_dirty = True
+    _hot_reload_metrics["signals_received"]["config"] += 1
+
+
+def signal_camera_config_changed(camera_id: Optional[str] = None) -> None:
+    """Signale qu'une config par-caméra (anpr_config, enabled_plugins, ...) a
+    changé. Optionnellement ciblée sur un ``camera_id`` — sinon full refresh.
+    """
+    global _camera_config_dirty
+    _camera_config_dirty = True
+    _hot_reload_metrics["signals_received"]["camera_config"] += 1
+
+
+def signal_camera_topology_changed(camera_id: Optional[str] = None,
+                                    removed: bool = False) -> None:
+    """Signale un changement de topologie flotte (ajout / suppression / URL
+    RTSP modifiée). Si ``camera_id`` est fourni, seul ce worker sera resync
+    au prochain cycle — le reste du pipeline continue à fonctionner sans
+    interruption.
+    """
+    global _cameras_topology_dirty
+    _cameras_topology_dirty = True
+    _hot_reload_metrics["signals_received"]["camera_topology"] += 1
+    if camera_id:
+        _camera_dirty_set.add(camera_id)
+    # removed=True est passé pour référence — le sync detectera l'absence et
+    # arrêtera le worker orphelin.
+
+
+def get_hot_reload_metrics() -> dict:
+    """Compteurs exposés par ``/api/diagnostics/hot-reload`` (Wave A preuves)."""
+    return {
+        **_hot_reload_metrics,
+        "camera_dirty_pending": sorted(_camera_dirty_set),
+        "flags": {
+            "config_dirty": _config_dirty,
+            "camera_config_dirty": _camera_config_dirty,
+            "cameras_topology_dirty": _cameras_topology_dirty,
+        },
+        "last_reload_ts": {
+            "config": _last_config_reload_ts,
+            "camera_config": _last_camera_config_reload_ts,
+            "topology": _last_topology_sync_ts,
+        },
+        "ttl_sec": _HOT_RELOAD_TTL_SEC,
+    }
+
 
 def _cfg(key: str, default):
     return _runtime_config.get(key, default)
 
 
 async def load_runtime_config():
+    """Recharge ai_config + bytetrack_config depuis Mongo.
+
+    v0.7.e · Appelée UNIQUEMENT sur signal ou expiration TTL — plus jamais
+    à chaque cycle IA. Voir ``signal_config_changed()``.
+    """
+    global _last_config_reload_ts, _config_dirty
     doc = await db.settings.find_one({"key": "ai_config"}, {"_id": 0})
     if doc and isinstance(doc.get("value"), dict):
         _runtime_config.update(doc["value"])
     bt = await db.settings.find_one({"key": "bytetrack_config"}, {"_id": 0})
     if bt and isinstance(bt.get("value"), dict):
         _bytetrack_cfg.update(bt["value"])
+    _last_config_reload_ts = time.time()
+    _config_dirty = False
+    _hot_reload_metrics["config_reloads"] += 1
     logger.info("Config IA runtime chargée : %s (bytetrack=%s)",
                 _runtime_config or "(défauts env)", _bytetrack_cfg.get("enabled", False))
 
 
 async def refresh_per_camera_configs():
+    """Recharge la map ``anpr_config`` par-caméra depuis Mongo.
+
+    v0.7.e · Appelée UNIQUEMENT sur signal ou TTL — plus par cycle IA.
+    """
+    global _last_camera_config_reload_ts, _camera_config_dirty
     cams = await db.cameras.find({"detect_enabled": True},
                                   {"_id": 0, "id": 1, "anpr_config": 1}).to_list(500)
     _camera_anpr_cfg.clear()
@@ -82,6 +186,9 @@ async def refresh_per_camera_configs():
         cfg = c.get("anpr_config") or {}
         if cfg:
             _camera_anpr_cfg[c["id"]] = cfg
+    _last_camera_config_reload_ts = time.time()
+    _camera_config_dirty = False
+    _hot_reload_metrics["camera_config_reloads"] += 1
 
 
 async def update_runtime_config(patch: dict) -> dict:
@@ -91,6 +198,7 @@ async def update_runtime_config(patch: dict) -> dict:
         {"$set": {"key": "ai_config", "value": _runtime_config}},
         upsert=True,
     )
+    signal_config_changed()  # v0.7.e · autres process/watchers voient direct
     return dict(_runtime_config)
 
 
@@ -379,15 +487,35 @@ async def _fetch_frame(camera_id: str):
     return None
 
 
-async def _sync_frame_source_workers(cams: list[dict]) -> None:
-    """Synchronise les workers ffmpeg persistants avec les caméras actives."""
+async def _sync_frame_source_workers(cams: list[dict], *,
+                                       only: Optional[set[str]] = None) -> None:
+    """Synchronise les workers ffmpeg persistants avec les caméras actives.
+
+    v0.7.e · Wave A · Hot Reload chirurgical.
+        * ``only=None``   → sync FULL (audit périodique, boot). Marque
+          ``topology_syncs_full``.
+        * ``only={ids}``  → sync PARTIEL : seuls les cam_ids listés sont
+          traités (start ou stop). Le reste du pipeline continue à tourner
+          intact. Marque ``topology_syncs_partial``.
+    """
     import frame_source
     go2rtc_rtsp = os.environ.get("GO2RTC_RTSP", "rtsp://go2rtc:8554")
     use_direct = os.environ.get("MGVMS_AI_DIRECT_RTSP", "1").lower() not in ("0", "false", "no")
 
+    partial = only is not None
+    if partial:
+        _hot_reload_metrics["topology_syncs_partial"] += 1
+    else:
+        _hot_reload_metrics["topology_syncs_full"] += 1
+
     active_ids = set()
     for cam in cams:
         cam_id = cam["id"]
+        if partial and cam_id not in only:
+            # En mode partiel on saute les caméras non-ciblées mais on garde
+            # leur ID dans ``active_ids`` pour ne pas les stopper par erreur.
+            active_ids.add(cam_id)
+            continue
         ai_url = (cam.get("ai_rtsp_url") or "").strip()
         native_url = (cam.get("rtsp_url") or "").strip()
         is_demo = cam_id.startswith("demo-") or cam_id.startswith("demo_")
@@ -416,17 +544,27 @@ async def _sync_frame_source_workers(cams: list[dict]) -> None:
             codec = "h265"
         try:
             frame_source.start(cam_id, rtsp_url, codec=codec, width=1280, height=720)
+            _hot_reload_metrics["frame_source_starts"] += 1
             logger.info("frame_source.start %s src=%s codec=%s (%s)",
                         cam_id, source_type, codec, rtsp_url[:60] + ("…" if len(rtsp_url) > 60 else ""))
         except Exception as e:
             logger.warning("frame_source.start(%s) échec: %s", cam_id, e)
 
+    # En mode partiel : on ne stoppe que les workers explicitement retirés
+    # (i.e. présents dans ``only`` mais ABSENTS de la liste ``cams`` fournie).
+    # En mode FULL : on stoppe tous les workers orphelins.
     current = set(frame_source.status().get("workers", {}).keys())
-    for stale in current - active_ids:
-        try:
-            frame_source.stop(stale)
-        except Exception:
-            pass
+    if partial:
+        stale = only - active_ids
+    else:
+        stale = current - active_ids
+    for cid in stale:
+        if cid in current:
+            try:
+                frame_source.stop(cid)
+                _hot_reload_metrics["frame_source_stops"] += 1
+            except Exception:
+                pass
 
 
 # ── Boucle temps réel : Phase A sync + Phase B downstream ───────────
@@ -471,10 +609,11 @@ async def _process_camera(cam: dict) -> None:
     from pipeline_v2.camera_worker import runtime as _runtime
     from pipeline_v2.inspector import inspector as _inspector
 
-    # v0.4.5.a · Warm-start persistant : garantit que le thread ffmpeg est
-    # déjà en train de lire dès que la caméra est marquée `detect_enabled`.
-    # Idempotent (no-op si déjà démarré avec la même config).
-    _ensure_frame_source_running(cam)
+    # v0.7.e · Wave A · Hot Reload chirurgical : le warm-start du worker
+    # ffmpeg est désormais assuré UNIQUEMENT par ``_sync_frame_source_workers``
+    # (appelé au démarrage + sur signal). Ne plus appeler `_ensure_frame_source_running`
+    # ici évite un import + un appel `frame_source.start()` par caméra
+    # par cycle — 100% redondant (idempotent, même config).
 
     t_start = time.perf_counter()
     frame = await _fetch_frame(cam["id"])
@@ -580,18 +719,45 @@ async def ai_loop() -> None:
     )
     while True:
         _ai_health["cycles_total"] += 1
+        _hot_reload_metrics["cycles_since_boot"] += 1
         _ai_health["last_cycle_ts"] = datetime.now(timezone.utc).isoformat()
         try:
-            await refresh_per_camera_configs()
-            await load_runtime_config()
+            # v0.7.e · Wave A · Hot Reload chirurgical.
+            # Les reloads Mongo ne se font PLUS chaque cycle. On respecte :
+            #   1. Le signal explicite posé par les routes API (dirty flag).
+            #   2. Un TTL de sûreté (défense en profondeur) pour rattraper
+            #      un changement DB qui aurait échappé au signal.
+            _now = time.time()
+            if _camera_config_dirty or (_now - _last_camera_config_reload_ts > _HOT_RELOAD_TTL_SEC):
+                await refresh_per_camera_configs()
+            if _config_dirty or (_now - _last_config_reload_ts > _HOT_RELOAD_TTL_SEC):
+                await load_runtime_config()
+
             cams = await db.cameras.find({"detect_enabled": True, "status": "online"}, {"_id": 0}).to_list(200)
+
             # P0-2 (v0.7.c) : retry de chargement UNIQUEMENT si des caméras l'exigent
             if cams and (not _ai_health["yolo_loaded"] or not _ai_health["alpr_loaded"]):
                 try:
                     await asyncio.to_thread(_load_models)
                 except Exception as reload_err:
                     logger.debug("Retry _load_models: %s", reload_err)
-            await _sync_frame_source_workers(cams)
+
+            # v0.7.e · sync workers : signal OU TTL (30s, 2× le TTL config)
+            # ou changement effectif de l'ensemble des cam_ids actifs.
+            global _last_topology_sync_ts, _cameras_topology_dirty
+            need_full_sync = (_now - _last_topology_sync_ts) > (_HOT_RELOAD_TTL_SEC * 3)
+            if _cameras_topology_dirty and _camera_dirty_set:
+                # Signal ciblé — sync PARTIEL des seules caméras impactées.
+                targeted = set(_camera_dirty_set)
+                _camera_dirty_set.clear()
+                _cameras_topology_dirty = False
+                await _sync_frame_source_workers(cams, only=targeted)
+                _last_topology_sync_ts = _now
+            elif _cameras_topology_dirty or need_full_sync:
+                _cameras_topology_dirty = False
+                await _sync_frame_source_workers(cams)
+                _last_topology_sync_ts = _now
+
             if cams:
                 logger.info("IA · cycle : %d caméra(s) réelle(s) en parallèle %s",
                             len(cams), [c["name"] for c in cams])

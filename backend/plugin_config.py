@@ -93,6 +93,12 @@ async def anpr_camera_put(camera_id: str, data: AnprCameraConfig,
     data.blacklist_local = [p.upper().replace(" ", "") for p in data.blacklist_local if p.strip()]
     await db.cameras.update_one({"id": camera_id},
                                 {"$set": {"anpr_config": data.model_dump()}})
+    # v0.7.e · Wave A : signal per-cam
+    try:
+        from ai_engine import signal_camera_config_changed
+        signal_camera_config_changed(camera_id)
+    except Exception:
+        pass
     await log_audit(user, "anpr_camera_config_updated", cam["name"],
                     f"ROI={len(data.roi_polygon)} pts · WL={len(data.whitelist_local)} · BL={len(data.blacklist_local)}")
     return data.model_dump()
@@ -313,9 +319,11 @@ async def tracking_config_put(data: ByteTrackConfig, user: dict = Depends(requir
     # v0.4 · Sync runtime — recharge immédiatement _bytetrack_cfg dans ai_engine
     # sinon le PUT met à jour la DB mais le pipeline continue avec l'ancienne
     # config (bug remonté par audit : "ByteTrack=False dans le monitoring").
+    # v0.7.e · Wave A : plutôt qu'un appel synchrone + import cyclique on
+    # POSE UN SIGNAL — la boucle IA rechargera au prochain cycle (défaut < 150ms).
     try:
-        from ai_engine import load_runtime_config
-        await load_runtime_config()
+        from ai_engine import signal_config_changed
+        signal_config_changed()
     except Exception:
         pass
     await log_audit(user, "bytetrack_config_updated",

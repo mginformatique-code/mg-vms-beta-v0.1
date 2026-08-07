@@ -2,6 +2,87 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v0.7.e] — 2026-06 — Wave A · Hot Reload chirurgical + Wave C · Multi-OCR / Crop optimal (P0)
+
+### Added — Wave C · Module `pipeline_v2/plate_quality.py`
+- Nouveau module dédié au gate qualité + amélioration du crop plaque
+  AVANT l'appel OCR :
+  * `assess_crop_quality(crop)` — mesure netteté (Laplacien), contraste,
+    inclinaison (Hough) + score composite 0..1
+  * `enhance_plate_crop(crop, quality)` — deskew + CLAHE (contraste local
+    canal L de LAB) + unsharp mask léger, uniquement si `should_enhance`
+  * `crop_hash(crop)` — aHash 16×16 pour cache OCR par similarité visuelle
+  * `engine_weight(name)` — poids par moteur OCR (fast-alpr=1.0,
+    tesseract=0.55, ...)
+  * `save_debug_bundle(...)` — bundle images + JSON (activable via env
+    `MGVMS_DEBUG_OCR=1` ou API PUT)
+
+### Fixed — Wave C · Cache OCR TrackID+hash (au lieu de TEXT seul)
+- Cause racine : `_plate_cache[plate_text]` seul ne couvrait pas le cas
+  d'un véhicule stationné dont le crop change à peine — chaque cycle
+  lançait N OCR redondants
+- Fix : nouveau cache `_crop_cache[(track_id, crop_hash)]` — évite tout
+  re-OCR sur crops perceptuellement identiques du même track
+
+### Fixed — Wave C · Fusion pondérée par moteur
+- Cause racine : `TrackedVehicle.best_reading` = vote majoritaire pur —
+  2 lectures tesseract peuvent l'emporter face à 1 fast-alpr à confidence
+  équivalente
+- Fix : score groupé = `Σ (confidence × engine_weight)`. Le meilleur
+  score gagne. Fast-alpr (poids 1.0) domine tesseract (poids 0.55) à
+  confidence égale, mais 3 lectures tesseract cohérentes battent 1 fast-alpr
+  isolée (comportement souhaité de « robustesse par accumulation »)
+
+### Added — Wave C · Endpoints diagnostic + toggle debug
+- `GET /api/diagnostics/plate-quality` — seuils actuels + poids moteurs
+  + état du mode debug
+- `PUT /api/diagnostics/plate-quality/debug?enabled=true|false` — toggle
+  mode debug à chaud (technician) — écrit bundle images dans
+  `/tmp/mgvms_debug_ocr/<cam>_<track>_<ts>/` (frame_full.jpg,
+  vehicle.jpg, plate_raw.jpg, plate_enhanced.jpg, bundle.json)
+
+### Fixed — Wave A · Boucle IA ne martèle plus MongoDB à chaque cycle
+- Cause racine : `ai_loop` rechargeait `runtime_config` + `per_camera_configs`
+  + `_sync_frame_source_workers` à CHAQUE cycle (~6×/sec), soit >12 queries
+  Mongo/sec en permanence sans qu'aucun paramètre n'ait changé
+- Fix : mécanisme signal-driven + TTL de sûreté (10 s) — les reloads ne
+  s'exécutent que sur signal explicite d'une route API ou après expiration
+  du TTL. Preuve : 4,3× moins de queries Mongo sur 25 s de boucle
+- Nouvelles fonctions publiques exposées par `ai_engine` :
+  * `signal_config_changed()`
+  * `signal_camera_config_changed(camera_id?)`
+  * `signal_camera_topology_changed(camera_id?, removed?)`
+  * `get_hot_reload_metrics()`
+
+### Fixed — Wave A · Modif caméra = 1 seul worker relancé (jamais restart global)
+- `_sync_frame_source_workers` accepte désormais `only={cam_ids}` — sync
+  ciblé qui ne stoppe que les workers explicitement retirés et ne relance
+  que les workers explicitement modifiés
+- Les routes `POST/PUT/DELETE /api/cameras`, `PUT /api/cameras/{id}/pipeline-config`,
+  `PUT /api/plugins/anpr/cameras/{id}` et `PUT /api/plugins/tracking/config`
+  posent maintenant le signal approprié
+- Preuve mesurée : création caméra → `topology_syncs_partial +1`,
+  `frame_source_starts` inchangé sur les workers existants (0 stop, 0 impact)
+
+### Fixed — Wave A · Suppression du double warm-start
+- Cause racine : `_process_camera` appelait `_ensure_frame_source_running(cam)`
+  à chaque cycle en plus de `_sync_frame_source_workers` — doublon inutile
+- Fix : suppression de l'appel per-camera (le sync topologie est désormais
+  la seule autorité)
+
+### Added — Endpoint diagnostic `/api/diagnostics/hot-reload`
+- Expose les compteurs `config_reloads`, `topology_syncs_full/partial`,
+  `frame_source_starts/stops`, `signals_received` — permet de prouver en
+  temps réel qu'une modification donnée n'a bien touché qu'un seul worker
+
+### Tests
+- Nouvelle suite `tests/test_v07e_hot_reload_wave_a.py` : 16 tests verts
+- Nouvelle suite `tests/test_v07e_multi_ocr_wave_c.py` : 19 tests verts
+- Suite existante : 59 tests critiques toujours verts (94/94 au total)
+- Zéro régression, aucune API publique modifiée
+
+---
+
 ## [v0.7.d] — 2026-06 — Camera API Hardening (P0)
 
 ### Fixed — Changelog embarqué + version applicative
