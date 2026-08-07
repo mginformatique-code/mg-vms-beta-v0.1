@@ -2,6 +2,34 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v0.8-rc1] — 2026-06 — Camera Health Score + Capabilities Matrix (delta v0.8 RC)
+
+### Added — Camera Health Score
+- Nouveau `backend/services/camera_health.py` (170 l) — score 0-100 par
+  caméra basé sur 7 signaux pondérés : FPS réel vs attendu (25 %),
+  fiabilité pipeline (20 %), qualité OCR 60 dernières plaques (15 %),
+  fiabilité RTSP frame_source (15 %), latence p95 vs SLA 200 ms (10 %),
+  fraîcheur ONVIF (10 %), fraîcheur événements (5 %)
+- Bands : `healthy` ≥ 80, `degraded` ≥ 55, `critical` < 55
+- Retourne signals détaillés + `reasons` (top 5 métriques dégradées)
+  → l'intégrateur voit immédiatement quelles caméras nécessitent une
+  intervention
+
+### Added — Endpoints Camera Health + Capabilities Matrix
+- `GET /api/cameras/{id}/health` — score détaillé d'une caméra
+- `GET /api/cameras/health` — toutes + résumé
+  `{total, healthy, degraded, critical}`
+- `GET /api/cameras/capabilities-matrix` — matrice vendor × capability
+  agrégée depuis les `capabilities` déjà collectées par chaque driver
+  (v0.7.c/d) + `vendor_summary` avec count présents / total
+
+### Tests
+- Nouveau `tests/test_v08rc_camera_health.py` : 4 verts
+- Suite existante : 136 tests
+- **Total : 140 / 140 tests verts**, zéro régression, 0 API modifiée
+
+---
+
 ## [v0.7.h] — 2026-06 — Wave I · QoS & Production Hardening (delta)
 
 ### Added — OCR Quality Score 0-100

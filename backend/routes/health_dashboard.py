@@ -481,6 +481,76 @@ async def diagnostics_qos_put(
     return {"ok": True, "current": {**DEFAULT_THRESHOLDS, **cleaned}}
 
 
+# ═════════════════════════════════════════════════════════════════════
+# v0.8-rc1 · Camera Health Score + Capabilities Matrix
+# ═════════════════════════════════════════════════════════════════════
+@health_dashboard_router.get("/cameras/{camera_id}/health")
+async def get_camera_health(camera_id: str,
+                              user: dict = Depends(require_permission("view_live"))):
+    from services.camera_health import compute_health
+    return await compute_health(camera_id)
+
+
+@health_dashboard_router.get("/cameras/health")
+async def get_all_cameras_health(user: dict = Depends(require_permission("view_live"))):
+    from services.camera_health import compute_all_health
+    results = await compute_all_health()
+    counts = {"healthy": 0, "degraded": 0, "critical": 0}
+    for r in results:
+        counts[r.get("band", "critical")] = counts.get(r.get("band", "critical"), 0) + 1
+    return {
+        "cameras": results,
+        "summary": {"total": len(results), **counts},
+    }
+
+
+@health_dashboard_router.get("/cameras/capabilities-matrix")
+async def get_capabilities_matrix(user: dict = Depends(require_permission("view_live"))):
+    """Matrice vendor × capabilities (Priorité 1 v0.8 RC).
+
+    Retourne pour chaque caméra un tuple (vendor, model, capabilities dict)
+    permettant à l'UI d'afficher un tableau complet ✓/✗ par constructeur.
+    """
+    cams_cursor = db.cameras.find({}, {
+        "_id": 0, "id": 1, "name": 1, "vendor": 1, "model": 1,
+        "capabilities": 1, "status": 1, "driver": 1,
+    })
+    rows = []
+    all_caps: set = set()
+    async for c in cams_cursor:
+        caps = c.get("capabilities") or {}
+        # Ne pas exposer les clés internes (préfixées _)
+        clean_caps = {k: v for k, v in caps.items() if not str(k).startswith("_")}
+        all_caps.update(clean_caps.keys())
+        rows.append({
+            "camera_id": c["id"],
+            "name": c.get("name"),
+            "vendor": (c.get("vendor") or "unknown").lower(),
+            "model": c.get("model") or "—",
+            "driver": c.get("driver"),
+            "status": c.get("status"),
+            "capabilities": clean_caps,
+        })
+    return {
+        "rows": rows,
+        "capability_keys": sorted(all_caps),
+        "vendor_summary": _summarize_by_vendor(rows, all_caps),
+    }
+
+
+def _summarize_by_vendor(rows: list[dict], all_caps: set) -> dict:
+    """Regroupe par vendor et compte les caps disponibles."""
+    by_vendor: dict = {}
+    for r in rows:
+        v = r["vendor"]
+        by_vendor.setdefault(v, {"count": 0, "caps_present": {}, "caps_total": len(all_caps)})
+        by_vendor[v]["count"] += 1
+        for k, val in r["capabilities"].items():
+            if val:
+                by_vendor[v]["caps_present"][k] = by_vendor[v]["caps_present"].get(k, 0) + 1
+    return by_vendor
+
+
 
 @health_dashboard_router.get("/diagnostics/pipeline-inspector")
 async def diagnostics_pipeline_inspector(user: dict = Depends(require_permission("view_live"))):

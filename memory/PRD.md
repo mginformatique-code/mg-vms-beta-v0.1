@@ -551,19 +551,32 @@ Répond aux 10 axes de l'audit demandé et aux 9 critères de validation, avec p
 - Tests : 10 verts (test_v07h_qos_hardening.py). Total v0.7 : **136/136 verts**
 - Fichiers : plate_quality.py (+8), engine_reliability.py (nouveau, 110l), qos_alerts.py (nouveau, 170l), server.py (+3), routes/health_dashboard.py (+40), stress/mongo_audit.py (nouveau, 140l)
 
-## Rapport Wave I : /app/memory/WAVE_I_QOS_HARDENING_v0.7.h.md
+## v0.8-rc1 · Camera Health Score + Capabilities Matrix (2026-06)
+- `backend/services/camera_health.py` (nouveau, 170l) : score 0-100 par caméra basé sur 7 signaux pondérés (FPS 25%, pipeline_reliability 20%, ocr_quality 15%, rtsp 15%, latency_p95 10%, onvif_freshness 10%, event_freshness 5%). Bands healthy≥80 / degraded≥55 / critical<55. Retourne signals détaillés + top 5 reasons
+- 3 endpoints : GET /api/cameras/{id}/health, GET /api/cameras/health (avec summary), GET /api/cameras/capabilities-matrix (vendor×caps + vendor_summary)
+- Preuve live : demo-cam-002 score 61.1 (degraded) — 47% conf OCR + pas d'ONVIF heartbeat = reasons visibles immédiatement
+- Tests : 4 verts (test_v08rc_camera_health.py). Total : **140/140 verts**
+- Fichiers : services/camera_health.py (nouveau, 170l), routes/health_dashboard.py (+60), tests (+55)
 
-## Backlog v0.7.i (session dédiée requise pour ces items lourds)
-- Intégrer reliability_mult dans anpr_tracker.best_reading (nécessite MAJ tests fusion)
-- Recrop auto multi-marges si Quality Score < 60 (nouvelle boucle retry _stage_anpr)
-- Virtualisation React (react-window) pages Vehicles/Events/Cameras pour tenir 100k+ items
+## Rapport v0.8-rc1 : /app/memory/v0.8-rc1_CAMERA_HEALTH.md
+
+## Backlog v0.8 RC complet (12-14 sessions dédiées pour v0.8 GA)
+Prioritisé par ROI décroissant (détails dans le rapport v0.8-rc1) :
+- P4 Pipeline Auto Optimizer (YOLO batch/résolution/fréquence + désactivation OCR faibles)
+- P3 OCR Learning multi-dim (par pays/luminosité + intégration reliability_mult dans fusion)
+- P2 Crop ANPR Premium (multi-marges + upscale + retry auto si score<60)
+- P1 Concrete drivers vendor : Hikvision ISAPI, Dahua CGI, Reolink, Axis VAPIX, Uniview, Hanwha, Bosch (3-5 sessions)
+- P5 Virtualisation React (react-window Vehicles/Events/Cameras/Timeline pour 100k+ items)
+- P7 Playback pro (timeline click → lecture immédiate + garantie synchro)
+- P8 Ops Center Monitoring UI (dashboard temps réel avec pastilles vert/orange/rouge)
+- P9 Tests résilience (chaos monkey Mongo/go2rtc/camera reboot/GPU OOM)
+- P10 Rapport validation finale (taux ANPR/faux positifs-négatifs/stabilité longue durée)
+- Feature 2 : Installation Quality Report (Map Center exploite hauteur/angle + ANPR success rate → recommandations)
+
+## Reste à backporter du v0.7.i
+- Intégrer reliability_mult dans anpr_tracker.best_reading
+- Recrop auto multi-marges si Quality Score<60
 - Frontend ErrorBoundary par section (isole chaque tab)
-- Stress-test panne : Mongo down / go2rtc down / caméra reboot
-- Job cron 24h simulation preview avec logs perf p95/p99 par heure
+- Stress-test panne (déjà couvert par P9 v0.8 RC)
+- Job cron 24h simulation avec logs perf p95/p99 par heure
 - Création auto indexes Mongo au bootstrap
-- useTrackedInterval hook (backlog Wave H)
-- Nginx auto-reload sur activation cert TLS (backlog Wave G)
-- Let's Encrypt bouton (backlog Wave G)
-- Alerte 30j/7j avant expiration cert TLS
-- Refactor routers.py legacy → routes/*.py
-- Concrete drivers Reolink/Hikvision/Dahua/Axis
