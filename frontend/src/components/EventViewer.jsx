@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
 import {
   X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCcw,
   Download, Copy, PlayCircle, Camera as CamIcon, MapPin, Clock, Puzzle, ShieldAlert,
-  ScanSearch, Loader2,
+  ScanSearch, Loader2, History, GanttChartSquare,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -19,8 +20,9 @@ import { toast } from "sonner";
  *   - onIndex(next): navigation
  *   - kind: "event" | "plate"  → pour titrage/actions
  */
-export default function EventViewer({ items, index, onClose, onIndex, kind = "event" }) {
+export default function EventViewer({ items, index, onClose, onIndex, onOpenPlate, kind = "event" }) {
   const item = items[index];
+  const navigate = useNavigate();
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(null);
@@ -300,6 +302,23 @@ export default function EventViewer({ items, index, onClose, onIndex, kind = "ev
           <button onClick={playAround} disabled={recLoading || showVideo} data-testid="viewer-play-video-btn"
                   className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-[#0044FF] text-white hover:bg-[#0033cc] disabled:opacity-50">
             <PlayCircle size={16} /> {showVideo ? "Vidéo en cours" : "Lire la vidéo autour de cet événement"}
+          </button>
+          {/* v1.0-rc4 · Fusion : historique complet de la plaque / du véhicule */}
+          {(item.plate || ocrResult?.plate) && onOpenPlate && (
+            <button
+              onClick={() => onOpenPlate(item.plate || ocrResult.plate)}
+              data-testid="viewer-plate-history-btn"
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 border border-[#00E676] text-[#00E676] hover:bg-[#00E676]/10"
+            >
+              <History size={15} /> Historique du véhicule ({item.plate || ocrResult.plate})
+            </button>
+          )}
+          <button
+            onClick={() => { onClose(); navigate(`/timeline${item.camera_id ? `?camera_id=${encodeURIComponent(item.camera_id)}` : ""}`); }}
+            data-testid="viewer-timeline-btn"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 border border-white/20 text-white/80 hover:bg-white/10"
+          >
+            <GanttChartSquare size={15} /> Voir dans la Timeline
           </button>
           {showVideo && (
             <button onClick={() => setShowVideo(false)} className="w-full text-xs text-white/60 hover:text-white">← Retour à l&apos;image</button>

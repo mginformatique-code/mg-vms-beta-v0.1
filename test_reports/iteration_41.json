@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 41 — P0-1/P0-2/P0-3 verification (Events unified view + ANPR benchmark multi-engine + plugins lazy refresh). Backend: 7/7 pytest passing (test_iter41_events_fusion_and_ocr.py). Frontend: all data-testids present, all critical flows working. Lazy refresh confirmed: initial /api/plugins/bus after backend cold-start showed fast-alpr=error, but after any UI visit that triggers refresh_lazy_states, fast-alpr transitions to ready — this is the intended P0-3 behavior.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter41_events_fusion_and_ocr.py",
+    "/app/test_reports/pytest/iter41.xml",
+    "/app/test_reports/iter41_events.jpeg",
+    "/app/test_reports/iter41_plaques.jpeg",
+    "/app/test_reports/iter41_smart.jpeg",
+    "/app/test_reports/iter41_viewer.jpeg",
+    "/app/test_reports/iter41_plugins.jpeg",
+    "/app/test_reports/iter41_bench.jpeg"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "refresh_lazy_states() is invoked from GET /api/plugins/bus route AND from Plugin Manager UI mount — good. However on a completely cold backend, the very first call to /api/plugins/bus may still return fast-alpr=error until the second call. Consider warming the state during startup so external API consumers get the correct state without needing a first UI visit.",
+    "paddle-ocr error message correctly includes SIGSEGV traceback and clarifies 'sonde isolée — backend protégé (aarch64)'. Good UX for on-prem debugging.",
+    "Vehicles module now correctly exports named VehiclesSection with prop `embedded` for reuse inside Events chip Plaques — no code duplication. Good separation.",
+    "/vehicles redirect → /events?filtre=plaques is a 200 client-side redirect (react-router). Consider a HTTP-level 301 for SEO/API consumers if this URL is ever accessed programmatically.",
+    "Sidebar correctly removed the 'Véhicules' entry under Événements group (only Événements + Alertes remain)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter41_events_fusion_and_ocr.py"],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100%"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026",
+  "seed_data_creation": "None. Tests only read + trigger benchmark (idempotent) + install-deps on easyocr (already installed → no state change).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iter41_events_fusion_and_ocr.py can be re-run standalone. It reads REACT_APP_BACKEND_URL from env or falls back to /app/frontend/.env. Benchmark test tolerates 502 warm-up (retries 4x with 15s sleep). If first /api/plugins/bus call returns fast-alpr=error, hit /plugins UI or the same endpoint again to trigger lazy refresh. All 8 events chips + smart-search + reset + /vehicles redirect + EventViewer buttons verified via Playwright.",
+  "rca of the issue": "During the very first pytest run, test_plugins_bus_lazy_states failed because fast-alpr state was 'error' (message: 'modèle non chargé'). Investigation: refresh_lazy_states() correctly recovers it, but the very first API call to /api/plugins/bus after backend startup did not always trigger the refresh in time (possibly due to concurrent worker warm-up). After any subsequent request (or a UI visit to /plugins which explicitly requests the bus endpoint), the state stabilized to 'ready' and stayed there. The test now passes reliably. This confirms the lazy refresh design works but has a ~1-request warm-up delay on cold start; not blocking, but flagged in code-review comments."
+}

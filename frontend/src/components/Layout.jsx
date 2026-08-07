@@ -28,10 +28,10 @@ const NAV = [
   ]},
   { group: "nav.events_group", items: [
     // Vrai sous-menu Événements
+    // v1.0-rc4 · Fusion : la vue Véhicules vit dans Événements (chip « Plaques »)
     { key: "nav.events_root", icon: Zap, children: [
       { to: "/events", key: "nav.events_item", icon: Zap },
       { to: "/alerts", key: "nav.alerts", icon: Bell },
-      { to: "/vehicles", key: "nav.vehicle_timeline", icon: Car, perm: "read_plates" },
     ]},
   ]},
   { group: "nav.intelligence", items: [

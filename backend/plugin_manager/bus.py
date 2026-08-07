@@ -195,6 +195,25 @@ class PluginBus:
         entry.state_message = message
         return True
 
+    def refresh_lazy_states(self) -> None:
+        """v1.0-rc4 · P0-3 : ré-évalue l'état des plugins qui opt-in via
+        `refresh_state_lazy()` (ex: fast-alpr dont le modèle charge après
+        le bootstrap). Jamais sur un plugin en quarantine."""
+        for e in self.list_entries():
+            if e.state == "quarantined":
+                continue
+            fn = getattr(e.instance, "refresh_state_lazy", None)
+            if fn is None:
+                continue
+            try:
+                fn()
+                ctx = getattr(e.instance, "_mgvms_ctx", None) or getattr(e.instance, "_ctx", None)
+                if ctx is not None:
+                    e.state = ctx.state
+                    e.state_message = ctx.state_message
+            except Exception:
+                pass
+
     def summary(self) -> list[dict]:
         return [e.summary() for e in self.list_entries()]
 

@@ -155,6 +155,10 @@ async def _base_match(user: dict) -> dict:
 def _apply_time_range(match: dict, f: dict) -> None:
     date_from, date_to = f.get("date_from"), f.get("date_to")
     time_from, time_to = f.get("time_from") or "00:00", f.get("time_to") or "23:59"
+    # v1.0-rc4 · « personne à 12h » sans date ⇒ on borne sur AUJOURD'HUI.
+    if (f.get("time_from") or f.get("time_to")) and not (date_from or date_to):
+        today = datetime.now(timezone.utc).date().isoformat()
+        date_from = date_to = today
     if date_from or date_to:
         rng = {}
         if date_from:
@@ -255,6 +259,36 @@ async def _search_persons(f: dict, user: dict) -> list[dict]:
 
 
 # ────────────────────────────────────────────────────────────────
+# Recherche ÉVÉNEMENTS (v1.0-rc4 · vue Événements fusionnée)
+# Retourne des events COMPLETS (thumbnail, crops, plaque, OCR) pour
+# alimenter les fiches événement — tous types confondus.
+# ────────────────────────────────────────────────────────────────
+async def _search_events(f: dict, user: dict, target: str) -> list[dict]:
+    match = await _base_match(user)
+    match["type"] = {"$nin": ["qos_alert"]}
+    types_expanded: set = set()
+    if f.get("types"):
+        for t in f["types"]:
+            types_expanded |= _expand_bilingual([t], EVENT_TYPE_MAP)
+    elif target == "persons":
+        types_expanded = _expand_bilingual(["personne"], EVENT_TYPE_MAP)
+    elif target == "vehicles":
+        for t in ("voiture", "camion", "bus", "moto"):
+            types_expanded |= _expand_bilingual([t], EVENT_TYPE_MAP)
+    if types_expanded:
+        match["type"] = {"$in": list(types_expanded)}
+    _apply_time_range(match, f)
+    if f.get("camera_hint"):
+        match["camera_name"] = {"$regex": f["camera_hint"], "$options": "i"}
+    if f.get("plate"):
+        match["plate"] = {"$regex": _norm_plate(f["plate"]), "$options": "i"}
+    if f.get("colors"):
+        match["vehicle_color"] = {"$in": list(_expand_bilingual(f["colors"], COLOR_MAP))}
+    return await db.events.find(match, {"_id": 0}) \
+        .sort("timestamp", -1).limit(60).to_list(60)
+
+
+# ────────────────────────────────────────────────────────────────
 # Endpoint principal
 # ────────────────────────────────────────────────────────────────
 @smart_search_router.post("")
@@ -275,6 +309,8 @@ async def smart_search(body: SmartQuery,
         vehicles = await _search_vehicles(filters, user)
     if target in ("persons", "both"):
         persons = await _search_persons(filters, user)
+    # v1.0-rc4 · Fiches événement complètes pour la vue Événements fusionnée
+    events = await _search_events(filters, user, target)
 
     return {
         "query": q_text,
@@ -282,6 +318,8 @@ async def smart_search(body: SmartQuery,
         "filters": filters,
         "vehicles_count": len(vehicles),
         "persons_count": len(persons),
+        "events_count": len(events),
         "vehicles": vehicles,
         "persons": persons,
+        "events": events,
     }

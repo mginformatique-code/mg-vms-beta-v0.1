@@ -149,7 +149,12 @@ async def bus_status(user: dict = Depends(require_permission("view_live"))):
     (différent de `/api/plugins` qui expose le catalogue déclaratif).
     Chaque entrée inclut les compteurs runtime (`calls`, `errors`,
     `timeouts`, `last_ms`).
+
+    v1.0-rc4 · P0-3 : re-évaluation PARESSEUSE de l'état pour les plugins
+    qui l'opt-in via `refresh_state_lazy()` (ex: fast-alpr dont le modèle
+    charge après le bootstrap). L'UI reflète ainsi l'état RÉEL du backend.
     """
+    bus.refresh_lazy_states()
     return {
         "entries": bus.summary(),
         "counts": {

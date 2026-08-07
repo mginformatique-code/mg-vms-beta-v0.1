@@ -31,6 +31,11 @@ class FastAlprPlugin(PlateRecognizer):
     async def on_config_change(self, new_config: dict) -> None:
         self._evaluate_state()
 
+    def refresh_state_lazy(self):
+        """v1.0-rc4 · P0-3 : ré-évaluation à la lecture du bus (le modèle ALPR
+        charge APRÈS le bootstrap — l'état doit suivre la réalité)."""
+        self._evaluate_state()
+
     async def recognize(self, frame: Frame, vehicle_bbox: Optional[tuple] = None) -> list:
         try:
             import ai_engine

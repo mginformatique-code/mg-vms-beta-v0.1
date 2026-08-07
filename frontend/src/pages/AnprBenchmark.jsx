@@ -71,9 +71,25 @@ export default function AnprBenchmark() {
   const [iterations, setIterations] = useState(5);
   const [running, setRunning] = useState(false);
   const [current, setCurrent] = useState(null);
+  // v1.0-rc4 · Sélection multi-moteurs OCR + fusion
+  const ENGINES = [
+    { id: "yolo",       label: "YOLO (détection)" },
+    { id: "fast-alpr",  label: "FastALPR" },
+    { id: "paddle-ocr", label: "PaddleOCR" },
+    { id: "easyocr",    label: "EasyOCR" },
+    { id: "opencv-ocr", label: "OpenCV OCR" },
+    { id: "tesseract",  label: "Tesseract" },
+  ];
+  const [selEngines, setSelEngines] = useState(["yolo", "fast-alpr"]);
+  const [fusionOcr, setFusionOcr] = useState(true);
   const [baseline, setBaseline] = useState(() => {
     try { return JSON.parse(localStorage.getItem("mg_anpr_baseline") || "null"); } catch { return null; }
   });
+
+  const toggleEngine = (id) => setSelEngines((prev) =>
+    prev.includes(id) ? prev.filter((e) => e !== id) : [...prev, id]);
+  const allSelected = selEngines.length === ENGINES.length;
+  const toggleAll = () => setSelEngines(allSelected ? [] : ENGINES.map((e) => e.id));
 
   useEffect(() => {
     api.get("/cameras").then((r) => setCams(r.data)).catch(() => setCams([]));
@@ -85,6 +101,9 @@ export default function AnprBenchmark() {
     try {
       const params = new URLSearchParams({ iterations: String(iterations) });
       if (cameraId) params.set("camera_id", cameraId);
+      const ocrEngines = selEngines.filter((e) => e !== "yolo");
+      if (ocrEngines.length) params.set("engines", ocrEngines.join(","));
+      if (fusionOcr && ocrEngines.length > 1) params.set("fusion", "true");
       const { data } = await api.post(`/system/anpr-benchmark?${params}`);
       setCurrent(data);
       toast.success(`Benchmark terminé : ${data.avg_total_ms} ms/cycle · ${data.estimated_fps} FPS estimés`);
@@ -154,6 +173,91 @@ export default function AnprBenchmark() {
           </button>
         )}
       </div>
+
+      {/* v1.0-rc4 · Sélection des moteurs à benchmarker */}
+      <div className="border border-border p-3 mb-4" data-testid="benchmark-engines">
+        <div className="text-[9px] uppercase tracking-wider text-muted-foreground mb-2">
+          Moteurs à comparer (temps · CPU · RAM · plaques lues)
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {ENGINES.map((e) => {
+            const on = selEngines.includes(e.id);
+            return (
+              <button key={e.id} onClick={() => toggleEngine(e.id)}
+                      data-testid={`benchmark-engine-${e.id}`}
+                      className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs border transition-colors ${
+                        on ? "border-[#0044FF] bg-[#0044FF]/10 text-[#0044FF] font-medium"
+                           : "border-border text-muted-foreground hover:border-[#0044FF]/60"
+                      }`}>
+                <span className={`inline-block w-3 h-3 border ${on ? "bg-[#0044FF] border-[#0044FF]" : "border-border"}`} />
+                {e.label}
+              </button>
+            );
+          })}
+          <button onClick={toggleAll} data-testid="benchmark-engine-all"
+                  className={`px-2.5 py-1.5 text-xs border ${allSelected ? "border-[#00E676] text-[#00E676]" : "border-border text-muted-foreground hover:border-[#00E676]/60"}`}>
+            Tous
+          </button>
+          <label className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[#FFB800]/60 text-[#FFB800] cursor-pointer ml-auto" data-testid="benchmark-fusion-toggle">
+            <input type="checkbox" checked={fusionOcr} onChange={(e) => setFusionOcr(e.target.checked)} className="accent-[#FFB800]" />
+            Fusion Multi OCR (vote)
+          </label>
+        </div>
+      </div>
+
+      {/* v1.0-rc4 · Résultats par moteur OCR */}
+      {current?.ocr_engines?.length > 0 && (
+        <div className="border border-border p-3 mb-4 bg-card" data-testid="benchmark-ocr-results">
+          <div className="font-head font-semibold mb-2 flex items-center gap-2"><Cpu size={15} /> Comparaison des moteurs OCR</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-[9px] uppercase tracking-wider text-muted-foreground border-b border-border">
+                  <th className="text-left py-1.5 pr-3">Moteur</th>
+                  <th className="text-left py-1.5 pr-3">État</th>
+                  <th className="text-right py-1.5 pr-3">Temps moy.</th>
+                  <th className="text-right py-1.5 pr-3">CPU</th>
+                  <th className="text-right py-1.5 pr-3">RAM Δ</th>
+                  <th className="text-right py-1.5 pr-3">Plaques lues</th>
+                  <th className="text-left py-1.5">Meilleure lecture</th>
+                </tr>
+              </thead>
+              <tbody>
+                {current.ocr_engines.map((r) => (
+                  <tr key={r.engine} className="border-b border-border/50" data-testid={`ocr-row-${r.engine}`}>
+                    <td className="py-1.5 pr-3 mono font-semibold">{r.engine}</td>
+                    <td className="py-1.5 pr-3">
+                      {r.available ? (
+                        <span className="text-[#00E676] text-[10px] uppercase">READY</span>
+                      ) : (
+                        <span className="text-[#FF3333] text-[10px] uppercase" title={r.message}>
+                          {r.state === "missing_dependency" ? "DEP MANQUANTE" : (r.state || "indisponible").toUpperCase()}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-1.5 pr-3 text-right mono">{r.avg_ms != null ? `${r.avg_ms} ms` : "—"}</td>
+                    <td className="py-1.5 pr-3 text-right mono">{r.cpu_pct != null ? `${r.cpu_pct}%` : "—"}</td>
+                    <td className="py-1.5 pr-3 text-right mono">{r.ram_delta_mb != null ? `${r.ram_delta_mb} Mo` : "—"}</td>
+                    <td className="py-1.5 pr-3 text-right mono">{r.plates_read_total ?? "—"}</td>
+                    <td className="py-1.5 mono">
+                      {r.best_plate ? `${r.best_plate.text} (${Math.round(r.best_plate.confidence * 100)}%)` : (r.error || r.message || "—")}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {current.fusion_result && (
+            <div className="mt-3 border border-[#FFB800]/50 bg-[#FFB800]/5 p-2 text-xs" data-testid="benchmark-fusion-result">
+              <div className="text-[9px] uppercase tracking-wider text-[#FFB800] mb-1">Fusion Multi OCR — vote majoritaire</div>
+              <span className="mono font-bold text-base">{current.fusion_result.text}</span>
+              <span className="mono text-muted-foreground ml-2">
+                confiance moy. {Math.round(current.fusion_result.avg_confidence * 100)}% · moteurs : {current.fusion_result.engines_used.join(", ")}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Résultats côte à côte */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">

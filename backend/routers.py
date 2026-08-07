@@ -591,11 +591,16 @@ async def camera_stream(camera_id: str, user: dict = Depends(require_permission(
 
 # ============ EVENTS ============
 @api_router.get("/events")
-async def list_events(response: Response, type: Optional[str] = None, site_id: Optional[str] = None,
+async def list_events(response: Response, type: Optional[str] = None, types: Optional[str] = None,
+                      site_id: Optional[str] = None,
                       camera_id: Optional[str] = None, limit: int = 100, offset: int = 0,
                       user: dict = Depends(get_current_user)):
     q = {}
-    if type:
+    if types:
+        # v1.0-rc4 · Fusion Événements/Véhicules : filtre multi-types
+        # (ex: types=Voiture,Camion,Bus,Moto pour le chip « Véhicules »).
+        q["type"] = {"$in": [t.strip() for t in types.split(",") if t.strip()]}
+    elif type:
         q["type"] = type
     else:
         # v1.0-rc3 · Exclut les alertes techniques (qos_alert) de la vue événements.
@@ -1336,9 +1341,17 @@ async def pipeline_webrtc_offer(camera_id: str, offer: WebRTCOfferInput,
 @api_router.post("/system/anpr-benchmark")
 async def anpr_benchmark(camera_id: Optional[str] = None,
                           iterations: int = 5,
+                          engines: Optional[str] = None,
+                          fusion: bool = False,
                           user: dict = Depends(require_role("technician"))):
     """Mesure la performance du pipeline ANPR sur un frame réel (ou test pattern).
     Utile pour comparer 2 versions de MG-VMS et diagnostiquer un ralentissement.
+
+    v1.0-rc4 · Benchmark MULTI-MOTEURS : le paramètre `engines` (liste séparée
+    par des virgules, ou `all`) benchmarke chaque moteur PlateRecognizer du bus
+    individuellement (fast-alpr, paddle-ocr, easyocr, opencv-ocr, tesseract…)
+    en mesurant temps, CPU, RAM et plaques lues. `fusion=true` ajoute un vote
+    majoritaire caractère par caractère sur les meilleures lectures.
 
     Retourne :
       - `resolution_analyzed` : taille du frame utilisé
@@ -1358,20 +1371,32 @@ async def anpr_benchmark(camera_id: Optional[str] = None,
         raise HTTPException(400, "iterations doit être entre 1 et 30")
     # Choix du frame source
     cam_id = camera_id
-    if not cam_id:
-        # Prend n'importe quelle caméra online (préfère demo-cam-002 qui a de vrais véhicules)
-        cam = await db.cameras.find_one({"status": "online"}, sort=[("id", 1)])
-        if not cam:
-            raise HTTPException(400, "Aucune caméra online — impossible de récupérer un frame")
-        cam_id = cam["id"]
-    frame_bytes = await _fetch_frame(cam_id)
-    if not frame_bytes:
-        raise HTTPException(502, f"Impossible de récupérer un frame de la caméra {cam_id}")
+    frame_bytes = None
+    candidates = [cam_id] if cam_id else \
+        [c["id"] for c in await db.cameras.find({"status": "online"}, {"_id": 0, "id": 1}).sort("id", 1).to_list(20)]
+    if not candidates:
+        raise HTTPException(400, "Aucune caméra online — impossible de récupérer un frame")
+    # v1.0-rc4 · Le fetch nominal est non-bloquant (wait=0) : on retente
+    # quelques fois (le worker produit une frame toutes les ~2 s).
+    for attempt in range(4):
+        for cid in candidates:
+            frame_bytes = await _fetch_frame(cid)
+            if frame_bytes is not None:
+                cam_id = cid
+                break
+        if frame_bytes is not None:
+            break
+        await asyncio.sleep(1.5)
+    if frame_bytes is None:
+        raise HTTPException(502, f"Impossible de récupérer un frame ({', '.join(candidates)})")
     # Décode UNE fois pour connaître la résolution
     import cv2
     import numpy as np
-    arr = np.frombuffer(frame_bytes, dtype=np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if isinstance(frame_bytes, np.ndarray):
+        img = frame_bytes
+    else:
+        arr = np.frombuffer(frame_bytes, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     resolution = f"{img.shape[1]}x{img.shape[0]}" if img is not None else "unknown"
     # Warm-up (compile CUDA kernels + charge modèles) — 1 passe non comptée
     await asyncio.to_thread(_analyze_frame, cam_id, frame_bytes)
@@ -1402,6 +1427,92 @@ async def anpr_benchmark(camera_id: Optional[str] = None,
         })
     avg = lambda k: round(sum(s[k] for s in samples) / len(samples), 1)  # noqa: E731
     avg_total = avg("total_ms")
+
+    # ── v1.0-rc4 · Benchmark par moteur OCR (multi-plugin) ─────────────
+    ocr_engines: list[dict] = []
+    fusion_result: Optional[dict] = None
+    if engines:
+        import psutil
+        from plugin_manager.bus import bus as plugin_bus
+        from plugin_manager.interfaces import Frame as PluginFrame
+        plugin_bus.refresh_lazy_states()
+        all_ocr = {e.name: e for e in plugin_bus.list_entries("PlateRecognizer")}
+        req = [e.strip() for e in engines.split(",") if e.strip()]
+        if any(r in ("all", "tous") for r in req):
+            req = list(all_ocr.keys())
+        # yolo = détecteur, déjà mesuré via avg_yolo_ms
+        req = [r for r in dict.fromkeys(req) if r not in ("yolo", "yolo-detection")]
+        pframe = PluginFrame(camera_id=cam_id,
+                             timestamp=datetime.now(timezone.utc).isoformat(),
+                             numpy_bgr=img, width=img.shape[1], height=img.shape[0])
+        proc = psutil.Process()
+        best_by_engine: dict[str, dict] = {}
+        for name in req:
+            entry = all_ocr.get(name)
+            if entry is None:
+                ocr_engines.append({"engine": name, "available": False, "state": "absent",
+                                    "message": "Plugin introuvable sur le bus"})
+                continue
+            if entry.state != "ready":
+                ocr_engines.append({"engine": name, "available": False, "state": entry.state,
+                                    "message": entry.state_message or "Non prêt (dépendance ou config manquante)"})
+                continue
+            times: list[float] = []
+            plates_found: list[dict] = []
+            err = None
+            rss0 = proc.memory_info().rss
+            cpu0 = proc.cpu_times()
+            wall0 = time.perf_counter()
+            for _ in range(iterations):
+                t0 = time.perf_counter()
+                try:
+                    res = await asyncio.wait_for(entry.instance.recognize(pframe, None), timeout=120)
+                except Exception as e:
+                    err = f"{type(e).__name__}: {e}"[:200]
+                    res = []
+                times.append((time.perf_counter() - t0) * 1000.0)
+                for p in (res or []):
+                    if getattr(p, "text", None):
+                        plates_found.append({"text": p.text,
+                                             "confidence": round(float(p.confidence or 0), 3)})
+            wall = max(1e-6, time.perf_counter() - wall0)
+            cpu1 = proc.cpu_times()
+            cpu_pct = round(((cpu1.user - cpu0.user) + (cpu1.system - cpu0.system)) / wall * 100.0, 1)
+            ram_delta_mb = round((proc.memory_info().rss - rss0) / 1e6, 1)
+            best = max(plates_found, key=lambda p: p["confidence"], default=None)
+            if best:
+                best_by_engine[name] = best
+            ocr_engines.append({
+                "engine": name, "available": True, "state": "ready",
+                "iterations": iterations,
+                "avg_ms": round(sum(times) / len(times), 1) if times else None,
+                "min_ms": round(min(times), 1) if times else None,
+                "max_ms": round(max(times), 1) if times else None,
+                "cpu_pct": cpu_pct,
+                "ram_delta_mb": ram_delta_mb,
+                "plates_read_total": len(plates_found),
+                "best_plate": best,
+                "error": err,
+            })
+        # Fusion Multi OCR : vote majoritaire caractère par caractère
+        if fusion and best_by_engine:
+            from collections import Counter
+            texts = [b["text"] for b in best_by_engine.values()]
+            maxlen = max(len(t) for t in texts)
+            voted = []
+            for i in range(maxlen):
+                chars = [t[i] for t in texts if i < len(t)]
+                if chars:
+                    voted.append(Counter(chars).most_common(1)[0][0])
+            fusion_result = {
+                "mode": "vote",
+                "text": "".join(voted),
+                "engines_used": list(best_by_engine.keys()),
+                "avg_confidence": round(sum(b["confidence"] for b in best_by_engine.values())
+                                        / len(best_by_engine), 3),
+                "candidates": {k: v for k, v in best_by_engine.items()},
+            }
+
     return {
         "camera_id": cam_id,
         "iterations": iterations,
@@ -1421,6 +1532,8 @@ async def anpr_benchmark(camera_id: Optional[str] = None,
         "cuda_version": _runtime_pytorch().get("cuda_version"),
         "yolo_model": _model_name(),
         "alpr_model": _alpr_model_name(),
+        "ocr_engines": ocr_engines,
+        "fusion_result": fusion_result,
         "samples": samples,
         "run_at": datetime.now(timezone.utc).isoformat(),
     }

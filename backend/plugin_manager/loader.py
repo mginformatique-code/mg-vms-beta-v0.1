@@ -341,14 +341,39 @@ class PluginLoader:
 
     _install_jobs: dict = {}  # {plugin_name: {status, log, returncode, started_at, finished_at}}
 
+    # Packages critiques figés pendant l'install (protège torch/numpy/opencv
+    # contre un upgrade sauvage qui casserait YOLO/fast-alpr).
+    CORE_PIN_PACKAGES = ("numpy", "torch", "torchvision", "opencv-python-headless",
+                         "scipy", "pillow", "ultralytics")
+
+    def _build_constraints_file(self) -> Optional[str]:
+        """Écrit un fichier de contraintes pip figeant les packages critiques."""
+        import importlib.metadata as md
+        import tempfile
+        lines = []
+        for pkg in self.CORE_PIN_PACKAGES:
+            try:
+                lines.append(f"{pkg}=={md.version(pkg)}")
+            except md.PackageNotFoundError:
+                continue
+        if not lines:
+            return None
+        f = tempfile.NamedTemporaryFile("w", suffix=".txt", prefix="mgvms_pins_", delete=False)
+        f.write("\n".join(lines) + "\n")
+        f.close()
+        return f.name
+
     async def install_dependencies(self, name: str, allow_upgrade_deps: bool = False) -> dict:
-        """Lance `pip install` en arrière-plan pour les deps Python du plugin.
+        """Installe les deps du plugin en arrière-plan — AVEC dépendances transitives.
 
-        Par défaut passe `--no-deps` pour protéger l'environnement (évite
-        d'upgrader numpy/opencv qui casseraient d'autres plugins).
-        Passer `allow_upgrade_deps=True` pour désactiver cette protection.
-
-        Retourne immédiatement un job status. Le job continue en tâche de fond.
+        v1.0-rc4 · Correction P0-2 : l'ancien `--no-deps` produisait de faux
+        succès (paquet installé mais import impossible → « DEP MANQUANTE »
+        persistait). Désormais :
+          1. deps système (apt-get, best-effort) si déclarées dans le manifest ;
+          2. `pip install` complet, protégé par un fichier de contraintes qui
+             fige numpy/torch/opencv aux versions actuelles ;
+          3. VÉRIFICATION post-install : le plugin est rechargé et le job n'est
+             `success` que si son état n'est plus `missing_dependency`.
         Poll via `get_install_status(name)`.
         """
         from datetime import datetime, timezone
@@ -356,52 +381,90 @@ class PluginLoader:
         if not lp:
             return {"status": "error", "error": f"Plugin '{name}' non chargé"}
         deps = lp.python_dependencies
-        if not deps:
-            return {"status": "error", "error": "Aucune python_dependency déclarée dans le manifest"}
+        sys_deps = lp.system_dependencies
+        if not deps and not sys_deps:
+            return {"status": "error", "error": "Aucune dépendance déclarée dans le manifest"}
 
         # Un seul job à la fois par plugin
         current = self._install_jobs.get(name)
         if current and current.get("status") == "running":
             return current
 
-        pip_flags = ["--no-cache-dir"]
-        if not allow_upgrade_deps:
-            pip_flags.append("--no-deps")
-
         job = {
             "status": "running",
             "deps": list(deps),
-            "flags": pip_flags,
+            "system_deps": list(sys_deps),
             "log": "",
             "returncode": None,
+            "verified_state": None,
             "started_at": datetime.now(timezone.utc).isoformat(),
             "finished_at": None,
         }
         self._install_jobs[name] = job
 
+        async def _exec(cmd: list[str], timeout: int) -> tuple[int, str]:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            except asyncio.TimeoutError:
+                proc.kill()
+                return -1, f"[TIMEOUT après {timeout}s] {' '.join(cmd)}"
+            return proc.returncode, (stdout or b"").decode(errors="replace")
+
         async def _run():
             try:
-                cmd = [sys.executable, "-m", "pip", "install", *pip_flags, *deps]
-                logger.info("plugin_install.start name=%s cmd=%s", name, cmd)
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-                )
-                # Timeout 15 min max pour éviter les blocages
-                try:
-                    stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=900)
-                except asyncio.TimeoutError:
-                    proc.kill()
-                    job["status"] = "timeout"
-                    job["log"] += "\n[TIMEOUT après 15 minutes]"
-                    return
-                job["log"] = (stdout or b"").decode(errors="replace")[-8000:]  # dernier 8kB
-                job["returncode"] = proc.returncode
-                job["status"] = "success" if proc.returncode == 0 else "failed"
-                logger.info("plugin_install.done name=%s status=%s rc=%s",
-                            name, job["status"], proc.returncode)
-                # Si succès → recharge le plugin pour re-évaluer l'état
-                if job["status"] == "success":
-                    await self.load_one(Path(lp.manifest_path))
+                # ── 1. Deps système (best-effort) ──────────────────────
+                if sys_deps:
+                    job["log"] += f"[1/3] apt-get install {' '.join(sys_deps)}\n"
+                    rc, out = await _exec(
+                        ["apt-get", "install", "-y", "--no-install-recommends", *sys_deps],
+                        timeout=600,
+                    )
+                    job["log"] += out[-3000:] + "\n"
+                    if rc != 0:
+                        job["log"] += f"[AVERTISSEMENT] deps système rc={rc} (poursuite pip)\n"
+
+                # ── 2. pip install AVEC dépendances + contraintes ──────
+                if deps:
+                    pip_flags = ["--no-cache-dir"]
+                    constraints = None
+                    if not allow_upgrade_deps:
+                        constraints = self._build_constraints_file()
+                        if constraints:
+                            pip_flags += ["-c", constraints]
+                    cmd = [sys.executable, "-m", "pip", "install", *pip_flags, *deps]
+                    job["log"] += f"[2/3] {' '.join(cmd)}\n"
+                    logger.info("plugin_install.start name=%s cmd=%s", name, cmd)
+                    rc, out = await _exec(cmd, timeout=1800)
+                    job["log"] += out[-8000:]
+                    job["returncode"] = rc
+                    if constraints:
+                        try:
+                            os.unlink(constraints)
+                        except OSError:
+                            pass
+                    if rc != 0:
+                        job["status"] = "failed"
+                        logger.warning("plugin_install.pip_failed name=%s rc=%s", name, rc)
+                        return
+
+                # ── 3. Vérification RÉELLE : reload + état ─────────────
+                job["log"] += "\n[3/3] Rechargement du plugin + vérification de l'état…\n"
+                reloaded = await self.load_one(Path(lp.manifest_path))
+                new_state = reloaded.entry.state if reloaded.entry else "error"
+                new_msg = (reloaded.entry.state_message if reloaded.entry else reloaded.error) or ""
+                job["verified_state"] = new_state
+                if new_state == "missing_dependency":
+                    job["status"] = "failed"
+                    job["log"] += (f"[ÉCHEC VÉRIFICATION] L'installation s'est terminée mais la "
+                                   f"dépendance reste non importable : {new_msg}\n")
+                    logger.warning("plugin_install.verify_failed name=%s msg=%s", name, new_msg)
+                else:
+                    job["status"] = "success"
+                    job["log"] += f"[OK] État du plugin après install : {new_state} {new_msg}\n"
+                    logger.info("plugin_install.done name=%s state=%s", name, new_state)
             except Exception as e:  # pragma: no cover
                 job["status"] = "error"
                 job["log"] += f"\n[EXC] {type(e).__name__}: {e}"

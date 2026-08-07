@@ -35,7 +35,7 @@ function passageThumbUrl(passageId, kind = "vehicle") {
  * fiche véhicule complète : galerie, timeline, heatmap, caméras visitées,
  * parcours, habitudes.
  */
-export default function Vehicles() {
+export function VehiclesSection({ embedded = false }) {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [q, setQ] = useState("");
@@ -136,16 +136,18 @@ export default function Vehicles() {
   }, [openPlate, q, load, loadAnomalies]);
 
   return (
-    <div className="p-4" data-testid="vehicles-page">
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-        <div>
-          <h1 className="font-head font-bold text-2xl tracking-tight flex items-center gap-2">
-            <Car size={26} /> Véhicules
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Historique par véhicule — cliquez sur une carte pour ouvrir la fiche complète.
-          </p>
-        </div>
+    <div className={embedded ? "" : "p-4"} data-testid="vehicles-page">
+      <div className={`flex items-center ${embedded ? "justify-end" : "justify-between"} mb-4 flex-wrap gap-3`}>
+        {!embedded && (
+          <div>
+            <h1 className="font-head font-bold text-2xl tracking-tight flex items-center gap-2">
+              <Car size={26} /> Véhicules
+            </h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Historique par véhicule — cliquez sur une carte pour ouvrir la fiche complète.
+            </p>
+          </div>
+        )}
         <div className="flex items-center gap-2 flex-1 max-w-2xl">
           <div className="relative flex-1">
             <Sparkles size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#0044FF]" />
@@ -394,9 +396,10 @@ function VehicleCard({ v, onOpen }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// VehicleDrawer — panneau latéral avec 6 onglets
+// VehicleDrawer — panneau latéral avec 6 onglets (exporté pour la vue
+// Événements fusionnée : historique plaque/véhicule depuis le viewer)
 // ═══════════════════════════════════════════════════════════════════
-function VehicleDrawer({ plate, onClose, onWatchChanged }) {
+export function VehicleDrawer({ plate, onClose, onWatchChanged }) {
   const open = !!plate;
   const [detail, setDetail] = useState(null);
   const reload = useCallback(() => {
@@ -1192,4 +1195,9 @@ function fmtRelative(iso) {
   if (diff < 3600) return `il y a ${Math.round(diff / 60)} min`;
   if (diff < 86400) return `il y a ${Math.round(diff / 3600)} h`;
   return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+// Compat : route legacy /vehicles (redirigée vers /events?filtre=plaques)
+export default function Vehicles() {
+  return <VehiclesSection />;
 }
