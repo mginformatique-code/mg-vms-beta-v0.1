@@ -60,6 +60,9 @@ RUN pip install --no-cache-dir \
 # WSDL ONVIF embarqués : indispensables pour découverte ONVIF hors-ligne
 COPY backend/wsdl/ ./wsdl/
 COPY backend/ .
+# v0.7.d · CHANGELOG embarqué — lu par routes/welcome.py (/app/CHANGELOG.md)
+# pour la version applicative et le Welcome Center. Sans lui : "unknown version".
+COPY CHANGELOG.md ./CHANGELOG.md
 
 # v0.4 · Bundle plugins (répertoire copié explicitement, sinon PluginLoader
 # ne trouve que les 2 fallbacks built-in au lieu des 50+ plugins).

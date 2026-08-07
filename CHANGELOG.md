@@ -2,7 +2,12 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
-## [v0.7.c+1] — 2026-06 — Camera API Hardening (P0)
+## [v0.7.d] — 2026-06 — Camera API Hardening (P0)
+
+### Fixed — Changelog embarqué + version applicative
+- `CHANGELOG.md` est désormais copié dans l'image Docker backend — le Welcome
+  Center affichait "unknown version" et un changelog vide une fois installé
+  (le fichier n'existait qu'en dépôt, jamais dans le conteneur)
 
 ### Fixed — P0-1 Statut caméra : source de vérité unique
 - Une caméra dont le worker `frame_source` produit des frames fraîches (<10s)
