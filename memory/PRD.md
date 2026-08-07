@@ -638,3 +638,21 @@ Prioritisé par ROI décroissant (détails dans le rapport v0.8-rc1) :
   (Playwright post-fix)
 - Fichiers : `frontend/craco.config.js` (+8), `backend/pipeline_v2/qos_alerts.py`
   (+35 / -8), tests (+160)
+
+## v0.8-rc5 · FEATURE FREEZE · Stabilisation Sprint 2 (2026-08)
+- 🎯 **Priorité #2 absolue** : Crop Premium v2 · cascade multi-variants
+  déclenchée UNIQUEMENT si score_100 < 60. 6 marges (0→+25 %) × 3 méthodes
+  (enhance + denoise + perspective_correct). Additif — fast-path préservé.
+- 📊 **Priorité #3** : Frames Dropped catégorisation. Compteurs distincts
+  `backpressure` / `rtsp_timeout` / `decode` exposés dans
+  `/api/diagnostics/frame-source` → l'opérateur voit d'un coup d'œil
+  si un "95 % dropped" est normal (backpressure) ou anomalie.
+- **Preuves mesurées** :
+  * Fast-path (score ≥ 60) : 0.61 ms avg → coût négligeable
+  * Escalade (score = 39) : +31 points de qualité → 70/100 en 376 ms
+    (12 variants testés sur CPU cloud sans GPU)
+- Tests : 13 nouveaux verts (test_v08rc5_crop_premium_frames_categorized.py).
+  Total suite : 87/88 (1 flaky pré-existant hors périmètre).
+- Fichiers : `backend/pipeline_v2/crop_premium.py` (nouveau, 245 lignes),
+  `camera_worker.py` (+25 / -3), `downstream.py` (+1),
+  `frame_source.py` (+18 / -1), tests (+175)

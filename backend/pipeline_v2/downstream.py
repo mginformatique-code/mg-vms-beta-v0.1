@@ -562,7 +562,7 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
         # (le doc est construit champ par champ ci-dessus), on les retire
         # aussi de p pour libérer la mémoire du result dict.
         for k in ("_emit", "_owner_bbox", "_plate_crop_np",
-                  "_plate_quality", "_crop_hash"):
+                  "_plate_quality", "_crop_hash", "_crop_premium"):
             p.pop(k, None)
         if list_status == "black":
             await _raise_blacklist_alert(cam, doc, (wl or {}).get("reason", ""))

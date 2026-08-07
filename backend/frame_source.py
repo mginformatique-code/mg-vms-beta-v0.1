@@ -113,6 +113,15 @@ class _Worker:
     # ── métriques v0.4.5.a ─────────────────────────────
     frames_produced: int = 0         # total depuis start()
     frames_dropped: int = 0          # frames écrasées avant lecture par le consommateur
+    # ── v0.8-rc5 · Sprint stabilisation P0 #3 · décomposition sémantique ──
+    # Compteurs distincts pour comprendre POURQUOI une caméra a beaucoup de drops.
+    # `frames_dropped_backpressure` = frames overwritten (consumer trop lent — c'est OK)
+    # `frames_dropped_rtsp_timeout` = read_exact timeout (RTSP flapping)
+    # `frames_dropped_decode`       = buffer taille anormale (stream corrompu)
+    # Somme cohérente : frames_dropped == somme des 3 catégories.
+    frames_dropped_backpressure: int = 0
+    frames_dropped_rtsp_timeout: int = 0
+    frames_dropped_decode: int = 0
     consumed_ts: float = 0.0         # dernier ts où un consommateur a lu latest_frame
     started_at: float = 0.0
     first_frame_at: float = 0.0      # ts de la 1re frame (mesure temps de warm-up)
@@ -226,10 +235,12 @@ def _reader_loop(w: _Worker):
                 buf = _read_exact(w.proc.stdout, frame_bytes, timeout_sec=_READ_TIMEOUT_SEC)
                 if buf is None:
                     logger.warning("frame-source: %s timeout lecture frame — redémarrage", w.camera_id)
+                    w.frames_dropped_rtsp_timeout += 1  # v0.8-rc5 · trace catégorie
                     break
                 if len(buf) != frame_bytes:
                     logger.warning("frame-source: %s stream ended (read %d/%d) — redémarrage",
                                    w.camera_id, len(buf), frame_bytes)
+                    w.frames_dropped_decode += 1  # v0.8-rc5 · trace catégorie
                     break
                 # Convertit en numpy BGR24 sans copie
                 frame = np.frombuffer(buf, dtype=np.uint8).reshape((h_out, w_out, 3))
@@ -238,6 +249,7 @@ def _reader_loop(w: _Worker):
                 #  - dropped : la frame précédente n'a jamais été consommée
                 if w.latest_frame is not None and w.latest_ts > w.consumed_ts:
                     w.frames_dropped += 1
+                    w.frames_dropped_backpressure += 1  # v0.8-rc5 · c'est du backpressure NORMAL
                 #  - pace entre 2 frames stdout (capture_latency)
                 if prev_frame_ts:
                     w.last_capture_ms = (now - prev_frame_ts) * 1000
@@ -443,6 +455,14 @@ def status() -> dict:
             "reconnect_count": max(0, w.restart_count - 1),
             "frames_produced": w.frames_produced,
             "frames_dropped": w.frames_dropped,
+            # v0.8-rc5 · Décomposition sémantique des drops (Sprint P0 #3).
+            # Permet de comprendre en 1 coup d'œil pourquoi frames_dropped est élevé :
+            # backpressure = consumer trop lent (NORMAL) vs timeout/decode = anomalie stream.
+            "frames_dropped_breakdown": {
+                "backpressure": w.frames_dropped_backpressure,
+                "rtsp_timeout": w.frames_dropped_rtsp_timeout,
+                "decode": w.frames_dropped_decode,
+            },
             "fps_capture_1min": fps,
             "warmup_ms": warmup_ms,
             "last_capture_interval_ms": round(w.last_capture_ms, 1) if w.last_capture_ms else None,

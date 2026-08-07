@@ -303,8 +303,34 @@ class CameraWorker:
                                                 max(0, int(abs_x1)):int(abs_x2)]
                     q = assess_crop_quality(raw_plate_crop)
                     enhanced_crop = raw_plate_crop
+                    crop_premium_meta = None  # v0.8-rc5 · trace CropPremium si escalade
                     if q.should_enhance and not q.skip:
                         enhanced_crop = enhance_plate_crop(raw_plate_crop, q)
+                    # v0.8-rc5 · Crop Premium v2 · Sprint stabilisation P0 #2
+                    # Si le crop reste sous 60/100 malgré l'enhance basique, on
+                    # tente une cascade multi-marges + prétraitements et on
+                    # sélectionne le meilleur crop pour l'OCR aval.
+                    # Correction MINIMALE : additive, aucun impact si score >= 60.
+                    try:
+                        current_score_100 = int(round((q.score or 0) * 100))
+                    except Exception:
+                        current_score_100 = 0
+                    if not q.skip and current_score_100 < 60:
+                        try:
+                            from .crop_premium import run_crop_premium
+                            cp = run_crop_premium(
+                                image_hd=ctx.image,
+                                bbox=(int(abs_x1), int(abs_y1), int(abs_x2), int(abs_y2)),
+                                min_score=60,
+                            )
+                            # On garde le résultat uniquement s'il est
+                            # meilleur que ce qu'on avait produit.
+                            if cp.best_quality.score_100 > current_score_100:
+                                enhanced_crop = cp.best_crop
+                                q = cp.best_quality
+                                crop_premium_meta = cp.to_dict()
+                        except Exception:
+                            logger.exception("crop_premium a échoué (non bloquant)")
                     plate_crop = enhanced_crop
                     # Cache (track_id, hash) — évite le re-OCR de crops
                     # quasi-identiques (véhicule stationné, faible mouvement).
@@ -346,6 +372,7 @@ class CameraWorker:
                         "_plate_crop_np": enhanced_crop,   # Wave C · partagé pour multi-OCR aval
                         "_plate_quality": q.to_dict(),
                         "_crop_hash": ch,
+                        "_crop_premium": crop_premium_meta,  # v0.8-rc5 · trace escalade
                     })
                     plate_debug.append({"plate": plate_text,
                                          "confidence": round(float(r.confidence), 2),

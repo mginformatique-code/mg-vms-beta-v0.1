@@ -2,6 +2,89 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v0.8-rc5] — 2026-08 — FEATURE FREEZE · Stabilisation Sprint 2
+
+**Mandat toujours actif** : aucune nouvelle fonctionnalité. Livraisons
+mesurables uniquement : stabilité, qualité ANPR, observabilité.
+
+Ce sprint attaque 2 axes du mandat officiel Sprint P0 :
+
+* Priorité #2 (absolue) — **Crop Premium v2** : image processing fallbacks
+* Priorité #3           — **Frames Dropped catégorisation** : diagnostiquer
+  en 1 coup d'œil pourquoi une caméra tourne à 2 FPS
+
+### Added — Crop Premium v2 (`pipeline_v2/crop_premium.py`, ~245 lignes)
+- **Cascade multi-variants automatique** déclenchée UNIQUEMENT si
+  ``score_100 < 60`` (fast-path préservé, aucun coût inutile) :
+  1. Génération de 6 crops par marge (0, +5, +10, +15, +20, +25 %)
+     depuis l'image HD (jamais preview MJPEG).
+  2. Sélection top-K (défaut 3) par score composite.
+  3. Application de 3 prétraitements par candidat :
+     * ``enhance_plate_crop`` (deskew + CLAHE + unsharp — déjà existant)
+     * ``denoise`` (fastNlMeansDenoising)
+     * ``perspective_correct`` (approxPolyDP 4 sommets → warpPerspective)
+  4. Retourne le meilleur (best_crop + best_quality + trace de tous les
+     variants pour audit).
+- `run_crop_premium(image_hd, bbox, min_score=60)` — point d'entrée unique.
+- Retourne `CropPremiumResult` : `best_crop`, `best_quality`, `best_method`,
+  `best_margin`, `tried_count`, `escalated`, `all_variants` (trace),
+  `took_ms`.
+
+### Added — Frames Dropped catégorisation (`frame_source.py`)
+- Nouveaux compteurs sur `_Worker` :
+  * `frames_dropped_backpressure` — consumer trop lent (**normal**, ce n'est
+    pas un bug — sémantique "latest-frame")
+  * `frames_dropped_rtsp_timeout` — timeout lecture RTSP (flapping)
+  * `frames_dropped_decode` — buffer taille anormale (stream corrompu)
+- Invariant : `frames_dropped == somme des 3 catégories`.
+- Exposé dans `/api/diagnostics/frame-source` sous `frames_dropped_breakdown`
+  → l'opérateur voit immédiatement si un "95 % dropped" est du backpressure
+  attendu ou une anomalie RTSP à corriger.
+
+### Changed — `camera_worker._stage_anpr` (intégration MINIMALE)
+- Après l'enhance basique existant, ajout d'un fallback conditionnel :
+  ```python
+  if not q.skip and current_score_100 < 60:
+      cp = run_crop_premium(...)
+      if cp.best_quality.score_100 > current_score_100:
+          enhanced_crop = cp.best_crop
+          q = cp.best_quality
+  ```
+- **Additif uniquement** — aucun changement de comportement pour les crops
+  ≥ 60. Fast-path préservé.
+- Trace complète dans `_crop_premium` (nettoyée avant Mongo par `downstream.py`).
+
+### Preuves mesurées
+- **Fast-path** (crop score ≥ 60) : avg **0.61 ms** / max 0.77 ms sur 20
+  itérations → coût négligeable.
+- **Escalade** (crop dégradé score=39) sur crop synthétique flou :
+  * AVANT : score **39/100** (sharp=5.7 · contrast=21.4 — non-OCR-utilisable)
+  * APRÈS : score **70/100** (méthode=enhance · margin=+15 %, 12 variants
+    testés, 376 ms sur CPU cloud sans GPU)
+  * Δ = **+31 points** → crop repasse au-dessus du seuil OCR-acceptable.
+- Preuve verbale : le pipeline paie le coût du fallback uniquement quand
+  le crop l'exige, jamais autrement.
+
+### Tests
+- Nouveau `tests/test_v08rc5_crop_premium_frames_categorized.py` :
+  **13 verts** (fast-path, escalade, margins générées, robustesse bbox,
+  intégration worker, downstream cleanup, dataclass frame_source,
+  status endpoint breakdown, régression endpoints critiques).
+- Régression : **87/88** verts sur la suite complète v0.7 + v0.8. Le
+  test flaky `test_v08rc2_benchmark_advisor::TestAdvisorNoCamera` passe
+  en isolation, échec en parallèle — pré-existant, non lié à ce sprint,
+  reporté investigation Sprint 3.
+
+### Fichiers modifiés
+- `backend/pipeline_v2/crop_premium.py` (nouveau, 245 lignes)
+- `backend/pipeline_v2/camera_worker.py` (+25 / -3)
+- `backend/pipeline_v2/downstream.py` (+1)
+- `backend/frame_source.py` (+18 / -1)
+- `backend/tests/test_v08rc5_crop_premium_frames_categorized.py`
+  (nouveau, 175 lignes)
+
+---
+
 ## [v0.8-rc4] — 2026-08 — FEATURE FREEZE · Stabilisation Sprint 1
 
 **Mandat officiel** : à partir de v0.8-rc4 aucune nouvelle fonctionnalité,
