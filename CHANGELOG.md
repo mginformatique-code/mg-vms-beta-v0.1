@@ -2,6 +2,39 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v0.7.c+1] — 2026-06 — Camera API Hardening (P0)
+
+### Fixed — P0-1 Statut caméra : source de vérité unique
+- Une caméra dont le worker `frame_source` produit des frames fraîches (<10s)
+  est TOUJOURS online — étape 0 prioritaire dans `_probe_status_once`, avant
+  tout probe go2rtc/TCP. Plus aucune incohérence "frames + IA mais OFFLINE"
+- Camera Center, Pipeline Center, Dashboard, Events et Map lisent tous
+  `cam.status` (DB) — vérifié, aucune logique de statut dupliquée côté UI
+
+### Fixed — P0-2 ONVIF "No such file devicemgmt.wsdl"
+- Cause racine : `drivers/onvif_driver.py` instanciait `ONVIFCamera()` SANS
+  `wsdl_dir` → onvif_zeep cherche `site-packages/wsdl` (dossier data fragile
+  selon le mode d'installation pip/Docker) → fichier introuvable
+- Fix : factory `wsdl_path.onvif_camera` (bundle officiel embarqué `backend/wsdl`,
+  versionné git + assertions build Docker) — chemin déterministe
+- Bundle WSDL complété avec les fichiers OFFICIELS onvif.org/w3.org :
+  `onvif.xsd` (révision 2025, +StringList requis par media2), `common.xsd`,
+  `soap-envelope` (SOAP 1.2), import media2 corrigé vers layout plat
+- Les 7 WSDL chargent 100% hors-ligne : devicemgmt (82 ops), media (79),
+  media2 (59), ptz (52), events, imaging, deviceio
+
+### Fixed — P0-5 Codes HTTP Camera API : jamais de 500
+- `unsupported_capability` → **501** (au lieu de 400)
+- `no_driver_available` → 501 · `device_error`/`driver_error` → 502
+- Fallback code inconnu → 502 (plus aucun chemin vers 500)
+
+### Verified — P0-4 UI 100% capability-driven
+- Tous les contrôles (PTZ, zoom, audio, sirène, spotlight, IR, IA embarquée)
+  conditionnés par `GET /api/devices/{id}/capabilities` — zéro logique de
+  marque dans le frontend
+
+---
+
 > Depuis Feb 2026, MG-VMS bascule sur un cycle interne de versions « pipeline »
 > (v0.3 → v0.4 → v0.4.1 → v0.4.2 → v0.4.3) qui reflète la refonte vers une architecture
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).

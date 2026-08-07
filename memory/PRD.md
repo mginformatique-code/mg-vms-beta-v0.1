@@ -444,3 +444,11 @@ Ordre officiel confirmé par le CEO :
   A2: fast-alpr état bus "error·modèle non chargé" figé au bootstrap (pas de refresh après _load_models). Cosmétique, dispatchable=false sans impact (core via plate_registry).
   A3: devices API map unsupported_capability→400 (pas 501 demandé) — routes/devices.py:80-95. Jamais de 500 ✓.
 - Backlog v1.0: Performance Gate (seuil 200ms configurable → event Operations Center avec stage responsable).
+
+## v0.7.c Camera API Hardening (2026-06)
+- P0-1: _probe_status_once étape 0 = frames fraîches frame_source (<10s) → online prioritaire (source de vérité unique; toutes les UIs lisent cam.status)
+- P0-2: OnvifDriver → factory wsdl_path.onvif_camera (wsdl_dir déterministe). Bundle WSDL complété OFFICIEL: onvif.xsd rev 2025 (+StringList), common.xsd, soap-envelope (SOAP1.2), media2 import corrigé. 7 WSDL 100% offline.
+- P0-5: mapping devices: unsupported_capability→501, no_driver_available→501, device_error/driver_error→502, fallback 502 (jamais 500)
+- P0-4: vérifié UI 100% capability-driven (caps.* partout, zéro logique marque)
+- Tests: WSDL parse 7/7, ONVIF init sans FileNotFoundError, P0-1 unit online/offline, battery endpoints sans 500, régression IA/plugins/UI OK
+- Limite: appels ONVIF réels (GetServices etc.) non testables sans caméra physique — définitions validées offline
