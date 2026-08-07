@@ -128,3 +128,88 @@ def _yolo_results_to_objects(results, _ae) -> list[DetectionObject]:
             continue
     out.sort(key=lambda o: o.confidence, reverse=True)
     return out
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# DetectorRegistry — v0.5.6 Phase B
+# ═════════════════════════════════════════════════════════════════════════
+class DetectorRegistry:
+    """Registry singleton des détecteurs disponibles à l'exécution.
+
+    Pattern factory : les implémentations concrètes (`YoloDetector`,
+    `RTDetrDetector`, `TensorRTDetector`…) s'enregistrent au chargement
+    et le pipeline demande une instance par nom :
+
+        registry.register("yolov11", YoloDetector)
+        registry.register("rt-detr", RTDetrDetector)
+        det = registry.get("yolov11")        # instance singleton
+        objs = det.detect(frame_bgr)
+
+    - ``get_active(cam_config)`` retourne le détecteur choisi pour cette
+      caméra. Aujourd'hui (Phase B), seule la config globale est lue —
+      la config par-caméra sera branchée en Phase C.
+    - Si le détecteur demandé n'existe pas → fallback vers ``yolov11``
+      avec un ``warning`` explicite (jamais silencieux).
+    """
+
+    def __init__(self) -> None:
+        self._factories: dict[str, type] = {}
+        self._instances: dict[str, Detector] = {}
+        self._default = "yolov11"
+
+    def register(self, name: str, factory: type) -> None:
+        self._factories[name] = factory
+
+    def get(self, name: str) -> Detector | None:
+        if name in self._instances:
+            return self._instances[name]
+        factory = self._factories.get(name)
+        if factory is None:
+            return None
+        try:
+            inst = factory()
+            self._instances[name] = inst
+            return inst
+        except Exception:  # pragma: no cover
+            return None
+
+    def get_active(self, cam_config: dict | None = None) -> tuple[Detector, str, str | None]:
+        """Retourne (detector_actif, name_effectif, warning_ou_None).
+
+        En Phase B, ``cam_config`` est ignoré (config globale uniquement).
+        En Phase C, on lira ``cam_config['pipeline_config']['detector']``.
+        """
+        # TODO Phase C : lire cam_config['pipeline_config']['detector'].
+        requested = self._default
+        det = self.get(requested)
+        if det is not None:
+            return det, requested, None
+        # Le default lui-même est indisponible → erreur logique.
+        return _NULL_DETECTOR, requested, (
+            f"Détecteur '{requested}' introuvable dans le registry — "
+            f"pipeline en mode dégradé."
+        )
+
+    def known(self) -> list[str]:
+        return sorted(self._factories.keys())
+
+
+class _NullDetector:
+    """Détecteur no-op — retourne toujours zéro détection.
+
+    Utilisé si le YOLO n'est pas encore chargé (démarrage) ou si le
+    modèle demandé n'a pas pu être instancié. **Ne jamais crash** : le
+    pipeline continue silencieusement à zéro détection, comme si aucune
+    caméra n'avait de contenu intéressant à cet instant.
+    """
+    name = "null"
+
+    def detect(self, frame_bgr) -> list[DetectionObject]:  # noqa: ARG002
+        return []
+
+
+_NULL_DETECTOR = _NullDetector()
+
+# Instance globale — importée par le pipeline (`_stage_detection`).
+registry = DetectorRegistry()
+registry.register("yolov11", YoloDetector)

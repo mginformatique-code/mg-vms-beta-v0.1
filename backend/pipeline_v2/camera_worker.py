@@ -82,44 +82,72 @@ class CameraWorker:
         inspector.record(self.camera_id, "motion", ms)
 
     def _stage_detection(self, ctx: FrameContext) -> None:
-        """YOLO — exécuté exactement UNE fois par frame. Aucun plugin ne
-        relance d'inférence : tous consomment ces Detection."""
+        """Detection — exécutée exactement UNE fois par frame via le
+        registry d'abstraction (`pipeline_v2.detector.registry`).
+
+        v0.5.6 Phase B · Le pipeline n'appelle plus jamais YOLO
+        directement — il demande un ``Detector`` au registry et consomme
+        des ``DetectionObject`` (indépendants du moteur). Aucun plugin
+        aval ne relance d'inférence.
+
+        Le comportement fonctionnel reste **identique** à v0.5.5 : la
+        seule implémentation active est ``YoloDetector`` (qui utilise
+        ``ai_engine._model`` avec le lock P0-1). Ajouter RT-DETR /
+        TensorRT / ONNX se fait désormais par :
+
+            registry.register("rt-detr", RTDetrDetector)
+
+        sans toucher au pipeline. La sélection par caméra sera branchée
+        en Phase C via ``cam_config['pipeline_config']['detector']``.
+        """
         import ai_engine as _ae
+        from .detector import registry as _detector_registry
         t0 = time.monotonic()
-        results = None
-        if _ae._model is not None:
+
+        detector, det_name, det_warning = _detector_registry.get_active(None)
+        objects = []
+        detect_error = False
+        if ctx.image is not None:
             try:
-                # v0.5.6 P0-1 · Sérialisation stricte des appels YOLO — le
-                # modèle est un singleton partagé, non thread-safe.
-                with _ae.YOLO_INFERENCE_LOCK:
-                    results = _ae._model.predict(
-                        ctx.image, conf=_ae._cfg("confidence", _ae.AI_CONFIDENCE),
-                        device=_ae._detected_device(), verbose=False)[0]
-            except Exception as e:
+                objects = detector.detect(ctx.image)
+            except Exception as e:  # pragma: no cover
+                detect_error = True
                 _ae._ai_health["last_cycle_error"] = \
-                    f"yolo.predict: {type(e).__name__}: {str(e)[:200]}"
-                logger.exception("YOLO.predict a échoué sur %s", self.camera_id)
+                    f"detector.detect: {type(e).__name__}: {str(e)[:200]}"
+                logger.exception("Detector %s a échoué sur %s", det_name, self.camera_id)
+        else:
+            # Aucune image dans le contexte : rien à détecter (early return).
+            objects = []
         ms = (time.monotonic() - t0) * 1000
-        ctx.timings["yolo_ms"] = round(ms, 1)
-        inspector.record(self.camera_id, "yolo", ms, error=(results is None and _ae._model is not None))
-        if results is None:
+        ctx.timings["yolo_ms"] = round(ms, 1)  # clé historique — conservée pour l'UI
+        ctx.timings["detector_ms"] = ctx.timings["yolo_ms"]
+        ctx.metadata["detector"] = {"name": det_name, "warning": det_warning}
+        inspector.record(self.camera_id, "yolo", ms, error=detect_error)
+        inspector.set_meta(self.camera_id, detector=det_name)
+        if not objects:
             return
-        for box in results.boxes:
-            cls_name = _ae._model.names[int(box.cls)]
+
+        # Filtre par vocabulaire produit (CLASS_FR) + enrichissement crop +
+        # couleur véhicule. Le pipeline downstream attend le format dict
+        # historique — la conversion est faite ici en un seul endroit.
+        img = ctx.image
+        for obj in objects:
+            cls_name = obj.label
             if cls_name not in _ae.CLASS_FR:
                 continue
-            x1, y1, x2, y2 = (max(0, int(v)) for v in box.xyxy[0])
-            crop = ctx.image[y1:y2, x1:x2]
+            x1, y1, x2, y2 = (max(0, int(v)) for v in obj.bbox)
+            crop = img[y1:y2, x1:x2]
             is_vehicle = cls_name in _ae.VEHICLE_CLASSES
             ctx.detections.append({
                 "class": cls_name, "label": _ae.CLASS_FR[cls_name],
-                "confidence": round(float(box.conf), 2),
+                "confidence": round(float(obj.confidence), 2),
                 # Encodage LAZY : le crop est encodé uniquement si un événement
                 # est réellement inséré (downstream) — zéro JPEG inutile.
                 "thumbnail": None,
                 "_crop": crop,
                 "vehicle_color": dominant_color_fr(crop) if is_vehicle else None,
                 "_bbox": (x1, y1, x2, y2),
+                "_detector": det_name,
             })
 
     def _stage_tracking(self, ctx: FrameContext, enabled_plugins: Optional[list]) -> None:
