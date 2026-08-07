@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
+import VirtualGrid from "@/components/VirtualGrid";
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
 } from "@/components/ui/sheet";
@@ -272,10 +273,17 @@ export default function Vehicles() {
         </div>
       )}
 
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {(smartResult ? (smartResult.vehicles || []) : items).map((v) => (
-          <VehicleCard key={v.plate} v={v} onOpen={() => setOpenPlate(v.plate)} />
-        ))}
+      <div data-testid="vehicles-grid-root">
+        <VirtualGrid
+          items={smartResult ? (smartResult.vehicles || []) : items}
+          renderItem={(v) => <VehicleCard v={v} onOpen={() => setOpenPlate(v.plate)} />}
+          itemKey={(v) => v.plate}
+          rowHeight={340}
+          minColumnWidth={260}
+          maxColumns={4}
+          threshold={200}
+          testid="vehicles-virtual-grid"
+        />
       </div>
 
       {smartResult?.persons_count > 0 && (

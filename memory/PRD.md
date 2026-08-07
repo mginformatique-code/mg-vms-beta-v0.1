@@ -579,4 +579,45 @@ Prioritisé par ROI décroissant (détails dans le rapport v0.8-rc1) :
 - Frontend ErrorBoundary par section (isole chaque tab)
 - Stress-test panne (déjà couvert par P9 v0.8 RC)
 - Job cron 24h simulation avec logs perf p95/p99 par heure
-- Création auto indexes Mongo au bootstrap
+- ~~Création auto indexes Mongo au bootstrap~~ ✅ **v0.8-rc3**
+
+## v0.8-rc3 · MongoDB Auto-Indexes + React Virtualization (2026-08)
+### Backend — MongoDB Auto-Indexes bootstrap
+- `backend/database.py` refonte : nouveau helper `_safe_index()` tolérant aux `OperationFailure`
+  (code 85 IndexOptionsConflict + 86 IndexKeySpecsConflict) et aux erreurs génériques. Bootstrap
+  ne crashe jamais si un index existe déjà avec des options différentes (ex : TTL préexistant).
+- Application des 17 recommandations issues de `stress/mongo_audit.py` :
+  * cameras : id, site_id, status
+  * events : timestamp, camera_id, type, kind + composé (camera_id, timestamp desc)
+  * plates : plate, timestamp, camera_id, track_id + composé (plate, timestamp desc)
+  * recordings : camera_id, start_ts, end_ts + composé (camera_id, start_ts desc)
+  * audit_logs : timestamp, actor
+  * sessions : user_id, created_at
+  * tls_certificates : id, active (v0.7.f)
+  * alerts : timestamp, camera_id
+- Preuve runtime : `list_indexes()` confirme 32 indexes créés sur 8 collections critiques
+  (avant : ~10). Backend startup log propre, zéro erreur.
+
+### Frontend — VirtualGrid react-window v2
+- Nouveau composant `frontend/src/components/VirtualGrid.jsx` (~110 lignes) — grille
+  responsive virtualisée basée sur `react-window@2.3.0`. Rend uniquement les cellules
+  visibles ± 2 overscan. Colonnes calculées dynamiquement via `ResizeObserver`
+  (min-column-width + max-columns).
+- Hybride intelligent : sous le `threshold` (défaut 200 items), fallback rendu classique
+  CSS grid (pas de régression UX pour les datasets modestes). Au-delà, activation Grid
+  virtualisée automatique.
+- Intégration `Vehicles.jsx` : la grille manuelle `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3
+  xl:grid-cols-4` remplacée par `<VirtualGrid ...>`. Preuve écran : 31 véhicules rendus
+  identiquement (sous threshold), zéro erreur React, testid présents.
+- Data-testid : `virtual-grid`, `virtual-grid-virtualized` (+ data-count/columns/rows).
+
+### Tests
+- Nouveau `tests/test_v08rc3_mongo_indexes_virtualization.py` — 7 tests verts (helpers,
+  indexes présents, VirtualGrid contract, Vehicles.jsx wired). Total : **147 tests verts**.
+
+### Fichiers modifiés
+- `backend/database.py` (+80 lignes, refactoring)
+- `frontend/src/components/VirtualGrid.jsx` (nouveau, 110 lignes)
+- `frontend/src/pages/Vehicles.jsx` (+8 / -5, intégration)
+- `frontend/package.json` (+1 dep : react-window@2.3.0)
+- `backend/tests/test_v08rc3_mongo_indexes_virtualization.py` (nouveau, 130 lignes)

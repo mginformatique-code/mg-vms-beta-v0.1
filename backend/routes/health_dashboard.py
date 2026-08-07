@@ -538,6 +538,48 @@ async def get_capabilities_matrix(user: dict = Depends(require_permission("view_
     }
 
 
+# ═════════════════════════════════════════════════════════════════════
+# v0.8-rc2 · Camera Benchmark + Camera Advisor
+# ═════════════════════════════════════════════════════════════════════
+@health_dashboard_router.post("/cameras/{camera_id}/benchmark")
+async def post_camera_benchmark(
+    camera_id: str,
+    duration_s: int = 60,
+    user: dict = Depends(require_permission("technician")),
+):
+    """Lance un benchmark bloquant durée `duration_s` (max 300 s)."""
+    from services.camera_benchmark import run_benchmark
+    duration_s = max(10, min(int(duration_s), 300))
+    return await run_benchmark(camera_id, duration_s=duration_s)
+
+
+@health_dashboard_router.get("/cameras/{camera_id}/benchmarks")
+async def get_camera_benchmarks(
+    camera_id: str, limit: int = 10,
+    user: dict = Depends(require_permission("view_live")),
+):
+    from services.camera_benchmark import list_benchmarks
+    return {"camera_id": camera_id,
+            "benchmarks": await list_benchmarks(camera_id, limit=limit)}
+
+
+@health_dashboard_router.get("/cameras/{camera_id}/advisor")
+async def get_camera_advisor(
+    camera_id: str,
+    user: dict = Depends(require_permission("view_live")),
+):
+    from services.camera_advisor import advise
+    return await advise(camera_id)
+
+
+@health_dashboard_router.get("/cameras/advisor")
+async def get_all_cameras_advisor(user: dict = Depends(require_permission("view_live"))):
+    from services.camera_advisor import advise_all
+    results = await advise_all()
+    total_recs = sum(len(r.get("recommendations", [])) for r in results)
+    return {"cameras": results, "total_recommendations": total_recs}
+
+
 def _summarize_by_vendor(rows: list[dict], all_caps: set) -> dict:
     """Regroupe par vendor et compte les caps disponibles."""
     by_vendor: dict = {}
