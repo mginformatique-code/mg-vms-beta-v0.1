@@ -30,6 +30,11 @@ class CameraCapabilities:
 
     Une capacité à ``False`` signifie que le driver a testé et confirmé
     l'absence de la fonction. ``None`` = non-testé (inconnu).
+
+    v0.5.7 · nouveaux flags optionnels ajoutés en bas (multi_stream,
+    codec_h265, IA fine-grain, thermal, radar, io, storage…). Tous
+    valent ``False`` par défaut → aucune régression pour un driver qui
+    ne les remonte pas.
     """
     # PTZ / optique
     ptz: bool = False
@@ -57,7 +62,7 @@ class CameraCapabilities:
     pir_sensor: bool = False        # détecteur mouvement PIR (Reolink)
     battery: bool = False           # caméra sur batterie
 
-    # Événements IA embarqués
+    # Événements IA embarqués (agrégat historique)
     onboard_ai: bool = False
     onboard_ai_features: tuple = field(default_factory=tuple)
 
@@ -70,6 +75,51 @@ class CameraCapabilities:
     # Info matériel
     max_resolution: tuple = (0, 0)
     max_fps: int = 0
+
+    # ── v0.5.7 · extensions Universal Camera API ─────────────────
+    # Vidéo
+    multi_stream: bool = False       # deux profils (main + sub)
+    codec_h265: bool = False         # H.265 supporté
+    # Audio étendu
+    talkback: bool = False           # alias sémantique de two_way_audio
+    upload_wav: bool = False         # upload d'un fichier audio custom
+    # Lumière étendue
+    flash: bool = False              # flash / stroboscope
+    # PTZ étendu
+    ptz_presets: bool = False        # rappel de presets
+    ptz_patrol: bool = False         # rondes automatiques
+    ptz_tracking: bool = False       # suivi auto d'une cible
+    # IA embarquée fine-grain (booléens dérivables de onboard_ai_features)
+    ai_motion: bool = False
+    ai_person: bool = False
+    ai_vehicle: bool = False
+    ai_animal: bool = False
+    ai_face: bool = False
+    ai_helmet: bool = False
+    ai_anpr: bool = False
+    ai_line_crossing: bool = False
+    ai_intrusion: bool = False
+    # Capteurs additionnels
+    thermal: bool = False
+    radar: bool = False
+    # I/O
+    relay: bool = False              # sortie relais (alias sémantique alarm_output)
+    digital_io: bool = False         # entrées/sorties numériques
+    # Connectique
+    wifi: bool = False
+    poe: bool = False
+    # Stockage
+    sdcard: bool = False
+    hdd: bool = False
+    nas: bool = False
+    ftp: bool = False
+    smtp: bool = False
+    cloud: bool = False
+    # Sécurité
+    https: bool = False
+    vpn: bool = False
+    # API propriétaire (générique — ex : Axis VAPIX, Hanwha SUNAPI…)
+    proprietary_api: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)

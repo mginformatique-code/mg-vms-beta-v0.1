@@ -24,6 +24,28 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 - **Installateur terrain** : setup guidé 10–15 min, health dashboard clair
 
 ### État Feb 2026 — sessions successives
+**Session 52 (Feb 2026)** — v0.5.7 · Universal Camera API · Phase 1 (consolidation d'interfaces) :
+- 📐 Document de migration `/app/MIGRATION_v057_UNIVERSAL_CAMERA_API.md` avec tableau
+  composant/action/décision — approche Option C (fusion progressive, zéro duplication).
+- 🎯 Une seule source de vérité : `backend/drivers/` reste inchangé (contrat + implémentations).
+- 🔗 `backend/pipeline_v2/camera_driver.py` réécrit en **contrat pur** : re-export du
+  `CameraDriver` (ABC), `CameraCapabilities`, `DeviceInfo`, `StreamInfo`, `DeviceStatus`,
+  exceptions et registry depuis `drivers/` + ajout d'une facette `CameraDriverProtocol`
+  (`runtime_checkable`) pour typing structural. Zéro logique métier.
+- 🛠️ `backend/pipeline_v2/camera_manager.py` créé — façade légère qui délègue au
+  `CameraDeviceService` (get_driver/discover/release + `validate_camera_doc` sans I/O
+  + `supported_vendors`). Aucune commande métier exposée.
+- ➕ `CameraCapabilities` enrichi (backward-compatible) avec ~25 nouveaux flags v0.5.7 :
+  `multi_stream`, `codec_h265`, `talkback`, `flash`, `ptz_presets/patrol/tracking`,
+  `ai_motion/person/vehicle/animal/face/helmet/anpr/line_crossing/intrusion`, `thermal`,
+  `radar`, `relay`, `digital_io`, `wifi`, `poe`, `sdcard`, `hdd`, `nas`, `ftp`, `smtp`,
+  `cloud`, `https`, `vpn`, `proprietary_api`. Tous à `False` par défaut.
+- ✅ Tests : `tests/test_v057_universal_api.py` (21 tests) + suite `test_camera_drivers.py`
+  (22 tests) — 43/43 verts. `/api/devices/_supported` répond avec les 5 vendors
+  historiques (onvif, reolink, dahua, hikvision, generic) sans changement d'API.
+- 🚫 Aucune modification des routes `/api/devices/*`. Aucun changement frontend.
+
+
 
 **Session 49 (Feb 2026)** — v0.5.5 · Assistant de découverte réseau avancée :
 - 🌐 Nouveau module `/app/backend/routes/discovery.py` : listing des

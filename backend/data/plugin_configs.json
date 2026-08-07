@@ -3,7 +3,9 @@
     "enabled_for_demo": false
   },
   "plate-recognizer": {
-    "api_token": "",
-    "regions": []
+    "api_token": "gAAAAABqdYVvebCid8V_6yscoYSSXS9q7UB4FVsE-6BJsHaQA0PVKJLVSzIFDKCsWsx4okUMKnFLIJXd9bM68JZ9V9Dhjihx2g==",
+    "regions": [
+      "us"
+    ]
   }
 }
