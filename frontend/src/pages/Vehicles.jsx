@@ -30,9 +30,13 @@ export default function Vehicles() {
   // Smart search
   const [smart, setSmart] = useState(""); // AI query
   const [smartLoading, setSmartLoading] = useState(false);
-  const [smartResult, setSmartResult] = useState(null); // {filters, items}
+  const [smartResult, setSmartResult] = useState(null); // {filters, vehicles, persons}
   const [advOpen, setAdvOpen] = useState(false);
   const [adv, setAdv] = useState({ colors: "", makes: "", types: "", date_from: "", date_to: "" });
+  const [history, setHistory] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("smart_search_history") || "[]"); }
+    catch { return []; }
+  });
   // Identities
   const [identities, setIdentities] = useState([]);
   const [identityCandidates, setIdentityCandidates] = useState([]);
@@ -56,13 +60,24 @@ export default function Vehicles() {
     } catch { /* silent */ }
   }, []);
 
-  const runSmartSearch = useCallback(async () => {
-    if (!smart.trim()) { setSmartResult(null); return; }
+  const runSmartSearch = useCallback(async (queryOverride) => {
+    const q = (typeof queryOverride === "string" ? queryOverride : smart).trim();
+    if (!q) { setSmartResult(null); return; }
+    if (typeof queryOverride === "string") setSmart(q);
     setSmartLoading(true);
     try {
-      const { data } = await api.post("/vehicles/smart-search", { query: smart });
+      const { data } = await api.post("/smart-search", { query: q });
       setSmartResult(data);
-      toast.success(`${data.count} véhicule${data.count > 1 ? "s" : ""} trouvé${data.count > 1 ? "s" : ""}`);
+      // Sauvegarde historique (5 dernières)
+      try {
+        const hist = JSON.parse(localStorage.getItem("smart_search_history") || "[]");
+        const next = [{ query: q, at: Date.now(), vehicles: data.vehicles_count, persons: data.persons_count, target: data.target },
+                       ...hist.filter((h) => h.query !== q)].slice(0, 5);
+        localStorage.setItem("smart_search_history", JSON.stringify(next));
+        setHistory(next);
+      } catch { /* ignore */ }
+      const total = (data.vehicles_count || 0) + (data.persons_count || 0);
+      toast.success(`${total} résultat${total > 1 ? "s" : ""} trouvé${total > 1 ? "s" : ""}`);
     } catch (e) {
       toast.error(e.response?.data?.detail?.message || "Recherche IA impossible");
     } finally { setSmartLoading(false); }
@@ -190,7 +205,7 @@ export default function Vehicles() {
       <div className="text-xs text-muted-foreground mono mb-3 flex items-center justify-between" data-testid="vehicles-count">
         <span>
           {smartResult
-            ? `${smartResult.count} résultat${smartResult.count > 1 ? "s" : ""} pour « ${smartResult.query} »`
+            ? `${(smartResult.vehicles_count || 0)} véhicule(s) + ${(smartResult.persons_count || 0)} personne(s) pour « ${smartResult.query} »`
             : `${items.length} véhicule${items.length > 1 ? "s" : ""} affiché${items.length > 1 ? "s" : ""} sur ${total}`}
         </span>
         {smartResult && (
@@ -200,6 +215,31 @@ export default function Vehicles() {
           </button>
         )}
       </div>
+
+      {history.length > 0 && !smartResult && (
+        <div className="mb-3 flex items-center gap-2 flex-wrap text-[11px]" data-testid="search-history">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Recherches récentes :</span>
+          {history.map((h, i) => (
+            <button
+              key={`${h.query}-${i}`}
+              onClick={() => runSmartSearch(h.query)}
+              data-testid={`history-${i}`}
+              className="flex items-center gap-1 px-2 py-0.5 border border-border hover:border-[#0044FF] hover:text-[#0044FF] transition-colors"
+              title={`${h.vehicles || 0} véhicules · ${h.persons || 0} personnes`}
+            >
+              <Sparkles size={10} className="text-[#0044FF]" />
+              <span className="truncate max-w-[240px]">{h.query}</span>
+            </button>
+          ))}
+          <button
+            onClick={() => { localStorage.removeItem("smart_search_history"); setHistory([]); }}
+            data-testid="history-clear"
+            className="text-[9px] uppercase tracking-wider text-muted-foreground hover:text-foreground ml-auto"
+          >
+            Vider
+          </button>
+        </div>
+      )}
 
       {smartResult?.filters && (
         <div className="border border-[#0044FF]/40 bg-[#0044FF]/5 p-2 mb-3 text-[11px] mono flex flex-wrap gap-2 items-center" data-testid="smart-filters">
@@ -233,10 +273,14 @@ export default function Vehicles() {
       )}
 
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {(smartResult ? smartResult.items : items).map((v) => (
+        {(smartResult ? (smartResult.vehicles || []) : items).map((v) => (
           <VehicleCard key={v.plate} v={v} onOpen={() => setOpenPlate(v.plate)} />
         ))}
       </div>
+
+      {smartResult?.persons_count > 0 && (
+        <PersonsSection persons={smartResult.persons || []} description={smartResult.filters?.object_description} />
+      )}
 
       <VehicleDrawer
         plate={openPlate}
@@ -549,6 +593,50 @@ function TabOverview({ d, onWatchChanged }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Section Personnes (résultats smart-search cross-domain)
+// ═══════════════════════════════════════════════════════════════════
+function PersonsSection({ persons, description }) {
+  return (
+    <div className="mt-6" data-testid="persons-section">
+      <div className="flex items-center gap-2 mb-3">
+        <Users size={16} className="text-[#0044FF]" />
+        <h2 className="font-head text-lg tracking-tight">Personnes détectées <span className="mono text-sm text-muted-foreground">({persons.length})</span></h2>
+        {description && (
+          <span className="text-xs text-muted-foreground italic">— « {description} » (tri visuel manuel)</span>
+        )}
+      </div>
+      <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
+        {persons.map((p) => (
+          <a key={p.id}
+             href={p.crop_thumbnail || "#"}
+             target="_blank" rel="noreferrer"
+             className="block bg-card border border-border hover:border-[#0044FF] transition-colors"
+             data-testid={`person-${p.id}`}>
+            {p.crop_thumbnail ? (
+              <img src={p.crop_thumbnail} alt="" loading="lazy" className="w-full h-32 object-cover" />
+            ) : (
+              <div className="w-full h-32 bg-secondary/50 flex items-center justify-center">
+                <Users size={20} className="opacity-40" />
+              </div>
+            )}
+            <div className="p-1.5 text-[10px] mono">
+              <div className="truncate">{p.type}</div>
+              <div className="text-muted-foreground truncate">{p.camera_name}</div>
+              <div className="flex items-center justify-between text-muted-foreground">
+                <span>{fmtDateTime(p.timestamp)}</span>
+                <span style={{ color: (p.confidence || 0) > 0.8 ? "#00E676" : "#FFB800" }}>
+                  {((p.confidence || 0) * 100).toFixed(0)}%
+                </span>
+              </div>
+            </div>
+          </a>
+        ))}
+      </div>
     </div>
   );
 }
