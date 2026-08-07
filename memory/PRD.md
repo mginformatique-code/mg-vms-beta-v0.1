@@ -476,8 +476,15 @@ Ordre officiel confirmé par le CEO :
 - Tests : 19 verts (test_v07e_multi_ocr_wave_c.py). Total : 94/94 verts (16 A + 19 C + 59 régression)
 - Fichiers : pipeline_v2/plate_quality.py (nouveau), pipeline_v2/camera_worker.py, anpr_tracker.py, pipeline_v2/downstream.py, routes/health_dashboard.py
 
+## v0.7.e Wave B · Frontend fuites (2026-06)
+- Audit statique : 33 intervalles / 2 sources temps-réel (WS + EventSource) / 186 useEffect / 10 addEventListener — TOUS avec cleanup validé
+- Fuite B1 identifiée : `aiDetections` map jamais purgée → croissance mémoire linéaire quand caméras ajoutées/supprimées. Fix : TTL 45s + prune 30s dans AppContext + skip re-render si rien à purger
+- Fuite B2 : nouvelle map identity à chaque WS message → re-renders inutiles de tous les consommateurs. Fix : skip write si payload identique (même ts + même count boxes)
+- Nouveau module `frontend/src/lib/perf.js` : `window.__mgvms_perf.snapshot()` accessible depuis DevTools/Playwright. Compte ws_messages, ws_reconnects, ai_detections_map_size, ai_detections_evictions, intervals/timers actifs, uptime
+- Preuves live (Playwright 42s) : ws_messages=28 · map_size=1 stable · evictions=0 · reconnects=0 · UI Welcome affiche v0.7.e correctement
+- Fichiers : frontend/src/lib/perf.js (nouveau, 87 lignes), frontend/src/context/AppContext.jsx (+51/-7)
+
 ## Vagues restantes v0.7.e (backlog)
-- Wave B : Frontend fuites / re-renders / WebSockets / polling / timers (mesures chiffrées)
 - Wave D : go2rtc + Camera API + ONVIF (auto-détection capabilities réelles, snapshots, previews stables pendant modif)
 - Wave E : Timeline type Reolink (couleurs par type d'événement) + miniatures véhicules (photo complète + crop véhicule + crop plaque) + fix boucle vidéo
 - Wave F : Stress-test 1/5/10/20/30/50 caméras avec FPS/CPU/GPU/VRAM/RAM/p95/p99/OCR moyen/temps détection/temps crop/temps OCR/total pipeline + rapport final

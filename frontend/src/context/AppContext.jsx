@@ -2,6 +2,13 @@ import React, { createContext, useContext, useEffect, useState, useCallback, use
 import api from "@/lib/api";
 import { translations } from "@/i18n";
 import { toast } from "sonner";
+import { bumpWsMessage, bumpWsReconnect, bumpEviction, setAiDetectionsMapSize } from "@/lib/perf";
+
+// v0.7.e · Wave B · TTL des entrées aiDetections (une caméra qui n'a
+// pas émis depuis N secondes est purgée pour éviter l'accumulation
+// mémoire quand des caméras sont supprimées ou passent offline).
+const AI_DETECTIONS_TTL_MS = 45_000;
+const AI_DETECTIONS_PRUNE_INTERVAL_MS = 30_000;
 
 const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
@@ -76,19 +83,34 @@ export function AppProvider({ children }) {
       try {
         ws = new WebSocket(`${base}/api/ws?token=${token}`);
         ws.onmessage = (e) => {
+          bumpWsMessage();
           let msg;
           try { msg = JSON.parse(e.data); } catch { return; }
           if (msg.type === "metrics") setLiveMetrics(msg.data);
           else if (msg.type === "ai_detections") {
-            setAiDetections((prev) => ({
-              ...prev,
-              [msg.data.camera_id]: {
+            // v0.7.e · Wave B · on ne recrée la map que si le payload est
+            // effectivement différent (référence stable ⇒ pas de re-render
+            // des consommateurs inutile).
+            setAiDetections((prev) => {
+              const camId = msg.data.camera_id;
+              const nowTs = msg.data.timestamp;
+              const existing = prev[camId];
+              const nextEntry = {
                 boxes: msg.data.boxes || [],
                 counts: msg.data.counts || {},
-                ts: msg.data.timestamp,
+                ts: nowTs,
+                _rx_at: Date.now(),   // timestamp local pour pruning TTL
                 motion_pct: msg.data.motion_pct,
-              },
-            }));
+              };
+              // Skip si les données sont identiques (même ts + mêmes boxes count)
+              if (existing && existing.ts === nowTs &&
+                  (existing.boxes?.length || 0) === nextEntry.boxes.length) {
+                return prev;
+              }
+              const next = { ...prev, [camId]: nextEntry };
+              setAiDetectionsMapSize(Object.keys(next).length);
+              return next;
+            });
           }
           else if (msg.type === "alert") {
             setLiveAlert(msg.data);
@@ -100,12 +122,34 @@ export function AppProvider({ children }) {
             else toast.info(txt);
           }
         };
-        ws.onclose = () => { if (alive) retry = setTimeout(connect, 4000); };
+        ws.onclose = () => { if (alive) { bumpWsReconnect(); retry = setTimeout(connect, 4000); } };
         ws.onerror = () => { try { ws.close(); } catch (e) {} };
       } catch (e) { if (alive) retry = setTimeout(connect, 4000); }
     };
     connect();
     return () => { alive = false; clearTimeout(retry); try { ws && ws.close(); } catch (e) {} };
+  }, [user]);
+
+  // v0.7.e · Wave B · Pruning périodique des aiDetections stales
+  // (caméras supprimées ou passées offline depuis longtemps).
+  useEffect(() => {
+    if (!user) return;
+    const iv = setInterval(() => {
+      const cutoff = Date.now() - AI_DETECTIONS_TTL_MS;
+      setAiDetections((prev) => {
+        let evicted = 0;
+        const next = {};
+        for (const [k, v] of Object.entries(prev)) {
+          if ((v?._rx_at ?? 0) >= cutoff) next[k] = v;
+          else evicted += 1;
+        }
+        if (evicted === 0) return prev;
+        bumpEviction(evicted);
+        setAiDetectionsMapSize(Object.keys(next).length);
+        return next;
+      });
+    }, AI_DETECTIONS_PRUNE_INTERVAL_MS);
+    return () => clearInterval(iv);
   }, [user]);
 
   return (
