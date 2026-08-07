@@ -57,7 +57,7 @@ const NAV = [
     { to: "/diagnostics", icon: Activity, key: "nav.diagnostics", role: "technician" },
   ]},
   { group: "nav.settings_group", items: [
-    { to: "/settings", icon: Settings, key: "nav.settings" },
+    { to: "/storage", icon: HardDrive, key: "nav.storage" },
     { to: "/notifications", icon: BellRing, key: "nav.notifications", role: "technician" },
   ]},
 ];

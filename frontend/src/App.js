@@ -101,6 +101,7 @@ function AppRoutes() {
       <Route path="/plugins" element={<Protected><Plugins /></Protected>} />
       <Route path="/plugins/:pluginId" element={<Protected><PluginPage /></Protected>} />
       <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
+      <Route path="/storage" element={<Protected><SettingsPage /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

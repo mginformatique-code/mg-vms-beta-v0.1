@@ -1,65 +1,338 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
-import { Moon, Sun, Languages, ShieldCheck, Monitor, Loader2, HardDrive, Save, Trash2, PlayCircle, Database, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Clock, Wifi, LogOut } from "lucide-react";
+import {
+  Loader2, HardDrive, Save, Trash2, PlayCircle, Database, RefreshCw,
+  CheckCircle2, XCircle, AlertTriangle, Server, Film, Info,
+} from "lucide-react";
 import { toast } from "sonner";
 
+/**
+ * Page Stockage — v0.5.7
+ *
+ * Trois disques dédiés recommandés :
+ *   1. Application VMS (système où tourne MG-VMS)
+ *   2. Base de données (MongoDB)
+ *   3. Enregistrements vidéo (pool caméras)
+ *
+ * Les préférences d'apparence & de langue sont accessibles dans la
+ * barre supérieure droite du Layout — elles ne sont plus dupliquées ici.
+ */
 export default function SettingsPage() {
-  const { t, theme, setTheme, lang, setLang, user, setUser } = useApp();
-
-  // eslint-disable-next-line react/no-unstable-nested-components
-  const Card = ({ title, icon: Icon, children, id }) => (
-    <div id={id} className="bg-card border border-border p-5 mb-3 scroll-mt-4">
-      <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-4"><Icon size={15} /> {title}</div>
-      {children}
-    </div>
-  );
-  // eslint-disable-next-line react/no-unstable-nested-components
-  const Opt = ({ active, onClick, icon: Icon, label, tid }) => (
-    <button onClick={onClick} data-testid={tid} className={`flex items-center gap-2 px-4 py-2.5 border text-sm transition-colors ${active ? "border-[#0044FF] bg-[#0044FF]/10 text-[#0044FF]" : "border-border hover:bg-secondary"}`}>
-      <Icon size={16} /> {label}
-    </button>
-  );
-
+  const { t, user } = useApp();
   return (
-    <div className="p-4 max-w-3xl">
-      <h1 className="font-head font-bold text-2xl tracking-tight mb-4">{t("settings.title")}</h1>
+    <div className="p-4 max-w-4xl" data-testid="storage-page">
+      <div className="mb-5">
+        <h1 className="font-head font-bold text-2xl tracking-tight">{t("storage.title")}</h1>
+        <p className="text-sm text-muted-foreground mt-1">{t("storage.subtitle")}</p>
+      </div>
 
-      <Card title={t("settings.appearance")} icon={Monitor}>
-        <div className="text-xs text-muted-foreground mb-2">{t("settings.theme")}</div>
-        <div className="flex gap-2 mb-5">
-          <Opt active={theme === "dark"} onClick={() => setTheme("dark")} icon={Moon} label="Dark" tid="theme-dark" />
-          <Opt active={theme === "light"} onClick={() => setTheme("light")} icon={Sun} label="Light" tid="theme-light" />
-        </div>
-        <div className="text-xs text-muted-foreground mb-2">{t("settings.language")}</div>
-        <div className="flex gap-2">
-          <Opt active={lang === "fr"} onClick={() => setLang("fr")} icon={Languages} label="Français" tid="lang-fr" />
-          <Opt active={lang === "en"} onClick={() => setLang("en")} icon={Languages} label="English" tid="lang-en" />
-        </div>
-      </Card>
+      <Tip text={t("storage.tip")} />
 
-      <Card title="Compte" icon={ShieldCheck}>
-        <div className="grid grid-cols-2 gap-y-2 text-sm">
-          <span className="text-muted-foreground">{t("common.name")}</span><span>{user?.name}</span>
-          <span className="text-muted-foreground">{t("common.email")}</span><span className="mono">{user?.email}</span>
-          <span className="text-muted-foreground">{t("common.role")}</span><span className="uppercase text-[#0044FF]">{user?.role}</span>
-        </div>
-      </Card>
-
-      {user?.role === "admin" && <RetentionCard />}
-      {user?.role === "admin" && <StorageCard />}
+      <VMSDiskCard />
       {user?.role === "admin" && <DatabaseCard />}
+      {user?.role === "admin" && <RetentionCard />}
+      {user?.role === "admin" && <VideoPoolsCard />}
     </div>
   );
 }
 
-const RetentionCard2 = ({ title, icon: Icon, children }) => (
-  <div className="bg-card border border-border p-5 mb-3">
-    <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-4"><Icon size={15} /> {title}</div>
-    {children}
-  </div>
-);
+// ═══════════════════════════════════════════════════════════════════
+// UI helpers
+// ═══════════════════════════════════════════════════════════════════
+function SectionCard({ id, title, subtitle, icon: Icon, badge, children }) {
+  return (
+    <div id={id} className="bg-card border border-border p-5 mb-4 scroll-mt-4">
+      <div className="flex items-start justify-between mb-3 gap-4">
+        <div>
+          <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground">
+            <Icon size={15} /> {title}
+          </div>
+          {subtitle && <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{subtitle}</p>}
+        </div>
+        {badge}
+      </div>
+      {children}
+    </div>
+  );
+}
 
+function Tip({ text }) {
+  return (
+    <div className="border border-border bg-secondary/40 p-3 mb-4 flex items-start gap-2 text-xs text-muted-foreground" data-testid="storage-tip">
+      <Info size={14} className="text-[#0044FF] mt-0.5 flex-shrink-0" />
+      <span>{text}</span>
+    </div>
+  );
+}
+
+function StatBox({ label, value, color, small }) {
+  return (
+    <div className="border border-border p-2 text-center">
+      <div className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={small ? "mono text-xs mt-0.5" : "mono text-lg font-bold mt-0.5"} style={color ? { color } : undefined}>{value}</div>
+    </div>
+  );
+}
+
+function UsageBar({ pct, threshold }) {
+  const color = pct > 85 ? "#FF3333" : pct > 70 ? "#FFB800" : "#00E676";
+  return (
+    <div className="h-2 bg-secondary mb-3 relative overflow-hidden">
+      <div className="h-full transition-all" style={{ width: `${Math.min(100, pct || 0)}%`, backgroundColor: color }} />
+      {threshold && <div className="absolute top-0 h-full w-px bg-white/40" style={{ left: `${threshold}%` }} title={`Seuil ${threshold}%`} />}
+    </div>
+  );
+}
+
+function DedicatedBadge({ ok, labelOk = "Dédié", labelWarn = "Partagé" }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 border ${ok ? "text-[#00E676] border-[#00E676]/60 bg-[#00E676]/10" : "text-[#FFB800] border-[#FFB800]/60 bg-[#FFB800]/10"}`}
+      data-testid={ok ? "badge-dedicated" : "badge-shared"}
+    >
+      {ok ? labelOk : labelWarn}
+    </span>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Utils : détecte la partition qui contient un chemin donné
+// ═══════════════════════════════════════════════════════════════════
+function partitionFor(partitions, targetPath) {
+  if (!partitions?.length || !targetPath) return null;
+  // On garde la partition dont le mountpoint est le plus long préfixe.
+  let best = null;
+  for (const p of partitions) {
+    const mp = p.mountpoint || "/";
+    if (targetPath === mp || targetPath.startsWith(mp === "/" ? "/" : mp + "/")) {
+      if (!best || (mp.length > (best.mountpoint || "").length)) best = p;
+    }
+  }
+  return best || partitions[0] || null;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 1. Disque VMS (application)
+// ═══════════════════════════════════════════════════════════════════
+function VMSDiskCard() {
+  const { t } = useApp();
+  const [state, setState] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+    api.get("/storage/overview")
+      .then(({ data }) => { if (mounted) setState(data); })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, []);
+
+  const vmsPart = useMemo(() => partitionFor(state?.partitions, "/app"), [state]);
+  const videoPart = useMemo(() => partitionFor(state?.partitions, state?.primary_recordings_dir), [state]);
+  const isDedicated = vmsPart && videoPart && vmsPart.mountpoint !== videoPart.mountpoint;
+
+  const usedPct = vmsPart?.used_pct ?? 0;
+
+  return (
+    <SectionCard
+      id="vms-disk"
+      title={t("storage.vms")}
+      subtitle={t("storage.vms_desc")}
+      icon={Server}
+      badge={vmsPart && <DedicatedBadge ok={isDedicated} />}
+    >
+      {!state && <div className="text-xs text-muted-foreground flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> Chargement…</div>}
+      {state && !vmsPart && <p className="text-xs text-muted-foreground">Impossible de détecter la partition système.</p>}
+      {vmsPart && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
+            <StatBox label={t("storage.vms_mount")} value={vmsPart.mountpoint} small />
+            <StatBox label={t("storage.vms_type")} value={vmsPart.fstype} small />
+            <StatBox label={t("storage.vms_total")} value={`${vmsPart.total_gb} Go`} />
+            <StatBox label={t("storage.vms_used")} value={`${vmsPart.used_gb} Go`} color={usedPct > 85 ? "#FF3333" : usedPct > 70 ? "#FFB800" : undefined} />
+            <StatBox label={t("storage.vms_free")} value={`${vmsPart.free_gb} Go`} color={usedPct > 85 ? "#FF3333" : undefined} />
+          </div>
+          <UsageBar pct={usedPct} />
+          <div className="mono text-[10px] text-muted-foreground" data-testid="vms-device">
+            {vmsPart.device} · {usedPct}% utilisé
+          </div>
+          {!isDedicated && (
+            <div className="mt-3 text-[11px] text-[#FFB800] flex items-start gap-1.5">
+              <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
+              <span>
+                L&apos;application et les enregistrements vidéo partagent la même partition. Pour un déploiement production,
+                montez un disque dédié aux enregistrements (voir la section <b>Enregistrements vidéo</b> ci-dessous).
+              </span>
+            </div>
+          )}
+        </>
+      )}
+    </SectionCard>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 2. Base de données (Mongo dédié)
+// ═══════════════════════════════════════════════════════════════════
+function DatabaseCard() {
+  const { t } = useApp();
+  const [state, setState] = useState(null);
+  const [form, setForm] = useState({ mongo_url: "", db_name: "" });
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+
+  const load = async () => {
+    try { const { data } = await api.get("/settings/database"); setState(data); }
+    catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Erreur chargement"); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const test = async () => {
+    if (!form.mongo_url || !form.db_name) { toast.error("URI et nom de base requis"); return; }
+    setTesting(true); setTestResult(null);
+    try {
+      const { data } = await api.post("/settings/database/test", form);
+      setTestResult({ ok: true, ...data });
+    } catch (e) {
+      setTestResult({ ok: false, error: formatApiErrorDetail(e.response?.data?.detail) || e.message });
+    } finally { setTesting(false); }
+  };
+
+  const save = async () => {
+    if (!testResult?.ok) { toast.error("Testez d'abord la connexion avec succès avant d'enregistrer"); return; }
+    if (!window.confirm("Confirmer l'enregistrement ?\n\nLe fichier /app/backend/.env sera modifié.\nLe backend devra être redémarré pour appliquer la nouvelle URI.")) return;
+    setSaving(true);
+    try {
+      await api.put("/settings/database", form);
+      toast.success("Config sauvegardée — redémarrage requis");
+      load();
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || e.message); }
+    finally { setSaving(false); }
+  };
+
+  const restart = async () => {
+    if (!window.confirm("Redémarrer le backend ?\n\nVous serez déconnecté quelques secondes. Reconnectez-vous ensuite.")) return;
+    setRestarting(true);
+    try {
+      await api.post("/settings/database/restart-backend", { confirm: true });
+      toast.info("Redémarrage en cours…");
+      setTimeout(() => window.location.reload(), 6000);
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e.response?.data?.detail) || e.message);
+      setRestarting(false);
+    }
+  };
+
+  const c = state?.current;
+  // Une DB « dédiée » côté frontend = URI hors localhost / hors 127.0.0.1 (donc serveur distant).
+  const isDedicated = c?.mongo_url_redacted &&
+    !/localhost|127\.0\.0\.1|::1/.test(c.mongo_url_redacted);
+
+  return (
+    <SectionCard
+      id="database"
+      title={t("storage.db")}
+      subtitle={t("storage.db_desc")}
+      icon={Database}
+      badge={c && <DedicatedBadge ok={isDedicated} labelOk="Serveur dédié" labelWarn="Serveur local" />}
+    >
+      {c && (
+        <div className="border border-border p-3 mb-4 bg-background">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Connexion active</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+            <div>
+              <div className="text-[10px] text-muted-foreground">URI (masquée)</div>
+              <div className="mono text-xs break-all" data-testid="db-current-uri">{c.mongo_url_redacted || "—"}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-muted-foreground">Nom de base</div>
+              <div className="mono text-xs" data-testid="db-current-name">{c.db_name || "—"}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-muted-foreground">Statut</div>
+              <div className="flex items-center gap-1.5 text-xs">
+                {c.status === "ok"
+                  ? <><CheckCircle2 size={12} className="mg-online" /> <span className="mg-online mono">OK</span></>
+                  : <><XCircle size={12} className="mg-error" /> <span className="mg-error mono">{c.status}</span></>}
+                {c.ping_ms !== null && c.ping_ms !== undefined && <span className="text-muted-foreground mono">· {c.ping_ms}ms</span>}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] text-muted-foreground">Collections</div>
+              <div className="mono text-xs">{c.collections ?? "—"}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Nouvelle configuration</div>
+      <div className="grid grid-cols-1 gap-2 mb-3">
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1">URI MongoDB</label>
+          <input type="text" placeholder="mongodb://user:password@serveur-mongo:27017 · mongodb+srv://..." value={form.mongo_url}
+                 onChange={(e) => { setForm({ ...form, mongo_url: e.target.value }); setTestResult(null); }}
+                 data-testid="db-new-uri"
+                 className="w-full px-3 py-2 bg-background border border-input outline-none mono text-xs focus:border-[#0044FF]" />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1">Nom de base</label>
+          <input type="text" placeholder="mg_vms_prod" value={form.db_name}
+                 onChange={(e) => { setForm({ ...form, db_name: e.target.value }); setTestResult(null); }}
+                 data-testid="db-new-name"
+                 className="w-full px-3 py-2 bg-background border border-input outline-none mono text-xs focus:border-[#0044FF]" />
+        </div>
+      </div>
+
+      {testResult && (
+        <div className="border p-3 mb-3 text-xs mono"
+             style={{ borderColor: testResult.ok ? "#00E676" : "#FF3333",
+                       background: testResult.ok ? "rgba(0,230,118,0.05)" : "rgba(255,51,51,0.05)" }}
+             data-testid="db-test-result">
+          {testResult.ok ? (
+            <div>
+              <div className="flex items-center gap-1.5 mg-online mb-1"><CheckCircle2 size={12} /> Connexion réussie</div>
+              <div className="text-muted-foreground">Ping : <b>{testResult.ping_ms}ms</b> · Collections : <b>{testResult.collections}</b> · Caméras : <b>{testResult.cameras_count}</b></div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 mg-error"><XCircle size={12} /> {testResult.error}</div>
+          )}
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2 mb-3">
+        <button onClick={test} disabled={testing || !form.mongo_url || !form.db_name}
+                data-testid="db-test-btn"
+                className="flex items-center gap-2 px-4 py-2 border border-[#0044FF] text-[#0044FF] text-sm hover:bg-[#0044FF]/10 disabled:opacity-40">
+          {testing ? <Loader2 size={13} className="animate-spin" /> : <PlayCircle size={13} />} Tester la connexion
+        </button>
+        <button onClick={save} disabled={saving || !testResult?.ok}
+                data-testid="db-save-btn"
+                className="flex items-center gap-2 px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40">
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Enregistrer
+        </button>
+        <button onClick={restart} disabled={restarting}
+                data-testid="db-restart-btn"
+                className="flex items-center gap-2 px-4 py-2 border border-[#FF3333] text-[#FF3333] text-sm hover:bg-[#FF3333]/10 disabled:opacity-40">
+          {restarting ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Redémarrer backend
+        </button>
+      </div>
+
+      <div className="text-[11px] text-muted-foreground border-t border-border pt-3 flex items-start gap-1.5">
+        <AlertTriangle size={12} className="mg-warning flex-shrink-0 mt-0.5" />
+        <span>
+          Pour une installation production, hébergez la base sur un <b>serveur ou disque dédié</b> (SSD recommandé).
+          Testez toujours la connexion avant d&apos;enregistrer. Backup automatique dans <code className="mono">/app/backend/.env.bak</code>.
+        </span>
+      </div>
+    </SectionCard>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 3a. Rétention vidéo (seuils + purge)
+// ═══════════════════════════════════════════════════════════════════
 function RetentionCard() {
   const [state, setState] = useState(null);
   const [form, setForm] = useState(null);
@@ -92,7 +365,7 @@ function RetentionCard() {
     setPurging(true);
     try {
       const { data } = await api.post("/settings/retention/run");
-      toast.success(`Purge terminée : ${data.deleted_by_age} par âge + ${data.deleted_by_quota} par quota, ${data.freed_gb} Go libérés`);
+      toast.success(`Purge : ${data.deleted_by_age} par âge + ${data.deleted_by_quota} par quota, ${data.freed_gb} Go libérés`);
       load();
     } catch (e) { toast.error("Purge échouée"); }
     finally { setPurging(false); }
@@ -102,27 +375,22 @@ function RetentionCard() {
   const usedColor = usedPct > form.max_disk_pct ? "#FF3333" : usedPct > form.max_disk_pct - 10 ? "#FFB800" : "#00E676";
 
   return (
-    <RetentionCard2 title="Rétention & stockage vidéo" icon={HardDrive}>
-      {/* Statut disque + volume enregistrements */}
-      <div className="grid grid-cols-4 gap-3 mb-4">
+    <SectionCard id="video-retention" title="Rétention vidéo" subtitle="Politique automatique de conservation et purge." icon={Film}>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
         <StatBox label="Disque total" value={`${state.disk.total_gb} Go`} />
         <StatBox label="Utilisé" value={`${state.disk.used_gb} Go`} color={usedColor} />
         <StatBox label="Libre" value={`${state.disk.free_gb} Go`} color={state.disk.free_gb < form.min_free_gb ? "#FF3333" : undefined} />
         <StatBox label="Occupation" value={`${usedPct}%`} color={usedColor} />
       </div>
-      <div className="h-2 bg-secondary mb-4 relative overflow-hidden">
-        <div className="h-full transition-all" style={{ width: `${Math.min(100, usedPct)}%`, backgroundColor: usedColor }} data-testid="disk-bar" />
-        <div className="absolute top-0 h-full w-px bg-white/40" style={{ left: `${form.max_disk_pct}%` }} title={`Seuil ${form.max_disk_pct}%`} />
-      </div>
+      <UsageBar pct={usedPct} threshold={form.max_disk_pct} />
 
-      <div className="grid grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
         <StatBox label="Enregistrements" value={state.recordings.count} small />
         <StatBox label="Volume total" value={`${state.recordings.size_gb} Go`} small />
         <StatBox label="Plus ancien" value={state.recordings.oldest ? new Date(state.recordings.oldest).toLocaleDateString("fr-FR") : "—"} small />
       </div>
 
-      {/* Édition des seuils */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
         <div>
           <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Conservation (jours)</label>
           <input type="number" min="1" max="365" value={form.retention_days} onChange={(e) => setForm({ ...form, retention_days: e.target.value })} data-testid="retention-days" className="w-full px-3 py-2 bg-background border border-input outline-none mono focus:border-[#0044FF]" />
@@ -136,11 +404,11 @@ function RetentionCard() {
           <input type="number" min="10" max="99" value={form.max_disk_pct} onChange={(e) => setForm({ ...form, max_disk_pct: e.target.value })} data-testid="retention-pct" className="w-full px-3 py-2 bg-background border border-input outline-none mono focus:border-[#0044FF]" />
         </div>
       </div>
-      <p className="text-[11px] text-muted-foreground mt-2 leading-relaxed">
+      <p className="text-[11px] text-muted-foreground mb-3 leading-relaxed">
         Les vidéos plus anciennes que <b>{form.retention_days} jours</b> sont supprimées automatiquement. Si l&apos;espace libre passe sous <b>{form.min_free_gb} Go</b> <i>ou</i> si l&apos;occupation dépasse <b>{form.max_disk_pct}%</b>, les <b>plus anciens segments</b> sont supprimés en priorité.
       </p>
 
-      <div className="mt-4 flex gap-2">
+      <div className="flex gap-2">
         <button onClick={save} disabled={saving} data-testid="retention-save" className="flex items-center gap-2 px-4 py-2 bg-[#0044FF] text-white text-sm">
           {saving && <Loader2 size={14} className="animate-spin" />}<Save size={14} /> Enregistrer les seuils
         </button>
@@ -148,23 +416,15 @@ function RetentionCard() {
           {purging ? <Loader2 size={14} className="animate-spin" /> : <PlayCircle size={14} />} Purger maintenant
         </button>
       </div>
-    </RetentionCard2>
-  );
-}
-
-function StatBox({ label, value, color, small }) {
-  return (
-    <div className="border border-border p-2 text-center">
-      <div className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className={small ? "mono text-xs mt-0.5" : "mono text-lg font-bold mt-0.5"} style={color ? { color } : undefined}>{value}</div>
-    </div>
+    </SectionCard>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Multi-disques : détection auto + ajout manuel + assignation caméras
+// 3b. Pools vidéo (multi-disques)
 // ═══════════════════════════════════════════════════════════════════
-function StorageCard() {
+function VideoPoolsCard() {
+  const { t } = useApp();
   const [state, setState] = useState(null);
   const [newPool, setNewPool] = useState({ name: "", path: "", enabled: true, max_size_gb: 0, priority: 0 });
   const [saving, setSaving] = useState(false);
@@ -201,16 +461,21 @@ function StorageCard() {
   if (!state) return null;
 
   return (
-    <div className="bg-card border border-border p-5 mb-3">
-      <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-4"><HardDrive size={15} /> Stockage multi-disques</div>
+    <SectionCard
+      id="video-pools"
+      title={t("storage.videos")}
+      subtitle={t("storage.videos_desc")}
+      icon={HardDrive}
+    >
+      <div className="text-[11px] mono text-muted-foreground mb-3">
+        Dossier principal : <span className="text-foreground">{state.primary_recordings_dir}</span>
+      </div>
 
-      <div className="text-[11px] mono text-muted-foreground mb-2">Dossier d&apos;enregistrement principal : {state.primary_recordings_dir}</div>
-
-      {/* Partitions détectées */}
+      {/* Partitions détectées — choix rapide */}
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Partitions physiques détectées ({state.partitions.length})</div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4">
         {state.partitions.map((p, i) => (
-          <div key={i} className="border border-border p-2 text-xs">
+          <div key={i} className="border border-border p-2 text-xs" data-testid={`partition-${i}`}>
             <div className="flex items-center justify-between">
               <div><span className="mono text-[#0044FF]">{p.mountpoint}</span> <span className="text-muted-foreground">({p.fstype})</span></div>
               <button onClick={() => setNewPool({ ...newPool, path: p.mountpoint, name: newPool.name || p.mountpoint })}
@@ -225,12 +490,12 @@ function StorageCard() {
         ))}
       </div>
 
-      {/* Pools de stockage déclarés */}
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Pools de stockage ({state.pools.length})</div>
-      {state.pools.length === 0 && <p className="text-xs text-muted-foreground mb-2">Aucun pool déclaré. Les enregistrements vont dans le dossier principal.</p>}
+      {/* Pools déclarés */}
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Pools déclarés ({state.pools.length})</div>
+      {state.pools.length === 0 && <p className="text-xs text-muted-foreground mb-3">Aucun pool déclaré — les enregistrements vont dans le dossier principal.</p>}
       <div className="space-y-2 mb-3">
         {state.pools.map((pool) => (
-          <div key={pool.id} className="border border-border p-3">
+          <div key={pool.id} className="border border-border p-3" data-testid={`pool-${pool.id}`}>
             <div className="flex items-center justify-between mb-2">
               <div>
                 <span className="font-medium">{pool.name}</span>
@@ -239,10 +504,10 @@ function StorageCard() {
               </div>
               <div className="flex gap-1">
                 <button onClick={() => updatePool(pool, { enabled: !pool.enabled })} className="text-[10px] px-2 py-0.5 border border-border hover:bg-secondary" data-testid={`pool-toggle-${pool.id}`}>{pool.enabled ? "Désactiver" : "Activer"}</button>
-                <button onClick={() => delPool(pool.id)} className="text-[10px] px-2 py-0.5 border border-[#FF3333] text-[#FF3333] hover:bg-[#FF3333]/10"><Trash2 size={10} /></button>
+                <button onClick={() => delPool(pool.id)} className="text-[10px] px-2 py-0.5 border border-[#FF3333] text-[#FF3333] hover:bg-[#FF3333]/10" data-testid={`pool-del-${pool.id}`}><Trash2 size={10} /></button>
               </div>
             </div>
-            <div className="grid grid-cols-4 gap-2 text-[10px]">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
               <div><div className="text-muted-foreground uppercase">Disque total</div><div className="mono">{pool.usage?.total_gb} Go</div></div>
               <div><div className="text-muted-foreground uppercase">Libre</div><div className="mono">{pool.usage?.free_gb} Go</div></div>
               <div><div className="text-muted-foreground uppercase">Enregistrements</div><div className="mono">{pool.recordings_count} · {pool.recordings_size_gb} Go</div></div>
@@ -270,197 +535,6 @@ function StorageCard() {
           </button>
         </div>
       </div>
-    </div>
+    </SectionCard>
   );
 }
-
-
-function DatabaseCard() {
-  const [state, setState] = useState(null);
-  const [form, setForm] = useState({ mongo_url: "", db_name: "" });
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [restarting, setRestarting] = useState(false);
-
-  const load = async () => {
-    try {
-      const { data } = await api.get("/settings/database");
-      setState(data);
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Erreur chargement"); }
-  };
-  useEffect(() => { load(); }, []);
-
-  const test = async () => {
-    if (!form.mongo_url || !form.db_name) {
-      toast.error("URI et nom de base requis");
-      return;
-    }
-    setTesting(true); setTestResult(null);
-    try {
-      const { data } = await api.post("/settings/database/test", form);
-      setTestResult({ ok: true, ...data });
-    } catch (e) {
-      setTestResult({ ok: false, error: formatApiErrorDetail(e.response?.data?.detail) || e.message });
-    } finally { setTesting(false); }
-  };
-
-  const save = async () => {
-    if (!testResult?.ok) {
-      toast.error("Testez d'abord la connexion avec succès avant d'enregistrer");
-      return;
-    }
-    if (!window.confirm(
-      "Confirmer l'enregistrement ?\n\n" +
-      "Le fichier /app/backend/.env sera modifié.\n" +
-      "Le backend devra être redémarré pour appliquer la nouvelle URI."
-    )) return;
-    setSaving(true);
-    try {
-      const { data } = await api.put("/settings/database", form);
-      toast.success("Config sauvegardée — redémarrage requis");
-      load();
-    } catch (e) {
-      toast.error(formatApiErrorDetail(e.response?.data?.detail) || e.message);
-    } finally { setSaving(false); }
-  };
-
-  const restart = async () => {
-    if (!window.confirm(
-      "Redémarrer le backend ?\n\n" +
-      "Vous serez déconnecté quelques secondes. Reconnectez-vous ensuite."
-    )) return;
-    setRestarting(true);
-    try {
-      await api.post("/settings/database/restart-backend", { confirm: true });
-      toast.info("Redémarrage en cours…");
-      setTimeout(() => window.location.reload(), 6000);
-    } catch (e) {
-      toast.error(formatApiErrorDetail(e.response?.data?.detail) || e.message);
-      setRestarting(false);
-    }
-  };
-
-  const c = state?.current;
-  return (
-    <div className="bg-card border border-border p-5 mb-3">
-      <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-4">
-        <Database size={15} /> Base de données
-      </div>
-
-      {c && (
-        <div className="border border-border p-3 mb-4 bg-background">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Connexion active</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-            <div>
-              <div className="text-[10px] text-muted-foreground">URI (masqué)</div>
-              <div className="mono text-xs" data-testid="db-current-uri">{c.mongo_url_redacted || "—"}</div>
-            </div>
-            <div>
-              <div className="text-[10px] text-muted-foreground">Nom de base</div>
-              <div className="mono text-xs" data-testid="db-current-name">{c.db_name || "—"}</div>
-            </div>
-            <div>
-              <div className="text-[10px] text-muted-foreground">Statut</div>
-              <div className="flex items-center gap-1.5 text-xs">
-                {c.status === "ok"
-                  ? <><CheckCircle2 size={12} className="mg-online" /> <span className="mg-online mono">OK</span></>
-                  : <><XCircle size={12} className="mg-error" /> <span className="mg-error mono">{c.status}</span></>}
-                {c.ping_ms !== null && <span className="text-muted-foreground mono">· {c.ping_ms}ms</span>}
-              </div>
-            </div>
-            <div>
-              <div className="text-[10px] text-muted-foreground">Collections</div>
-              <div className="mono text-xs">{c.collections ?? "—"}</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Nouvelle configuration</div>
-      <div className="grid grid-cols-1 gap-2 mb-3">
-        <div>
-          <label className="text-xs text-muted-foreground block mb-1">URI MongoDB</label>
-          <input
-            type="text"
-            placeholder="mongodb://user:password@host:27017 · mongodb+srv://... · mongodb://serveur-dedie:27017"
-            value={form.mongo_url}
-            onChange={(e) => { setForm({ ...form, mongo_url: e.target.value }); setTestResult(null); }}
-            data-testid="db-new-uri"
-            className="w-full px-3 py-2 bg-background border border-input outline-none mono text-xs focus:border-[#0044FF]"
-          />
-        </div>
-        <div>
-          <label className="text-xs text-muted-foreground block mb-1">Nom de base</label>
-          <input
-            type="text"
-            placeholder="mg_vms_prod"
-            value={form.db_name}
-            onChange={(e) => { setForm({ ...form, db_name: e.target.value }); setTestResult(null); }}
-            data-testid="db-new-name"
-            className="w-full px-3 py-2 bg-background border border-input outline-none mono text-xs focus:border-[#0044FF]"
-          />
-        </div>
-      </div>
-
-      {testResult && (
-        <div className="border p-3 mb-3 text-xs mono"
-             style={{ borderColor: testResult.ok ? "#00E676" : "#FF3333",
-                       background: testResult.ok ? "rgba(0,230,118,0.05)" : "rgba(255,51,51,0.05)" }}
-             data-testid="db-test-result">
-          {testResult.ok ? (
-            <div>
-              <div className="flex items-center gap-1.5 mg-online mb-1">
-                <CheckCircle2 size={12} /> Connexion réussie
-              </div>
-              <div className="text-muted-foreground">
-                Ping : <b>{testResult.ping_ms}ms</b> · Collections : <b>{testResult.collections}</b> · Caméras : <b>{testResult.cameras_count}</b>
-              </div>
-              {testResult.collections_sample?.length > 0 && (
-                <div className="text-[10px] text-muted-foreground mt-1 truncate">
-                  Ex. : {testResult.collections_sample.slice(0, 5).join(", ")}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5 mg-error">
-              <XCircle size={12} /> {testResult.error}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="flex flex-wrap gap-2 mb-4">
-        <button onClick={test} disabled={testing || !form.mongo_url || !form.db_name}
-                data-testid="db-test-btn"
-                className="flex items-center gap-2 px-4 py-2 border border-[#0044FF] text-[#0044FF] text-sm hover:bg-[#0044FF]/10 disabled:opacity-40">
-          {testing ? <Loader2 size={13} className="animate-spin" /> : <PlayCircle size={13} />}
-          Tester la connexion
-        </button>
-        <button onClick={save} disabled={saving || !testResult?.ok}
-                data-testid="db-save-btn"
-                className="flex items-center gap-2 px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40">
-          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-          Enregistrer
-        </button>
-        <button onClick={restart} disabled={restarting}
-                data-testid="db-restart-btn"
-                className="flex items-center gap-2 px-4 py-2 border border-[#FF3333] text-[#FF3333] text-sm hover:bg-[#FF3333]/10 disabled:opacity-40">
-          {restarting ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-          Redémarrer backend
-        </button>
-      </div>
-
-      <div className="text-[11px] text-muted-foreground border-t border-border pt-3 flex items-start gap-1.5">
-        <AlertTriangle size={12} className="mg-warning flex-shrink-0 mt-0.5" />
-        <span>
-          Le changement d&apos;URI nécessite un <b>redémarrage du backend</b>. Testez toujours la connexion
-          avant d&apos;enregistrer. Un backup <code className="mono">/app/backend/.env.bak</code> est créé
-          automatiquement. Moteurs supportés : <b>{(state?.supported_engines || ["mongodb"]).join(", ")}</b> —
-          support SQL/MariaDB prévu roadmap.
-        </span>
-      </div>
-    </div>
-  );
-}
-
