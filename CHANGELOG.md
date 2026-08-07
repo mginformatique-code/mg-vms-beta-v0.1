@@ -7,6 +7,325 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 > modulaire Plugin Manager NG + Pipeline Engine v2 (style DeepStream/Frigate).
 > L'ancien cycle produit (1.x/2.x) reste préservé en bas de fichier.
 
+## [v0.7.b] — 2026-02 — Smart Search cross-domain (personnes) + Historique recherches
+
+### Added (backend) — Recherche IA étendue aux événements humains
+- Nouveau router `routes/smart_search.py` monté sur `POST /api/smart-search` :
+  * Le LLM détermine automatiquement le `target` (`vehicles` / `persons` / `both`)
+  * Croise les collections `plates` (véhicules) ET `events` (détections IA)
+  * Retour unifié : `{query, target, filters, vehicles_count, persons_count,
+    vehicles[], persons[]}`
+- Schéma JSON de parsing enrichi : `target`, `object_description`,
+  `date_from/to`, `time_from/to`, `camera_hint`, `colors` (véhicule OU vêtement)
+- Traducteurs bilingues étendus : personne↔person, vélo↔bike, camion↔truck,
+  voiture↔car — pour la normalisation des types d'events
+
+### Added (frontend) — Section « Personnes détectées » + Historique
+- Composant `PersonsSection` : galerie de crops humains (60 max), type +
+  caméra + timestamp + confiance ; clic ouvre l'image plein écran
+- Description IA affichée en italique à côté du titre : « — "veste rouge"
+  (tri visuel manuel) »
+- Header résultats : `X véhicule(s) + Y personne(s) pour « … »`
+- **Barre historique** sous la zone de recherche (localStorage) :
+  * 5 dernières requêtes, chip cliquable avec icône ✨
+  * Tooltip précise vehicles/persons counts
+  * Bouton « Vider » pour purger
+
+### Fixed
+- `runSmartSearch` recevait l'objet event du onClick au lieu d'une string
+  → `event.trim is not a function` corrigé (guard `typeof === "string"`)
+
+### Testé
+- « personne cette semaine » → 60 personnes, target=persons, dates
+  correctement calculées (2026-07-31 → 2026-08-07)
+- « voitures grises » → 30 véhicules, target=vehicles
+- Historique : rerun depuis chip fonctionne + persiste entre navigations
+
+---
+
+## [v0.7] — 2026-02 — Vehicle Identity + Smart Search IA (Claude Sonnet 5)
+
+### Added (backend) — Vehicle Identity (cross-plate matching)
+- Collection Mongo `vehicle_identities` (isolée de `plates`)
+- `POST /api/vehicles/identities` — création manuelle (name, plates[],
+  make, color, type, notes)
+- `GET  /api/vehicles/identities` — liste toutes les identités
+- `GET  /api/vehicles/identities/detect?min_plates=2` — détection auto :
+  groupes make+color+type observés sur ≥2 plaques distinctes ; filtre
+  les groupes déjà couverts par une identité existante
+- `GET  /api/vehicles/identities/{id}` — détail + stats agrégées
+  (passages_count, cameras_count, first/last_seen)
+- `DELETE /api/vehicles/identities/{id}`
+
+### Added (backend) — Recherche IA en langage naturel
+- `POST /api/vehicles/smart-search` — Claude Sonnet 5 via
+  `emergentintegrations` + EMERGENT_LLM_KEY
+- Parseur JSON strict : plaque, colors[], makes[], types[], date_from/to,
+  time_from/to, camera_hint, person_description
+- Traduction FR↔EN + regex `^…$` case-insensitive sur les couleurs/types
+  pour matcher les données stockées avec majuscules variables
+- Retour agrégé par plaque (30 max), triée par last_seen
+
+### Added (frontend) — Barre IA + Filtres avancés + Panneau Identités
+- Barre de recherche unique avec icône ✨ acceptant du langage naturel
+- Bouton « Filtres » (repliable) pour affiner par couleur/marque/type/dates
+- Chips de filtres IA visibles au-dessus des résultats (transparence sur
+  ce que le LLM a compris)
+- Composant `IdentitiesPanel` en tête de page : identités existantes +
+  candidats détectés + bouton « Créer l'identité » en un clic
+
+### Changed
+- Menu latéral : suppression de l'item « Recherche véhicule » (redondance
+  avec la barre IA) ; route `/vehicles/search` conservée pour compatibilité
+
+### Testé
+- 30 véhicules trouvés pour « voitures grises » (Claude extrait
+  `{"colors":["gris"],"types":["voiture"]}`)
+- « camions ce matin » → filtres date+heure appliqués correctement
+
+---
+
+## [v0.7-preview] — 2026-02 — Consensus multi-plugins + Validation manuelle + Retrait YOLO
+
+### Added (backend) — Consensus OCR multi-plugins
+- Fonction `_levenshtein()` + `_find_variants()` : détecte les variantes
+  OCR d'une même plaque (distance ≤ 2 + contexte partagé caméra/couleur/marque)
+- `GET  /api/vehicles/{plate}/consensus` — calcule la plaque canonique
+  probable via vote pondéré par moteur (`fast-alpr=1.0`, `plate-recognizer=1.0`,
+  `paddle-ocr=0.9`, `openalpr=0.9`, `tesseract=0.6`, `easyocr=0.7`)
+  * Score = Σ (avg_confidence × poids_moteur × nb_lectures)
+- `POST /api/vehicles/{plate}/validate` — fige la plaque canonique + lie
+  les variantes dans la collection `plate_validations`. L'historique brut
+  reste intact.
+- `DELETE /api/vehicles/{plate}/validate` — retire la validation manuelle
+
+### Added (frontend) — Bloc Consensus dans le drawer
+- Composant `PlateConsensusBlock` :
+  * Suggestion canonique en vert avec score
+  * Barres de score comparatives par candidat
+  * Bouton `[VALIDER]` par candidat qui persiste la validation
+  * Badge « Validée » avec date + validateur quand une plaque est figée
+  * Bouton « Retirer la validation »
+
+### Removed (frontend) — Ligne YOLO obsolète
+- Page Événements : « Détections réelles : mouvement, personnes,
+  véhicules (YOLO) — X au total » remplacée par « Détections IA temps
+  réel — X au total » (représentation générique)
+
+### Testé
+- Cas L3863 : score 7.16 (11 lectures fast-alpr, avg_conf 0.651) vs
+  variante L3883 (score 7.01, distance Levenshtein=1) — exactement le
+  scénario « mauvais OCR sur le même véhicule »
+
+---
+
+## [v0.6.b] — 2026-02 — Alertes Habitudes + Watchlist inline
+
+### Added (backend) — Anomalies véhicule
+- `_compute_anomaly()` : compare la dernière passe aux habitudes
+  (arrivée/départ typiques, jours prédominants, historique nocturne)
+- Types d'anomalies : `off_hours`, `off_days`, `nocturnal_first`,
+  `nocturnal_rare`, `insufficient_history`
+- Sévérité `info` / `warning` / `high` (2 anomalies simultanées =
+  automatiquement high)
+- `GET  /api/vehicles/{plate}/anomaly` — rapport unitaire
+- `GET  /api/vehicles/anomalies/recent?since_hours=48&limit=20` — liste
+  des véhicules avec anomalie warning/high sur la fenêtre demandée
+- `POST /api/vehicles/{plate}/notify-anomaly` — envoie une notification
+  via `send_notification()` (SMTP / Discord / Telegram)
+
+### Added (frontend) — Bandeau + Bloc drawer + Actions Watchlist
+- Bandeau jaune « ANOMALIES RÉCENTES » en tête de la grille — chips
+  cliquables qui ouvrent directement le drawer sur le véhicule concerné
+- Bloc rouge « Anomalie détectée [HIGH] » dans l'onglet Vue du drawer,
+  avec message contextuel et bouton `[Créer une alerte]`
+- **Actions Watchlist inline** dans le drawer :
+  * Statut courant en badge (LISTE NOIRE / LISTE BLANCHE / AUCUNE)
+  * 3 boutons Blacklist / Whitelist / Retirer en un clic
+  * Utilise les endpoints existants `POST/DELETE /api/watchlist`
+- Mise à jour instantanée du statut dans la carte + le drawer
+
+---
+
+## [v0.6] — 2026-02 — Smart ANPR History (Vehicle Timeline Center)
+
+### Added (backend) — 9 nouveaux endpoints agrégateurs
+Aucun changement du pipeline OCR ni de `/api/plates` existant.
+- Nouveau router `routes/vehicles.py` monté sur `/api/vehicles/*`
+- `GET  /api/vehicles` — liste agrégée par plaque (passages_count,
+  first_seen, last_seen, cameras_count, best_thumb_id, preview_thumb_ids[3],
+  vehicle_make/model/color majoritaires)
+- `GET  /api/vehicles/{plate}` — fiche complète + durée moyenne de
+  présence calculée (min/max par jour)
+- `GET  /api/vehicles/{plate}/passages` — galerie paginée
+- `GET  /api/vehicles/{plate}/heatmap` — matrices by_hour[24] + by_dow[7]
+- `GET  /api/vehicles/{plate}/cameras` — passages par caméra
+- `GET  /api/vehicles/{plate}/journey` — transitions caméra→caméra
+- `GET  /api/vehicles/{plate}/habits` — arrivée/départ typiques, jours
+  prédominants, alertes nocturnes
+- `GET  /api/vehicles/{plate}/identity` — **stub v0.6** (architecture
+  prête pour matching cross-plate en v0.7)
+- `GET  /api/vehicles/passage/{id}/thumb?kind=frame|vehicle|plate` —
+  image JPEG binaire (décodée depuis base64 stocké), cache 24 h — décharge
+  les listes du base64 volumineux
+
+### Added (frontend) — Vehicle History Center
+- Nouvelle route `/vehicles` dans le menu ÉVÉNEMENTS
+- Grille de **cartes cascade** — 3 photos empilées + badge `+N` en haut
+  à gauche (spec exacte du brief)
+- **Drawer latéral** shadcn Sheet, 6 onglets :
+  1. **Vue** — best thumb + stats + habitudes calculées
+  2. **Galerie** — chronologique paginée, lazy load
+  3. **Timeline** — groupée par jour
+  4. **Heatmap** — barres par heure + par jour
+  5. **Caméras** — compteurs par caméra
+  6. **Parcours** — transitions chronologiques
+- **Refresh auto 30 s** avec pause automatique quand un drawer est ouvert
+- Composant `PlateBadge` type française avec bande bleue F
+- Aucune modification de la page ANPR existante — compat totale
+
+### Testé
+- 31 véhicules réels agrégés depuis les lectures de démo
+- Drawer L3863 : 11 passages, 1 caméra, durée moy. 177 min, habitudes
+  Mardi/Mercredi 11:22 / 13:08→19:27
+
+---
+
+## [v0.5.7-storage] — 2026-02 — Refonte page Paramètres → Stockage
+
+### Changed (frontend)
+- Menu latéral : item « Paramètres » → **« Stockage »** (icône `HardDrive`)
+- Nouvelle route `/storage` (l'ancien `/settings` reste actif pour compat)
+- Page réorganisée autour de **3 disques dédiés** :
+  1. **Application VMS** (partition `/app` détectée auto)
+  2. **Base de données** (Mongo local vs serveur dédié)
+  3. **Enregistrements vidéo** (Rétention + Pools multi-disques)
+- Badges intelligents **DÉDIÉ** (vert) / **PARTAGÉ** / **SERVEUR LOCAL**
+  (jaune) qui invitent visuellement à séparer les disques
+- Bandeau bonne pratique en haut de page + alerte contextuelle quand VMS
+  et vidéos partagent la même partition
+
+### Removed (frontend)
+- Tuile « Compte » (redondante avec le menu utilisateur haut-droite)
+- Tuile « Apparence » (langue et thème sont déjà en haut à droite
+  du Layout : icônes `FR` / lune)
+
+### Added (i18n)
+- 16 nouvelles clés FR + EN (`nav.storage`, `storage.title|subtitle|tip|
+  vms|vms_mount|vms_type|vms_total|vms_free|vms_used|db|db_desc|videos|
+  videos_desc|appearance`)
+
+---
+
+## [v0.5.7] — 2026-02 — Universal Camera API · Final Build (Validator + Matrix + Health)
+
+### Added — Driver Validator (validation non destructive)
+- `pipeline_v2/driver_validator.py` — service qui valide chaque capacité
+  déclarée d'un driver **sans jamais exécuter de commande destructive**
+- Enum `TestState` : `PASS` / `WARNING` / `FAIL` / `TIMEOUT` /
+  `UNSUPPORTED` / `SKIPPED`
+- Score pondéré officiel : `snapshot=25`, `stream=25`, `device_info=15`,
+  `events=15`, `ptz=10`, `audio=5`, `reboot=3`, `siren=2` (total 100)
+- Facteurs : `PASS=1.0`, `WARNING=0.7`, `FAIL/TIMEOUT=0`, `UNSUPPORTED/
+  SKIPPED` exclus du dénominateur
+- Les capacités PTZ / siren / light / audio / reboot sont vérifiées par
+  **inspection de contrat** (`_method_is_overridden` compare à
+  `CameraDriver` base), jamais exécutées physiquement
+- `GET  /api/devices/{id}/validate?persist=false` (idempotent)
+- `GET  /api/devices/{id}/validate?persist=true` (écrit dans
+  `cameras[id].last_validation`)
+- `POST /api/devices/{id}/validate` (persistance canonique)
+
+### Added — Capability Matrix (agrégat lecture seule)
+- `pipeline_v2/capability_matrix.py` — construit une matrice OR des
+  capacités depuis `cameras.capabilities` déjà persisté
+- `GET /api/devices/matrix?group=vendor|driver|model|camera`
+
+### Added — Driver Health
+- Attribut de classe `MANIFEST` ajouté sur `ONVIFDriver`, `ReolinkDriver`,
+  `HikvisionDriver`, `DahuaDriver` :
+  `{driver, version, status: stable|beta|experimental, api, protocols[],
+    supported_models[], coverage_pct}`
+- `GET /api/devices/drivers/health` — agrège manifests + stats runtime
+  (cameras_count, validations_count, avg_score, last_validation_at)
+
+### Tests
+- Nouvelle suite `test_v057_validator_matrix_health.py` : **26 tests**
+- Cumul v0.5.7 : **69/69 verts** (26 validator/matrix/health + 21 Phase 1
+  + 22 v0.4.6), 100 % mocks, aucune caméra physique
+
+### Livrable
+- `/app/FINAL_BUILD_v057.md` — rapport final : fichiers créés/modifiés,
+  endpoints ajoutés, dettes techniques identifiées pour v0.6
+
+---
+
+## [v0.5.7-phase1] — 2026-02 — Universal Camera API · Foundations
+
+### Added — Migration Option C (consolidation, zéro duplication)
+- Document `/app/MIGRATION_v057_UNIVERSAL_CAMERA_API.md` (tableau
+  composant/action/décision)
+- `backend/pipeline_v2/camera_driver.py` **réécrit** en **contrat pur** :
+  re-export du `CameraDriver` (ABC) + `CameraCapabilities` + `DeviceInfo`
+  + `StreamInfo` + `DeviceStatus` + exceptions depuis `drivers/` + facette
+  `CameraDriverProtocol` (`runtime_checkable`) pour typing structural.
+  **Zéro logique métier.**
+- `backend/pipeline_v2/camera_manager.py` créé — façade passive qui
+  délègue à `CameraDeviceService` (get_driver / discover / release /
+  validate_camera_doc / supported_vendors). **Aucune commande métier.**
+- `CameraCapabilities` enrichi de ~25 nouveaux flags backward-compatible :
+  `multi_stream`, `codec_h265`, `talkback`, `flash`, `ptz_presets`,
+  `ptz_patrol`, `ptz_tracking`, `ai_motion`, `ai_person`, `ai_vehicle`,
+  `ai_animal`, `ai_face`, `ai_helmet`, `ai_anpr`, `ai_line_crossing`,
+  `ai_intrusion`, `thermal`, `radar`, `relay`, `digital_io`, `wifi`, `poe`,
+  `sdcard`, `hdd`, `nas`, `ftp`, `smtp`, `cloud`, `https`, `vpn`,
+  `proprietary_api` (tous à `False` par défaut → aucune régression)
+
+### Règles v0.5.7 respectées
+- Une seule source de vérité : `backend/drivers/`
+- Un seul contrat, un seul registry, un seul CameraDeviceService
+- Aucune modification des routes `/api/devices/*` (frontend intact)
+
+### Tests
+- Nouvelle suite `test_v057_universal_api.py` : **21 tests**
+- 43/43 verts (22 v0.4.6 + 21 nouveaux Phase 1)
+
+---
+
+## [v0.5.6] — 2026-02 — AI Pipeline Hardening (Phases A + B + C/D/E)
+
+### Added — Phase A (Thread-safety & Fusion hiérarchique)
+- Thread-safety des workers pipeline (locks asyncio là où nécessaire)
+- Fusion **hiérarchique** de l'OCR (canaux top-down au lieu de flat merge)
+- Corrections cache OCR (invalidation propre, TTL respecté)
+
+### Added — Phase B (Detector Registry abstraction)
+- Registry `pipeline_v2/detector.py` : abstraction du choix de moteur
+  détection véhicule/personne (YOLO, MediaPipe, custom) par plugin
+
+### Added — Phase B suite (Plate Recognizer OCR abstraction)
+- Registry `pipeline_v2/plate_recognizer.py` : le pipeline choisit le
+  moteur OCR via une interface unique. Support fast-alpr, plate-recognizer,
+  paddle-ocr, tesseract, easyocr en plugins interchangeables.
+
+### Added — Phase C/D/E (Config per-camera + métriques p99)
+- `pipeline_config` par caméra dans Mongo : `{detector, tracker, anpr,
+  fusion}` — chaque caméra peut avoir sa propre configuration
+- Métriques latence p99 exposées dans les diagnostics AI
+
+### Documents
+- `/app/AUDIT_PIPELINE_v055.md`
+- `/app/PHASE_A_HARDENING_v056.md`, `PHASE_B_HARDENING_v056.md`,
+  `PHASE_B_SUITE_OCR_v056.md`, `PHASE_CDE_HARDENING_v056.md`
+
+### Tests
+- `test_v056a_pipeline_hardening.py`, `test_v056b_detector_registry.py`,
+  `test_v056b_ocr_abstraction.py`, `test_v056cd_config_and_metrics.py`
+- 132/132 tests backend unitaires liés au pipeline verts
+
+---
+
+
 ## [v0.5.5.e] — 2026-02 — Inactivité + Enforcement RBAC + Audit RBAC
 
 ### Added (frontend) — Timeout d'inactivité "en dur"
