@@ -80,19 +80,23 @@ class PTZPresetBody(BaseModel):
 def _driver_error_response(exc: CameraDriverError) -> HTTPException:
     payload = exc.to_dict()
     # Code HTTP :
-    #   400 pour "unsupported_capability" / "camera_missing_ip"
+    #   501 pour "unsupported_capability" (v0.7.c — capability absente = Not Implemented)
+    #   400 pour "camera_missing_ip"
     #   401 pour "authentication_failed"
     #   404 pour "camera_not_found"
     #   503 pour "device_unreachable" / "command_timeout"
     mapping = {
-        "unsupported_capability": 400,
+        "unsupported_capability": 501,
+        "no_driver_available": 501,
         "camera_missing_ip": 400,
         "authentication_failed": 401,
         "camera_not_found": 404,
         "device_unreachable": 503,
         "command_timeout": 503,
+        "device_error": 502,
+        "driver_error": 502,
     }
-    return HTTPException(status_code=mapping.get(exc.code, 500), detail=payload)
+    return HTTPException(status_code=mapping.get(exc.code, 502), detail=payload)
 
 
 # ── GET ─────────────────────────────────────────────────────────

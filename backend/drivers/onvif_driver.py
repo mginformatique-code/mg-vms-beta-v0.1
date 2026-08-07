@@ -81,10 +81,13 @@ class ONVIFDriver(CameraDriver):
             raise DeviceConnectionError(f"ONVIF connect {self.host}:{self.port} — {e}")
 
     def _sync_connect(self) -> None:
-        # Import paresseux (onvif_zeep est lourd)
-        from onvif import ONVIFCamera
-        self._camera = ONVIFCamera(self.host, self.port, self.username,
-                                   self.password, no_cache=True)
+        # v0.7.c P0-2 · Factory centralisée : injecte wsdl_dir vers le bundle
+        # WSDL officiel embarqué (backend/wsdl). Sans cela, onvif_zeep 0.2.12
+        # cherche les WSDL dans site-packages (non bundlés) → "No such file
+        # .../wsdl/devicemgmt.wsdl" en Docker.
+        from wsdl_path import onvif_camera
+        self._camera = onvif_camera(self.host, self.port, self.username,
+                                    self.password, no_cache=True)
         # Vérifie tout de suite l'auth via GetDeviceInformation
         info = self._camera.devicemgmt.GetDeviceInformation()
         self._device_info_cache = DeviceInfo(

@@ -1092,6 +1092,17 @@ async def _probe_status_once(cam: dict) -> tuple[str, str, bool]:
     cam_id = cam["id"]
     is_demo = cam_id in DEMO_IDS
 
+    # ── Étape 0 (v0.7.c P0-1) : SOURCE DE VÉRITÉ PRIORITAIRE ──
+    # Une caméra dont le worker frame_source produit des frames fraîches
+    # alimente le pipeline IA — elle ne peut JAMAIS être marquée offline,
+    # quel que soit le résultat des probes go2rtc/TCP en aval.
+    try:
+        import frame_source as _fs
+        if _fs.get_latest_frame(cam_id, max_age_sec=10.0) is not None:
+            return ("online", "", False)
+    except Exception:
+        pass
+
     # ── Étape 1 : vérifier la présence du stream dans go2rtc (léger, pas de decode) ──
     if not is_demo:
         sources = await _get_go2rtc_stream_sources(name)
