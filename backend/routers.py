@@ -637,12 +637,34 @@ async def _lookup_recording_for(ev: dict, user: dict) -> dict:
     ts = ev.get("timestamp")
     if not ts:
         raise HTTPException(404, "Événement sans horodatage")
+    # v1.0-rc2 · Bloc 2 · Fix régression clips vidéo.
+    # 1. Tentative stricte : segment qui couvre le timestamp (start≤ts≤end)
     rec = await db.recordings.find_one(
         {"camera_id": ev.get("camera_id"),
          "start": {"$lte": ts},
          "end": {"$gte": ts}},
         {"_id": 0},
     )
+    if not rec:
+        # 2. Fallback : segment "actif" pas encore fermé (end écrit à posteriori
+        #    par le recorder toutes les 2 min → gap possible sur les events
+        #    tout frais). On prend le segment le plus récent commencé avant
+        #    l'event, à condition qu'il soit démarré < 5 min avant (heuristique
+        #    sûre : évite de rattacher un event à un segment vieux de plusieurs h).
+        rec = await db.recordings.find_one(
+            {"camera_id": ev.get("camera_id"),
+             "start": {"$lte": ts}},
+            {"_id": 0},
+            sort=[("start", -1)],
+        )
+        if rec:
+            try:
+                ev_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                rec_start = datetime.fromisoformat(rec["start"].replace("Z", "+00:00"))
+                if ev_dt - rec_start > timedelta(minutes=5):
+                    rec = None   # trop vieux, on n'accepte pas ce fallback
+            except (ValueError, KeyError):
+                rec = None
     if not rec:
         raise HTTPException(404, "Aucun enregistrement ne couvre cet événement")
     try:

@@ -15,6 +15,20 @@ import {
 import { toast } from "sonner";
 
 /**
+ * v1.0-rc2 · Fix miniatures Vehicles noires.
+ * Les balises <img> HTML ne peuvent PAS envoyer le header Authorization Bearer,
+ * elles s'appuient uniquement sur les cookies. Le backend `auth.get_current_user`
+ * accepte un fallback `?token=` en query param (voir auth.py:255).
+ * Ce helper injecte le token pour toutes les images de passage véhicule.
+ */
+function passageThumbUrl(passageId, kind = "vehicle") {
+  if (!passageId) return null;
+  const token = localStorage.getItem("mg_token") || "";
+  const qs = token ? `&token=${encodeURIComponent(token)}` : "";
+  return `${process.env.REACT_APP_BACKEND_URL}/api/vehicles/passage/${passageId}/thumb?kind=${kind}${qs}`;
+}
+
+/**
  * Vehicle History Center — v0.6 Smart ANPR History
  *
  * Regroupe automatiquement les lectures ANPR par plaque et présente une
@@ -305,8 +319,9 @@ export default function Vehicles() {
 // VehicleCard — effet cascade + badge +N
 // ═══════════════════════════════════════════════════════════════════
 function VehicleCard({ v, onOpen }) {
-  const thumbUrl = (id, kind = "vehicle") =>
-    id ? `${process.env.REACT_APP_BACKEND_URL}/api/vehicles/passage/${id}/thumb?kind=${kind}` : null;
+  // v1.0-rc2 · Utilise le helper module `passageThumbUrl` qui appende ?token=
+  // (les <img> HTML ne peuvent pas envoyer de Bearer header).
+  const thumbUrl = (id, kind = "vehicle") => passageThumbUrl(id, kind);
 
   const previews = (v.preview_thumb_ids || []).slice(0, 3);
   const extra = Math.max(0, (v.passages_count || 0) - 1);
@@ -487,7 +502,7 @@ function TabOverview({ d, onWatchChanged }) {
     <div className="space-y-4" data-testid="drawer-overview">
       {d.best_thumb_id && (
         <img
-          src={`${process.env.REACT_APP_BACKEND_URL}/api/vehicles/passage/${d.best_thumb_id}/thumb?kind=frame`}
+          src={passageThumbUrl(d.best_thumb_id, "frame")}
           alt="Best thumbnail"
           className="w-full max-h-64 object-cover border border-border"
           onError={(e) => { e.target.style.display = "none"; }}
@@ -942,13 +957,13 @@ function TabGallery({ plate }) {
                data-testid={`gallery-${p.id}`}>
             {/* v0.7.e · Wave E · 3 crops préservés : photo complète (lien),
                 crop véhicule (miniature principale), crop plaque (bandeau bas). */}
-            <a href={`${process.env.REACT_APP_BACKEND_URL}/api/vehicles/passage/${p.id}/thumb?kind=frame`}
+            <a href={passageThumbUrl(p.id, "frame")}
                target="_blank" rel="noreferrer"
                className="block relative"
                data-testid={`gallery-frame-link-${p.id}`}
                title="Voir la photo complète">
               <img
-                src={`${process.env.REACT_APP_BACKEND_URL}/api/vehicles/passage/${p.id}/thumb?kind=vehicle`}
+                src={passageThumbUrl(p.id, "vehicle")}
                 alt=""
                 loading="lazy"
                 className="w-full h-24 object-cover"
@@ -961,13 +976,13 @@ function TabGallery({ plate }) {
             </a>
             {/* Bandeau crop plaque (petit ruban 100% × 20px) — le vrai crop
                 de plaque optimisé par le gate qualité v0.7.e Wave C. */}
-            <a href={`${process.env.REACT_APP_BACKEND_URL}/api/vehicles/passage/${p.id}/thumb?kind=plate`}
+            <a href={passageThumbUrl(p.id, "plate")}
                target="_blank" rel="noreferrer"
                className="block bg-black border-t border-border"
                data-testid={`gallery-plate-link-${p.id}`}
                title="Voir le crop plaque HD">
               <img
-                src={`${process.env.REACT_APP_BACKEND_URL}/api/vehicles/passage/${p.id}/thumb?kind=plate`}
+                src={passageThumbUrl(p.id, "plate")}
                 alt=""
                 loading="lazy"
                 className="w-full h-8 object-contain bg-black"
@@ -1026,7 +1041,7 @@ function TabTimeline({ plate }) {
             {rows.map((p) => (
               <div key={p.id} className="flex items-center gap-3 text-xs" data-testid={`timeline-item-${p.id}`}>
                 <span className="mono text-[#0044FF] w-14">{new Date(p.timestamp).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span>
-                <img src={`${process.env.REACT_APP_BACKEND_URL}/api/vehicles/passage/${p.id}/thumb?kind=vehicle`} alt="" loading="lazy"
+                <img src={passageThumbUrl(p.id, "vehicle")} alt="" loading="lazy"
                      className="w-10 h-10 object-cover border border-border"
                      onError={(e) => { e.target.style.display = "none"; }} />
                 <span className="text-muted-foreground truncate flex-1">{p.camera_name}</span>

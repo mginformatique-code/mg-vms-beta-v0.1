@@ -2,6 +2,81 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v1.0-rc2] — 2026-08 — FEATURE FREEZE · Bloc 2 · Régressions mesurées
+
+Bloc 2 du mandat v1.0 : régler les régressions identifiées lors de l'audit
+initial. **Deux régressions confirmées et corrigées** avec preuve avant/après.
+
+### Fixed — Régression #1 · Clips vidéo "disparus" (`routers.py`)
+
+**Diagnostic mesuré** :
+- Audit initial : 0/10617 events ont un champ `clip_url` → alerte
+- **Investigation** : le champ `clip_url` n'existe **nulle part** dans le code.
+  Ce n'est pas une régression au sens strict — l'architecture est différente.
+- **Architecture réelle** : `recorder.py` produit des segments continus de
+  2 min (510 documents `recordings`, `has_event`, `file_path`). Un endpoint
+  `GET /api/events/{id}/recording` **existe déjà** dans `routers.py` et
+  fait le join à la demande. Frontend `EventViewer.jsx` l'appelle déjà.
+- **Vrai bug** : sur les 200 events les plus récents, **6% ne se résolvent
+  pas** — tous sur la caméra active, tous récents (< 40 min). Cause : le
+  recorder ferme les segments toutes les 2 min → le segment courant en
+  cours d'écriture n'a pas encore de `end` en base → strict match échoue.
+
+**Cause racine** : `_lookup_recording_for` ne cherchait que les segments
+strictement `start <= ts <= end`. Aucun fallback pour le segment "actif".
+
+**Fix minimal** (12 lignes) : après échec du strict match, fallback vers
+le segment le plus récent commencé avant l'event, BORNÉ à 5 min (au-delà
+→ refusé, pas de rattachement abusif).
+
+**Preuve avant/après** :
+- AVANT : **35% résolution** sur 20 events récents (`demo-cam-002`)
+- APRÈS : **100% résolution** (20/20 OK)
+- Anti-régression : event vieux de 2 mois → 404 conservé (comportement intact)
+
+### Fixed — Régression #2 · Miniatures Véhicules noires (`Vehicles.jsx`)
+
+**Diagnostic mesuré** :
+- Utilisateur signale "cartes noires, miniatures absentes" sur `Vehicles`
+- Test API direct backend : `GET /api/vehicles/passage/{id}/thumb` → HTTP 200 · 11 KB JPEG (fonctionne parfaitement)
+- Frontend construit `<img src="...">` avec l'URL sans token
+- **Cause racine** : les balises `<img>` HTML **ne peuvent pas** envoyer
+  l'header `Authorization: Bearer`. Elles s'appuient sur cookies ou query
+  params. Le token JWT étant en localStorage → 401 pour toutes les images.
+- Le `onError` du composant cachait l'image (`e.target.style.display =
+  "none"`) → fond secondary/50 visible = "carte noire".
+
+**Backend déjà prêt** : `auth.get_current_user` accepte un fallback
+`?token=...` en query param (auth.py:255, documenté explicitement pour
+les `<a href>` téléchargements).
+
+**Fix minimal** (module-level helper + 6 remplacements) :
+- Nouveau helper `passageThumbUrl(id, kind)` au niveau module Vehicles.jsx
+  qui append `?token=${localStorage.getItem("mg_token")}` à l'URL
+- 6 endroits mis à jour (VehicleCard preview + drawer best_thumb + 4 img
+  passages)
+
+**Preuve mesurée** (Playwright, `/vehicles`) :
+- AVANT : cartes véhicules noires (miniatures 401)
+- APRÈS : **83/83 miniatures chargées** · 0 failed · 0 pending · 0 React error
+
+### Tests
+- `tests/test_v1rc2_clip_recording_fallback.py` — **7 verts** (strict match,
+  fallback, refus si >5min, no-recording 404, event sans timestamp,
+  endpoint registered)
+- `tests/test_v1rc2_vehicles_thumbs.py` — **6 verts** (helper défini,
+  aucune URL directe, helper utilisé ≥6 fois, fallback token accepté par
+  auth, endpoint thumb registered, non-régression)
+- **Régression totale : 178/178 verts** (v0.7 + v0.8 + v1.0-rc1 + v1.0-rc2)
+
+### Fichiers modifiés
+- `backend/routers.py` (+21 / -1 : fallback dans `_lookup_recording_for`)
+- `frontend/src/pages/Vehicles.jsx` (+15 / -8 : helper module + 6 usages)
+- `backend/tests/test_v1rc2_clip_recording_fallback.py` (nouveau, 180 lignes)
+- `backend/tests/test_v1rc2_vehicles_thumbs.py` (nouveau, 80 lignes)
+
+---
+
 ## [v1.0-rc1] — 2026-08 — FEATURE FREEZE · Installation Docker Production Ready
 
 **Bloc 1 du mandat v1.0** : installer MG-VMS depuis un clone Git vierge en
