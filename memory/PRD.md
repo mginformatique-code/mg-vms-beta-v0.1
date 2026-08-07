@@ -656,3 +656,21 @@ Prioritisé par ROI décroissant (détails dans le rapport v0.8-rc1) :
 - Fichiers : `backend/pipeline_v2/crop_premium.py` (nouveau, 245 lignes),
   `camera_worker.py` (+25 / -3), `downstream.py` (+1),
   `frame_source.py` (+18 / -1), tests (+175)
+
+## v0.8-rc6 · FEATURE FREEZE · Stabilisation Sprint 3 (2026-08)
+- 🔬 **Priorité #7** : Pipeline Trace End-to-End · suit UNE détection
+  Frame→Decode→Motion→YOLO→Tracking→ROI→ANPR avec timings exacts par
+  stage. Sampling léger (1/100 frames, ajustable). Ring buffer 50 traces.
+- 🩺 **Priorité #4** : Camera State Fusion · un état caméra fusionne 4
+  signaux (frame_source, pipeline_activity, go2rtc, tcp). Une caméra
+  produisant des frames RTSP est TOUJOURS online — fin des faux Offline.
+- **Preuves mesurées live** :
+  * Trace live pipeline demo-cam-002 : total = 109.65 ms
+    (yolo = 102.06 ms = 94 % → goulot identifié · GPU → total < 200 ms)
+  * Camera state demo-cam-002 : online avec 100 % confidence (4/4 signaux)
+- 6 endpoints diagnostic ajoutés (traces × 4 + camera-state × 2)
+- Tests : 18 nouveaux verts (test_v08rc6_state_fusion_and_tracing.py).
+  Suite complète : 103/103 verts, zéro régression.
+- Fichiers : `pipeline_v2/trace.py` (155 l), `pipeline_v2/camera_state.py`
+  (200 l), `camera_worker.py` (+20 / -5), `routes/health_dashboard.py`
+  (+95), tests (+215)

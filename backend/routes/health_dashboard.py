@@ -694,3 +694,122 @@ async def diagnostics_anpr_quality_reset(
     anpr_quality.reset(camera_id)
     return {"ok": True, "reset": camera_id or "all"}
 
+
+
+
+# ═════════════════════════════════════════════════════════════════════
+# v0.8-rc6 · Sprint 3 · Camera State Fusion + Pipeline Trace End-to-End
+# ═════════════════════════════════════════════════════════════════════
+@health_dashboard_router.get("/diagnostics/camera-state/{camera_id}")
+async def diagnostics_camera_state(
+    camera_id: str,
+    check_network: bool = True,
+    user: dict = Depends(require_permission("view_live")),
+):
+    """v0.8-rc6 · État caméra fusionné multi-signaux.
+
+    Retourne :
+      - ``status`` : "online" | "degraded" | "offline"
+      - ``confidence`` : 0..100 (proportion signaux positifs)
+      - ``signals`` : liste des 4 capteurs (frame_source, pipeline_activity,
+                       go2rtc_stream, tcp_reachable) avec détails
+      - ``reasons`` : justifications textuelles
+
+    Règle : une caméra qui produit des frames RTSP est TOUJOURS online, même
+    si le probe go2rtc timeout. Fin des faux "Offline".
+    """
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
+    if not cam:
+        raise HTTPException(status_code=404, detail="camera_not_found")
+    from pipeline_v2.camera_state import fuse_camera_state
+    fused = await fuse_camera_state(cam, check_network=check_network)
+    return fused.to_dict()
+
+
+@health_dashboard_router.get("/diagnostics/camera-state")
+async def diagnostics_camera_state_all(
+    check_network: bool = False,   # défaut False pour éviter tempête réseau
+    user: dict = Depends(require_permission("view_live")),
+):
+    """v0.8-rc6 · Fusion multi-signaux pour TOUTES les caméras.
+
+    Par défaut ``check_network=False`` — signaux locaux uniquement (rapide).
+    Passer ``check_network=true`` pour inclure go2rtc + TCP probe.
+    """
+    from pipeline_v2.camera_state import fuse_camera_state
+    cams = await db.cameras.find({}, {"_id": 0}).to_list(None)
+    out = []
+    for cam in cams:
+        try:
+            fused = await fuse_camera_state(cam, check_network=check_network)
+            out.append(fused.to_dict())
+        except Exception as e:
+            logger.warning("fuse_camera_state failed for %s: %s", cam.get("id"), e)
+    summary = {
+        "total": len(out),
+        "online": sum(1 for f in out if f["status"] == "online"),
+        "degraded": sum(1 for f in out if f["status"] == "degraded"),
+        "offline": sum(1 for f in out if f["status"] == "offline"),
+    }
+    return {"cameras": out, "summary": summary}
+
+
+@health_dashboard_router.get("/diagnostics/traces")
+async def diagnostics_traces(
+    camera_id: Optional[str] = None,
+    limit: int = 50,
+    user: dict = Depends(require_permission("view_live")),
+):
+    """v0.8-rc6 · Ring buffer des N derniers traces end-to-end.
+
+    Chaque trace détaille les étapes réellement exécutées (fetch, decode,
+    yolo, tracking, roi, anpr, crop_premium, dispatch, persist...) avec
+    ``start_ms`` relatif au trace + ``duration_ms``.
+    """
+    from pipeline_v2.trace import collector
+    return {
+        "sampling_every_n_frames": collector.get_sampling(),
+        "traces": collector.list_recent(camera_id=camera_id, limit=limit),
+    }
+
+
+@health_dashboard_router.get("/diagnostics/traces/{trace_id}")
+async def diagnostics_trace_detail(
+    trace_id: str,
+    user: dict = Depends(require_permission("view_live")),
+):
+    """v0.8-rc6 · Détail d'un trace précis (résolution UUID)."""
+    from pipeline_v2.trace import collector
+    t = collector.get(trace_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="trace_not_found")
+    return t
+
+
+@health_dashboard_router.put("/diagnostics/traces/sampling")
+async def diagnostics_traces_sampling(
+    n: int,
+    user: dict = Depends(require_permission("view_live")),
+):
+    """v0.8-rc6 · Ajuste le taux de sampling (1 trace / N frames).
+
+    n=1 → toutes les frames (couteux, debug uniquement)
+    n=100 → défaut, coût négligeable
+    n=1000 → sampling très rare (production)
+    """
+    from pipeline_v2.trace import collector
+    if n < 1 or n > 100000:
+        raise HTTPException(status_code=400, detail="n doit être entre 1 et 100000")
+    collector.set_sampling(n)
+    return {"ok": True, "sampling_every_n_frames": collector.get_sampling()}
+
+
+@health_dashboard_router.post("/diagnostics/traces/clear")
+async def diagnostics_traces_clear(
+    user: dict = Depends(require_permission("view_live")),
+):
+    """v0.8-rc6 · Vide le ring buffer des traces."""
+    from pipeline_v2.trace import collector
+    n = collector.clear()
+    return {"ok": True, "purged": n}
+

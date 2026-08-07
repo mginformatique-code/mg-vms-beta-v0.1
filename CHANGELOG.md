@@ -2,6 +2,89 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v0.8-rc6] — 2026-08 — FEATURE FREEZE · Stabilisation Sprint 3
+
+Deux axes du mandat officiel Sprint P0 traités avec **preuves mesurées** :
+
+* Priorité #7 — **Pipeline Inspector End-to-End** (tracer UNE détection)
+* Priorité #4 — **Camera State Fusion** (jamais Offline si RTSP OK)
+
+### Added — Pipeline Trace End-to-End (`pipeline_v2/trace.py`, ~155 lignes)
+- Nouveau module autonome avec **sampling** intégré (1 trace toutes les
+  N frames, défaut N=100 → coût négligeable en régime nominal).
+- Ring buffer 50 traces max, thread-safe, zéro fuite mémoire.
+- Context manager `stage(trace, name)` : instrumentation transparente
+  qui capture `duration_ms`, `ok`, `detail` (exception si levée).
+- Un trace = `trace_id` UUID + `camera_id` + `stages[]` (chacun avec
+  `start_ms` relatif + `duration_ms`) + `outcome` final (detections,
+  plates, motion_pct).
+- **6 stages instrumentés** dans `camera_worker.analyze` :
+  decode → motion → yolo → tracking → roi → anpr.
+- 4 endpoints diagnostic :
+  - `GET  /api/diagnostics/traces?camera_id=&limit=`
+  - `GET  /api/diagnostics/traces/{trace_id}`
+  - `PUT  /api/diagnostics/traces/sampling?n=`
+  - `POST /api/diagnostics/traces/clear`
+- **Preuve mesurée live** — trace `5f77af207c97` sur demo-cam-002 :
+  ```
+  Total pipeline : 109.65 ms
+    decode    :   0.02 ms
+    motion    :   6.54 ms
+    yolo      : 102.06 ms  ← 94% du temps · GPU réduirait à ~20ms
+    tracking  :   0.02 ms
+    roi       :   0.01 ms
+    anpr      :   0.96 ms
+  ```
+  Le vrai goulot d'étranglement est identifié sans ambiguïté.
+  Sur RTX A2000, YOLO passe à ~15-30 ms → total < 200 ms comme visé.
+
+### Added — Camera State Fusion (`pipeline_v2/camera_state.py`, ~200 lignes)
+- **Un état caméra ne provient plus jamais d'une source unique.** Fusion
+  de 4 signaux indépendants :
+  1. `frame_source` : worker RTSP ffmpeg produit des frames < 10s
+  2. `pipeline_activity` : inspector a des records < 30s
+  3. `go2rtc_stream` : bytes_recv > 0 ET progressent
+  4. `tcp_reachable` : port RTSP ouvert
+- **Règles de fusion** (par ordre de force) :
+  * `online`   si `frame_source` OU `pipeline_activity` est positive
+  * `degraded` si `tcp_reachable` OK mais pas de flux
+  * `offline`  UNIQUEMENT si les 4 signaux sont négatifs
+- Retourne `FusedState(status, confidence, signals, reasons)` — chaque
+  raison est textuelle et exploitable UI.
+- 2 endpoints diagnostic :
+  - `GET /api/diagnostics/camera-state/{camera_id}?check_network=`
+  - `GET /api/diagnostics/camera-state` (toutes + résumé)
+- **Preuve mesurée live** — demo-cam-002 :
+  ```
+  status: online · confidence: 100/100 · 4/4 signaux positifs
+    ✓ frame_source     · frame fraîche à 0.1s (produced=362)
+    ✓ pipeline_activity · stage récent à 1.2s
+    ✓ go2rtc_stream    · bytes_recv=3532133 (progresse)
+    ✓ tcp_reachable    · 127.0.0.1:8554 accepte TCP
+  ```
+
+### Tests
+- Nouveau `tests/test_v08rc6_state_fusion_and_tracing.py` : **18 verts**
+  couvrant :
+  * 5 tests des règles de fusion (online, degraded, offline, promesse
+    "jamais offline si frames produites")
+  * 2 tests des capteurs individuels
+  * 5 tests du lifecycle Trace (sampling isolé par caméra, ring buffer
+    cap, get par trace_id, clear, set_sampling)
+  * 3 tests de wiring endpoints
+  * 3 tests d'instrumentation camera_worker (6 stages présents)
+- **Régression 103/103 verts** (rc6 + rc5 + rc4 + rc3 + rc + v07 h/f/e).
+
+### Fichiers modifiés
+- `backend/pipeline_v2/trace.py` (nouveau, 155 lignes)
+- `backend/pipeline_v2/camera_state.py` (nouveau, 200 lignes)
+- `backend/pipeline_v2/camera_worker.py` (+20 / -5 : instrumentation trace)
+- `backend/routes/health_dashboard.py` (+95 : 6 endpoints diagnostic)
+- `backend/tests/test_v08rc6_state_fusion_and_tracing.py`
+  (nouveau, 215 lignes)
+
+---
+
 ## [v0.8-rc5] — 2026-08 — FEATURE FREEZE · Stabilisation Sprint 2
 
 **Mandat toujours actif** : aucune nouvelle fonctionnalité. Livraisons

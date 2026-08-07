@@ -441,13 +441,26 @@ class CameraWorker:
             ctx.fps = round(1.0 / dt, 2) if dt > 0 else 0.0
         self._last_ts = now_ts
 
-        if not self._stage_decode(ctx, frame_input):
-            return {"detections": [], "plates": [], "motion_pct": 0.0}
-        self._stage_motion(ctx)
-        self._stage_detection(ctx, camera)
-        self._stage_tracking(ctx, enabled_plugins, camera)
-        self._stage_roi(ctx)
-        self._stage_anpr(ctx, enabled_plugins, camera)
+        # v0.8-rc6 · Pipeline Trace End-to-End · sampling léger (1/N frames)
+        # Zéro coût quand collector.should_sample() renvoie False (>99% des frames).
+        from .trace import collector as _trace_collector, stage as _trace_stage
+        _trc = _trace_collector.start_trace(self.camera_id) \
+            if _trace_collector.should_sample(self.camera_id) else None
+
+        with _trace_stage(_trc, "decode"):
+            if not self._stage_decode(ctx, frame_input):
+                _trace_collector.finish_trace(_trc, {"error": "decode_failed"})
+                return {"detections": [], "plates": [], "motion_pct": 0.0}
+        with _trace_stage(_trc, "motion"):
+            self._stage_motion(ctx)
+        with _trace_stage(_trc, "yolo"):
+            self._stage_detection(ctx, camera)
+        with _trace_stage(_trc, "tracking"):
+            self._stage_tracking(ctx, enabled_plugins, camera)
+        with _trace_stage(_trc, "roi"):
+            self._stage_roi(ctx)
+        with _trace_stage(_trc, "anpr"):
+            self._stage_anpr(ctx, enabled_plugins, camera)
 
         # Overlay LIVE : bboxes normalisées + track_id
         w, h = ctx.width, ctx.height
@@ -463,6 +476,13 @@ class CameraWorker:
             ctx.counts[d["label"]] = ctx.counts.get(d["label"], 0) + 1
 
         ctx.timings["total_ms"] = round((time.monotonic() - t_total) * 1000, 1)
+        # v0.8-rc6 · Trace terminé : outcome = résumé de la détection
+        _trace_collector.finish_trace(_trc, {
+            "detections_count": len(ctx.detections),
+            "plates_count": len(ctx.plates),
+            "plates": [p.get("plate") for p in ctx.plates if p.get("plate")],
+            "motion_pct": ctx.motion_pct,
+        })
         return ctx.to_legacy_result()
 
 
