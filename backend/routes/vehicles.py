@@ -30,6 +30,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from auth import require_permission
 from database import db
@@ -625,6 +626,227 @@ async def vehicle_notify_anomaly(plate: str,
             f"{report['message']}")
     results = await send_notification(subject=subject, body=body)
     return {"sent": results, "report": report}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 8c. Consensus multi-plugins & validation manuelle — v0.7 preview
+# ═══════════════════════════════════════════════════════════════════
+def _levenshtein(a: str, b: str) -> int:
+    """Distance d'édition classique — assez rapide pour des chaînes < 10 char."""
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            cur[j] = min(cur[j-1] + 1, prev[j] + 1, prev[j-1] + (ca != cb))
+        prev = cur
+    return prev[-1]
+
+
+def _norm_plate(p: str) -> str:
+    return (p or "").upper().replace(" ", "").replace("-", "")
+
+
+async def _find_variants(seed_plate: str, user: dict, max_distance: int = 2) -> list[dict]:
+    """Retourne les plaques "voisines" susceptibles d'appartenir au même véhicule.
+
+    Critères :
+      - Longueur identique (±1 caractère max)
+      - Distance de Levenshtein ≤ ``max_distance``
+      - Même vendor de couleur/marque OU même caméra (heuristique)
+    """
+    seed = _norm_plate(seed_plate)
+    if len(seed) < 4:
+        return []
+    match = await _base_match(user)
+    # Récupère toutes les plaques distinctes avec meta
+    pipe = [
+        {"$match": match},
+        {"$group": {
+            "_id": "$plate",
+            "count": {"$sum": 1},
+            "cameras": {"$addToSet": "$camera_id"},
+            "colors": {"$addToSet": "$vehicle_color"},
+            "makes": {"$addToSet": "$vehicle_make"},
+            "engines": {"$addToSet": "$engine"},
+            "last_seen": {"$max": "$timestamp"},
+        }},
+        {"$limit": 5000},
+    ]
+    all_plates = await db.plates.aggregate(pipe).to_list(5000)
+    seed_meta = next((p for p in all_plates if _norm_plate(p["_id"]) == seed), None)
+    if not seed_meta:
+        return []
+    seed_cams = set(seed_meta["cameras"] or [])
+    seed_colors = set(c for c in (seed_meta["colors"] or []) if c)
+    seed_makes = set(m for m in (seed_meta["makes"] or []) if m)
+
+    variants = []
+    for p in all_plates:
+        norm = _norm_plate(p["_id"])
+        if norm == seed:
+            continue
+        if abs(len(norm) - len(seed)) > 1:
+            continue
+        dist = _levenshtein(norm, seed)
+        if dist > max_distance:
+            continue
+        cams = set(p["cameras"] or [])
+        colors = set(c for c in (p["colors"] or []) if c)
+        makes = set(m for m in (p["makes"] or []) if m)
+        shared_cams = bool(cams & seed_cams)
+        shared_color = bool(colors & seed_colors)
+        shared_make = bool(makes & seed_makes) if seed_makes else False
+        # Heuristique : au moins un contexte partagé
+        if not (shared_cams or shared_color or shared_make):
+            continue
+        variants.append({
+            "plate": p["_id"],
+            "distance": dist,
+            "count": p["count"],
+            "cameras": list(cams),
+            "shared_context": {
+                "cameras": shared_cams,
+                "color": shared_color,
+                "make": shared_make,
+            },
+            "engines": [e for e in (p["engines"] or []) if e],
+            "last_seen": p["last_seen"],
+        })
+    variants.sort(key=lambda v: (v["distance"], -v["count"]))
+    return variants
+
+
+@vehicles_router.get("/{plate}/consensus")
+async def vehicle_consensus(plate: str,
+                             user: dict = Depends(require_permission("read_plates"))):
+    """Consensus multi-plugins : détecte les variantes OCR de la même plaque
+    et calcule la plaque **canonique probable** par vote pondéré des moteurs.
+
+    Le score par candidat = Σ (confidence × poids_moteur) sur toutes les
+    lectures groupées. Poids moteur : 1.0 par défaut (égalitaire) — reste
+    ajustable en v0.7 par plugin (Fast-ALPR vs Plate-Recognizer vs Paddle).
+    """
+    seed = _norm_plate(plate)
+    q = await _base_match(user)
+    q["plate"] = {"$regex": seed, "$options": "i"}
+    count = await db.plates.count_documents(q)
+    if count == 0:
+        raise HTTPException(status_code=404, detail={"error": "vehicle_not_found"})
+
+    variants = await _find_variants(seed, user)
+
+    # Regroupe toutes les plaques (seed + variantes) et vote.
+    all_plates = [seed] + [v["plate"] for v in variants]
+    match_all = await _base_match(user)
+    match_all["plate"] = {"$in": all_plates}
+    pipe = [
+        {"$match": match_all},
+        {"$group": {
+            "_id": {"plate": "$plate", "engine": "$engine"},
+            "n": {"$sum": 1},
+            "avg_conf": {"$avg": "$confidence"},
+        }},
+    ]
+    rows = await db.plates.aggregate(pipe).to_list(length=None)
+
+    # Poids par moteur (extension future). Pour l'instant, tous à 1.0.
+    ENGINE_WEIGHTS = {"fast-alpr": 1.0, "plate-recognizer": 1.0, "paddle-ocr": 0.9,
+                      "openalpr": 0.9, "tesseract": 0.6, "easyocr": 0.7}
+    candidates: dict[str, dict] = {}
+    engines_by_plate: dict[str, list[dict]] = {}
+    for r in rows:
+        pk = r["_id"]["plate"]
+        eng = (r["_id"].get("engine") or "unknown")
+        w = ENGINE_WEIGHTS.get(eng, 0.8)
+        score = float(r["avg_conf"] or 0) * w * int(r["n"])
+        candidates.setdefault(pk, {"plate": pk, "score": 0.0, "reads": 0, "engines": []})
+        candidates[pk]["score"] += score
+        candidates[pk]["reads"] += r["n"]
+        engines_by_plate.setdefault(pk, []).append({
+            "engine": eng, "reads": r["n"],
+            "avg_confidence": round(r["avg_conf"] or 0, 3),
+            "weight": w,
+        })
+    for pk, votes in engines_by_plate.items():
+        candidates[pk]["engines"] = sorted(votes, key=lambda x: -x["reads"])
+    ranked = sorted(candidates.values(), key=lambda c: -c["score"])
+    top = ranked[0] if ranked else None
+
+    # Statut de validation manuelle
+    val_doc = await db.plate_validations.find_one({"canonical_plate": seed}, {"_id": 0}) \
+        if hasattr(db, "plate_validations") else None
+    if not val_doc:
+        # Cherche si le seed appartient à une identité déjà validée
+        val_doc = await db.plate_validations.find_one(
+            {"$or": [{"canonical_plate": seed}, {"variants": seed}]}, {"_id": 0}
+        )
+
+    return {
+        "seed_plate": seed,
+        "canonical_candidate": (top or {}).get("plate"),
+        "canonical_score": round((top or {}).get("score", 0), 2),
+        "candidates": [{
+            "plate": c["plate"],
+            "score": round(c["score"], 2),
+            "reads": c["reads"],
+            "engines": c["engines"],
+        } for c in ranked[:5]],
+        "variants_detected": variants,
+        "validation": val_doc,
+        "note": "Consensus multi-plugins v0.7 preview — les poids par moteur sont ajustables.",
+    }
+
+
+class PlateValidationBody(BaseModel):
+    canonical_plate: str
+    variants: list[str] = []
+    reason: str = ""
+
+
+@vehicles_router.post("/{plate}/validate")
+async def vehicle_validate_plate(plate: str, body: PlateValidationBody,
+                                   user: dict = Depends(require_permission("read_plates"))):
+    """Fige manuellement la plaque canonique + fusionne les variantes.
+
+    Sauvegarde dans ``plate_validations`` :
+      { canonical_plate, variants[], validated_by, validated_at, reason }
+
+    Ne modifie pas la table ``plates`` (préserve l'historique brut) mais
+    fournit une notion d'*Identity* que les endpoints consommateurs peuvent
+    utiliser pour ré-écrire la plaque affichée."""
+    canonical = _norm_plate(body.canonical_plate or plate)
+    variants = sorted({_norm_plate(v) for v in body.variants if v} - {canonical})
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "canonical_plate": canonical,
+        "variants": variants,
+        "validated_by": user.get("email"),
+        "validated_at": now,
+        "reason": (body.reason or "").strip(),
+    }
+    await db.plate_validations.update_one(
+        {"canonical_plate": canonical},
+        {"$set": doc},
+        upsert=True,
+    )
+    return {"ok": True, "validation": doc}
+
+
+@vehicles_router.delete("/{plate}/validate")
+async def vehicle_unvalidate_plate(plate: str,
+                                     user: dict = Depends(require_permission("read_plates"))):
+    """Retire la validation manuelle (revient au consensus automatique)."""
+    canonical = _norm_plate(plate)
+    res = await db.plate_validations.delete_one(
+        {"$or": [{"canonical_plate": canonical}, {"variants": canonical}]}
+    )
+    return {"ok": True, "deleted": res.deleted_count}
 
 
 # ═══════════════════════════════════════════════════════════════════

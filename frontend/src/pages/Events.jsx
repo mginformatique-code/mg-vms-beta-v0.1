@@ -42,7 +42,7 @@ export default function Events() {
           <h1 className="font-head font-bold text-2xl tracking-tight flex items-center gap-2">
             <Zap size={22} className="text-[#0044FF]" /> Événements IA
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Détections réelles : mouvement, personnes, véhicules (YOLO) — <span className="mono">{total}</span> au total</p>
+          <p className="text-sm text-muted-foreground mt-0.5">Détections IA temps réel — <span className="mono">{total}</span> au total</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <select data-testid="events-type-filter" value={type} onChange={(e) => setType(e.target.value)} className="border border-border bg-card text-sm px-2 py-2 outline-none">

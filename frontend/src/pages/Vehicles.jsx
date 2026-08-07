@@ -9,6 +9,7 @@ import {
   Search, Car, Camera as CameraIcon, Clock, Route as RouteIcon,
   Activity, BarChart3, Loader2, Info, ChevronDown, ChevronRight,
   AlertTriangle, ShieldAlert, ShieldCheck, Shield, Bell, X as XIcon,
+  CheckCircle2, GitMerge,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -351,6 +352,9 @@ function TabOverview({ d, onWatchChanged }) {
         </div>
       )}
 
+      {/* Consensus multi-plugins & validation manuelle */}
+      <PlateConsensusBlock plate={d.plate} />
+
       {/* Actions Watchlist */}
       <div className="border border-border p-3 space-y-2" data-testid="watchlist-actions">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
@@ -418,6 +422,139 @@ function TabOverview({ d, onWatchChanged }) {
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Consensus multi-plugins & Validation manuelle de la plaque (v0.7 preview)
+// ═══════════════════════════════════════════════════════════════════
+function PlateConsensusBlock({ plate }) {
+  const [data, setData] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(() => {
+    api.get(`/vehicles/${encodeURIComponent(plate)}/consensus`)
+      .then(({ data }) => setData(data))
+      .catch(() => setData(null));
+  }, [plate]);
+  useEffect(() => { load(); }, [load]);
+
+  if (!data) return null;
+  const val = data.validation;
+  const isValidated = !!val;
+  const canonical = isValidated ? val.canonical_plate : data.canonical_candidate;
+  const candidates = data.candidates || [];
+  const variants = data.variants_detected || [];
+  const hasVariants = variants.length > 0;
+
+  const validate = async (chosenCanonical) => {
+    setSaving(true);
+    try {
+      const variantPlates = candidates
+        .filter((c) => c.plate !== chosenCanonical)
+        .map((c) => c.plate);
+      await api.post(`/vehicles/${encodeURIComponent(plate)}/validate`, {
+        canonical_plate: chosenCanonical,
+        variants: variantPlates,
+        reason: "Validation manuelle depuis le drawer véhicule",
+      });
+      toast.success(`Plaque « ${chosenCanonical} » validée · ${variantPlates.length} variante(s) liée(s)`);
+      load();
+    } catch { toast.error("Validation impossible"); }
+    finally { setSaving(false); }
+  };
+
+  const unvalidate = async () => {
+    setSaving(true);
+    try {
+      await api.delete(`/vehicles/${encodeURIComponent(plate)}/validate`);
+      toast.success("Validation retirée");
+      load();
+    } catch { toast.error("Retrait impossible"); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="border border-border p-3 space-y-2" data-testid="consensus-block">
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+          <GitMerge size={11} /> Consensus multi-plugins
+        </div>
+        {isValidated && (
+          <span className="text-[9px] mono uppercase px-1.5 py-0.5 border border-[#00E676] text-[#00E676] flex items-center gap-1">
+            <CheckCircle2 size={10} /> Validée
+          </span>
+        )}
+      </div>
+
+      {isValidated ? (
+        <div className="text-xs space-y-1">
+          <div>Plaque canonique : <b className="mono">{canonical}</b></div>
+          {val.variants?.length > 0 && (
+            <div className="text-muted-foreground">
+              Variantes liées : {val.variants.map((v) => <span key={v} className="mono mr-1">{v}</span>)}
+            </div>
+          )}
+          <div className="text-[10px] text-muted-foreground">
+            Par {val.validated_by} · {fmtDateTime(val.validated_at)}
+          </div>
+          <button onClick={unvalidate} disabled={saving}
+                  data-testid="unvalidate-btn"
+                  className="mt-1 text-[10px] uppercase tracking-wider px-2 py-1 border border-border hover:bg-secondary/60">
+            {saving ? <Loader2 size={11} className="animate-spin" /> : "Retirer la validation"}
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="text-xs space-y-1">
+            <div>Suggestion : <b className="mono text-[#00E676]">{canonical}</b> (score {data.canonical_score})</div>
+            {hasVariants && (
+              <div className="text-muted-foreground text-[11px]">
+                {variants.length} variante{variants.length > 1 ? "s" : ""} OCR détectée{variants.length > 1 ? "s" : ""} — probablement le même véhicule
+              </div>
+            )}
+          </div>
+
+          {candidates.length > 1 && (
+            <div className="space-y-1 border-t border-border pt-2">
+              {candidates.map((c) => (
+                <div key={c.plate} className="flex items-center gap-2 text-[11px]" data-testid={`candidate-${c.plate}`}>
+                  <span className="mono font-semibold w-16">{c.plate}</span>
+                  <div className="flex-1 h-1 bg-secondary/60 relative">
+                    <div className="h-full bg-[#0044FF]"
+                         style={{ width: `${Math.min(100, (c.score / (candidates[0].score || 1)) * 100)}%` }} />
+                  </div>
+                  <span className="mono w-10 text-right">{c.score}</span>
+                  <span className="mono text-muted-foreground w-14 text-right">
+                    {c.reads} lect. · {c.engines.length} moteur{c.engines.length > 1 ? "s" : ""}
+                  </span>
+                  <button
+                    onClick={() => validate(c.plate)}
+                    disabled={saving}
+                    data-testid={`validate-${c.plate}`}
+                    className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-[#00E676] text-[#00E676] hover:bg-[#00E676]/10 disabled:opacity-40"
+                  >
+                    Valider
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {candidates.length <= 1 && !hasVariants && (
+            <button
+              onClick={() => validate(canonical)}
+              disabled={saving}
+              data-testid="validate-single-btn"
+              className="w-full flex items-center justify-center gap-1 px-2 py-2 border border-[#00E676] text-[#00E676] text-xs hover:bg-[#00E676]/10"
+            >
+              {saving ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={12} />}
+              Valider cette plaque
+            </button>
+          )}
+        </>
       )}
     </div>
   );
