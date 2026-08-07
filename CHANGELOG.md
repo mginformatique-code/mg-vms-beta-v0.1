@@ -2,6 +2,78 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v1.0-rc3] — 2026-08 — FEATURE FREEZE · qos_alert filtrés + Bouton Analyser OCR
+
+Deux demandes UX terrain :
+
+### Fixed — qos_alert ne polluent plus la vue Événements
+- **Problème utilisateur** : "qos_alert n'a rien à faire dans les événements"
+- **Cause** : `GET /api/events` sans filtre `type` retournait TOUS les documents
+  de la collection `events`, y compris les alertes techniques de QoS.
+- **Fix minimal** (routers.py, +5 lignes) : quand `type` n'est pas fourni,
+  le query mongo ajoute `type: {$nin: ["qos_alert"]}`. Le filtre explicite
+  `?type=qos_alert` reste accessible (rétrocompat pour dashboards internes).
+- **Preuve mesurée** : `curl /api/events?limit=200` → 200 events retournés,
+  Counter des types = `{Vélo: 39, Voiture: 47, Mouvement: 56, Personne: 58}`,
+  **0 qos_alert**. Filtre explicite → 5 qos_alert accessibles.
+
+### Added — Bouton "Analyser OCR" sur images d'événements sans plaque
+
+- **Cas d'usage** : un event `Voiture` détecté par YOLO mais sans plaque
+  extraite (angle, flou, luminosité). L'utilisateur veut relancer l'OCR
+  à la demande sans re-traiter la vidéo entière.
+- **Backend** (routers.py, +55 lignes) : `POST /api/events/{id}/reanalyze`
+  * Charge l'event · vérifie le thumbnail (base64)
+  * Décode + appelle `ai_engine.analyze_image_local(bytes)` (même pipeline
+    que l'upload manuel — fast-alpr + Crop Premium v2 si score < 60)
+  * Persiste `reanalyzed_at`, `reanalyzed_plate`, `reanalyzed_confidence`,
+    `reanalyzed_engine` + si plaque : maj `plate` + `confidence` sur l'event
+  * Retourne `{ok, plate, confidence, vehicle_type, vehicle_color}`
+- **Frontend** (`EventViewer.jsx`, +40 lignes) :
+  * Nouveau bouton `data-testid="viewer-reanalyze-btn"` visible UNIQUEMENT
+    quand `kind === "event"` ET `!item.plate` ET `!ocrResult?.plate` ET
+    thumbnail présent (aucun clutter sur les events qui ont déjà une plaque)
+  * Loading state (spinner Loader2) pendant l'appel
+  * Résultat affiché en encadré vert avec plaque + confiance
+  * Toast succès/échec via `sonner`
+- **Test runtime** : `POST /events/{id}/reanalyze` sur event `Mouvement` →
+  200 OK, `{plate: null, message: "Aucune plaque détectée sur cette image"}`
+  (comportement attendu — c'est un vélo sans plaque)
+
+### Tests
+- Nouveau `tests/test_v1rc3_events_filter_and_reanalyze.py` — **9 verts** :
+  * 2 sur filtrage qos_alert (query + rétrocompat)
+  * 5 sur endpoint reanalyze (registered, 404, 400, no plate, with plate)
+  * 3 sur bouton frontend (visibilité conditionnelle, appel API, testid)
+- **Suite complète 187/188 verts** (1 flaky pré-existant hors périmètre)
+
+### Fichiers modifiés
+- `backend/routers.py` (+60 / -1)
+- `frontend/src/components/EventViewer.jsx` (+40 / -3)
+- `backend/tests/test_v1rc3_events_filter_and_reanalyze.py` (nouveau, 210 lignes)
+
+### Point d'attention · Fusion Événements / Véhicules
+
+Demande utilisateur : **un seul menu** consolidant Événements + Véhicules
+avec toutes les options (vidéo, recherche IA, timeline avec icônes, menu
+plaques…).
+
+État actuel constaté visuellement : la sidebar présente DÉJÀ une hiérarchie
+`Événements > {Événements, Alertes, Véhicules}` — la fusion est partielle.
+
+**Ce chantier est un vrai refactor UI** (pas un fix de bug) et sort du
+scope FEATURE FREEZE strict. **À planifier séparément** :
+- Consolider `Events.jsx` + `Vehicles.jsx` en un seul écran avec tabs
+  filtres (Plaques / Véhicules / Personnes / Camions / Bus / Animaux)
+- Fiche unifiée : vidéo + miniature + crop véhicule + crop plaque + OCR
+  + Multi-OCR + recherche IA + historique + timeline
+- Conserver 100 % des fonctionnalités existantes
+
+À valider ensemble avant de lancer (impact UX, tests visuels, non-régression
+sur toute la navigation).
+
+---
+
 ## [v1.0-rc2] — 2026-08 — FEATURE FREEZE · Bloc 2 · Régressions mesurées
 
 Bloc 2 du mandat v1.0 : régler les régressions identifiées lors de l'audit

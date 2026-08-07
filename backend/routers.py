@@ -597,6 +597,11 @@ async def list_events(response: Response, type: Optional[str] = None, site_id: O
     q = {}
     if type:
         q["type"] = type
+    else:
+        # v1.0-rc3 · Exclut les alertes techniques (qos_alert) de la vue événements.
+        # Ces alertes ont leur propre place (Suivi des performances / diagnostics)
+        # et n'ont rien à faire mélangées aux détections IA/ANPR de la vue utilisateur.
+        q["type"] = {"$nin": ["qos_alert"]}
     if site_id:
         q["site_id"] = site_id
     if camera_id:
@@ -628,6 +633,66 @@ async def recording_context(camera_id: str, at: str, user: dict = Depends(get_cu
     """Trouve l'enregistrement couvrant un instant précis (camera_id + timestamp ISO).
     Utilisé pour les alertes ou tout item sans id d'événement direct."""
     return await _lookup_recording_for({"camera_id": camera_id, "timestamp": at, "site_id": None}, user)
+
+
+@api_router.post("/events/{event_id}/reanalyze")
+async def reanalyze_event(event_id: str, user: dict = Depends(require_permission("read_plates"))):
+    """v1.0-rc3 · Relance l'OCR sur l'image thumbnail d'un événement.
+
+    Correction MINIMALE (pas de refeeding vidéo) : on prend le `thumbnail`
+    déjà stocké sur l'event et on le repasse dans le pipeline ANPR complet
+    via `ai_engine.analyze_image_local` (fast-alpr + Crop Premium v2 si le
+    score du crop est < 60). Utile pour les events où YOLO a détecté un
+    véhicule mais aucune plaque n'a été extraite au moment T.
+    """
+    ev = await db.events.find_one({"id": event_id}, {"_id": 0})
+    if not ev:
+        raise HTTPException(404, "Événement introuvable")
+
+    thumb = ev.get("thumbnail")
+    if not thumb or not isinstance(thumb, str):
+        raise HTTPException(400, "Aucune miniature disponible sur cet événement")
+
+    # Décode la data URL base64 en bytes JPEG
+    try:
+        import base64
+        b64 = thumb.split(",", 1)[1] if "," in thumb else thumb
+        image_bytes = base64.b64decode(b64)
+        if not image_bytes:
+            raise ValueError("bytes vides")
+    except Exception as e:
+        raise HTTPException(500, f"Miniature illisible: {e}")
+
+    # Passe via le pipeline unique (même que /api/analyze upload)
+    try:
+        import ai_engine
+        result = await asyncio.to_thread(ai_engine.analyze_image_local, image_bytes)
+    except Exception as e:
+        raise HTTPException(500, f"OCR indisponible: {e}")
+
+    plate = (result or {}).get("plate", "")
+    conf = float((result or {}).get("confidence", 0.0))
+
+    # Persiste le résultat sur l'event (audit + re-affichage sans re-run)
+    update = {
+        "reanalyzed_at": datetime.now(timezone.utc).isoformat(),
+        "reanalyzed_plate": plate,
+        "reanalyzed_confidence": conf,
+        "reanalyzed_engine": "fast-alpr",
+    }
+    if plate:
+        update["plate"] = plate  # exposer côté frontend directement
+        update["confidence"] = conf
+    await db.events.update_one({"id": event_id}, {"$set": update})
+
+    return {
+        "ok": True,
+        "plate": plate or None,
+        "confidence": conf,
+        "vehicle_type": (result or {}).get("vehicle_type"),
+        "vehicle_color": (result or {}).get("vehicle_color"),
+        "message": "Aucune plaque détectée sur cette image" if not plate else None,
+    }
 
 
 async def _lookup_recording_for(ev: dict, user: dict) -> dict:

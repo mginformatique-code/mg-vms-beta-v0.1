@@ -3,6 +3,7 @@ import api from "@/lib/api";
 import {
   X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCcw,
   Download, Copy, PlayCircle, Camera as CamIcon, MapPin, Clock, Puzzle, ShieldAlert,
+  ScanSearch, Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -26,12 +27,15 @@ export default function EventViewer({ items, index, onClose, onIndex, kind = "ev
   const [recInfo, setRecInfo] = useState(null); // { stream_url, offset_sec }
   const [showVideo, setShowVideo] = useState(false);
   const [recLoading, setRecLoading] = useState(false);
+  // v1.0-rc3 · Bouton "Analyser OCR" pour events sans plaque détectée
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrResult, setOcrResult] = useState(null);
   const imgRef = useRef(null);
   const containerRef = useRef(null);
   const videoRef = useRef(null);
 
   // Reset zoom on item change / close
-  useEffect(() => { setScale(1); setPan({ x: 0, y: 0 }); setRecInfo(null); setShowVideo(false); }, [index]);
+  useEffect(() => { setScale(1); setPan({ x: 0, y: 0 }); setRecInfo(null); setShowVideo(false); setOcrResult(null); }, [index]);
 
   // Escape + arrows
   useEffect(() => {
@@ -257,6 +261,42 @@ export default function EventViewer({ items, index, onClose, onIndex, kind = "ev
         </div>
 
         <div className="p-4 border-t border-white/10 space-y-2">
+          {/* v1.0-rc3 · Bouton "Analyser OCR" — visible SEULEMENT quand
+              aucune plaque n'a été détectée à l'origine et pas encore
+              ré-analysée dans cette session */}
+          {kind === "event" && !item.plate && !ocrResult?.plate && item.thumbnail && (
+            <button
+              onClick={async () => {
+                if (!item.id) return toast.error("Événement sans identifiant");
+                setOcrLoading(true);
+                try {
+                  const { data } = await api.post(`/events/${item.id}/reanalyze`);
+                  setOcrResult(data);
+                  if (data.plate) {
+                    toast.success(`Plaque détectée : ${data.plate} (${Math.round((data.confidence || 0) * 100)}%)`);
+                  } else {
+                    toast.info(data.message || "Aucune plaque détectée");
+                  }
+                } catch (e) {
+                  toast.error(e.response?.data?.detail || "Analyse impossible");
+                } finally { setOcrLoading(false); }
+              }}
+              disabled={ocrLoading}
+              data-testid="viewer-reanalyze-btn"
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-[#7C3AED] text-white hover:bg-[#6D28D9] disabled:opacity-50"
+            >
+              {ocrLoading ? <Loader2 size={16} className="animate-spin" /> : <ScanSearch size={16} />}
+              {ocrLoading ? "Analyse en cours…" : "Analyser OCR sur cette image"}
+            </button>
+          )}
+          {ocrResult?.plate && (
+            <div className="p-2 border border-[#00E676]/30 bg-[#00E676]/5 text-xs">
+              <div className="text-[10px] uppercase tracking-wider text-[#00E676] mb-1">Nouvelle lecture OCR</div>
+              <div className="mono text-white font-bold text-base">{ocrResult.plate}</div>
+              <div className="text-[10px] text-white/60 mono">Confiance {Math.round((ocrResult.confidence || 0) * 100)}%</div>
+            </div>
+          )}
+
           <button onClick={playAround} disabled={recLoading || showVideo} data-testid="viewer-play-video-btn"
                   className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-[#0044FF] text-white hover:bg-[#0033cc] disabled:opacity-50">
             <PlayCircle size={16} /> {showVideo ? "Vidéo en cours" : "Lire la vidéo autour de cet événement"}
