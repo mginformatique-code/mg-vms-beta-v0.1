@@ -196,3 +196,13 @@ async def on_shutdown():
 @app.get("/api/")
 async def root():
     return {"app": "MG-VMS", "status": "ok"}
+
+
+# ═════════════════════════════════════════════════════════════════
+# Healthcheck ultra-léger pour Docker / Kubernetes probes.
+# STRICTEMENT : aucune dépendance externe (Mongo, go2rtc, GPU, Pipeline).
+# Réponse < 5 ms garanti. Le diagnostic complet reste dans /api/system-health.
+# ═════════════════════════════════════════════════════════════════
+@app.get("/health", include_in_schema=False)
+async def health():
+    return {"status": "ok"}
