@@ -140,6 +140,16 @@ class ONVIFDriver(CameraDriver):
                 if cfgs:
                     caps.ptz = True
                     caps.zoom = True   # supposé (à raffiner selon config)
+                    # v0.7.e · Wave D · probe presets
+                    try:
+                        profiles = await asyncio.to_thread(self._media.GetProfiles)
+                        if profiles:
+                            presets = await asyncio.to_thread(
+                                self._ptz.GetPresets, {"ProfileToken": profiles[0].token})
+                            if presets:
+                                caps.ptz_presets = True
+                    except Exception:
+                        pass
             except Exception:
                 pass
         # Imaging → IR cut filter
@@ -154,7 +164,45 @@ class ONVIFDriver(CameraDriver):
                         caps.ir_control = True
             except Exception:
                 pass
-        # Streams
+        # v0.7.e · Wave D · Audio input / output (mic embarqué, HP)
+        if self._media is not None:
+            try:
+                asrcs = await asyncio.to_thread(self._media.GetAudioSources) or []
+                if asrcs:
+                    caps.audio_input = True
+                    caps.microphone = True
+            except Exception:
+                pass
+            try:
+                aouts = await asyncio.to_thread(self._media.GetAudioOutputs) or []
+                if aouts:
+                    caps.audio_output = True
+                    caps.speaker = True
+                    if caps.audio_input:
+                        caps.two_way_audio = True
+                        caps.talkback = True
+            except Exception:
+                pass
+        # v0.7.e · Wave D · Events service (Profile T)
+        try:
+            _ = self._camera.create_events_service()
+            caps.onboard_ai = True  # au minimum : events IA/motion embarqués
+        except Exception:
+            pass
+        # v0.7.e · Wave D · Snapshot URI (Profile S optionnel)
+        try:
+            profiles = await asyncio.to_thread(self._media.GetProfiles) or []
+            if profiles:
+                snap = await asyncio.to_thread(
+                    self._media.GetSnapshotUri, {"ProfileToken": profiles[0].token})
+                if getattr(snap, "Uri", None):
+                    # Snapshot HTTP → on considère l'HTTPS support si l'URI
+                    # commence par https://
+                    if str(snap.Uri).startswith("https://"):
+                        caps.https = True
+        except Exception:
+            pass
+        # Streams + multi_stream + codec_h265
         try:
             streams = await self.get_streams()
             if streams:
@@ -162,6 +210,10 @@ class ONVIFDriver(CameraDriver):
                 main = streams[0]
                 caps.max_resolution = main.resolution
                 caps.max_fps = main.fps
+                if len(streams) >= 2:
+                    caps.multi_stream = True
+                if any(s.codec == "h265" for s in streams):
+                    caps.codec_h265 = True
         except Exception:
             pass
         self._caps = caps

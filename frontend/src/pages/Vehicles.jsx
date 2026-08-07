@@ -927,20 +927,46 @@ function TabGallery({ plate }) {
   return (
     <div className="space-y-3" data-testid="drawer-gallery">
       <div className="text-xs text-muted-foreground mono">{items.length} / {total} captures</div>
-      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {items.map((p) => (
-          <a key={p.id}
-             href={`${process.env.REACT_APP_BACKEND_URL}/api/vehicles/passage/${p.id}/thumb?kind=frame`}
-             target="_blank" rel="noreferrer"
-             className="relative block bg-secondary/40 border border-border hover:border-[#0044FF]"
-             data-testid={`gallery-${p.id}`}>
-            <img
-              src={`${process.env.REACT_APP_BACKEND_URL}/api/vehicles/passage/${p.id}/thumb?kind=vehicle`}
-              alt=""
-              loading="lazy"
-              className="w-full h-24 object-cover"
-              onError={(e) => { e.target.style.display = "none"; }}
-            />
+          <div key={p.id}
+               className="relative block bg-secondary/40 border border-border hover:border-[#0044FF] transition-colors"
+               data-testid={`gallery-${p.id}`}>
+            {/* v0.7.e · Wave E · 3 crops préservés : photo complète (lien),
+                crop véhicule (miniature principale), crop plaque (bandeau bas). */}
+            <a href={`${process.env.REACT_APP_BACKEND_URL}/api/vehicles/passage/${p.id}/thumb?kind=frame`}
+               target="_blank" rel="noreferrer"
+               className="block relative"
+               data-testid={`gallery-frame-link-${p.id}`}
+               title="Voir la photo complète">
+              <img
+                src={`${process.env.REACT_APP_BACKEND_URL}/api/vehicles/passage/${p.id}/thumb?kind=vehicle`}
+                alt=""
+                loading="lazy"
+                className="w-full h-24 object-cover"
+                data-testid={`gallery-vehicle-thumb-${p.id}`}
+                onError={(e) => { e.target.style.display = "none"; }}
+              />
+              <span className="absolute top-1 right-1 px-1.5 py-0.5 text-[8px] mono uppercase tracking-wider bg-black/60 text-white border border-white/20">
+                Full →
+              </span>
+            </a>
+            {/* Bandeau crop plaque (petit ruban 100% × 20px) — le vrai crop
+                de plaque optimisé par le gate qualité v0.7.e Wave C. */}
+            <a href={`${process.env.REACT_APP_BACKEND_URL}/api/vehicles/passage/${p.id}/thumb?kind=plate`}
+               target="_blank" rel="noreferrer"
+               className="block bg-black border-t border-border"
+               data-testid={`gallery-plate-link-${p.id}`}
+               title="Voir le crop plaque HD">
+              <img
+                src={`${process.env.REACT_APP_BACKEND_URL}/api/vehicles/passage/${p.id}/thumb?kind=plate`}
+                alt=""
+                loading="lazy"
+                className="w-full h-8 object-contain bg-black"
+                data-testid={`gallery-plate-thumb-${p.id}`}
+                onError={(e) => { e.target.style.display = "none"; }}
+              />
+            </a>
             <div className="p-1 text-[9px] mono text-muted-foreground">
               <div className="truncate">{fmtDateTime(p.timestamp)}</div>
               <div className="flex items-center justify-between">
@@ -948,7 +974,7 @@ function TabGallery({ plate }) {
                 <span style={{ color: p.confidence > 0.9 ? "#00E676" : "#FFB800" }}>{(p.confidence * 100).toFixed(0)}%</span>
               </div>
             </div>
-          </a>
+          </div>
         ))}
       </div>
       {items.length < total && (

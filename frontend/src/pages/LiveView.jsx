@@ -253,27 +253,32 @@ const Feed = React.memo(FeedInner, (prev, next) => {
 
 // Mapping type/label → icône + libellé + couleur (style Reolink)
 // Icônes lucide-react cohérentes avec le reste de l'app.
+// v0.7.e · Wave E · Palette timeline type Reolink alignée sur la demande
+// utilisateur : 🟦 Personne, 🟩 Voiture, 🟨 Moto, 🟧 Camion, 🟪 Bus,
+// 🟥 Animal, 🟫 Vélo. Les alertes critiques (feu/arme/bagarre) restent
+// en rouge/orange pour cohérence sémantique.
 const EVENT_KIND_META = {
-  person:  { icon: User,       label: "Personne", color: "#00E676" },
-  car:     { icon: Car,        label: "Voiture",  color: "#0044FF" },
-  truck:   { icon: Truck,      label: "Camion",   color: "#0088FF" },
-  bus:     { icon: Truck,      label: "Bus",      color: "#0088FF" },
-  bicycle: { icon: Bike,       label: "Vélo",     color: "#66CCFF" },
-  motorbike: { icon: Bike,     label: "Moto",     color: "#66CCFF" },
-  motorcycle: { icon: Bike,    label: "Moto",     color: "#66CCFF" },
-  animal:  { icon: PawPrint,   label: "Animal",   color: "#EA580C" },
-  dog:     { icon: PawPrint,   label: "Chien",    color: "#EA580C" },
-  cat:     { icon: PawPrint,   label: "Chat",     color: "#EA580C" },
-  bird:    { icon: PawPrint,   label: "Oiseau",   color: "#EA580C" },
-  plate:   { icon: ScanLine,   label: "Plaque",   color: "#FFB800" },
-  fire:    { icon: Flame,      label: "Feu",      color: "#FF3333" },
-  smoke:   { icon: Flame,      label: "Fumée",    color: "#FF6600" },
-  weapon:  { icon: AlertOctagon, label: "Arme",   color: "#FF3333" },
-  fight:   { icon: AlertOctagon, label: "Bagarre",color: "#FF3333" },
-  fall:    { icon: AlertOctagon, label: "Chute",  color: "#FF6600" },
-  ppe:     { icon: HardHat,    label: "EPI",      color: "#FFB800" },
-  zone:    { icon: MapPin,     label: "Zone",     color: "#0044FF" },
-  motion:  { icon: Activity,   label: "Mouvement",color: "#00E676" },
+  person:     { icon: User,        label: "Personne", color: "#0044FF" },   // 🟦 bleu
+  car:        { icon: Car,         label: "Voiture",  color: "#00E676" },   // 🟩 vert
+  motorbike:  { icon: Bike,        label: "Moto",     color: "#FFB800" },   // 🟨 jaune
+  motorcycle: { icon: Bike,        label: "Moto",     color: "#FFB800" },
+  truck:      { icon: Truck,       label: "Camion",   color: "#FF6600" },   // 🟧 orange
+  bus:        { icon: Truck,       label: "Bus",      color: "#9333EA" },   // 🟪 violet
+  animal:     { icon: PawPrint,    label: "Animal",   color: "#FF3333" },   // 🟥 rouge
+  dog:        { icon: PawPrint,    label: "Chien",    color: "#FF3333" },
+  cat:        { icon: PawPrint,    label: "Chat",     color: "#FF3333" },
+  bird:       { icon: PawPrint,    label: "Oiseau",   color: "#FF3333" },
+  bicycle:    { icon: Bike,        label: "Vélo",     color: "#8B4513" },   // 🟫 marron
+  plate:      { icon: ScanLine,    label: "Plaque",   color: "#FFD700" },   // jaune vif (spécifique ANPR)
+  // Alertes critiques (priorité visuelle rouge/orange)
+  fire:       { icon: Flame,       label: "Feu",      color: "#FF3333" },
+  smoke:      { icon: Flame,       label: "Fumée",    color: "#FF6600" },
+  weapon:     { icon: AlertOctagon,label: "Arme",     color: "#FF3333" },
+  fight:      { icon: AlertOctagon,label: "Bagarre",  color: "#FF3333" },
+  fall:       { icon: AlertOctagon,label: "Chute",    color: "#FF6600" },
+  ppe:        { icon: HardHat,     label: "EPI",      color: "#FFB800" },
+  zone:       { icon: MapPin,      label: "Zone",     color: "#0044FF" },
+  motion:     { icon: Activity,    label: "Mouvement",color: "#66CCFF" },   // cyan discret (bas signal)
 };
 
 function _kindFromEvent(ev) {

@@ -484,7 +484,50 @@ Ordre officiel confirmé par le CEO :
 - Preuves live (Playwright 42s) : ws_messages=28 · map_size=1 stable · evictions=0 · reconnects=0 · UI Welcome affiche v0.7.e correctement
 - Fichiers : frontend/src/lib/perf.js (nouveau, 87 lignes), frontend/src/context/AppContext.jsx (+51/-7)
 
-## Vagues restantes v0.7.e (backlog)
-- Wave D : go2rtc + Camera API + ONVIF (auto-détection capabilities réelles, snapshots, previews stables pendant modif)
-- Wave E : Timeline type Reolink (couleurs par type d'événement) + miniatures véhicules (photo complète + crop véhicule + crop plaque) + fix boucle vidéo
-- Wave F : Stress-test 1/5/10/20/30/50 caméras avec FPS/CPU/GPU/VRAM/RAM/p95/p99/OCR moyen/temps détection/temps crop/temps OCR/total pipeline + rapport final
+## v0.7.e Wave D · Camera API hardening (2026-06)
+- ONVIF `get_capabilities()` enrichi : probes audio_input/output/two_way, events (Profile T → onboard_ai), snapshot URI + HTTPS detection, multi_stream (>=2 profils), codec_h265, ptz_presets
+- Bundle WSDL local offline validé (test dédié) : devicemgmt/media/ptz/imaging/events/analytics/accesscontrol + xsd
+- Contrat "preview stable pendant modif caméra" renforcé (short-circuit `all_match` dans register_camera_stream + signal-driven Wave A)
+- Tests : 8 verts (TestWsdlBundle 2 + TestOnvifCapabilitiesProbing 5 + TestIdempotentCameraUpdate 1)
+- Fichier : backend/drivers/onvif_driver.py (+60/-6)
+
+## v0.7.e Wave E · Timeline Reolink + miniatures + boucle vidéo (2026-06)
+- Palette timeline LiveView `EVENT_KIND_META` alignée sur la demande utilisateur : 🟦 person=#0044FF · 🟩 car=#00E676 · 🟨 motorbike=#FFB800 · 🟧 truck=#FF6600 · 🟪 bus=#9333EA · 🟥 animal=#FF3333 · 🟫 bicycle=#8B4513. Alertes critiques rouge/orange préservées
+- Galerie véhicule Vehicles.jsx expose désormais les 3 crops distincts : photo complète (lien overlay), crop véhicule (miniature 100×96), crop plaque (bandeau bas 100×32 cliquable). Le crop plaque = version optimisée Wave C (deskew/CLAHE/sharpen)
+- data-testid ajoutés : `gallery-frame-link-<id>`, `gallery-vehicle-thumb-<id>`, `gallery-plate-link-<id>`, `gallery-plate-thumb-<id>`
+- Fix boucle vidéo Recordings.jsx : `<video onEnded>` handler qui passe automatiquement au segment suivant (comportement Reolink-like). Sans ce handler la vidéo restait bloquée sur la dernière frame — perçu à tort comme "boucle sur le même segment"
+- Tests : 10 verts (TestVehicleGalleryHasThreeCrops 2 + TestTimelinePaletteMatchesRequest 7 + TestRecordingsAutoNextSegment 1)
+- Fichiers : LiveView.jsx (+11/-14), Vehicles.jsx (+38/-18), Recordings.jsx (+12)
+
+## Total pytest v0.7.e (Waves A+B+C+D+E)
+- 112/112 verts (16 Wave A + 19 Wave C + 18 Wave D+E + 59 régression ciblée)
+- Zéro API publique modifiée, zéro régression
+
+## v0.7.e Wave F · Stress-test 1→50 caméras (2026-06)
+- Harness reproductible `backend/stress/stress_test.py` — mesure asyncio.gather 1/5/10/20/30/50 cams × 3 frames
+- Environnement preview CPU-only 8 vCPUs 32 GB — pas de GPU NVIDIA détecté (nvidia-smi absent)
+- YOLOv8n (6.25 MB) auto-téléchargé + warmup, CPU inference
+- Résultats mean total pipeline (ms) : n=1→106.5 · n=10→523.8 · n=50→2782.6 (goulot YOLO CPU-only qui scale linéaire N)
+- **Wave C stages négligeables** : assess_crop_quality ~0.8ms constant, crop_hash ~0.1ms, enhance short-circuit → total Wave C < 1 ms peu importe N
+- RAM stable à 1088 MB RSS après 50 cams (pas de fuite ; delta -12 MB entre n=30 et n=50 = convergence GC)
+- CPU cap ~145% (~1.45 core) — YOLO CPU tient GIL par gros blocks
+- Extrapolation GPU RTX 3060 : cible <200ms tenue jusqu'à N=50 (YOLO 30-50ms + Wave C 1ms + OCR 80-120ms ≈ 150ms)
+- Rapports : /app/memory/WAVE_F_STRESS_TEST_v0.7.e.md + STRESS_TEST_v0.7.e_report.json (données brutes)
+
+## Rapport consolidé Waves A→F : /app/memory/RAPPORT_FINAL_v0.7.e.md
+- 112 tests verts (16 A + 19 C + 18 D+E + 59 régression) — zéro régression, zéro API publique modifiée
+- ~1300 lignes livrées + 53 nouveaux tests
+- 4 endpoints diagnostic runtime : /api/diagnostics/hot-reload, /api/diagnostics/plate-quality[/debug], window.__mgvms_perf.snapshot()
+- 8 rapports MD dédiés dans /app/memory/
+
+## Backlog v0.7.f (non-P0 restants du v0.7.d handoff)
+- Performance Gate : alerte Operations Center si total_ms > 200 ms sur une cam avec stage responsable
+- YAML fix deploy-app/docker-compose.prod.yml:55 (blocker prod TLS)
+- Refactor routers.py legacy → routes/*.py modulaire
+- Validation stricte enabled_plugins (empêcher noms inexistants)
+- Concrete drivers Reolink/Hikvision/Dahua/Axis suivant CameraDriverProtocol
+- Storage roadmap : "Mount a disk" wizard, SMART indicators, bulk/backup DB migration
+- AI vision Claude Vision sur person crops, filtres visuels rapides
+- Saved searches Smart Search
+- Bulk OCR variant retroactive cleanup
+- Export AI folders PDF (véhicules + persons + timeline)

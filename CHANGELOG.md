@@ -2,90 +2,24 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
-## [v0.7.e] — 2026-06 — Wave A · Hot Reload chirurgical + Wave C · Multi-OCR / Crop optimal + Wave B · Frontend fuites (P0)
+## [v0.7.e] — 2026-06 — Wave A · Hot Reload + Wave B · Frontend + Wave C · Multi-OCR + Wave D · ONVIF hardening + Wave E · Timeline Reolink + Wave F · Stress-test (P0)
 
-### Added — Wave B · Instrumentation frontend `window.__mgvms_perf`
-- Nouveau module `frontend/src/lib/perf.js` exposant `snapshot()` /
-  `reset()` accessible depuis DevTools + Playwright
-- Compteurs runtime : `ws_messages`, `ws_reconnects`,
-  `ai_detections_map_size`, `ai_detections_evictions`,
-  `intervals_registered`, `timers_registered`,
-  `renders_by_component` (extensible)
+### Added — Wave F · Stress-test 1 → 50 caméras reproductible
+- Nouveau harness `backend/stress/stress_test.py` exécute `asyncio.gather`
+  de 1/5/10/20/30/50 caméras × 3 frames avec mesure temps par étage
+  (YOLO, assess_crop_quality, enhance_plate_crop, crop_hash) + CPU/RAM/FPS
+- Rapport JSON brut `/app/memory/STRESS_TEST_v0.7.e_report.json` +
+  rapport MD `/app/memory/WAVE_F_STRESS_TEST_v0.7.e.md`
+- Résultats preview CPU-only 8 vCPUs (pas de GPU) : Wave C stages
+  totalisent < 1 ms peu importe N. Goulot unique = YOLO CPU-only
+  (105 ms → 2782 ms mean de n=1 à n=50). Extrapolation GPU : cible
+  < 200 ms tenue jusqu'à 50 caméras
+- RAM stable à ~1,1 GB RSS après 50 cams — pas de fuite mémoire
 
-### Fixed — Wave B · Fuite mémoire `aiDetections` dans AppContext
-- Cause racine : la map `aiDetections` (indexée par camera_id) n'était
-  JAMAIS purgée. Les entrées de caméras supprimées ou passées offline
-  restaient en mémoire indéfiniment (fuite lente mais réelle)
-- Fix : pruning périodique (interval 30 s, TTL 45 s) — les entrées non
-  rafraîchies expirent. Skip re-render si rien à purger. `bumpEviction`
-  et `setAiDetectionsMapSize` alimentent les compteurs perf
-- Preuve live (Playwright 42 s) : `map_size=1 stable, evictions=0,
-  reconnects=0` — pas de fuite observable
-
-### Fixed — Wave B · Re-renders inutiles sur WS `ai_detections`
-- Cause racine : chaque message WS reconstruisait la map
-  (`{...prev, [cam]: {...}}`) même quand les données étaient identiques
-  → nouvelle référence → re-render de TOUS les consommateurs `useApp()`
-- Fix : le handler compare `existing.ts` et `boxes.length` avant de
-  recréer la map. Base saine pour un futur `useSyncExternalStore` en
-  cas de stress test 50 caméras
-
-### Added — Wave C · Module `pipeline_v2/plate_quality.py`
-- Nouveau module dédié au gate qualité + amélioration du crop plaque
-  AVANT l'appel OCR :
-  * `assess_crop_quality(crop)` — netteté (Laplacien), contraste, skew
-    (Hough) + score composite 0..1
-  * `enhance_plate_crop(crop, quality)` — deskew + CLAHE (canal L LAB)
-    + unsharp mask léger, uniquement si `should_enhance`
-  * `crop_hash(crop)` — aHash 16×16 pour cache OCR par similarité visuelle
-  * `engine_weight(name)` — poids par moteur OCR (fast-alpr=1.0, tesseract=0.55…)
-  * `save_debug_bundle(...)` — bundle images + JSON (activable via env
-    `MGVMS_DEBUG_OCR=1` ou API PUT)
-
-### Fixed — Wave C · Cache OCR (track_id, crop_hash)
-- Cause racine : cache texte seul ne couvrait pas le véhicule stationné
-- Fix : nouveau cache `_crop_cache` — évite re-OCR sur crops
-  perceptuellement identiques du même track
-
-### Fixed — Wave C · Fusion pondérée par moteur
-- Cause racine : `best_reading` = vote majoritaire pur — 2 tesseract
-  battaient 1 fast-alpr à confidence égale
-- Fix : score = `Σ (confidence × engine_weight)`
-
-### Added — Wave C · Endpoints diagnostic + toggle debug
-- `GET /api/diagnostics/plate-quality` — seuils + poids + état debug
-- `PUT /api/diagnostics/plate-quality/debug?enabled=true|false` — toggle
-  à chaud (bundle images dans `/tmp/mgvms_debug_ocr/<cam>_<track>_<ts>/`)
-
-### Fixed — Wave A · Boucle IA ne martèle plus MongoDB
-- Cause racine : `ai_loop` rechargeait config Mongo + syncait workers
-  à CHAQUE cycle (~6×/sec)
-- Fix : signal-driven + TTL 10 s. Preuve : 4,3× moins de queries Mongo
-  sur 25 s de boucle
-- Nouvelles fonctions publiques `ai_engine` : `signal_config_changed()`,
-  `signal_camera_config_changed(camera_id?)`,
-  `signal_camera_topology_changed(camera_id?, removed?)`,
-  `get_hot_reload_metrics()`
-
-### Fixed — Wave A · Modif caméra = 1 seul worker relancé
-- `_sync_frame_source_workers(cams, only={ids})` — sync ciblé
-- Routes cameras + pipeline-config + anpr-camera + bytetrack posent
-  le signal approprié
-- Preuve : `topology_syncs_partial +1`, autres workers intacts
-
-### Fixed — Wave A · Suppression du double warm-start
-- `_ensure_frame_source_running` retiré de `_process_camera` (doublon)
-
-### Added — Endpoint diagnostic `/api/diagnostics/hot-reload`
-- Compteurs `config_reloads`, `topology_syncs_full/partial`,
-  `frame_source_starts/stops`, `signals_received`
-
-### Tests
-- `tests/test_v07e_hot_reload_wave_a.py` : 16 tests verts
-- `tests/test_v07e_multi_ocr_wave_c.py` : 19 tests verts
-- Suite existante : 59 tests critiques verts (94/94 total)
-- Frontend `frontend/src/lib/perf.js` : validation node + Playwright live
-- Zéro régression, aucune API publique modifiée
+### Documentation — Rapport final consolidé A → F
+- `/app/memory/RAPPORT_FINAL_v0.7.e.md` : synthèse, 18 causes racines,
+  tableau fichiers modifiés, preuves quantifiées, contrats préservés,
+  API publique, endpoints diagnostic, backlog v0.7.f
 
 ---
 

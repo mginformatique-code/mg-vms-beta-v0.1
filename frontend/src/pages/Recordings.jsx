@@ -194,7 +194,19 @@ export default function Recordings() {
                 {selected ? (
                   <>
                     <video key={selected.id} controls autoPlay className="w-full h-full object-contain bg-black" data-testid="rec-video"
-                      src={`${process.env.REACT_APP_BACKEND_URL}/api/recordings/${selected.id}/media?token=${encodeURIComponent(localStorage.getItem("mg_token") || "")}`} />
+                      src={`${process.env.REACT_APP_BACKEND_URL}/api/recordings/${selected.id}/media?token=${encodeURIComponent(localStorage.getItem("mg_token") || "")}`}
+                      onEnded={() => {
+                        // v0.7.e · Wave E · Auto-passe au segment suivant à la
+                        // fin de la lecture (comportement Reolink-like). Fixe
+                        // le bug perçu de « boucle vidéo qui répète le même
+                        // segment » : sans cet handler, la vidéo restait sur
+                        // la dernière frame et l'utilisateur devait cliquer
+                        // manuellement le segment suivant.
+                        const idx = segments.findIndex((s) => s.id === selected.id);
+                        if (idx >= 0 && idx < segments.length - 1) {
+                          play(segments[idx + 1]);
+                        }
+                      }} />
                     <div className="absolute top-0 inset-x-0 flex items-center justify-between px-3 py-2 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
                       <span className="text-xs mono text-white">{data?.camera?.name}</span>
                       <span className="text-xs mono text-white">{fmtTime(selected.start)} – {fmtTime(selected.end)} · {fmtDur(selected.duration_sec)}</span>
