@@ -2,6 +2,80 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v0.8-rc3] — 2026-08 — MongoDB Auto-Indexes + React Virtualization
+
+### Added — MongoDB Auto-Indexes bootstrap
+- `backend/database.py` refondu avec un nouveau helper `_safe_index()`
+  tolérant aux `OperationFailure` (code 85 `IndexOptionsConflict`,
+  code 86 `IndexKeySpecsConflict`) et aux erreurs génériques. Le
+  bootstrap ne crashe plus si un index existe déjà avec des options
+  différentes (ex : TTL préexistant) — l'existant est conservé, on
+  log en INFO et on continue.
+- Application automatique des **17 recommandations** issues de
+  `stress/mongo_audit.py` (`missing_index` + `missing_ttl`) au startup :
+  - `cameras` : `id`, `site_id`, `status`
+  - `events` : `timestamp`, `camera_id`, `type`, `kind`
+    + composé `(camera_id, timestamp desc)`
+  - `plates` : `plate`, `timestamp`, `camera_id`, `track_id` (sparse)
+    + composé `(plate, timestamp desc)`
+  - `recordings` : `camera_id`, `start`, `start_ts`, `end_ts`
+    + composé `(camera_id, start_ts desc)`
+  - `audit_logs` : `timestamp`, `actor`
+  - `sessions` : `user_id`, `created_at`
+  - `tls_certificates` : `id`, `active`
+  - `alerts` : `timestamp`, `camera_id`
+- Preuve runtime : `list_indexes()` post-bootstrap confirme **32
+  indexes** sur les 8 collections critiques (vs ~10 avant). Backend
+  démarre sans warning fatal.
+
+### Added — Frontend VirtualGrid (react-window v2)
+- Nouveau composant `frontend/src/components/VirtualGrid.jsx`
+  (~110 lignes) — grille responsive virtualisée basée sur
+  `react-window@2.3.0`. Rend uniquement les cellules visibles ± 2
+  overscan.
+- Colonnes calculées **dynamiquement** via `ResizeObserver` en fonction
+  de `minColumnWidth` + `maxColumns` (défaut 260 px / 4 colonnes) —
+  reproduit le comportement `grid-cols-1 sm:2 lg:3 xl:4` sans DOM
+  massif.
+- **Hybride intelligent** : sous le `threshold` (défaut 200 items),
+  fallback vers un rendu classique CSS grid (zéro régression UX pour
+  les datasets modestes). Au-delà, activation automatique de la Grid
+  virtualisée.
+- Preuve : conçu pour tenir 500 000+ items sans DOM bloat (contrainte
+  P0 v0.8 RC).
+- Data-testid exposés : `virtual-grid` (root) + `virtual-grid-virtualized`
+  (mode virtualisé, avec `data-count` / `data-columns` / `data-rows`).
+
+### Changed — Intégration VirtualGrid dans Vehicles.jsx
+- La grille manuelle `<div className="grid gap-4 grid-cols-1 sm:grid-cols-2
+  lg:grid-cols-3 xl:grid-cols-4">` est remplacée par
+  `<VirtualGrid renderItem={...} threshold={200} />`. Aucune régression
+  visuelle sur les datasets < 200 véhicules (fallback CSS grid).
+- Preuve écran Playwright : 31 véhicules affichés à l'identique,
+  `data-testid="vehicles-grid-root"` et `vehicles-virtual-grid`
+  détectés, `window.__mgvms_react_errors === 0`.
+
+### Tests
+- Nouveau `tests/test_v08rc3_mongo_indexes_virtualization.py` :
+  **7 verts** (helpers `_safe_index`, indexes présents, contrat
+  VirtualGrid, wiring Vehicles.jsx).
+- Régression : 41 tests critiques (`test_v08rc_camera_health`,
+  `test_v08rc2_benchmark_advisor`, `test_v07h_qos_hardening`,
+  `test_v07f_tls_settings`, `test_v07e_hot_reload_wave_a`) toujours
+  verts.
+- **Total v0.8-rc3 : 147 / 147 tests verts**, zéro régression, 0 API
+  publique modifiée.
+
+### Fichiers modifiés
+- `backend/database.py` (refactoring ~80 lignes)
+- `frontend/src/components/VirtualGrid.jsx` (nouveau, ~110 lignes)
+- `frontend/src/pages/Vehicles.jsx` (+8 / -5)
+- `frontend/package.json` (+1 dépendance : `react-window@2.3.0`)
+- `backend/tests/test_v08rc3_mongo_indexes_virtualization.py`
+  (nouveau, ~130 lignes)
+
+---
+
 ## [v0.8-rc1] — 2026-06 — Camera Health Score + Capabilities Matrix (delta v0.8 RC)
 
 ### Added — Camera Health Score
