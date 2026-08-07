@@ -813,3 +813,50 @@ async def diagnostics_traces_clear(
     n = collector.clear()
     return {"ok": True, "purged": n}
 
+
+
+# ═════════════════════════════════════════════════════════════════════
+# v0.8-rc7 · Sprint 4 · Stability Watcher endpoints (Priorité #4)
+# ═════════════════════════════════════════════════════════════════════
+@health_dashboard_router.get("/diagnostics/stability")
+async def diagnostics_stability(
+    window: str = "1h",
+    user: dict = Depends(require_permission("view_live")),
+):
+    """v0.8-rc7 · Retour agrégé Stability Watcher sur la fenêtre choisie.
+
+    window ∈ {"1h", "6h", "24h", "72h"}
+
+    Réponse : {window, snapshot_count, latest, aggregates{ram,cpu,rss,
+    mongo_uptime_pct, go2rtc_uptime_pct}}.
+
+    Le watcher tourne en background (tick 60 s) — voir server.on_startup.
+    """
+    from pipeline_v2.stability_watcher import watcher, WINDOWS
+    if window not in WINDOWS:
+        raise HTTPException(status_code=400,
+                             detail=f"window doit être dans {list(WINDOWS)}")
+    return watcher.snapshot(window)
+
+
+@health_dashboard_router.get("/diagnostics/stability/latest")
+async def diagnostics_stability_latest(
+    user: dict = Depends(require_permission("view_live")),
+):
+    """v0.8-rc7 · Dernier snapshot brut (utile pour dashboards temps réel)."""
+    from pipeline_v2.stability_watcher import watcher
+    latest = watcher.latest()
+    if latest is None:
+        raise HTTPException(status_code=404, detail="pas encore de snapshot (attendre 60s)")
+    return latest
+
+
+@health_dashboard_router.post("/diagnostics/stability/clear")
+async def diagnostics_stability_clear(
+    user: dict = Depends(require_permission("view_live")),
+):
+    """v0.8-rc7 · Purge le ring buffer (tests / redémarrage soft)."""
+    from pipeline_v2.stability_watcher import watcher
+    n = watcher.clear()
+    return {"ok": True, "purged": n}
+

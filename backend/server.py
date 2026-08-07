@@ -183,6 +183,9 @@ async def on_startup():
     # v0.7.h · Wave I · Axe QoS · Surveillance permanente + alertes Ops Center
     from pipeline_v2.qos_alerts import qos_watcher_loop
     asyncio.create_task(qos_watcher_loop())
+    # v0.8-rc7 · Sprint 4 P4 · Stability Watcher 72 h (minute-par-minute)
+    from pipeline_v2.stability_watcher import watcher as _stability_watcher
+    _stability_watcher.start()
     logger.info("MG-VMS API démarré - données initialisées + broadcaster temps réel actif")
 
 

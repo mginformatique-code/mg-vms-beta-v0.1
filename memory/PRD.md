@@ -674,3 +674,20 @@ Prioritisé par ROI décroissant (détails dans le rapport v0.8-rc1) :
 - Fichiers : `pipeline_v2/trace.py` (155 l), `pipeline_v2/camera_state.py`
   (200 l), `camera_worker.py` (+20 / -5), `routes/health_dashboard.py`
   (+95), tests (+215)
+
+## v0.8-rc7 · FEATURE FREEZE · Stabilisation Sprint 4 · Phase Qualification (2026-08)
+- 📊 **Priorité #4** : Stability Watcher permanent — snapshot minute-par-
+  minute (72 h × 60 min ring buffer). Capture Backend + Pipeline + Mongo +
+  go2rtc. Agrégats p50/p95/p99 sur fenêtres 1h/6h/24h/72h + uptime_pct
+  des dépendances.
+- 🌪 **Priorité #3** : Chaos Test Harness Enterprise — 5 scénarios
+  non-destructifs (rtsp_worker_state, inspector_flood, trace_overflow,
+  qos_alert_flood, mongo_failure). Batch runner + rapport JSON.
+- **Preuves mesurées live** :
+  * Watcher 1er snapshot : CPU 17.5 % · RAM 37 % · RSS 822 MB · Mongo 0.9ms
+  * Chaos 5/5 verts en 0.29 s (qos_alert_flood : 99 bloqués sur 100)
+- 3 endpoints diagnostic stability + CLI `python -m stress.chaos`
+- Tests : 14 nouveaux verts. Suite complète : 117/117 verts.
+- Fichiers : `pipeline_v2/stability_watcher.py` (230 l),
+  `stress/chaos.py` (200 l), `server.py` (+3), `health_dashboard.py`
+  (+45), tests (+190)
