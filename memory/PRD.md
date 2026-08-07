@@ -24,6 +24,31 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 - **Installateur terrain** : setup guidé 10–15 min, health dashboard clair
 
 ### État Feb 2026 — sessions successives
+**Session 53 (Feb 2026)** — v0.5.7 · **Final Build** · Validator + Matrix + Driver Health (feature complete, freeze) :
+- 🔍 Nouveau service `pipeline_v2/driver_validator.py` — validation **non destructive** d'un driver caméra.
+  Enum `TestState` : PASS / WARNING / FAIL / TIMEOUT / UNSUPPORTED / SKIPPED. Score pondéré
+  (snapshot=25, stream=25, device_info=15, events=15, ptz=10, audio=5, reboot=3, siren=2).
+  Les capacités destructives (PTZ, siren, light, audio, reboot) sont validées par **inspection
+  de contrat** (méthode surchargée par rapport à `CameraDriver` base), jamais exécutées.
+- 📊 Nouveau service `pipeline_v2/capability_matrix.py` — agrégat en lecture seule.
+  `build_capability_matrix(group)` avec `group` ∈ {vendor, driver, model, camera}.
+  `build_driver_health()` combine `MANIFEST` de chaque driver + stats runtime (cameras_count,
+  validations_count, last_validation_at, avg_score).
+- 🩺 `MANIFEST` ajouté sur chaque driver (`ONVIFDriver`, `ReolinkDriver`, `HikvisionDriver`,
+  `DahuaDriver`) : {driver, version, status: stable|beta|experimental, api, protocols,
+  supported_models, coverage_pct}.
+- 🌐 Nouveaux endpoints (déclarés AVANT `/{camera_id}/...` pour éviter le shadowing) :
+  - `GET /api/devices/matrix?group=vendor|driver|model|camera`
+  - `GET /api/devices/drivers/health`
+  - `GET /api/devices/{camera_id}/validate?persist=false` (idempotent)
+  - `POST /api/devices/{camera_id}/validate` (persiste dans `cameras[id].last_validation`)
+- ✅ Tests : nouvelle suite `test_v057_validator_matrix_health.py` (**26 tests**, 100 % mocks).
+  Cumul MG-VMS v0.5.7 : **69/69** verts (26 validator/matrix/health + 21 Phase 1 + 22 v0.4.6).
+- 🛡️ **Zéro régression** : `/api/devices/_supported` inchangé, structures existantes préservées.
+  Aucun frontend modifié. `CameraManager` reste passif. Aucun code destructif ajouté.
+- 🧊 **FIN DE BUILD** : v0.5.7 est feature complete. Aucun ajout d'ici la v0.6.
+
+
 **Session 52 (Feb 2026)** — v0.5.7 · Universal Camera API · Phase 1 (consolidation d'interfaces) :
 - 📐 Document de migration `/app/MIGRATION_v057_UNIVERSAL_CAMERA_API.md` avec tableau
   composant/action/décision — approche Option C (fusion progressive, zéro duplication).

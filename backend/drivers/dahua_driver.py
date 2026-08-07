@@ -27,6 +27,17 @@ logger = logging.getLogger("drivers.dahua")
 class DahuaDriver(ONVIFDriver):
     vendor = "dahua"
 
+    #: Métadonnées v0.5.7 · Driver Health
+    MANIFEST: dict = {
+        "driver": "dahua",
+        "version": "0.5",
+        "status": "beta",
+        "api": "CGI (configManager) + ONVIF fallback",
+        "protocols": ["cgi", "onvif", "rtsp", "http"],
+        "supported_models": ["IPC-HFW*", "IPC-HDW*", "SD*"],
+        "coverage_pct": 50,
+    }
+
     def __init__(self, host: str, username: str, password: str,
                  port: Optional[int] = None):
         super().__init__(host, username, password, port or 80)

@@ -43,6 +43,17 @@ class ONVIFDriver(CameraDriver):
 
     vendor = "onvif"
 
+    #: Métadonnées v0.5.7 · Driver Health
+    MANIFEST: dict = {
+        "driver": "onvif",
+        "version": "1.0",
+        "status": "stable",
+        "api": "ONVIF Profile S/T (SOAP + Zeep)",
+        "protocols": ["onvif", "rtsp", "http"],
+        "supported_models": ["*"],
+        "coverage_pct": 90,
+    }
+
     def __init__(self, host: str, username: str, password: str,
                  port: Optional[int] = None):
         super().__init__(host, username, password, port or 80)

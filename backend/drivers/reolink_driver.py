@@ -43,6 +43,20 @@ class ReolinkDriver(ONVIFDriver):
 
     vendor = "reolink"
 
+    #: Métadonnées v0.5.7 · Driver Health
+    MANIFEST: dict = {
+        "driver": "reolink",
+        "version": "1.0",
+        "status": "stable",
+        "api": "Reolink JSON API (/api.cgi) + ONVIF fallback",
+        "protocols": ["reolink_api", "onvif", "rtsp", "http"],
+        "supported_models": [
+            "RLC-1224A", "RLC-820A", "RLC-810A", "RLC-410A", "RLC-510A",
+            "RLC-511WA", "Argus 3 Pro", "Duo 2", "TrackMix", "Doorbell",
+        ],
+        "coverage_pct": 88,
+    }
+
     def __init__(self, host: str, username: str, password: str,
                  port: Optional[int] = None):
         super().__init__(host, username, password, port or 80)

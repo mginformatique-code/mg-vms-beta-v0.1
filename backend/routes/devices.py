@@ -1,9 +1,9 @@
-"""Routes API du Device Layer (v0.4.6).
+"""Routes API du Device Layer (v0.4.6 + enrichissement v0.5.7).
 
 Toutes les commandes physiques d'une caméra passent par ces endpoints.
 Aucun code appelant n'importe directement un driver.
 
-Endpoints :
+Endpoints v0.4.6 :
   GET  /api/devices/{camera_id}/info
   GET  /api/devices/{camera_id}/capabilities
   GET  /api/devices/{camera_id}/status
@@ -18,6 +18,12 @@ Endpoints :
   POST /api/devices/{camera_id}/ptz/zoom      · {value}
   POST /api/devices/{camera_id}/ptz/preset    · {id}
   GET  /api/devices/_supported                · liste des vendors supportés
+
+Endpoints v0.5.7 (Universal Camera API — Validator / Matrix / Health) :
+  GET  /api/devices/matrix?group=vendor|driver|model|camera
+  GET  /api/devices/drivers/health
+  GET  /api/devices/{camera_id}/validate?persist=false   · idempotent
+  POST /api/devices/{camera_id}/validate                  · persiste le rapport
 """
 from __future__ import annotations
 
@@ -33,6 +39,8 @@ from drivers import (
 )
 from auth import require_permission
 from services.camera_device_service import camera_device_service as svc
+from pipeline_v2.driver_validator import driver_validator
+from pipeline_v2.capability_matrix import build_capability_matrix, build_driver_health
 
 logger = logging.getLogger("routes.devices")
 
@@ -91,6 +99,53 @@ def _driver_error_response(exc: CameraDriverError) -> HTTPException:
 @devices_router.get("/_supported")
 async def supported_vendors(user: dict = Depends(require_permission("view_live"))):
     return {"vendors": list_supported_vendors()}
+
+
+# ═════════════════════════════════════════════════════════════════
+# v0.5.7 · Universal Camera API — Matrix / Health / Validator
+# (déclarés AVANT `/{camera_id}/...` pour éviter tout shadowing)
+# ═════════════════════════════════════════════════════════════════
+@devices_router.get("/matrix")
+async def devices_matrix(group: str = "vendor",
+                          user: dict = Depends(require_permission("view_live"))):
+    """Matrice de capacités de la flotte, groupée par ``group``.
+
+    ``group`` ∈ {``vendor``, ``driver``, ``model``, ``camera``}.
+    Lecture seule — aucune I/O caméra.
+    """
+    try:
+        return await build_capability_matrix(group)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail={"error": "invalid_group", "message": str(e)})
+
+
+@devices_router.get("/drivers/health")
+async def devices_drivers_health(user: dict = Depends(require_permission("view_live"))):
+    """Santé + manifest de chaque driver enregistré. Lecture seule."""
+    return await build_driver_health()
+
+
+@devices_router.get("/{camera_id}/validate")
+async def device_validate_get(camera_id: str, persist: bool = False,
+                               user: dict = Depends(require_permission("view_live"))):
+    """Valide de manière **non destructive** les capacités du driver.
+
+    - ``persist=false`` (défaut) : idempotent, ne modifie rien.
+    - ``persist=true``           : sauvegarde le rapport dans ``cameras[id].last_validation``.
+    """
+    if persist:
+        report = await driver_validator.run_and_persist(camera_id)
+    else:
+        report = await driver_validator.validate(camera_id)
+    return report.to_dict()
+
+
+@devices_router.post("/{camera_id}/validate")
+async def device_validate_post(camera_id: str,
+                                user: dict = Depends(require_permission("manage_cameras"))):
+    """Validation persistée (POST) — équivalent à ``GET ?persist=true``."""
+    report = await driver_validator.run_and_persist(camera_id)
+    return report.to_dict()
 
 
 @devices_router.get("/{camera_id}/info")

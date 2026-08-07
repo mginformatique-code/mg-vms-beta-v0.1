@@ -26,6 +26,17 @@ logger = logging.getLogger("drivers.hikvision")
 class HikvisionDriver(ONVIFDriver):
     vendor = "hikvision"
 
+    #: Métadonnées v0.5.7 · Driver Health
+    MANIFEST: dict = {
+        "driver": "hikvision",
+        "version": "0.5",
+        "status": "beta",
+        "api": "ISAPI (XML + Digest Auth)",
+        "protocols": ["isapi", "onvif", "rtsp", "http"],
+        "supported_models": ["DS-2CD*", "DS-2DE*", "iDS-2CD*"],
+        "coverage_pct": 55,
+    }
+
     def __init__(self, host: str, username: str, password: str,
                  port: Optional[int] = None):
         super().__init__(host, username, password, port or 80)
