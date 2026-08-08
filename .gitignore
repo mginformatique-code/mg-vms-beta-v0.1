@@ -83,6 +83,10 @@ android-sdk/
 .env
 .env.*
 *.env
+# EXCEPTION packaging : les templates d'exemple SANS secrets DOIVENT être versionnés
+# (install.sh les exige — le vrai .env reste ignoré par les règles ci-dessus)
+!.env.example
+!deploy-app/.env.example
 credentials.json
 *.key
 .credentials
