@@ -1,95 +1,117 @@
-# MG-VMS — Déploiement Docker production (v0.4.4)
-# ================================================================================
-# Cette configuration N'UTILISE PLUS de volume Docker nommé. Toutes les
-# données persistantes vivent sur des chemins host explicites (bind mounts).
+# ==============================================================================
+# MG-VMS · deploy-app/docker-compose.yml · v1.0-rc4 · Production
+# ==============================================================================
+# Installation depuis un clone Git vierge :
+#   cd deploy-app
+#   cp .env.example .env            # adapter secrets + chemins
+#   sudo mkdir -p /mnt/storage/{mongodb,models,crops,logs,certs,backups} \
+#                 /mnt/storage/video-datastore/recordings
+#   docker compose build --no-cache
+#   docker compose up -d
 #
-#   MONGO_DATA_PATH   → base MongoDB   (SSD dédié recommandé)
-#   RECORDINGS_PATH   → enregistrements vidéo (HDD dédié recommandé)
+# Règles v1.0 :
+#   - AUCUN bind mount de code (le code est embarqué dans les images) ;
+#   - volumes = données persistantes UNIQUEMENT (/mnt/storage/...) ;
+#   - ordre de démarrage : mongo healthy → go2rtc healthy → backend healthy
+#     → frontend.
 #
-# Défauts en développement (Linux dev laptop) :
-#     MONGO_DATA_PATH=./data/mongo
-#     RECORDINGS_PATH=./data/recordings
-#
-# Défauts en production (host cible) :
-#     MONGO_DATA_PATH=/mnt/mongodb
-#     RECORDINGS_PATH=/mnt/video-datastore/recordings
-#
-# Ces valeurs sont surchargées via un fichier ``.env`` à côté de ce fichier :
-#     cp .env.example .env
-#     # éditer .env pour production
-#     docker compose up -d --build
-#
-# Pré-requis serveur (production) :
-#   - Ubuntu 24.04 LTS
-#   - NVIDIA Driver >= 550 (support CUDA 12.4)
-#   - nvidia-container-toolkit installé
-#   - `docker run --rm --gpus all nvidia/cuda:12.4.1-runtime-ubuntu22.04 nvidia-smi` OK
-#   - Ports LAN ouverts : 3000 (UI), 8001 (API), 1984 (go2rtc UI), 8554 (RTSP),
-#                          8555 TCP+UDP (WebRTC)
-#   - Point de montage `/mnt/mongodb` (SSD ext4 dédié)
-#   - Point de montage `/mnt/video-datastore/recordings` (HDD ext4 dédié)
+# Pré-requis serveur : Docker Compose v2, NVIDIA Driver >= 550 +
+# nvidia-container-toolkit (GPU), ports 3000/8001/1984/8554/8555.
 
 services:
+
+  # ─── MongoDB · stockage documents ────────────────────────────────
   mongo:
-    image: mongo:7
+    image: mongo:7.0
+    container_name: mgvms-mongo
     restart: unless-stopped
+    command:
+      - --wiredTigerCacheSizeGB=2
     volumes:
-      # Bind mount host → conteneur : MongoDB écrit directement sur le SSD dédié.
-      # v0.4.4 · suppression définitive du volume Docker nommé `mongo_data`.
-      - ${MONGO_DATA_PATH:-./data/mongo}:/data/db
+      - ${MONGO_DATA_PATH:-/mnt/storage/mongodb}:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ping:1})"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
     networks: [mgvms]
 
-  # ─── go2rtc : moteur central de flux vidéo ──────────────────────────────
+  # ─── go2rtc · moteur central de flux (RTSP/HLS/WebRTC) ───────────
   go2rtc:
     image: alexxit/go2rtc:1.9.9
+    container_name: mgvms-go2rtc
     restart: unless-stopped
-    volumes:
-      - ./go2rtc.yaml:/config/go2rtc.yaml
-      # v0.4.4 · unification : le dossier ``recordings`` du HDD est exposé aux
-      # deux services en lecture (go2rtc pour streaming des replays,
-      # backend pour l'écriture des enregistrements et vignettes).
-      - ${RECORDINGS_PATH:-./data/recordings}:/app/media:ro
-      # P0-4 (v0.7.c) · vidéos des caméras démo (street-demo.mp4) : le repo
-      # `media/` n'était PAS monté dans le conteneur → exec ffmpeg échouait
-      # (fichier introuvable) → go2rtc HTTP 500 sur cam_demo-cam-002.
-      - ../media:/demo-media:ro
     ports:
       - "1984:1984"       # HTTP API + WebSocket
-      - "8554:8554"       # RTSP (VLC / clients directs)
+      - "8554:8554"       # RTSP
       - "8555:8555"       # WebRTC ICE TCP
       - "8555:8555/udp"   # WebRTC ICE UDP
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml:ro
+      # Datastore vidéo en LECTURE (replays)
+      - ${RECORDINGS_PATH:-/mnt/storage/video-datastore/recordings}:/app/media:ro
+      # Vidéos des caméras démo (fix P0-4 v0.7.c : street-demo.mp4)
+      - ../media:/demo-media:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:1984/api"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
     networks: [mgvms]
 
-  # ─── Backend FastAPI (Python 3.11 · torch cu124 · FFmpeg CUDA) ─────────
+  # ─── Backend FastAPI + Pipeline IA (CUDA) ────────────────────────
   backend:
     build:
-      context: ..                     # racine du repo
+      context: ..                     # racine du repo (voir /.dockerignore)
       dockerfile: backend/Dockerfile
+    image: mgvms-backend:latest
+    container_name: mgvms-backend
     restart: unless-stopped
     runtime: nvidia
+    depends_on:
+      mongo:
+        condition: service_healthy
+      go2rtc:
+        condition: service_healthy
     environment:
+      TZ: ${TZ:-Europe/Paris}
       # ── Base MG-VMS ─────────────────────────────────────────
-      MONGO_URL: mongodb://mongo:27017
+      MONGO_URL: ${MONGO_URL:-mongodb://mongo:27017}
       DB_NAME: ${DB_NAME:-mgvms}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://192.168.1.21:3000,http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       JWT_SECRET: ${JWT_SECRET:-please_change_this_secret_in_production}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@mg-vms.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@2026}
       GO2RTC_URL: ${GO2RTC_URL:-http://go2rtc:1984}
       GO2RTC_RTSP: ${GO2RTC_RTSP:-rtsp://go2rtc:8554}
       # ── GPU / CUDA / FFmpeg NVDEC ───────────────────────────
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility,video
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility,video}
       MGVMS_AI_HW_ACCEL: ${MGVMS_AI_HW_ACCEL:-auto}
       GO2RTC_FFMPEG_CUDA: ${GO2RTC_FFMPEG_CUDA:-0}
-    volumes:
-      # v0.4.4 · Enregistrements sur HDD dédié (jamais dans un volume nommé).
-      - ${RECORDINGS_PATH:-./data/recordings}:/app/recordings
-    depends_on:
-      - mongo
-      - go2rtc
+      # ── Chemins internes (mappés via volumes ci-dessous) ────
+      RECORDINGS_DIR: /app/recordings
+      MODEL_PATH: /models
+      CROP_PATH: /crops
+      LOG_PATH: /logs
+      CERT_PATH: /certificates
+      BACKUP_PATH: /backups
     ports:
       - "8001:8001"
+    volumes:
+      # DONNÉES uniquement — jamais de code (immutabilité de l'image)
+      - ${RECORDINGS_PATH:-/mnt/storage/video-datastore/recordings}:/app/recordings
+      - ${MODELS_PATH:-/mnt/storage/models}:/models
+      - ${CROPS_PATH:-/mnt/storage/crops}:/crops
+      - ${LOGS_PATH:-/mnt/storage/logs}:/logs
+      - ${CERTS_PATH:-/mnt/storage/certs}:/certificates
+      - ${BACKUPS_PATH:-/mnt/storage/backups}:/backups
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s          # imports torch/ultralytics/OCR longs
     deploy:
       resources:
         reservations:
@@ -99,21 +121,38 @@ services:
               capabilities: [gpu, video]
     networks: [mgvms]
 
+  # ─── Frontend React (build) + Nginx ──────────────────────────────
   frontend:
     build:
       context: ../frontend
+      dockerfile: Dockerfile
       args:
         REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL:-http://192.168.1.21:8001}
+    image: mgvms-frontend:latest
+    container_name: mgvms-frontend
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    environment:
+      MGVMS_HOSTNAME: ${MGVMS_HOSTNAME:-mg-vms.local}
+      HTTPS_FORCE: ${HTTPS_FORCE:-false}
     ports:
-      - "3000:80"
+      - "${FRONTEND_HTTP_PORT:-3000}:80"
+      - "${FRONTEND_HTTPS_PORT:-3443}:443"
+    volumes:
+      # Certificats TLS (self-signed auto-généré au 1er boot si vide) —
+      # HTTPS non bloquant pour cette étape.
+      - ${CERTS_PATH:-/mnt/storage/certs}:/etc/nginx/certs
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "-o", "/dev/null", "http://localhost/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
     networks: [mgvms]
 
-# v0.4.4 · Bloc `volumes:` supprimé — plus AUCUN volume Docker nommé.
-# MongoDB et enregistrements utilisent exclusivement des bind mounts host.
-
+# Aucun volume Docker nommé : bind mounts host explicites uniquement.
 networks:
   mgvms:
     driver: bridge
+    name: mgvms

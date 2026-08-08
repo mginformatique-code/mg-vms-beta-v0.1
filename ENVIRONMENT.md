@@ -1,7 +1,7 @@
 # MG-VMS · Environment Variables · v1.0
 
 Toutes les variables configurables sont centralisées dans le fichier
-`docker/.env` (copie de `docker/.env.example`). Ce document décrit les
+`deploy-app/.env` (copie de `deploy-app/.env.example`). Ce document décrit les
 conventions de stockage et le rôle de chaque groupe de variables.
 
 ---

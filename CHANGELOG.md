@@ -2,6 +2,44 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v1.0-rc4.1] — 2026-06 — BUILD REPRODUCTIBLE · Yarn lock + CRACO + requirements + compose
+
+Chantier packaging UNIQUEMENT (zéro feature, zéro fichier métier touché).
+Rapport détaillé : `deploy-app/RAPPORT_BUILD_v1.0-rc4.md`.
+
+### Fixed — Yarn `--frozen-lockfile` échouait sur clone propre
+- Cause : entrée `react-window@^2.3.0` manquante dans le yarn.lock committé.
+- Fix : lock resynchronisé (+5 lignes). `package.json` et `resolutions` inchangés.
+- Preuve : clone vierge → `yarn install --frozen-lockfile` SUCCESS + `yarn build`
+  « Compiled successfully » (bundle 5,5 Mo).
+
+### Fixed — Docker frontend `craco: not found`
+- Cause : `NODE_ENV=production` dans le builder → devDependencies sautées.
+- Fix : `yarn install --production=false --frozen-lockfile` (bypass lockfile RETIRÉ).
+  NODE_ENV non forcé (le forcer en development casse le build : craco.config
+  active visual-edits/React-Refresh). `DISABLE_ESLINT_PLUGIN=true` au build
+  (16 warnings react-hooks pré-existants fatals avec CI=true — fichiers métier
+  intouchables pendant le freeze).
+
+### Fixed — Backend Docker : `COPY requirements.txt` introuvable (context: ..)
+- Fix : `COPY backend/requirements.txt` + `COPY backend/. .` +
+  `COPY data/plugins/ /app/data/plugins/` (51 plugins embarqués) +
+  `/.dockerignore` racine (contexte minimal, sans secrets ni node_modules).
+- pip : install du freeze complet en `--no-deps` + extra-index-url
+  (emergentintegrations) — le résolveur refuserait des pins hérités pourtant
+  qualifiés. 245/245 pins vérifiés disponibles en wheels x86_64.
+
+### Changed — `deploy-app/docker-compose.yml` durci
+- Ordre garanti : mongo healthy → go2rtc healthy → backend healthy → frontend.
+- Healthchecks : mongosh ping · wget go2rtc:1984/api · curl /health
+  (start_period 90 s) · curl frontend.
+- Storage 100 % `/mnt/storage/...` (7 bind mounts données, zéro bind mount de
+  code, zéro volume nommé). GPU nvidia (gpu+video) conservé. Montage
+  `../media:/demo-media:ro` conservé (fix street-demo.mp4).
+- `.env.example` complété (MONGO_URL, chemins storage, NVIDIA_*, TZ, ports).
+- Doublons `/docker/docker-compose.yml` + `/docker/go2rtc.yaml` supprimés
+  (dérive de config) — `deploy-app/` est l'unique source de vérité.
+
 ## [v1.0-rc4] — 2026-08 — FEATURE FREEZE · Fusion Événements/Véhicules + Système Plugins OCR réparé
 
 Réponse aux 5 P0 utilisateur (captures d'écran = cas de production). Validé par

@@ -9,14 +9,28 @@ Ce dossier permet de lancer **l'application MG-VMS complète et fonctionnelle**
 
 ## Prérequis
 - Docker + Docker Compose v2 (`docker compose version`)
-- ~2 Go RAM libres. Aucun GPU requis.
+- GPU NVIDIA (prod) : driver ≥ 550 + nvidia-container-toolkit
+- Points de montage stockage créés AVANT le premier démarrage :
+```bash
+sudo mkdir -p /mnt/storage/mongodb \
+              /mnt/storage/video-datastore/recordings \
+              /mnt/storage/models /mnt/storage/crops \
+              /mnt/storage/logs /mnt/storage/certs /mnt/storage/backups
+```
 
 ## Démarrage rapide
 ```bash
 cd deploy-app
-cp .env.example .env          # ajustez les secrets si besoin
-docker compose up -d --build  # build + lancement (première fois : ~3-5 min)
+cp .env.example .env          # ajustez secrets + IP LAN (obligatoire)
+docker compose config --quiet # validation de la configuration
+docker compose build --no-cache
+docker compose up -d
+docker compose ps             # attendre : mongo/go2rtc/backend healthy
+curl -fsS http://127.0.0.1:8001/health   # → 200
 ```
+
+Ordre de démarrage garanti par les healthchecks :
+`mongo healthy → go2rtc healthy → backend healthy → frontend`.
 
 Puis ouvrez :
 - **Application** : http://localhost:3000
@@ -38,7 +52,8 @@ docker compose down -v             # arrêt + suppression des données Mongo
 ## Notes
 - Le backend **initialise automatiquement** les données de démonstration au premier
   démarrage (admin, sites, caméras, événements ANPR, équipements réseau, matériel…).
-- Les données persistent dans le volume `mongo_data`.
+- Les données persistent via bind mounts host (`/mnt/storage/...` — voir `.env`).
+  Aucun volume Docker nommé, aucun bind mount de code (images immuables).
 - `REACT_APP_BACKEND_URL` est **figé au build** du frontend. Pour déployer derrière un
   domaine, rebuild avec la bonne valeur :
   `REACT_APP_BACKEND_URL=https://api.mondomaine.fr docker compose up -d --build`

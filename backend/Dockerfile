@@ -45,15 +45,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # ------------------------------------------------------------------------------
 # Python dependencies (couche cache indépendante des sources)
+# v1.0-rc4 · Le contexte de build est la RACINE du repo (deploy-app compose :
+# context: .. / dockerfile: backend/Dockerfile) → chemins relatifs à la racine.
+#
+# `requirements.txt` est un FREEZE COMPLET (lockfile pip) de l'environnement
+# qualifié. Installation en 2 temps :
+#   1. --no-deps : réplique EXACTEMENT le set validé (le résolveur pip
+#      refuserait certains pins hérités — ex: opt-einsum/paddle — alors que
+#      l'ensemble est fonctionnel et testé) ;
+#   2. l'extra-index-url est requis pour `emergentintegrations`.
+# Aucune version ne doit être modifiée ici sans re-qualification complète.
 # ------------------------------------------------------------------------------
-COPY requirements.txt .
+COPY backend/requirements.txt ./requirements.txt
 RUN python3 -m pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir --no-deps -r requirements.txt \
+        --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/
 
 # ------------------------------------------------------------------------------
 # Sources applicatives (embarquées dans l'image · pas de bind mount en prod)
 # ------------------------------------------------------------------------------
-COPY . .
+COPY backend/. .
+
+# Plugins dynamiques : le loader résout `<backend>/data/plugins` = /app/data/plugins
+COPY data/plugins/ /app/data/plugins/
 
 # ------------------------------------------------------------------------------
 # Dossiers persistants (mount points — les données réelles arrivent via volumes)

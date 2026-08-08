@@ -717,3 +717,11 @@ Prioritisé par ROI décroissant (détails dans le rapport v0.8-rc1) :
 - Mocks HTTP caméras RTSP physiques (tests skippés).
 - P1 : VirtualGrid sur Events/Timeline ; Pipeline Auto Optimizer ; migration routers.py → routes/.
 - Rapport de tests : /app/test_reports/iteration_41.json (backend 7/7, frontend 100%).
+
+## v1.0-rc4.1 · Build reproductible (2026-06) — packaging only
+- Yarn lock resync (react-window) → `--frozen-lockfile` + `yarn build` validés sur clone vierge.
+- frontend/Dockerfile : --production=false + frozen-lockfile strict ; NODE_ENV non forcé (craco/visual-edits) ; DISABLE_ESLINT_PLUGIN au build (16 warnings métier pré-existants).
+- backend/Dockerfile : chemins racine (context ..), plugins copiés, pip freeze --no-deps + extra-index emergentintegrations ; /.dockerignore racine créé.
+- deploy-app/docker-compose.yml réécrit : healthchecks + depends_on healthy en cascade, storage /mnt/storage/*, GPU conservé, demo-media conservé ; doublons /docker supprimés ; .env.example complet.
+- Validé : compose config (binaire v2.39.1 réel), 245/245 pins x86_64 dispo. NON testable ici : docker build/up (pas de daemon) — checklist serveur dans deploy-app/README.md.
+- Rapport 25 points : deploy-app/RAPPORT_BUILD_v1.0-rc4.md

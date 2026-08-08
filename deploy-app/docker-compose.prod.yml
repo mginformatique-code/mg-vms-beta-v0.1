@@ -29,7 +29,7 @@ services:
       - letsencrypt:/etc/letsencrypt
       - certbot_www:/var/www/certbot
       # Recordings alias (auth_request pointe vers backend)
-      - ${RECORDINGS_PATH:-./data/recordings}:/app/recordings:ro
+      - ${RECORDINGS_PATH:-/mnt/storage/video-datastore/recordings}:/app/recordings:ro
     networks: [mgvms]
 
   # ─── Let's Encrypt ACME (auto-renew) ────────────────────────────

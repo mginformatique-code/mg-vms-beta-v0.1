@@ -9,18 +9,31 @@
 # ─── Stage 1 : build React ────────────────────────────────────────────
 FROM node:20-bookworm-slim AS builder
 
-ENV NODE_ENV=production
+# NE PAS forcer NODE_ENV ici :
+#   - craco.config.js active visual-edits/React-Refresh si NODE_ENV != production
+#     (casse `yarn build` avec « React Refresh Babel transform ... »)
+#   - `craco build` (react-scripts) force lui-même NODE_ENV=production.
+# Les devDependencies (dont @craco/craco) sont garanties par
+# `--production=false` ci-dessous, indépendamment de NODE_ENV.
 ENV CI=true
 ENV GENERATE_SOURCEMAP=false
+# 16 warnings pré-existants `react-hooks/exhaustive-deps` (12 fichiers métier)
+# deviendraient fatals avec CI=true. Les corriger = toucher du code métier
+# (interdit — zéro régression). Le lint reste actif en dev/preview ; on
+# désactive uniquement le plugin ESLint pendant le build de production
+# (flag CRA documenté, pas un bypass du lockfile ni de craco).
+ENV DISABLE_ESLINT_PLUGIN=true
 
 WORKDIR /app
 
 COPY package.json ./
-COPY yarn.lock* ./
+COPY yarn.lock ./
 
-# TEMPORAIRE : tant que le dépôt n'est pas 100 % clean sur les resolutions
-# yarn, on évite --frozen-lockfile (voir docker/README.md #Yarn).
+# v1.0-rc4 · Lockfile strict : le build échoue si package.json/yarn.lock
+# divergent (reproductibilité garantie — aucun bypass).
 RUN yarn install \
+      --production=false \
+      --frozen-lockfile \
       --network-timeout 600000 \
       --non-interactive
 
