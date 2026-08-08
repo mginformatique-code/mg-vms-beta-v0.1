@@ -57,7 +57,7 @@ Rapport détaillé : `deploy-app/RAPPORT_BUILD_v1.0-rc4.md`.
 - Doublons `/docker/docker-compose.yml` + `/docker/go2rtc.yaml` supprimés
   (dérive de config) — `deploy-app/` est l'unique source de vérité.
 
-## [v1.0-rc4] — 2026-08 — FEATURE FREEZE · Fusion Événements/Véhicules + Système Plugins OCR réparé
+## [v1.0-rc4] — 2026-06 — FEATURE FREEZE · Fusion Événements/Véhicules + Système Plugins OCR réparé
 
 Réponse aux 5 P0 utilisateur (captures d'écran = cas de production). Validé par
 l'agent de test : **backend 7/7, frontend 100%** (`/app/test_reports/iteration_41.json`).
