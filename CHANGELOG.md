@@ -2,6 +2,84 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v1.0-rc4] — 2026-08 — FEATURE FREEZE · Fusion Événements/Véhicules + Système Plugins OCR réparé
+
+Réponse aux 5 P0 utilisateur (captures d'écran = cas de production). Validé par
+l'agent de test : **backend 7/7, frontend 100%** (`/app/test_reports/iteration_41.json`).
+
+### Changed — P0-1 · UNE seule vue « Événements » (fusion avec « Véhicules »)
+- **Problème utilisateur** : deux menus (Événements IA / Véhicules) montraient
+  pratiquement les mêmes données — mauvaise UX.
+- **Fix** (`Events.jsx` réécrit, `Vehicles.jsx` +export `VehiclesSection`/`VehicleDrawer`) :
+  * 8 chips de filtre : Tous · Plaques · Véhicules · Personnes · Camions · Bus ·
+    Deux roues · Animaux (`data-testid="events-filter-*"`)
+  * Le chip **Plaques** embarque l'INTÉGRALITÉ de l'ancien module Véhicules
+    (recherche IA groupée par plaque, identités, anomalies, drawer 6 onglets :
+    Vue/Galerie/Timeline/Heatmap/Caméras/Parcours). Zéro perte de fonctionnalité.
+  * Fiche événement (EventViewer) complète : clip vidéo, image HD, crops
+    véhicule/plaque, OCR, bouton Réanalyser, **+ « Historique du véhicule »**
+    (ouvre la fiche plaque) **et « Voir dans la Timeline »** (nouveaux).
+  * `/vehicles` → redirection `/events?filtre=plaques` ; entrée « Véhicules »
+    retirée de la sidebar (`Layout.jsx`).
+- **Backend** : `GET /api/events` accepte `types=` (CSV multi-types, ex:
+  `types=Voiture,Camion,Bus,Moto` pour le chip Véhicules).
+
+### Added — Recherche IA sur TOUTE la vue Événements
+- **Demande utilisateur** : « personne à 12h sur son téléphone », « voiture
+  passée devant la cam 12 à 12h » — pas seulement dans le menu Plaques.
+- **Backend** (`smart_search.py`) : nouvelle réponse `events[]` = fiches
+  événement COMPLÈTES (thumbnail, crops, plaque) filtrées par le LLM
+  (types, horaires, `camera_hint`, plaque, couleurs). Horaire sans date ⇒
+  borné sur AUJOURD'HUI.
+- **Frontend** : barre Recherche IA en tête de `/events`
+  (`data-testid="events-smart-input"`), bandeau des filtres IA détectés + reset.
+- **Preuve E2E** : « voiture passée devant la caméra Démo cet après-midi » →
+  `target=vehicles, camera_hint=Démo, time 12:00-18:00`, 60 events.
+
+### Fixed — P0-2 · « DEP MANQUANTE » persistait après installation (cause racine)
+- **Cause racine** : l'installeur utilisait `pip install --no-deps` → le paquet
+  s'installait (rc=0, toast « succès ») mais ses dépendances transitives
+  manquaient → l'import échouait toujours → l'état restait `missing_dependency`.
+  L'UI reflétait DÉJÀ le backend : c'est l'installation qui était cassée.
+- **Fix** (`plugin_manager/loader.py · install_dependencies`) :
+  1. deps **système** installées via apt (ex: binaire `tesseract`) ;
+  2. `pip install` **avec** dépendances, protégé par un fichier de contraintes
+     (numpy/torch/torchvision/opencv/ultralytics figés — rien ne casse) ;
+  3. **vérification post-install** : reload du plugin + contrôle de l'état réel
+     (`verified_state`) — un job n'est `success` QUE si l'import passe.
+     Fini les faux succès.
+- **Résultat mesuré (preview)** : `easyocr=ready`, `tesseract=ready`,
+  `opencv-ocr=ready`, `fast-alpr=ready` sur `GET /api/plugins/bus`.
+- **paddle-ocr** : paddlepaddle+paddleocr+paddlex installés, MAIS le moteur
+  d'inférence C++ **segfaulte sur aarch64** (l'environnement preview est ARM).
+  Le plugin est désormais blindé : sonde d'init en **sous-processus isolé**
+  (`_probe_isolated`) — un crash natif ne peut PLUS tuer le backend ; état
+  `error` honnête avec message explicite. Sur le **build Docker x86_64 client :
+  fonctionnel** (deps gelées dans `requirements.txt`, `tesseract-ocr` ajouté au
+  `Dockerfile` backend, plugin compatible API PaddleOCR 2.x ET 3.x).
+
+### Added — Benchmark multi-moteurs OCR (P0-2 suite)
+- **Backend** : `POST /api/system/anpr-benchmark?engines=fast-alpr,paddle-ocr,easyocr,opencv-ocr,tesseract&fusion=true`
+  (ou `engines=all`) → par moteur : `avg/min/max_ms`, `cpu_pct`, `ram_delta_mb`,
+  `plates_read_total`, meilleure lecture ; moteurs non prêts remontés
+  `available=false` + message. `fusion=true` ⇒ vote majoritaire caractère par
+  caractère sur les meilleures lectures. Sélection de frame robuste (retry sur
+  toutes les caméras online, gère frame numpy ou JPEG).
+- **Frontend** (`AnprBenchmark.jsx`) : cases ○ YOLO ○ FastALPR ○ PaddleOCR
+  ○ EasyOCR ○ OpenCV OCR ○ Tesseract ○ Tous + ☑ Fusion Multi OCR ; tableau
+  comparatif par moteur (`data-testid="benchmark-ocr-results"`).
+
+### Fixed — P0-3 · L'UI reflète l'état RÉEL du backend
+- **Cause racine (fast-alpr)** : état évalué UNE seule fois au bootstrap,
+  AVANT le chargement paresseux du modèle ALPR ⇒ « ERREUR modèle non chargé »
+  figé à jamais alors que `alpr_loaded=true` quelques secondes plus tard.
+- **Fix** : `bus.refresh_lazy_states()` (opt-in par plugin via
+  `refresh_state_lazy()`) appelé par `GET /api/plugins/bus`, par le benchmark,
+  et en warm-up différé (20 s / 60 s) après le bootstrap.
+- **Preuve E2E** : `fast-alpr` passe `error → ready` dès que le modèle est
+  chargé, sans redémarrage ni action manuelle.
+
+
 ## [v1.0-rc3] — 2026-08 — FEATURE FREEZE · qos_alert filtrés + Bouton Analyser OCR
 
 Deux demandes UX terrain :
@@ -2466,14 +2544,3 @@ docstring de `pipeline_v2/__init__.py`.
 - Mur vidéo (1→64), dashboard (KPI + graphiques), ANPR (recherche, watchlist, export CSV, analyse IA d'image), recherche véhicule, alertes, carte OSM, audit, gestion utilisateurs, paramètres.
 - Bilingue FR/EN, thèmes clair/sombre.
 - Tests : 30/30 backend + parcours frontend.
-
-## [1.0-rc4] — 2026-08 — Fusion Événements/Véhicules + Plugins OCR réparés
-### Ajouté
-- **Vue Événements unifiée** : chips de filtre (Tous, Plaques, Véhicules, Personnes, Camions, Bus, Deux roues, Animaux). Le chip « Plaques » embarque tout le module Véhicules (recherche IA, identités, fiches complètes). `/vehicles` → redirection.
-- **Recherche IA globale** sur la vue Événements (« personne à 12h au téléphone », « voiture devant la cam 12 à 12h ») — `smart-search` retourne des fiches événement complètes.
-- **Benchmark multi-moteurs OCR** : FastALPR, PaddleOCR, EasyOCR, OpenCV OCR, Tesseract, Tous + Fusion Multi OCR (temps, CPU, RAM, plaques lues par moteur).
-- **EventViewer** : boutons « Historique du véhicule » et « Voir dans la Timeline ».
-### Corrigé
-- **Installation plugins** : fini le `--no-deps` (faux succès « DEP MANQUANTE ») — install complète protégée par contraintes + deps système apt + vérification post-install de l'état réel.
-- **États plugins temps réel** : rafraîchissement paresseux (fast-alpr passait « ERREUR modèle non chargé » à tort après démarrage).
-- **paddle-ocr** : sonde d'init en sous-processus isolé — un crash natif C++ (aarch64) ne peut plus tuer le backend.
