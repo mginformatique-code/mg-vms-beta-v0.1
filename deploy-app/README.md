@@ -18,6 +18,20 @@ sudo mkdir -p /mnt/storage/mongodb \
               /mnt/storage/logs /mnt/storage/certs /mnt/storage/backups
 ```
 
+## Installation en UNE commande (recommandé)
+```bash
+cd deploy-app
+sudo ./install.sh              # pull GitHub + validations + storage + build + up
+```
+Le script : ① tire le dernier build GitHub (`--ff-only`), ② **valide** les
+fichiers de build (Dockerfiles, compose, requirements ×3, synchronisation
+yarn.lock/package.json — installation ANNULÉE si incohérence), ③ crée les
+dossiers `/mnt/storage/...`, ④ copie `.env.example → .env` (jamais écrasé),
+⑤ `config → build → up -d`, ⑥ attend les 4 healthchecks puis teste `/health`.
+
+Options : `--no-pull` (repo tel quel) · `--check-only` (validations seules) ·
+`--no-cache` (rebuild complet).
+
 ## Démarrage rapide
 ```bash
 cd deploy-app

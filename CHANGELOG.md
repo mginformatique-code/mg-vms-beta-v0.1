@@ -2,6 +2,23 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v1.0-rc4.2] — 2026-06 — install.sh · Installation validée en une commande
+
+### Added — `deploy-app/install.sh`
+- UNE commande : `cd deploy-app && sudo ./install.sh`
+- ① Pull du dernier build GitHub (`--ff-only`, protégé si modifs locales) ;
+  ② **Validation pré-vol** : présence + cohérence des Dockerfiles (contexte
+  racine, --frozen-lockfile, --production=false, NODE_ENV non forcé),
+  compose/go2rtc/.env.example, requirements ×3 (100 % épinglés),
+  **synchronisation yarn.lock ↔ package.json** (toutes les dépendances
+  résolues) — la moindre incohérence ANNULE l'installation (aucun bypass) ;
+  ③ création `/mnt/storage/{mongodb,video-datastore/recordings,models,crops,logs,certs,backups}` ;
+  ④ `.env` créé depuis l'exemple (jamais écrasé) ; ⑤ `docker compose config →
+  build → up -d` ; ⑥ attente des 4 healthchecks + test `GET /health`.
+- Options : `--no-pull`, `--check-only`, `--no-cache`.
+- Testé : chemin nominal (26 validations vertes sur le repo) ET chemin d'échec
+  (désynchronisation yarn.lock simulée → détectée + installation annulée).
+
 ## [v1.0-rc4.1] — 2026-06 — BUILD REPRODUCTIBLE · Yarn lock + CRACO + requirements + compose
 
 Chantier packaging UNIQUEMENT (zéro feature, zéro fichier métier touché).

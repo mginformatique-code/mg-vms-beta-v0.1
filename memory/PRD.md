@@ -725,3 +725,6 @@ Prioritisé par ROI décroissant (détails dans le rapport v0.8-rc1) :
 - deploy-app/docker-compose.yml réécrit : healthchecks + depends_on healthy en cascade, storage /mnt/storage/*, GPU conservé, demo-media conservé ; doublons /docker supprimés ; .env.example complet.
 - Validé : compose config (binaire v2.39.1 réel), 245/245 pins x86_64 dispo. NON testable ici : docker build/up (pas de daemon) — checklist serveur dans deploy-app/README.md.
 - Rapport 25 points : deploy-app/RAPPORT_BUILD_v1.0-rc4.md
+
+## v1.0-rc4.2 · install.sh (2026-06)
+- deploy-app/install.sh : pull GitHub + 26 validations pré-vol (Dockerfiles/compose/requirements×3/yarn.lock sync) + mkdir /mnt/storage + .env + build/up + attente healthchecks. Options --no-pull/--check-only/--no-cache. Testé nominal + négatif.
