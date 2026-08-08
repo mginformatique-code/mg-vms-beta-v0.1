@@ -4,6 +4,18 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 ## [v1.0-rc4.2] — 2026-06 — install.sh · Installation validée en une commande
 
+### Fixed — 2 bloquants remontés par le serveur (`--check-only`)
+- **`deploy-app/.env.example` jamais committé** : cause racine = règle
+  `.gitignore` ligne 84 (`.env.*`) qui ignorait aussi les templates d'exemple.
+  Fix : exceptions `!.env.example` / `!deploy-app/.env.example` (les vrais
+  `.env` restent ignorés — aucun secret versionné).
+- **`frontend/yarn.lock` désynchronisé côté Git** : le resync react-window
+  (+5 lignes) existait dans l'arbre de travail mais n'avait jamais été inclus
+  dans les commits automatiques. Fix : commit explicite `3d0343c`.
+- Preuve depuis un `git clone` du commit : `install.sh --check-only` → 0 erreur ;
+  `yarn install --frozen-lockfile` → SUCCESS ; `yarn build` → Compiled
+  successfully. `package.json` : 0 modification.
+
 ### Added — `deploy-app/install.sh`
 - UNE commande : `cd deploy-app && sudo ./install.sh`
 - ① Pull du dernier build GitHub (`--ff-only`, protégé si modifs locales) ;
