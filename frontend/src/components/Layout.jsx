@@ -20,9 +20,13 @@ const NAV = [
       { to: "/", key: "nav.welcome", icon: Sparkles, end: true },
       { to: "/dashboard", key: "nav.dashboard", icon: Grid3x3 },
     ]},
-    { to: "/live", icon: Grid3x3, key: "nav.live", perm: "view_live" },
+    // v1.0-rc4 · Regroupement Caméras : Appareils + Mur vidéo + Centre caméras
+    { key: "nav.cameras", icon: Cctv, children: [
+      { to: "/cameras", key: "nav.devices", icon: Cctv },
+      { to: "/live", key: "nav.live", icon: Grid3x3, perm: "view_live" },
+      { to: "/camera-center", key: "nav.camera_center", icon: Layers },
+    ]},
     { to: "/recordings", icon: Film, key: "nav.recordings", perm: "view_recordings" },
-    { to: "/cameras", icon: Cctv, key: "nav.cameras" },
     { to: "/sites", icon: Building2, key: "nav.sites" },
     { to: "/map", icon: Map, key: "nav.map" },
   ]},

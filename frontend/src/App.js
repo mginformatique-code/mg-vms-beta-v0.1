@@ -40,6 +40,7 @@ import PipelineDesigner from "@/pages/PipelineDesigner";
 import PipelineInspector from "@/pages/PipelineInspector";
 import PipelineCenter from "@/pages/PipelineCenter";
 import CameraCenter from "@/pages/CameraCenter";
+import CameraCenterDispatch from "@/pages/CameraCenterDispatch";
 import UsersPage from "@/pages/Users";
 import SettingsPage from "@/pages/Settings";
 import Notifications from "@/pages/Notifications";
@@ -101,6 +102,7 @@ function AppRoutes() {
       <Route path="/pipeline/designer" element={<Protected><PipelineDesigner /></Protected>} />
       <Route path="/pipeline/inspector" element={<Protected><PipelineInspector /></Protected>} />
       <Route path="/pipeline-center" element={<Protected><PipelineCenter /></Protected>} />
+      <Route path="/camera-center" element={<Protected><CameraCenterDispatch /></Protected>} />
       <Route path="/camera-center/:cameraId" element={<Protected><CameraCenter /></Protected>} />
       <Route path="/users" element={<Protected><UsersPage /></Protected>} />
       <Route path="/notifications" element={<Protected><Notifications /></Protected>} />
