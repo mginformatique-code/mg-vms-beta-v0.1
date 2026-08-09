@@ -6,6 +6,7 @@ import CameraPluginsConfig from "@/pages/CameraPluginsConfig";
 import {
   Plus, Wifi, WifiOff, Camera as CamIcon, Trash2, Activity, Loader2, Radar,
   CheckCircle2, XCircle, AlertTriangle, Pencil, Wand2, ChevronRight, BrainCircuit,
+  Stethoscope,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -19,7 +20,7 @@ const EMPTY_FORM = {
   ptz_enabled: false, record_enabled: true, detect_enabled: false,
   enabled_plugins: [],
   record_mode: "continuous", storage_pool_id: "", storage_max_size_gb: 0,
-  rtsp_transport: "tcp", preferred_codec: "auto",
+  rtsp_transport: "tcp", preferred_codec: "auto", stream_mode: "auto",
   // Assistant RTSP
   wiz_brand: "", wiz_model_idx: 0, wiz_stream: "main", wiz_channel: 1,
 };
@@ -76,6 +77,7 @@ export default function Cameras() {
       storage_max_size_gb: c.storage_max_size_gb || 0,
       rtsp_transport: c.rtsp_transport || "tcp",
       preferred_codec: c.preferred_codec || "auto",
+      stream_mode: c.stream_mode || "auto",
     });
     setConnCheck(null); setProfiles([]); setOpen(true);
     // Charge assignation de stockage existante
@@ -98,6 +100,7 @@ export default function Cameras() {
         username: form.username, password: form.password,
         rtsp_transport: form.rtsp_transport || "tcp",
         preferred_codec: form.preferred_codec || "auto",
+        stream_mode: form.stream_mode || "auto",
         profile_token: form.mode === "onvif" ? (form.profile_token || "") : "",
       });
       setConnCheck(data);
@@ -255,6 +258,19 @@ export default function Cameras() {
     } catch (e) { toast.error("Diagnostic indisponible"); setDiagState(null); }
   };
 
+  // v1.0-rc4 · Diagnostic pipeline vidéo multi-étages (RTSP → Go2RTC → WebRTC)
+  const [pipelineDiag, setPipelineDiag] = useState(null);
+  const openPipelineDiagnostic = async (c) => {
+    setPipelineDiag({ loading: true, cam: c });
+    try {
+      const { data } = await api.get(`/cameras/${c.id}/pipeline-diagnostic`);
+      setPipelineDiag({ loading: false, cam: c, ...data });
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Diagnostic pipeline indisponible");
+      setPipelineDiag(null);
+    }
+  };
+
   const currentBrand = brands.find((b) => b.id === form.wiz_brand);
   const currentModel = currentBrand?.models?.[form.wiz_model_idx];
 
@@ -305,6 +321,7 @@ export default function Cameras() {
                   <button onClick={() => openDiagnostic(c)} data-testid="diagnostic-btn" title="Diagnostic complet" className="p-1.5 hover:bg-secondary text-[#00E676]"><Radar size={15} /></button>
                   <button onClick={() => snapshot(c)} data-testid="snapshot-btn" title="Snapshot" className="p-1.5 hover:bg-secondary"><CamIcon size={15} /></button>
                   {c.detect_enabled && <button onClick={() => openDebug(c)} data-testid="debug-ia-btn" title="Debug IA (dernier snapshot d'analyse)" className="p-1.5 hover:bg-secondary text-[#0044FF]"><BrainCircuit size={15} /></button>}
+                  <button onClick={() => openPipelineDiagnostic(c)} data-testid="pipeline-diag-btn" title="Diagnostic pipeline vidéo (RTSP → Go2RTC → WebRTC)" className="p-1.5 hover:bg-secondary text-[#00E5FF]"><Stethoscope size={15} /></button>
                   {can("technician") && <button onClick={() => openEdit(c)} data-testid="edit-camera-btn" title="Modifier" className="p-1.5 hover:bg-secondary"><Pencil size={15} /></button>}
                   {can("technician") && <button onClick={() => del(c)} data-testid="delete-camera-btn" className="p-1.5 hover:bg-secondary text-[#FF3333]"><Trash2 size={15} /></button>}
                 </div></td>
@@ -481,6 +498,15 @@ export default function Cameras() {
                 </select>
                 <p className="text-[10px] text-muted-foreground mt-0.5">Live/IA préfèrent H.264, l&apos;enregistrement peut utiliser H.265</p>
               </div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Mode pipeline vidéo</label>
+                <select value={form.stream_mode} onChange={(e) => setForm({ ...form, stream_mode: e.target.value })} className="inp" data-testid="stream-mode">
+                  <option value="auto">Auto (défaut — env MGVMS_AI_DIRECT_RTSP)</option>
+                  <option value="direct_rtsp">RTSP → MG-VMS direct (IA sans Go2RTC)</option>
+                  <option value="go2rtc">RTSP → Go2RTC → MG-VMS (streaming centralisé)</option>
+                </select>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Direct : pipeline IA indépendant de Go2RTC. Go2RTC : preview & IA via relais.</p>
+              </div>
             </div>
 
             {/* Config enregistrement avancée : mode + canal ONVIF + disque cible */}
@@ -652,8 +678,94 @@ export default function Cameras() {
       <OnvifDiscovery open={discOpen} onClose={() => setDiscOpen(false)}
         onPick={(dev) => { setEditingId(null); setForm({ ...EMPTY_FORM, ip: dev.ip, onvif_port: dev.port || 80, mode: "onvif", protocol: "ONVIF" }); setDiscOpen(false); setOpen(true); }} />
       {diagState && <DiagnosticDialog state={diagState} onClose={() => setDiagState(null)} onRefresh={() => openDiagnostic(diagState.cam)} />}
+      {pipelineDiag && <PipelineDiagnosticDialog state={pipelineDiag} onClose={() => setPipelineDiag(null)} onRefresh={() => openPipelineDiagnostic(pipelineDiag.cam)} />}
       <style>{`.inp{width:100%;padding:0.5rem 0.625rem;background:hsl(var(--card));border:1px solid hsl(var(--input));font-size:0.875rem;outline:none}.inp:focus{border-color:#0044FF}`}</style>
     </div>
+  );
+}
+
+function PipelineDiagnosticDialog({ state, onClose, onRefresh }) {
+  const { cam, loading, steps, verdict, stream_mode, stream_name, go2rtc_url } = state;
+  const [refreshing, setRefreshing] = useState(false);
+  const doRefresh = async () => {
+    setRefreshing(true);
+    try { await onRefresh?.(); } finally { setRefreshing(false); }
+  };
+  const badge = (s) => {
+    const map = {
+      PASS: { bg: "bg-[#00E676]/15", fg: "text-[#00E676]", border: "border-[#00E676]/40", icon: <CheckCircle2 size={12} /> },
+      FAIL: { bg: "bg-[#FF3333]/15", fg: "text-[#FF3333]", border: "border-[#FF3333]/40", icon: <XCircle size={12} /> },
+      WARN: { bg: "bg-[#FFB800]/15", fg: "text-[#FFB800]", border: "border-[#FFB800]/40", icon: <AlertTriangle size={12} /> },
+      SKIP: { bg: "bg-secondary", fg: "text-muted-foreground", border: "border-border", icon: null },
+    }[s] || { bg: "bg-secondary", fg: "text-muted-foreground", border: "border-border", icon: null };
+    return (
+      <span className={`inline-flex items-center gap-1 text-[10px] mono uppercase tracking-wider px-2 py-0.5 border ${map.bg} ${map.fg} ${map.border}`}>
+        {map.icon} {s}
+      </span>
+    );
+  };
+  const verdictColor = verdict === "PASS" ? "text-[#00E676]" : verdict === "WARN" ? "text-[#FFB800]" : "text-[#FF3333]";
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="rounded-none border-border max-w-3xl" data-testid="pipeline-diag-dialog">
+        <DialogHeader>
+          <DialogTitle className="font-head flex items-center gap-2">
+            <Stethoscope size={18} /> Diagnostic pipeline vidéo — {cam?.name}
+          </DialogTitle>
+        </DialogHeader>
+        {loading ? (
+          <div className="flex items-center gap-2 py-6 text-muted-foreground"><Loader2 size={18} className="animate-spin" /> Sonde en cours…</div>
+        ) : (
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="border border-border p-2">
+                <div className="text-[10px] uppercase text-muted-foreground">Verdict global</div>
+                <div className={`text-lg font-bold ${verdictColor}`} data-testid="pipeline-diag-verdict">{verdict}</div>
+              </div>
+              <div className="border border-border p-2">
+                <div className="text-[10px] uppercase text-muted-foreground">Stream Mode</div>
+                <div className="mono text-sm">{stream_mode}</div>
+              </div>
+              <div className="border border-border p-2">
+                <div className="text-[10px] uppercase text-muted-foreground">Nom stream Go2RTC</div>
+                <div className="mono text-xs truncate" title={stream_name}>{stream_name}</div>
+              </div>
+            </div>
+            <div className="border border-border">
+              {(steps || []).map((s, i) => (
+                <div key={s.step} className={`p-3 ${i < steps.length - 1 ? "border-b border-border" : ""}`} data-testid={`pipeline-diag-step-${s.step}`}>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] mono text-muted-foreground w-4">{i + 1}.</span>
+                      <span className="text-sm font-medium mono">{s.step}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {s.latency_ms != null && <span className="text-[10px] mono text-muted-foreground">{s.latency_ms} ms</span>}
+                      {badge(s.status)}
+                    </div>
+                  </div>
+                  {s.detail && <div className="text-xs text-muted-foreground pl-6">{s.detail}</div>}
+                  {s.data && Object.keys(s.data).length > 0 && (
+                    <details className="pl-6 mt-1">
+                      <summary className="text-[10px] mono text-muted-foreground cursor-pointer hover:text-foreground">Détails techniques</summary>
+                      <pre className="text-[10px] mono text-muted-foreground mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap">{JSON.stringify(s.data, null, 2)}</pre>
+                    </details>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="text-[10px] text-muted-foreground mono">Go2RTC URL: {go2rtc_url}</div>
+          </div>
+        )}
+        <DialogFooter>
+          <button onClick={doRefresh} disabled={refreshing || loading} className="text-xs px-3 py-1.5 border border-border hover:bg-secondary flex items-center gap-1" data-testid="pipeline-diag-refresh">
+            {refreshing ? <Loader2 size={12} className="animate-spin" /> : <Activity size={12} />} Relancer
+          </button>
+          <button onClick={onClose} className="text-xs px-3 py-1.5 border border-border hover:bg-secondary" data-testid="pipeline-diag-close">Fermer</button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

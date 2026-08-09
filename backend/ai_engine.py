@@ -520,13 +520,24 @@ async def _sync_frame_source_workers(cams: list[dict], *,
         native_url = (cam.get("rtsp_url") or "").strip()
         is_demo = cam_id.startswith("demo-") or cam_id.startswith("demo_")
 
+        # v1.0-rc4 · Résolution du mode pipeline vidéo per-camera.
+        # Le champ `stream_mode` prime sur l'env global `MGVMS_AI_DIRECT_RTSP`.
+        # Valeurs : "auto" (env global) · "direct_rtsp" (force direct) · "go2rtc" (force relais).
+        stream_mode = (cam.get("stream_mode") or "auto").lower()
+        if stream_mode == "direct_rtsp":
+            direct_this_cam = True
+        elif stream_mode == "go2rtc":
+            direct_this_cam = False
+        else:
+            direct_this_cam = use_direct
+
         if is_demo:
             rtsp_url = f"{go2rtc_rtsp}/cam_{cam_id}"
             source_type = "demo-go2rtc-relay"
-        elif use_direct and ai_url:
+        elif direct_this_cam and ai_url:
             rtsp_url = ai_url
             source_type = "direct-ai"
-        elif use_direct and native_url:
+        elif direct_this_cam and native_url:
             rtsp_url = native_url
             source_type = "direct-native"
         elif native_url or ai_url:

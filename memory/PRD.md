@@ -718,6 +718,28 @@ Prioritisé par ROI décroissant (détails dans le rapport v0.8-rc1) :
 - P1 : VirtualGrid sur Events/Timeline ; Pipeline Auto Optimizer ; migration routers.py → routes/.
 - Rapport de tests : /app/test_reports/iteration_41.json (backend 7/7, frontend 100%).
 
+## v1.0-rc4 · Vague 1 · stream_mode per-camera + diagnostic pipeline vidéo (2026-08)
+- **Contexte** : ta Reolink 4K HEVC → ONVIF/RTSP/RTSP_URL OK mais Go2RTC échoue à décoder → preview KO. Fondations `MGVMS_AI_DIRECT_RTSP` + `ai_rtsp_url` existent depuis Session 10 v0.3, mais aucun choix explicite par caméra ni endpoint de diagnostic pointu.
+- **Champ `Camera.stream_mode`** (defaut `auto` = comportement historique) :
+  * `auto` : suit `MGVMS_AI_DIRECT_RTSP` global
+  * `direct_rtsp` : IA ouvre RTSP en direct (indépendant de Go2RTC)
+  * `go2rtc` : IA + preview passent par Go2RTC (streaming centralisé)
+- **`ai_engine._sync_frame_source_workers`** : résolution du mode PER-CAMERA, `stream_mode` prime sur env global. Zéro régression pour les caméras sans le champ (defaults `auto`).
+- **Nouvel endpoint** `GET /api/cameras/{id}/pipeline-diagnostic` (rôle technician+, lecture seule) qui teste 6 étapes séquencées :
+  1. `rtsp_tcp_reachable` : socket TCP ip:rtsp_port
+  2. `rtsp_stream_decodable` : ffprobe → codec/résolution/fps
+  3. `go2rtc_api_reachable` : GET /api sur Go2RTC
+  4. `go2rtc_stream_known` : cam_{id} déclaré ?
+  5. `go2rtc_producer_alive` : producers actifs + medias publiés (⚠ WARN si producer sans media = pattern décodage HEVC échoué)
+  6. `hevc_webrtc_compat` : décision statique H.265 → WebRTC direct impossible, preview via MJPEG
+- **UI Cameras.jsx** :
+  * Selector "Mode pipeline vidéo" dans le formulaire (auto / direct_rtsp / go2rtc)
+  * Bouton icône 🩺 "Diagnostic pipeline vidéo" par caméra
+  * Dialog dédié : verdict global (PASS/WARN/FAIL) + 6 étapes avec badges couleur + latence + détails dépliables
+- **Tests** : 10/10 verts (`test_v1rc4_stream_mode_pipeline_diag.py`) + 5/5 lockout inchangés
+- **Preuve UI** : screenshot dialog complet sur demo-cam-001 — 6 étapes affichées avec bons badges et détails techniques.
+- **Ce que ça résout pour la Reolink** : quand tu lanceras ce diagnostic sur ta caméra 4K HEVC en prod, tu verras EXACTEMENT laquelle des 6 étapes échoue (probablement `go2rtc_producer_alive` en WARN avec "producer sans media publié" = hwaccel HEVC manquant côté ffmpeg go2rtc). C'est la data qu'il faut pour la Vague 3.
+
 ## v1.0-rc4.6 · Account lockout / brute-force protection par compte (2026-08)
 - **Feature** : lockout PAR COMPTE, PERMANENT (5 échecs → locked, unlock explicite requis). Historique IP:email 15min conservé en défense en profondeur.
 - **Backend** : nouveaux helpers atomiques `_account_track_failure` + `_account_track_success`. 7 nouveaux champs sur `users` (defaults sûrs, zéro migration). `public_user()` enrichi + `is_main_admin`.

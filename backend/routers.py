@@ -120,6 +120,13 @@ class CameraInput(BaseModel):
     # Transport RTSP + codec préféré (P0 finalisation)
     rtsp_transport: str = "tcp"  # tcp | udp
     preferred_codec: str = "auto"  # auto | h264 | h265
+    # v1.0-rc4 · Mode pipeline vidéo choisi explicitement par l'admin :
+    #   - "auto"        : comportement historique (MGVMS_AI_DIRECT_RTSP global)
+    #   - "go2rtc"      : IA + preview passent par Go2RTC (streaming centralisé)
+    #   - "direct_rtsp" : IA ouvre RTSP directement (Go2RTC utilisé UNIQUEMENT
+    #                     pour le preview navigateur — pipeline IA découplé,
+    #                     tourne même si Go2RTC est HS)
+    stream_mode: str = "auto"
     allow_rtsp_override: bool = False  # créer même si le test RTSP échoue (mode ONVIF)
     lat: Optional[float] = None
     lng: Optional[float] = None
