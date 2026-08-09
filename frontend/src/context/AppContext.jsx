@@ -78,7 +78,13 @@ export function AppProvider({ children }) {
     const token = localStorage.getItem("mg_token");
     if (!token) return;
     let ws, alive = true, retry;
-    const base = process.env.REACT_APP_BACKEND_URL.replace(/^http/, "ws");
+    // v1.0-rc4.4 · WebSocket : si REACT_APP_BACKEND_URL est vide (build HTTPS
+    // reproductible qui passe par Nginx), on construit l'URL depuis window.location.
+    // Sinon on garde le comportement historique (preview Emergent, dev direct).
+    const envBase = process.env.REACT_APP_BACKEND_URL || "";
+    const base = envBase
+      ? envBase.replace(/^http/, "ws")
+      : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
     const connect = () => {
       try {
         ws = new WebSocket(`${base}/api/ws?token=${token}`);
