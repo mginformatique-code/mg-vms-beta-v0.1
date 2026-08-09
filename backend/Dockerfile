@@ -21,18 +21,25 @@ WORKDIR /app
 
 # ------------------------------------------------------------------------------
 # OS packages (ffmpeg pour capture RTSP + OpenCV deps)
+# v1.0-rc4.3 · Python 3.11 EXPLICITE : l'image ubuntu22.04 fournit Python 3.10
+# par défaut, or le freeze qualifié exige 3.11 (ex: contourpy==1.3.3).
+# ⚠ Le dépôt universe de jammy ne propose que 3.11.0~rc1 (release candidate
+# figée) → PPA deadsnakes pour un Python 3.11.x FINAL maintenu.
 # ------------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    python3-pip \
-    python3-dev \
+    software-properties-common gnupg ca-certificates \
+ && add-apt-repository -y ppa:deadsnakes/ppa \
+ && apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-dev \
+    python3.11-venv \
+    python3.11-distutils \
     build-essential \
     ffmpeg \
     tesseract-ocr \
     curl \
     wget \
     git \
-    ca-certificates \
     libglib2.0-0 \
     libgl1 \
     libsm6 \
@@ -44,22 +51,49 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 # ------------------------------------------------------------------------------
+# pip pour Python 3.11 + liens python3/pip3 → 3.11
+# (/usr/local/bin précède /usr/bin dans PATH : le python3.10 système reste
+#  intact pour apt, mais TOUT l'applicatif utilise 3.11)
+# ------------------------------------------------------------------------------
+RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11 \
+ && ln -sf /usr/bin/python3.11 /usr/local/bin/python3 \
+ && ln -sf /usr/bin/python3.11 /usr/local/bin/python \
+ && ln -sf /usr/local/bin/pip /usr/local/bin/pip3
+
+# ─── TEST DE BUILD : échec immédiat si Python < 3.11 ───────────────────
+RUN python3 --version && python3 --version 2>&1 | grep -Eq "Python 3\.11\." \
+    || (echo "ERREUR BUILD : Python 3.11 requis, trouvé: $(python3 --version 2>&1)" && exit 1)
+RUN python3 -m pip --version && python3 -m pip --version | grep -q "python 3.11" \
+    || (echo "ERREUR BUILD : pip ne cible pas Python 3.11" && exit 1)
+
+# ------------------------------------------------------------------------------
 # Python dependencies (couche cache indépendante des sources)
-# v1.0-rc4 · Le contexte de build est la RACINE du repo (deploy-app compose :
+# v1.0-rc4.3 · Le contexte de build est la RACINE du repo (deploy-app compose :
 # context: .. / dockerfile: backend/Dockerfile) → chemins relatifs à la racine.
 #
-# `requirements.txt` est un FREEZE COMPLET (lockfile pip) de l'environnement
-# qualifié. Installation en 2 temps :
-#   1. --no-deps : réplique EXACTEMENT le set validé (le résolveur pip
-#      refuserait certains pins hérités — ex: opt-einsum/paddle — alors que
-#      l'ensemble est fonctionnel et testé) ;
-#   2. l'extra-index-url est requis pour `emergentintegrations`.
-# Aucune version ne doit être modifiée ici sans re-qualification complète.
+# `requirements.txt` = freeze COMPLET et RÉSOLUBLE : les conflits de pins
+# hérités (opt-einsum/paddle, google-genai/httpx/anyio, opencv-python) ont été
+# corrigés puis re-qualifiés — le résolveur pip standard passe SANS --no-deps.
+# litellm est installé depuis l'asset Emergent (URL directe dans le fichier) ;
+# l'extra-index-url est requis pour `emergentintegrations`.
 # ------------------------------------------------------------------------------
 COPY backend/requirements.txt ./requirements.txt
-RUN python3 -m pip install --upgrade pip && \
-    pip install --no-cache-dir --no-deps -r requirements.txt \
+RUN python3.11 -m pip install --upgrade pip && \
+    python3.11 -m pip install --no-cache-dir -r requirements.txt \
         --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/
+
+# ─── Normalisation opencv (déterminisme) ───────────────────────────────
+# Les 4 variantes opencv (python/headless/contrib/contrib-headless) écrivent
+# dans le MÊME répertoire `cv2` : la dernière installée gagne — l'ordre du
+# résolveur est arbitraire. On force la variante contrib (superset : inclut
+# cv2.text requis par le plugin opencv-ocr) en toute fin, à version identique.
+RUN python3.11 -m pip install --no-cache-dir --force-reinstall --no-deps \
+        opencv-contrib-python==4.10.0.84
+
+# ─── TEST DE BUILD : contourpy==1.3.3 réellement installé + imports clés ──
+RUN python3.11 -c "import contourpy, sys; assert contourpy.__version__=='1.3.3', contourpy.__version__; print('contourpy', contourpy.__version__, 'OK sur', sys.version)"
+RUN python3.11 -c "import cv2; assert hasattr(cv2,'text'), 'module contrib cv2.text absent'; print('cv2', cv2.__version__, '+ contrib OK')"
+RUN python3.11 -c "import fastapi, motor, cv2, litellm; print('imports critiques OK')"
 
 # ------------------------------------------------------------------------------
 # Sources applicatives (embarquées dans l'image · pas de bind mount en prod)
