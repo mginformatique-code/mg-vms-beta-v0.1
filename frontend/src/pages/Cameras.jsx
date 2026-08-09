@@ -178,7 +178,7 @@ export default function Cameras() {
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Génération impossible"); }
   };
 
-  const submit = async ({ allow_rtsp_override = false } = {}) => {
+  const submit = async ({ allow_rtsp_override = false, force_stream_mode = null } = {}) => {
     if (!form.name || !form.site_id) return toast.error("Nom et site requis");
     if (!form.ip) return toast.error("Adresse IP requise");
     if (form.mode === "rtsp" && !form.rtsp_url) return toast.error("URL RTSP requise (mode RTSP)");
@@ -197,13 +197,18 @@ export default function Cameras() {
           toast.error(check?.message || "URL RTSP non validée — impossible de créer la caméra");
           setSaving(false); return;
         }
-      } else if (!onvifOk) {
-        toast.error("Impossible de forcer : ONVIF n'a pas répondu correctement");
+      } else if (!onvifOk && !rtspOk) {
+        // v1.0-rc4 · L'override est autorisé si AU MOINS ONVIF OU RTSP marche.
+        // Cas "ONVIF OK + RTSP OK + Go2RTC KO" doit pouvoir passer même en mode rtsp.
+        toast.error("Impossible de forcer : ni ONVIF ni RTSP n'ont répondu correctement");
         setSaving(false); return;
       }
       const { wiz_brand, wiz_model_idx, wiz_stream, wiz_channel, record_mode, storage_pool_id, storage_max_size_gb, ...payload } = form;
       if (form.mode === "onvif") payload.rtsp_url = ""; // backend re-découvre via profile_token
       payload.allow_rtsp_override = allow_rtsp_override;
+      // v1.0-rc4 · Override explicite du stream_mode (utilisé par le fallback
+      // "Créer malgré l'erreur Go2RTC" qui force direct_rtsp).
+      if (force_stream_mode) payload.stream_mode = force_stream_mode;
       let camId = editingId;
       if (editingId) {
         await api.put(`/cameras/${editingId}`, payload);
@@ -223,7 +228,32 @@ export default function Cameras() {
         });
       } catch (e) { /* ignoré : la caméra a été créée */ }
       closeDialog(); load();
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec de la sauvegarde"); }
+    } catch (e) {
+      // v1.0-rc4 · Fallback "Créer malgré l'erreur Go2RTC" :
+      // Si le backend refuse à cause de Go2RTC (mais ONVIF + RTSP étaient OK),
+      // proposer explicitement la création en mode direct_rtsp.
+      const detail = e.response?.data?.detail;
+      const detailMsg = typeof detail === "string" ? detail : (detail?.message || "");
+      const isGo2rtcFailure = /go2rtc/i.test(detailMsg) && !allow_rtsp_override;
+      if (isGo2rtcFailure && !editingId) {
+        const proceed = window.confirm(
+          "Go2RTC ne parvient pas à exploiter ce flux.\n\n" +
+          "La caméra peut néanmoins être créée avec le pipeline RTSP → MG-VMS " +
+          "direct (indépendant de Go2RTC, l'IA lira le flux directement).\n\n" +
+          "Créer malgré l'erreur Go2RTC ?"
+        );
+        if (proceed) {
+          // Force direct_rtsp + allow_rtsp_override, sans dépendre du re-render setForm
+          setSaving(false);
+          setTimeout(() => submit({
+            allow_rtsp_override: true,
+            force_stream_mode: "direct_rtsp",
+          }), 50);
+          return;
+        }
+      }
+      toast.error(formatApiErrorDetail(detail) || "Échec de la sauvegarde");
+    }
     finally { setSaving(false); }
   };
 

@@ -261,16 +261,62 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
     except Exception:
         pass
     if not registered:
-        # Si ONVIF a réussi mais go2rtc n'arrive pas à ouvrir le flux, autoriser la création si demandé
-        if data.mode == "onvif" and data.allow_rtsp_override:
-            await db.cameras.update_one({"id": doc["id"]}, {"$set": {"status": "offline"}})
-            await log_audit(user, "camera_created_no_rtsp", data.name,
-                            "ONVIF OK, RTSP échoué — création forcée par l'utilisateur")
+        # v1.0-rc4 · Découplage Camera creation ↔ Go2RTC.
+        # Le mode pipeline choisi par l'admin (stream_mode) est l'AUTORITÉ :
+        #   - "direct_rtsp" : Go2RTC OPTIONNEL → la caméra est conservée
+        #     (pipeline IA lit RTSP directement, aucune dépendance à Go2RTC).
+        #   - "go2rtc"      : Go2RTC REQUIS → conserve le comportement historique
+        #     (delete + 400), c'est le contrat explicite du mode.
+        #   - "auto" + allow_rtsp_override : conserve (choix admin, fallback).
+        #   - "auto" sans override : conserve la caméra en marquant
+        #     go2rtc_status=error (plus jamais de DELETE silencieux — l'admin
+        #     décide) et le pipeline IA démarrera en direct.
+        stream_mode = (payload.get("stream_mode") or "auto").lower()
+        keep_camera = (
+            stream_mode == "direct_rtsp"
+            or data.allow_rtsp_override
+            or stream_mode == "auto"
+        )
+        if keep_camera:
+            fallback_mode = "direct_rtsp" if stream_mode == "auto" else stream_mode
+            await db.cameras.update_one(
+                {"id": doc["id"]},
+                {"$set": {
+                    "status": "offline",
+                    "go2rtc_status": "error",
+                    "onvif_status": "ok" if data.mode == "onvif" else "n/a",
+                    "rtsp_status": "ok",  # register_camera_stream a passé le test RTSP
+                    "pipeline_status": f"direct_rtsp (Go2RTC indisponible)"
+                                        if fallback_mode == "direct_rtsp"
+                                        else fallback_mode,
+                    "stream_mode": fallback_mode,  # force pour cohérence runtime
+                }},
+            )
+            doc["status"] = "offline"
+            doc["go2rtc_status"] = "error"
+            doc["stream_mode"] = fallback_mode
+            await log_audit(
+                user, "camera_created_go2rtc_fallback", data.name,
+                f"ONVIF/RTSP OK · Go2RTC KO · pipeline forcé en {fallback_mode}",
+            )
+        elif stream_mode == "go2rtc":
+            # L'admin a EXPLICITEMENT choisi go2rtc → refus explicite avec suggestion.
+            await db.cameras.delete_one({"id": doc["id"]})
+            raise HTTPException(
+                400,
+                "Mode pipeline « RTSP → Go2RTC → MG-VMS » sélectionné mais Go2RTC "
+                "n'arrive pas à exploiter le flux. Solutions : basculez sur "
+                "« RTSP → MG-VMS direct » (pipeline indépendant de Go2RTC), ou "
+                "cochez « Créer malgré l'erreur Go2RTC » pour forcer la création.",
+            )
         else:
             await db.cameras.delete_one({"id": doc["id"]})
-            raise HTTPException(400, "Impossible d'enregistrer le flux dans go2rtc "
-                                     "(URL RTSP invalide ou service indisponible). "
-                                     "Cochez « Créer malgré le test RTSP » pour forcer la création.")
+            raise HTTPException(
+                400,
+                "Impossible d'enregistrer le flux dans Go2RTC (URL RTSP invalide "
+                "ou service indisponible). Cochez « Créer malgré l'erreur Go2RTC » "
+                "pour forcer la création avec le pipeline RTSP direct.",
+            )
     doc.pop("_id", None); doc.pop("password", None)
     return doc
 

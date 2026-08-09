@@ -202,6 +202,14 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
 
     if cam.get("id") in DEMO_IDS:
         return True  # flux de démonstration défini statiquement dans go2rtc.yaml
+    # v1.0-rc4 · Respecter le stream_mode : les caméras en "direct_rtsp"
+    # NE SONT PAS inscrites dans Go2RTC (le pipeline IA lit RTSP directement).
+    # On retourne True car "l'objectif d'enregistrement" est trivialement
+    # satisfait (rien à inscrire). Le caller (create/update) verra registered=True
+    # et n'appliquera aucune logique de fallback/refus.
+    if (cam.get("stream_mode") or "auto").lower() == "direct_rtsp":
+        logger.info("register_camera_stream: skip %s (stream_mode=direct_rtsp)", cam.get("id"))
+        return True
     rtsp_url = _build_rtsp_url(cam)
     if not rtsp_url.lower().startswith(("rtsp://", "rtmp://", "http://", "https://")):
         return False
@@ -397,6 +405,12 @@ async def sync_all_streams() -> None:
             # Les démos : variantes _hd et _sd déjà déclarées statiquement dans go2rtc.yaml,
             # mais on garantit qu'elles existent quand même (utile après upgrade).
             await _ensure_variants(_stream_name(cam["id"]))
+            continue
+        # v1.0-rc4 · Respecter le stream_mode choisi par l'admin :
+        # les caméras en "direct_rtsp" ne sont PAS inscrites dans Go2RTC
+        # (l'IA lit RTSP en direct, aucune dépendance à Go2RTC pour le pipeline).
+        if (cam.get("stream_mode") or "auto").lower() == "direct_rtsp":
+            logger.debug("sync_all_streams: skip %s (stream_mode=direct_rtsp)", cam["id"])
             continue
         name = _stream_name(cam["id"])
         if await _stream_registered(name):
