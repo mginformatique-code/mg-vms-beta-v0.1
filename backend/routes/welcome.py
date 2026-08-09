@@ -489,6 +489,12 @@ async def welcome_summary(user: dict = Depends(get_current_user)):
             "current_version": version,
             "new_since_last_seen": new_entries[:10],
             "has_new_version": has_new_version,
+            # v1.0-rc4.5 · Historique récent (5 dernières entrées) — toujours
+            # peuplé pour que l'UI n'affiche jamais "vide" quand
+            # `last_seen_version === installed`. La UI privilégie
+            # `new_since_last_seen` (badge "Nouveautés") et retombe sur
+            # `recent` en libellé "Historique récent" sinon.
+            "recent": all_entries[:5],
         },
     }
 

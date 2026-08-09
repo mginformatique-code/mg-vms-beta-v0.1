@@ -478,12 +478,18 @@ function WidgetsSection({ widgets, isAdmin, onCreate, onDelete, t }) {
 }
 
 function ChangelogSection({ changelog, expanded, onToggle }) {
-  const entries = changelog?.new_since_last_seen || [];
+  // v1.0-rc4.5 · Priorité aux nouveautés depuis last_seen_version, sinon
+  // fallback sur les 5 dernières entrées (historique récent) pour ne
+  // jamais afficher une section vide alors que CHANGELOG.md est peuplé.
+  const newEntries = changelog?.new_since_last_seen || [];
+  const recentEntries = changelog?.recent || [];
+  const entries = newEntries.length > 0 ? newEntries : recentEntries;
+  const sectionTitle = newEntries.length > 0 ? "Nouveautés" : "Historique récent";
   return (
     <div className="bg-card border border-border p-4" data-testid="welcome-changelog" id="changelog">
       <SectionHeader
         icon={Sparkles}
-        title="Nouveautés"
+        title={sectionTitle}
         right={
           <button
             onClick={onToggle}
@@ -495,7 +501,7 @@ function ChangelogSection({ changelog, expanded, onToggle }) {
         }
       />
       {entries.length === 0 ? (
-        <div className="text-xs text-muted-foreground py-2">Aucune nouveauté depuis votre dernière visite.</div>
+        <div className="text-xs text-muted-foreground py-2">Aucune entrée dans le changelog.</div>
       ) : (
         <div className="space-y-3">
           {(expanded ? entries : entries.slice(0, 3)).map((e) => (
