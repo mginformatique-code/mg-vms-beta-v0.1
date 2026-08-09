@@ -89,6 +89,11 @@ services:
       NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility,video}
       MGVMS_AI_HW_ACCEL: ${MGVMS_AI_HW_ACCEL:-auto}
       GO2RTC_FFMPEG_CUDA: ${GO2RTC_FFMPEG_CUDA:-0}
+      # ── Recherche IA / Smart Search (v1.0-rc4) ──────────────
+      # Clé LLM (Emergent Universal Key). Absente = /api/smart-search
+      # retourne 503 SMART_SEARCH_LLM_NOT_CONFIGURED, la vue Events
+      # continue de fonctionner (filtres classiques). Backend only.
+      EMERGENT_LLM_KEY: ${EMERGENT_LLM_KEY-}
       # ── Chemins internes (mappés via volumes ci-dessous) ────
       RECORDINGS_DIR: /app/recordings
       MODEL_PATH: /models

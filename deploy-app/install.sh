@@ -141,6 +141,17 @@ if [ "$ERREURS" -gt 0 ]; then
   exit 1
 fi
 ok "Validation complète : 0 erreur"
+
+# v1.0-rc4 · Vérification non-bloquante de la config Smart Search (LLM)
+# Absente = fonctionnalité IA désactivée mais reste du produit intact.
+if [ -f .env ] && grep -qE "^EMERGENT_LLM_KEY=.+$" .env; then
+  ok "Smart Search IA : EMERGENT_LLM_KEY configurée (recherche IA active)"
+else
+  warn "Smart Search IA : EMERGENT_LLM_KEY absente dans deploy-app/.env — "
+  warn "  la recherche IA renverra 503 (Events restent fonctionnels sans IA)"
+  warn "  Obtenez la clé via Emergent Profile → Manage plan → Universal Key"
+fi
+
 [ "$CHECK_ONLY" = 1 ] && { echo -e "${VERT}--check-only : terminé.${NC}"; exit 0; }
 
 # ══════════════════════════════════════════════════════════════════════

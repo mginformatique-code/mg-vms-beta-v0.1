@@ -346,8 +346,12 @@ async def smart_search(body: SmartSearchBody,
 
     key = os.environ.get("EMERGENT_LLM_KEY")
     if not key:
-        raise HTTPException(status_code=500,
-                            detail={"error": "no_llm_key", "message": "EMERGENT_LLM_KEY manquante."})
+        # v1.0-rc4 · Code normalisé + 503 (service indisponible, pas 500).
+        raise HTTPException(status_code=503,
+                            detail={"code": "SMART_SEARCH_LLM_NOT_CONFIGURED",
+                                    "error": "no_llm_key",
+                                    "message": "La recherche IA n'est pas configurée sur ce serveur. "
+                                               "Ajouter EMERGENT_LLM_KEY dans deploy-app/.env."})
 
     system = (
         "Tu es un parseur qui convertit une requête utilisateur en JSON strict "

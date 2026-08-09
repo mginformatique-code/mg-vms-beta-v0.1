@@ -718,6 +718,19 @@ Prioritisé par ROI décroissant (détails dans le rapport v0.8-rc1) :
 - P1 : VirtualGrid sur Events/Timeline ; Pipeline Auto Optimizer ; migration routers.py → routes/.
 - Rapport de tests : /app/test_reports/iteration_41.json (backend 7/7, frontend 100%).
 
+## v1.0-rc4 · Smart Search fix EMERGENT_LLM_KEY prod + fallback (2026-08)
+- **Cause racine** : la clé LLM était présente automatiquement dans le pod preview Emergent mais **absente du container backend en production** (ni dans `.env.example`, ni transmise via `docker-compose.yml`).
+- **Fix chirurgical 6 fichiers** :
+  * `backend/routes/smart_search.py` : code normalisé `SMART_SEARCH_LLM_NOT_CONFIGURED` (503) au lieu de 500 générique. Message explicite pointant vers `.env`.
+  * `backend/routes/vehicles.py` : même politique sur le second endpoint.
+  * `deploy-app/.env.example` : `EMERGENT_LLM_KEY=` avec doc complète (secrète, BACKEND ONLY, optionnelle).
+  * `deploy-app/docker-compose.yml` : injection au service backend uniquement.
+  * `deploy-app/install.sh` : warn non-bloquant si absente.
+  * `frontend/src/pages/Events.jsx` : `catch` améliore le fallback (`setSmartResult(null)` → listing classique préservé).
+- **Sécurité** : clé jamais dans le bundle React (grep frontend/src/ = 0), jamais dans les detail d'erreur (test anti-fuite dédié), backend only via `os.environ.get()`.
+- **Découverte importante** : `emergentintegrations` appelle `load_dotenv()` à l'import → en dev/preview la clé est rechargée depuis `/app/backend/.env` même après `os.environ.pop`. En prod (container sans fichier .env), le fallback 503 se déclenchera correctement.
+- **Tests** : 5/5 verts dans `test_v1rc4_smart_search_fallback.py` (dont subprocess isolé chdir `/tmp` pour reproduire vraiment l'absence de la clé).
+
 ## v1.0-rc4 · Vague 1 · stream_mode per-camera + diagnostic pipeline vidéo (2026-08)
 - **Contexte** : ta Reolink 4K HEVC → ONVIF/RTSP/RTSP_URL OK mais Go2RTC échoue à décoder → preview KO. Fondations `MGVMS_AI_DIRECT_RTSP` + `ai_rtsp_url` existent depuis Session 10 v0.3, mais aucun choix explicite par caméra ni endpoint de diagnostic pointu.
 - **Champ `Camera.stream_mode`** (defaut `auto` = comportement historique) :

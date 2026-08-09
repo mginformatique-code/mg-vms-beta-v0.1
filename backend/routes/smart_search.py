@@ -72,9 +72,15 @@ async def _parse_query_llm(query: str) -> dict:
     from emergentintegrations.llm.chat import LlmChat, UserMessage
     key = os.environ.get("EMERGENT_LLM_KEY")
     if not key:
-        raise HTTPException(status_code=500,
-                            detail={"error": "no_llm_key",
-                                    "message": "EMERGENT_LLM_KEY manquante."})
+        # v1.0-rc4 · Code + message explicites pour le frontend (pas de
+        # "Une erreur est survenue"). Le fallback UI côté Events.jsx doit
+        # afficher ce message sans casser la vue.
+        raise HTTPException(status_code=503,
+                            detail={"code": "SMART_SEARCH_LLM_NOT_CONFIGURED",
+                                    "error": "no_llm_key",
+                                    "message": "La recherche IA n'est pas configurée sur ce serveur. "
+                                               "Ajouter EMERGENT_LLM_KEY dans deploy-app/.env puis relancer "
+                                               "`docker compose up -d backend`."})
     try:
         chat = LlmChat(api_key=key,
                         session_id=f"smart-{_uuid.uuid4().hex[:8]}",
@@ -83,7 +89,9 @@ async def _parse_query_llm(query: str) -> dict:
     except Exception as e:
         logger.warning("smart-search LLM failed: %s", e)
         raise HTTPException(status_code=502,
-                            detail={"error": "llm_error", "message": str(e)[:200]})
+                            detail={"code": "SMART_SEARCH_LLM_ERROR",
+                                    "error": "llm_error",
+                                    "message": f"Le service LLM a échoué : {str(e)[:150]}"})
     txt = (raw or "").strip()
     if txt.startswith("```"):
         txt = txt.strip("`")
@@ -92,8 +100,9 @@ async def _parse_query_llm(query: str) -> dict:
         return json.loads(txt)
     except Exception:
         raise HTTPException(status_code=502,
-                            detail={"error": "llm_parse_error",
-                                    "message": "Réponse LLM invalide.",
+                            detail={"code": "SMART_SEARCH_LLM_PARSE_ERROR",
+                                    "error": "llm_parse_error",
+                                    "message": "Réponse LLM invalide (JSON attendu).",
                                     "raw": txt[:300]})
 
 

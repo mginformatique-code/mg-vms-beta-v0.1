@@ -55,7 +55,11 @@ export default function Events() {
       setSmartResult(data);
       toast.success(`${data.events_count || 0} événement(s) trouvé(s) pour « ${q} »`);
     } catch (e) {
-      toast.error(e.response?.data?.detail?.message || "Recherche IA impossible");
+      // v1.0-rc4 · Fallback : IA indisponible → revient au listing classique
+      // sans casser la vue Events. Message explicite du backend (SMART_SEARCH_LLM_*).
+      setSmartResult(null);
+      const d = e.response?.data?.detail;
+      toast.error(d?.message || d?.error || "Recherche IA indisponible — filtres classiques toujours actifs");
     } finally { setSmartLoading(false); }
   }, [smart]);
 
