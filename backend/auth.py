@@ -6,6 +6,7 @@ import secrets
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Request, Depends, Response
 from pydantic import BaseModel, EmailStr, Field
+from pymongo import ReturnDocument
 from typing import Optional, List
 import uuid
 
@@ -158,6 +159,16 @@ def has_permission(user: dict, perm: str) -> bool:
 MAX_LOGIN_ATTEMPTS = 5
 LOCKOUT_MINUTES = 15
 
+# v1.0-rc4.6 · Verrouillage PAR COMPTE (persistant, indépendant du lockout
+# IP:email ci-dessus qui reste actif comme défense en profondeur).
+MAX_ACCOUNT_ATTEMPTS = 5
+
+
+def _is_main_admin(email: str) -> bool:
+    """True si l'email correspond à ADMIN_EMAIL — non-déverrouillable via UI."""
+    admin_email = (os.environ.get("ADMIN_EMAIL") or "").strip().lower()
+    return bool(admin_email) and email.strip().lower() == admin_email
+
 
 def _testing_mode() -> bool:
     """Bypass complet du verrou brute-force en mode test (env TESTING=1).
@@ -240,6 +251,16 @@ def public_user(user: dict) -> dict:
         "created_at": user.get("created_at"),
         "site_ids": user.get("site_ids", []),
         "permissions": effective_permissions(user),
+        # v1.0-rc4.6 · État de verrouillage (comptes existants sans ces
+        # champs → defaults sûrs, aucune migration nécessaire).
+        "locked": bool(user.get("locked", False)),
+        "failed_login_count": int(user.get("failed_login_count") or 0),
+        "locked_at": user.get("locked_at"),
+        "last_failed_login_at": user.get("last_failed_login_at"),
+        "last_failed_login_ip": user.get("last_failed_login_ip"),
+        "last_login_at": user.get("last_login_at"),
+        "last_login_ip": user.get("last_login_ip"),
+        "is_main_admin": _is_main_admin(user.get("email", "")),
     }
 
 
@@ -375,21 +396,100 @@ async def _clear_attempts(identifier: str):
     await db.login_attempts.delete_one({"identifier": identifier})
 
 
+# v1.0-rc4.6 · Verrouillage par compte (persistant, unlock explicite requis)
+# ─────────────────────────────────────────────────────────────────────────
+async def _account_track_failure(email: str, ip: str) -> dict:
+    """Incrémente atomiquement le compteur d'échecs du compte ciblé.
+
+    - Ne fait rien si l'utilisateur n'existe pas (évite l'énumération d'emails).
+    - Verrouille le compte de façon PERSISTANTE lorsque failed_login_count ≥
+      MAX_ACCOUNT_ATTEMPTS (aucun déverrouillage automatique — action admin
+      requise via l'UI ou la CLI `mgvms-admin unlock-user`).
+    - Journalise `account_locked` lors du basculement locked=False → True.
+
+    Returns: dict {locked: bool, count: int, target_email: str} ou {} si user absent.
+    """
+    if _testing_mode():
+        return {}
+    now_iso = datetime.now(timezone.utc).isoformat()
+    result = await db.users.find_one_and_update(
+        {"email": email},
+        {
+            "$inc": {"failed_login_count": 1},
+            "$set": {"last_failed_login_at": now_iso, "last_failed_login_ip": ip},
+        },
+        projection={"id": 1, "email": 1, "failed_login_count": 1, "locked": 1},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not result:
+        return {}
+    count = int(result.get("failed_login_count") or 0)
+    was_locked = bool(result.get("locked"))
+    just_locked = False
+    if count >= MAX_ACCOUNT_ATTEMPTS and not was_locked:
+        await db.users.update_one(
+            {"id": result["id"]},
+            {"$set": {"locked": True, "locked_at": now_iso}},
+        )
+        just_locked = True
+        await log_audit(
+            None, "account_locked", result.get("email", email),
+            f"{count} tentatives consécutives", ip,
+        )
+    return {"locked": was_locked or just_locked, "count": count, "target_email": result.get("email", email)}
+
+
+async def _account_track_success(user: dict, ip: str) -> None:
+    """Reset compteur d'échecs + met à jour last_login_* sur connexion réussie.
+
+    Ne touche PAS le flag `locked` (un compte verrouillé qui parviendrait à
+    l'authentification — impossible en pratique car court-circuité en amont —
+    doit rester verrouillé jusqu'à unlock explicite).
+    """
+    if _testing_mode():
+        return
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.users.update_one(
+        {"id": user["id"]},
+        {
+            "$set": {
+                "failed_login_count": 0,
+                "last_login_at": now_iso,
+                "last_login_ip": ip,
+            }
+        },
+    )
+
+
 # ---------- Endpoints ----------
 @auth_router.post("/login")
 async def login(data: LoginInput, request: Request, response: Response):
     email = data.email.lower()
     ip = _client_ip(request)
     identifier = f"{ip}:{email}"
+    # ── Défense en profondeur #1 : rate-limit IP:email (auto 15 min) ────
     await _check_lockout(identifier)
 
     user = await db.users.find_one({"email": email}, {"_id": 0})
+
+    # ── Défense en profondeur #2 : lockout compte PERSISTANT ────────────
+    # Le message renvoyé reste volontairement générique pour ne pas révéler
+    # (a) qu'un compte existe, (b) qu'il est verrouillé. L'audit trail suffit
+    # pour l'admin. Un compte verrouillé refuse même le bon mot de passe.
+    if user and user.get("locked"):
+        await log_audit(None, "login_failed", email, "Compte verrouillé", ip)
+        raise HTTPException(status_code=401, detail="Email ou mot de passe invalide")
+
     if not user or not verify_password(data.password, user["password_hash"]):
-        count = await _register_failure(identifier)
-        await log_audit(None, "login_failed", email, f"Tentative {count}/{MAX_LOGIN_ATTEMPTS}", ip)
-        if count >= MAX_LOGIN_ATTEMPTS:
-            await log_audit(None, "account_locked", email, f"Verrouillé {LOCKOUT_MINUTES} min", ip)
-            raise HTTPException(status_code=423, detail=f"Trop de tentatives. Compte verrouillé {LOCKOUT_MINUTES} min.")
+        # Rate-limit IP:email (existant)
+        count_ip = await _register_failure(identifier)
+        # Compteur PAR COMPTE (nouveau v1.0-rc4.6) — noop silencieux si user absent
+        acct = await _account_track_failure(email, ip) if user else {}
+        await log_audit(
+            None, "login_failed", email,
+            f"IP {count_ip}/{MAX_LOGIN_ATTEMPTS} · compte {acct.get('count', 0)}/{MAX_ACCOUNT_ATTEMPTS}",
+            ip,
+        )
         raise HTTPException(status_code=401, detail="Email ou mot de passe invalide")
     if not user.get("active", True):
         raise HTTPException(status_code=403, detail="Compte désactivé")
@@ -421,6 +521,8 @@ async def login(data: LoginInput, request: Request, response: Response):
             used_recovery = True
 
     await _clear_attempts(identifier)
+    # v1.0-rc4.6 · Reset compteur PAR COMPTE + last_login_at/ip
+    await _account_track_success(user, ip)
     # v0.5.4 · Session tracking + timeout configurable
     hours = await _get_session_hours()
     import uuid as _uuid

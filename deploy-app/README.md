@@ -63,6 +63,36 @@ docker compose down                # arrêt
 docker compose down -v             # arrêt + suppression des données Mongo
 ```
 
+## CLI administrative · déverrouillage de comptes (v1.0-rc4.6)
+
+Un compte est verrouillé automatiquement après **5 échecs de connexion
+consécutifs**. Le verrouillage est **permanent** (aucun déverrouillage
+automatique — action admin requise). Même avec le bon mot de passe, un
+compte verrouillé est refusé (message générique, aucune fuite d'info).
+
+### Compte admin principal (`ADMIN_EMAIL`)
+Déverrouillage **CLI uniquement** (l'UI refuse avec 403 explicite) :
+```bash
+docker exec -it mgvms-backend python3 -m scripts.mgvms_admin unlock-user admin@mg-vms.com
+docker exec -it mgvms-backend python3 -m scripts.mgvms_admin list-locked
+```
+
+### Autres comptes (technician / client / readonly / …)
+Déverrouillage **UI** : Administration → Utilisateurs → bouton 🔓 dans la
+colonne Actions (badge rouge « Verrouillé » dans la colonne Statut). Le
+tooltip affiche la date de verrouillage, le nombre d'échecs et la dernière
+IP fautive.
+
+L'API `POST /api/users/{id}/unlock` (rôle admin requis) est également
+utilisable depuis un script :
+```bash
+curl -X POST -H "Authorization: Bearer <token>" \
+     http://localhost:8001/api/users/<user_id>/unlock
+```
+
+Ce que la CLI/UI fait exactement : `locked=false`, `failed_login_count=0`,
+`locked_at` supprimé + audit `account_unlocked` journalisé.
+
 ## Notes
 - Le backend **initialise automatiquement** les données de démonstration au premier
   démarrage (admin, sites, caméras, événements ANPR, équipements réseau, matériel…).

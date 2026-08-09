@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from auth import (
     hash_password, log_audit, public_user,
     PERMISSIONS, ROLES, require_permission, require_role,
+    _is_main_admin,
 )
 from database import db
 from notifications import send_email_to
@@ -162,3 +163,41 @@ async def admin_disable_mfa(user_id: str,
     )
     background.add_task(send_email_to, target.get("email"), subject, body)
     return {"ok": True, "user_id": user_id, "email": target.get("email")}
+
+
+# ─── v1.0-rc4.6 · Déverrouillage compte (brute-force) ─────────────────
+@users_router.post("/users/{user_id}/unlock")
+async def unlock_user_account(
+    user_id: str,
+    user: dict = Depends(require_role("admin")),
+):
+    """Déverrouille un compte utilisateur verrouillé après 5 échecs.
+
+    - Réservé aux admins (`require_role("admin")`).
+    - Le compte ADMIN_EMAIL (admin principal) est PROTÉGÉ : le déverrouillage
+      passe UNIQUEMENT par la CLI `mgvms-admin unlock-user <email>` (voir
+      `scripts/mgvms_admin.py`). Retour 403 explicite ici.
+    - Idempotent : appeler unlock sur un compte non verrouillé n'écrit
+      rien de destructif — remet juste `failed_login_count` à 0.
+    """
+    target = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(404, "Utilisateur introuvable")
+    if _is_main_admin(target.get("email", "")):
+        raise HTTPException(
+            403,
+            "Le compte admin principal ne peut être déverrouillé que via la "
+            "CLI serveur : `mgvms-admin unlock-user " + target["email"] + "`",
+        )
+    await db.users.update_one(
+        {"id": user_id},
+        {
+            "$set": {"locked": False, "failed_login_count": 0},
+            "$unset": {"locked_at": ""},
+        },
+    )
+    await log_audit(
+        user, "account_unlocked", target.get("email", user_id),
+        f"admin={user.get('email')}",
+    )
+    return {"ok": True, "user_id": user_id, "email": target.get("email"), "locked": False}

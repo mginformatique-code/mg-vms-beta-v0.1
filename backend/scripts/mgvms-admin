@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# MG-VMS · Wrapper CLI · v1.0-rc4.6
+# ==============================================================================
+# Encapsule `python3 -m scripts.mgvms_admin` avec le bon PYTHONPATH.
+#
+# Usage :
+#   docker exec -it mgvms-backend mgvms-admin unlock-user admin@mg-vms.com
+#   docker exec -it mgvms-backend mgvms-admin list-locked
+#
+# Ce fichier est installé dans /usr/local/bin/mgvms-admin par le Dockerfile
+# backend. En développement local, appelez directement :
+#   cd /app/backend && python3 -m scripts.mgvms_admin unlock-user <email>
+set -euo pipefail
+cd /app 2>/dev/null || cd "$(dirname "$0")/../.."
+exec python3 -m scripts.mgvms_admin "$@"

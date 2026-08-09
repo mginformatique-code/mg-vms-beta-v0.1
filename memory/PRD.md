@@ -718,6 +718,16 @@ Prioritisé par ROI décroissant (détails dans le rapport v0.8-rc1) :
 - P1 : VirtualGrid sur Events/Timeline ; Pipeline Auto Optimizer ; migration routers.py → routes/.
 - Rapport de tests : /app/test_reports/iteration_41.json (backend 7/7, frontend 100%).
 
+## v1.0-rc4.6 · Account lockout / brute-force protection par compte (2026-08)
+- **Feature** : lockout PAR COMPTE, PERMANENT (5 échecs → locked, unlock explicite requis). Historique IP:email 15min conservé en défense en profondeur.
+- **Backend** : nouveaux helpers atomiques `_account_track_failure` + `_account_track_success`. 7 nouveaux champs sur `users` (defaults sûrs, zéro migration). `public_user()` enrichi + `is_main_admin`.
+- **Sécurité** : login sur compte locked → 401 générique (aucune fuite "existe / verrouillé"). Anti-énumération : email inconnu ne crée pas de doc.
+- **Endpoint** : `POST /api/users/{id}/unlock` (admin) — refuse ADMIN_EMAIL avec 403 explicite pointant vers CLI.
+- **CLI `mgvms_admin`** : `unlock-user <email>` et `list-locked`. Docker : `docker exec -it mgvms-backend python3 -m scripts.mgvms_admin <cmd>`.
+- **UI Users** : badge rouge « Verrouillé » avec tooltip complet (locked_at + count + IP), bouton 🔓 unlock non-admin, icône 🔒 lecture seule pour admin principal.
+- **Tests** : 5/5 verts (test_v1rc46_account_lockout.py).
+- **Preuve** : admin locked + bon MDP → "Email ou mot de passe invalide" (screenshot). CLI unlock → HTTP 200 avec `last_login_ip` mis à jour.
+
 ## v1.0-rc4.3 · Build reproductibilité — Validation statique complète (2026-08)
 - **Mémoire nettoyée** : `/root/.insightface`, `/root/.EasyOCR`, `/root/.paddlex`, `/root/.cache/*`, logs supervisor tronqués, `__pycache__` purgés, `git gc --aggressive`, vieux rapports Wave archivés dans `/app/memory/_archive.tar.gz`. Libéré : 9.2G → 8.3G (93% → 85%).
 - **Méthode structurée** (fin des pytest chaotiques dans le pod preview) : validation statique dans le pod (Python 3.11 disponible dans `/root/.venv`), build Docker réel se fait sur la machine du client.

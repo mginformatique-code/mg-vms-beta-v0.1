@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Trash2, UserCog, Loader2, Building2, ShieldCheck, ShieldOff, Pencil, Eye, EyeOff } from "lucide-react";
+import { Plus, Trash2, UserCog, Loader2, Building2, ShieldCheck, ShieldOff, Pencil, Eye, EyeOff, Lock, Unlock } from "lucide-react";
 import { toast } from "sonner";
 
 const ROLES = ["admin", "technician", "client", "readonly", "guest"];
@@ -35,6 +35,16 @@ export default function UsersPage() {
   const changeRole = async (u, role) => { await api.put(`/users/${u.id}`, { role }); toast.success("Rôle modifié"); load(); };
   const toggleActive = async (u) => { await api.put(`/users/${u.id}`, { active: !u.active }); load(); };
   const del = async (u) => { if (!window.confirm(`Supprimer ${u.email} ?`)) return; try { await api.delete(`/users/${u.id}`); toast.success("Supprimé"); load(); } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); } };
+  const unlockUser = async (u) => {
+    if (!window.confirm(`Déverrouiller le compte ${u.email} ?\n\nLe compteur d'échecs sera remis à zéro.`)) return;
+    try {
+      await api.post(`/users/${u.id}/unlock`);
+      toast.success(`${u.email} déverrouillé`);
+      load();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e.response?.data?.detail));
+    }
+  };
   const disableMfa = async (u) => {
     if (!window.confirm(`Désactiver la MFA de ${u.email} ?\n\nL'utilisateur pourra se reconnecter avec son seul mot de passe et devra refaire un enrollement MFA depuis son compte.`)) return;
     try {
@@ -115,11 +125,42 @@ export default function UsersPage() {
                     <span className="text-[10px] mono uppercase tracking-wider text-muted-foreground" data-testid={`user-mfa-${u.id}`}>—</span>
                   )}
                 </td>
-                <td className="px-3 py-2"><button onClick={() => toggleActive(u)} disabled={u.id === me.id} className={`text-xs px-2 py-0.5 border ${u.active ? "mg-online border-[#00E676]/40" : "mg-offline border-[#FF3333]/40"}`}>{u.active ? t("common.active") : "Inactif"}</button></td>
+                <td className="px-3 py-2">
+                  {u.locked ? (
+                    <span
+                      className="inline-flex items-center gap-1 text-[10px] mono uppercase tracking-wider px-1.5 py-0.5 bg-[#FF3333]/15 text-[#FF3333] border border-[#FF3333]/40"
+                      title={`Verrouillé le ${u.locked_at || "?"} · ${u.failed_login_count || 0} échecs · IP ${u.last_failed_login_ip || "?"}`}
+                      data-testid={`user-locked-${u.id}`}
+                    >
+                      <Lock size={10} /> Verrouillé
+                    </span>
+                  ) : (
+                    <button onClick={() => toggleActive(u)} disabled={u.id === me.id} className={`text-xs px-2 py-0.5 border ${u.active ? "mg-online border-[#00E676]/40" : "mg-offline border-[#FF3333]/40"}`}>{u.active ? t("common.active") : "Inactif"}</button>
+                  )}
+                </td>
                 <td className="px-3 py-2">
                   <div className="flex items-center justify-end gap-1">
                     <button onClick={() => openEdit(u)} data-testid="edit-user-btn" title="Modifier" className="p-1.5 hover:bg-secondary text-[#00E5FF]"><Pencil size={15} /></button>
                     {!["admin", "technician"].includes(u.role) && <button onClick={() => openSites(u)} data-testid="user-sites-btn" title={t("users.sites")} className="p-1.5 hover:bg-secondary"><Building2 size={15} /></button>}
+                    {u.locked && !u.is_main_admin && (
+                      <button
+                        onClick={() => unlockUser(u)}
+                        data-testid={`user-unlock-${u.id}`}
+                        title={`Déverrouiller (${u.failed_login_count || 0} échecs)`}
+                        className="p-1.5 hover:bg-secondary text-[#00E676]"
+                      >
+                        <Unlock size={15} />
+                      </button>
+                    )}
+                    {u.locked && u.is_main_admin && (
+                      <span
+                        title="Admin principal — déverrouillage CLI uniquement : mgvms-admin unlock-user <email>"
+                        className="p-1.5 text-muted-foreground cursor-help"
+                        data-testid={`user-main-admin-cli-only-${u.id}`}
+                      >
+                        <Lock size={15} />
+                      </span>
+                    )}
                     {u.twofa_enabled && u.id !== me.id && (
                       <button onClick={() => disableMfa(u)} data-testid={`user-disable-mfa-${u.id}`} title="Désactiver la MFA (perte du téléphone)" className="p-1.5 hover:bg-secondary text-[#FFB800]">
                         <ShieldOff size={15} />
