@@ -718,6 +718,18 @@ Prioritisé par ROI décroissant (détails dans le rapport v0.8-rc1) :
 - P1 : VirtualGrid sur Events/Timeline ; Pipeline Auto Optimizer ; migration routers.py → routes/.
 - Rapport de tests : /app/test_reports/iteration_41.json (backend 7/7, frontend 100%).
 
+## v1.0-rc4.3 · Build reproductibilité — Validation statique complète (2026-08)
+- **Mémoire nettoyée** : `/root/.insightface`, `/root/.EasyOCR`, `/root/.paddlex`, `/root/.cache/*`, logs supervisor tronqués, `__pycache__` purgés, `git gc --aggressive`, vieux rapports Wave archivés dans `/app/memory/_archive.tar.gz`. Libéré : 9.2G → 8.3G (93% → 85%).
+- **Méthode structurée** (fin des pytest chaotiques dans le pod preview) : validation statique dans le pod (Python 3.11 disponible dans `/root/.venv`), build Docker réel se fait sur la machine du client.
+- **Validation 6/6 verte** :
+  * `install.sh --check-only` : 0 erreur (13 fichiers, 233+17+25 lignes requirements 100 % épinglées, yarn.lock synchro)
+  * `pip check` sur venv Python 3.11 : 0 requirement cassé
+  * Assertion Dockerfile `contourpy==1.3.3` : OK
+  * Assertion Dockerfile `cv2 4.10.0 + hasattr(cv2,'text')` : OpenCV contrib OK
+  * Assertion Dockerfile `import fastapi, motor, cv2, litellm` : OK
+  * Import `server.py` complet : 341 routes + WSDL 7/7 essentiels
+- **Conclusion** : Dockerfile + docker-compose + requirements sont cohérents. Prêt pour `docker compose build` chez le client.
+
 ## v1.0-rc4.1 · Build reproductible (2026-06) — packaging only
 - Yarn lock resync (react-window) → `--frozen-lockfile` + `yarn build` validés sur clone vierge.
 - frontend/Dockerfile : --production=false + frozen-lockfile strict ; NODE_ENV non forcé (craco/visual-edits) ; DISABLE_ESLINT_PLUGIN au build (16 warnings métier pré-existants).
