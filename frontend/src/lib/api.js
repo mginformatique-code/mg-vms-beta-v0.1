@@ -11,20 +11,15 @@ const api = axios.create({ baseURL: API });
 // v1.0-rc4.5 · Audit UI · Redirect /login intelligent
 // -----------------------------------------------------------------------------
 // Une 401 sur un endpoint SECONDAIRE (capabilities, diagnostics, streams
-// info, plugins) ne doit JAMAIS détruire la session globale et vider le
-// Camera Center. Seuls les endpoints CRITIQUES (auth core, listes racines)
-// déclenchent le redirect quand le refresh échoue.
+// info, plugins, camera detail...) ne doit JAMAIS détruire la session
+// globale. Seul `/auth/me` (endpoint vital utilisé par Protected/AppContext
+// pour valider la session) déclenche un redirect quand le refresh échoue.
 //
-// Sur un endpoint secondaire, on rejette simplement la promesse ; l'UI locale
-// gère l'erreur avec un fallback (badge "—", "non disponible", etc.) sans
-// arracher l'utilisateur de son écran.
-const CRITICAL_PATHS = [
-  "/auth/me",
-  "/auth/refresh",
-  "/cameras",       // liste racine (nav)
-  "/sites",
-  "/system/",
-];
+// Rationale : si le refresh a échoué mais que le user est en train de
+// consulter /camera-center/xxx, on préfère afficher un toast d'erreur
+// que d'arracher l'utilisateur de sa page. Il se rebranchera au prochain
+// changement de route via Protected.
+const CRITICAL_PATHS = ["/auth/me"];
 
 function _isCriticalPath(url) {
   if (!url) return false;

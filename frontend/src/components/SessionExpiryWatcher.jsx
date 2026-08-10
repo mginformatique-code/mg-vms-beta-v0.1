@@ -30,8 +30,10 @@ export default function SessionExpiryWatcher() {
 
   useEffect(() => {
     if (!user) { setWarnLeft(null); return; }
-    const token = localStorage.getItem("access_token") ||
-      document.cookie.split("; ").find((c) => c.startsWith("access_token="))?.split("=")[1];
+    // v1.0-rc4.5 · Fix clé de token — le JWT est stocké dans "mg_token"
+    // (voir lib/api.js), PAS "access_token". L'ancien nom laissait le
+    // watcher silencieux en permanence.
+    const token = localStorage.getItem("mg_token");
     if (!token) return;
     const expMs = decodeExp(token);
     if (!expMs) return;
