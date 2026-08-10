@@ -19,6 +19,7 @@ import MapView from "@/pages/MapView";
 import MapCenter from "@/pages/MapCenter";
 import SessionExpiryWatcher from "@/components/SessionExpiryWatcher";
 import InactivityWatcher from "@/components/InactivityWatcher";
+import DebugPanel from "@/components/DebugPanel";
 import SecurityCenter from "@/pages/SecurityCenter";
 import TlsSettings from "@/pages/TlsSettings";
 import PipelineInspectorLive from "@/pages/PipelineInspectorLive";
@@ -122,6 +123,7 @@ function App() {
         <AppRoutes />
         <SessionExpiryWatcher />
         <InactivityWatcher />
+        <DebugPanel />
         <Toaster position="top-right" />
       </BrowserRouter>
     </AppProvider>
