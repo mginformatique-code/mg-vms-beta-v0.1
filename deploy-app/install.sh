@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# MG-VMS · install.sh · v1.0-rc4.1
+# MG-VMS · install.sh · v1.0-rc4.5
 # ==============================================================================
 # Installation/mise à jour complète en UNE commande depuis la racine du repo :
 #
@@ -45,7 +45,7 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(dirname "$SCRIPT_DIR")"
 cd "$REPO"
-echo -e "${BLEU}MG-VMS · Installation v1.0-rc4${NC} — repo : $REPO"
+echo -e "${BLEU}MG-VMS · Installation v1.0-rc4.5${NC} — repo : $REPO"
 
 # ══════════════════════════════════════════════════════════════════════
 # 1. Dernier build GitHub
@@ -183,10 +183,29 @@ done
 cd "$SCRIPT_DIR"
 if [ -f .env ]; then
   ok ".env existant conservé (jamais écrasé)"
+  # v1.0-rc4.5 · Blindage anti-régression Mixed Content : détecter tôt une
+  # valeur polluée qui ferait échouer la Garde 1 du Dockerfile frontend.
+  if grep -qE '^REACT_APP_BACKEND_URL=(http|https)://' .env; then
+    err ""
+    err "❌  .env contient une valeur REACT_APP_BACKEND_URL non vide :"
+    grep -E '^REACT_APP_BACKEND_URL=' .env | sed 's/^/     /' >&2
+    err ""
+    err "  v1.0-rc4.5 · Le frontend en production utilise EXCLUSIVEMENT des"
+    err "  URLs relatives (/api, /ws) proxifiées par Nginx same-origin. La"
+    err "  Garde 1 du Dockerfile refuse toute valeur non-vide pour éviter"
+    err "  un blocage Mixed Content côté navigateur."
+    err ""
+    err "  → Éditer $SCRIPT_DIR/.env"
+    err "  → Vider ou supprimer la ligne : REACT_APP_BACKEND_URL="
+    err "  → Relancer sudo ./install.sh"
+    exit 1
+  fi
 else
   cp .env.example .env
   warn ".env créé depuis .env.example — ADAPTEZ IP LAN + secrets :"
-  warn "   nano $SCRIPT_DIR/.env  (CORS_ORIGINS, REACT_APP_BACKEND_URL, JWT_SECRET, ADMIN_PASSWORD)"
+  warn "   nano $SCRIPT_DIR/.env  (CORS_ORIGINS, JWT_SECRET, ADMIN_PASSWORD)"
+  warn "   ⚠ v1.0-rc4.5 · NE PAS remplir REACT_APP_BACKEND_URL (URLs relatives"
+  warn "     obligatoires en prod — la Garde 1 du Dockerfile la refuse)"
 fi
 
 # ══════════════════════════════════════════════════════════════════════

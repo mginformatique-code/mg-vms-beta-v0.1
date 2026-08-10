@@ -2,6 +2,121 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v1.0-rc4.5] — 2026-08 — Audit "Restore First" · Go2RTC · Cleanup UI · AppDebugPanel
+
+Session d'audit avec règle stricte "restore first, no new features". Chaque
+modification a été justifiée par un rapport de root cause avant application.
+
+### Fixed — Root cause Mixed Content post-login "Une erreur est survenue"
+- Cause démontrée par instrumentation `DiagOverlay` (retirée après diag) :
+  `REACT_APP_BACKEND_URL=http://192.168.1.21:8001` était bakée dans le bundle
+  React alors que la page était servie en `https://mg-vms.local:3443`.
+  Chrome bloquait TOUTES les requêtes API en `ERR_BLOCKED_BY_MIXED_CONTENT`
+  avant même le DNS lookup → axios reject sans response → `formatApiErrorDetail(undefined)`
+  → affichage du message générique "Une erreur est survenue.".
+- **N'était PAS un crash React** (ErrorBoundary jamais déclenché, `React root
+  render completed` OK). Simple erreur UI d'un formulaire de login sans réponse.
+- Fix : `frontend/Dockerfile` avec **2 gardes anti-régression** :
+  - Garde 1 : `RUN` échoue le build si `REACT_APP_BACKEND_URL` non-vide
+  - Garde 2 : scan post-build du bundle refuse toute URL absolue vers
+    `/api/(auth|cameras|system|events|...)`
+- Retrait complet de `args: REACT_APP_BACKEND_URL` dans docker-compose.yml
+  et docker-compose.prod.yml (variable réservée au dev `yarn start`).
+- `install.sh` détecte à l'install une pollution `.env` → échec avec message
+  explicite (évite un `docker compose build` qui plante avec la Garde 1).
+
+### Fixed — Root cause Go2RTC flux lents/neige/artefacts (Phase 1)
+- Cause racine probable : sur des LAN imparfaits (WiFi, VLAN, switch non-QoS),
+  Go2RTC recevait des paquets UDP RTSP en désordre → artefacts "neige".
+- Fix `backend/streaming.py::register_camera_stream` : suffixe
+  `#transport=tcp#timeout=15` automatique sur toute source RTSP nouvelle.
+  Go2RTC utilise alors TCP → 0 % perte de paquets.
+- Fix `backend/video_engine.py` : `hd_preview_width` par défaut passe de `0`
+  (résolution native) à `1280` — évite le transcoding MJPEG CPU-heavy sur
+  flux 4K côté conteneur go2rtc (sans hwaccel par défaut).
+- Fix `deploy-app/go2rtc.yaml` : nouvelle section `ffmpeg:` avec template
+  `rtsp:` forçant `-rtsp_transport tcp -rtsp_flags prefer_tcp -timeout 15000000
+  -fflags nobuffer -flags low_delay -analyzeduration 1M -probesize 1M` sur les
+  transcodages internes Go2RTC.
+
+### Fixed — Redirect /login intempestif après 401 sur endpoint secondaire
+- Cause : l'intercepteur axios (`frontend/src/lib/api.js`) redirigeait vers
+  `/login` sur ÉCHEC de refresh, quel que soit l'endpoint fautif. Une 401 sur
+  `/devices/{id}/capabilities` cassait la session globale et vidait le
+  Camera Center silencieusement.
+- Fix : allowlist `CRITICAL_PATHS = [/auth/me, /auth/refresh, /cameras, /sites,
+  /system/]` — le redirect ne s'applique QU'À ces routes. Les autres 401
+  propagent l'erreur localement sans détruire la session.
+
+### Fixed — ONVIF Discovery : create_media_service() bloquant
+- Cause : dans `backend/streaming.py::_onvif_probe`, l'échec de
+  `create_media_service()` ou `GetProfiles()` levait une exception globale
+  → 502 côté API → utilisateur bloqué même quand l'identité device était OK.
+- Fix : chaque étape ONVIF est désormais try/except granulaire avec log INFO
+  (device → capabilities → media → profiles → streamUri → PTZ). Une capacité
+  secondaire manquante (PTZ, media alt-service) n'empêche plus la création
+  de la caméra tant qu'un profil a une URL RTSP.
+
+### Changed — Cleanup UI page Caméras / Appareils
+- 6 boutons de diagnostic inline retirés de la ligne caméra (test-camera,
+  diagnostic, snapshot, debug-ia, pipeline-diag, go2rtc-diag). Ne restent que
+  Modifier (Pencil) + Supprimer (Trash2).
+- Colonnes réduites à : État · Nom · **Mode vidéo (badge DIRECT/GO2RTC)**
+  · Résolution · Actions. Colonnes Site, IP, PTZ retirées (redondantes ou
+  techniques — accessibles via Camera Center).
+- Wizard ajout caméra : `stream_mode` par défaut passe de `"auto"` à
+  `"direct_rtsp"` (safe default). Le `<select>` a été remplacé par deux
+  cartes radio prominentes : "RTSP → MG-VMS direct" (recommandé) et
+  "RTSP → Go2RTC → MG-VMS". Option "auto" supprimée pour rendre le choix
+  explicite. Une caméra ONVIF découverte peut désormais tourner en direct_rtsp.
+
+### Removed — Page Go2RTCDiagnostic dédiée (feature-freeze respecté)
+- Suppression complète : `frontend/src/pages/Go2RTCDiagnostic.jsx`, route
+  `/diagnostics/go2rtc/:cameraId`, bouton d'accès dans la table Cameras.
+- Endpoint backend `GET /api/cameras/{id}/go2rtc-diagnostic` conservé
+  (utilisable via curl côté serveur, aucune UI production).
+
+### Added — AppDebugPanel (Ctrl+Shift+D · admin uniquement)
+- Volet debug **app-level** MG-VMS caché par défaut. Activé via raccourci
+  clavier `Ctrl+Shift+D`, fermé via `Escape` ou même combo. Guard `role="admin"`.
+- 4 onglets :
+  - **Session** : user courant, rôles, permissions, MFA, JWT décodé (sub, iat,
+    exp, expires_in_s, expired), refresh token présent, compteurs erreurs
+    live (unhandled rejections, window.onerror, React ErrorBoundary caught)
+  - **Réseau** : ring buffer live 100 derniers appels axios (méthode, URL,
+    status, latence, code d'erreur réseau) + ring buffer 100 dernières erreurs
+    JS globales avec stack. Résumé statistique auto-refresh 500 ms (total,
+    2xx/4xx/5xx, network errors, latence moyenne). Boutons "↻ Rafraîchir"
+    et "🗑 Vider buffers"
+  - **Navigation** : route courante, params, contexte AppProvider (user, lang,
+    theme), storage local (keys, mg_lang, mg_theme)
+  - **Build** : env navigateur (href, origin, protocol, host, port),
+    NODE_ENV, REACT_APP_BACKEND_URL effective, axios baseURL, user agent,
+    probes backend live
+- Bouton **"📋 Copier rapport"** : dump texte structuré (session + navigation
+  + build + 40 derniers appels + 20 dernières erreurs + résultats probes)
+  copié dans le presse-papier — prêt à coller dans un ticket support.
+- **Aucune modification** de l'UI production : aucun bouton, aucun menu,
+  aucune route ajoutée. 100 % transparent pour les utilisateurs non-admin.
+
+### Instrumentation permanente (frontend)
+- `frontend/src/lib/api.js` : ring buffer `window.__mgvms_axios_history` (100)
+  peuplé par les 2 interceptors axios (request → t0, response → duration_ms
+  + status, error → code/message).
+- `frontend/src/index.js` : ring buffer `window.__mgvms_error_history` (100)
+  peuplé par `window.addEventListener("unhandledrejection")` et
+  `window.addEventListener("error")` avec stack trace complète.
+- Impact CPU/mémoire : négligeable (< 1 Ko par entry, roll-over à 100).
+
+### Not touched — respect strict du feature freeze
+- Aucune modification : OCR, ANPR, Events, Mongo schema, Camera Center 12 tabs,
+  Plugins, Nginx, docker-compose base, backend routers business logic.
+- Endpoint backend `go2rtc-diagnostic` créé mais **aucune UI de production**
+  ne l'expose — conservé pour audit via curl côté serveur uniquement.
+
+---
+
+
 ## [v1.0-rc4.2] — 2026-06 — install.sh · Installation validée en une commande
 
 ### Fixed — 2 bloquants remontés par le serveur (`--check-only`)
