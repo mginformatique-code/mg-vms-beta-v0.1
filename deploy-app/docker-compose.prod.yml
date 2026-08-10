@@ -75,9 +75,10 @@ services:
   # ─── Frontend : NE PAS exposer le port 3000 en direct ───────────
   frontend:
     ports: !reset []
-    environment:
-      # Frontend appelle désormais /api/* via nginx (same-origin)
-      REACT_APP_BACKEND_URL: https://${MGVMS_DOMAIN}
+    # v1.0-rc4.5 · Le frontend en prod utilise des URLs relatives
+    # (/api, /ws) proxifiées par Nginx same-origin. Aucune variable
+    # REACT_APP_BACKEND_URL n'est nécessaire ni acceptée (garde
+    # Dockerfile).
     networks: [mgvms]
 
 volumes:

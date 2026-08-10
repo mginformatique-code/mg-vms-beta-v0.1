@@ -23,6 +23,51 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 - **Équipe MG-VMS** : noyau petit et testable (~5000 lignes Python)
 - **Installateur terrain** : setup guidé 10–15 min, health dashboard clair
 
+### Session courante (Feb 2026) — v1.0-rc4.5 · Root cause + Blindage URLs relatives (P0)
+
+**Root cause du crash post-login "Une erreur est survenue"** (validé par instrumentation DiagOverlay temporaire, retirée après diagnostic) :
+- **N'était PAS un crash React**, aucune ErrorBoundary déclenchée, aucun composant fautif
+- `REACT_APP_BACKEND_URL=http://192.168.1.21:8001` était bakée dans le bundle prod
+- Page servie en `https://mg-vms.local:3443` → toutes les requêtes vers HTTP absolue → **Mixed Content bloqué par Chrome** (`ERR_NETWORK` sans response) → axios reject sans `response.data` → `formatApiErrorDetail(undefined)` (api.js:54) → "Une erreur est survenue." peint dans le formulaire Login (Login.jsx:47)
+- Nginx ne voyait aucune requête (bloquée AVANT dispatch réseau)
+
+**Blindage v1.0-rc4.5 — URLs relatives obligatoires en prod** :
+- `frontend/Dockerfile` : **Garde 1** échoue le build si `REACT_APP_BACKEND_URL` non-vide (build-arg ou env). **Garde 2** scan post-build : rejette tout bundle contenant `https?://<host>/api/(auth|cameras|system|events|...)` (URL absolue vers endpoint MG-VMS)
+- `deploy-app/docker-compose.yml` : section `args: REACT_APP_BACKEND_URL` retirée du service `frontend`
+- `deploy-app/docker-compose.prod.yml` : ligne `environment.REACT_APP_BACKEND_URL` (morte, n'affectait pas le bundle) retirée
+- `deploy-app/.env.example` : commentaire renforcé — variable interdite en prod, réservée au dev `yarn start`
+- `frontend/src/lib/api.js` : `${REACT_APP_BACKEND_URL || ""}/api` (défensif contre `undefined`)
+- Dev (`yarn start` local) : lit `.env` normalement, comportement inchangé
+
+**Fichiers modifiés cette session** :
+- `frontend/Dockerfile` (2 gardes anti-régression Mixed Content)
+- `frontend/src/lib/api.js` (fallback `|| ""`)
+- `deploy-app/docker-compose.yml` (retrait args)
+- `deploy-app/docker-compose.prod.yml` (retrait env mort)
+- `deploy-app/.env.example` (commentaire renforcé)
+- Restauration à la version sobre : `frontend/src/components/ErrorBoundary.jsx`, `frontend/src/index.js`
+- Supprimé : `frontend/src/components/DiagOverlay.jsx` (instrumentation temporaire)
+
+**Validation locale** :
+- `yarn build` avec `REACT_APP_BACKEND_URL=""` → bundle propre, endpoints `/api/*` en relatif
+- `grep -oE 'https?://[^"]+/api/(auth|...)/'` sur bundle → 0 hit
+- Smoke test preview Emergent → login page OK, DiagOverlay absent, ErrorBoundary non déclenché
+- Lint OK sur les 3 fichiers restaurés
+
+**Instructions déploiement client** :
+```bash
+cd deploy-app
+# 1. Vérifier REACT_APP_BACKEND_URL VIDE (ou absente) dans .env
+grep REACT_APP_BACKEND_URL .env
+# 2. Rebuild frontend (garde 1+2 valident automatiquement)
+docker compose build --no-cache frontend
+# 3. Recréer conteneur
+docker compose up -d frontend
+# 4. Vérification bundle
+docker exec mgvms-frontend sh -c "grep -c 192.168 /usr/share/nginx/html/static/js/*.js || echo propre"
+```
+
+
 ### État Feb 2026 — sessions successives
 **Session 53 (Feb 2026)** — v0.5.7 · **Final Build** · Validator + Matrix + Driver Health (feature complete, freeze) :
 - 🔍 Nouveau service `pipeline_v2/driver_validator.py` — validation **non destructive** d'un driver caméra.

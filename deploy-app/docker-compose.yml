@@ -131,8 +131,12 @@ services:
     build:
       context: ../frontend
       dockerfile: Dockerfile
-      args:
-        REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL-}
+      # v1.0-rc4.5 · Blindage : PAS d'args REACT_APP_BACKEND_URL.
+      # Le frontend en prod utilise EXCLUSIVEMENT des URLs relatives
+      # (/api, /ws) proxifiées par Nginx same-origin. Le Dockerfile fait
+      # échouer le build si REACT_APP_BACKEND_URL est non-vide (garde 1)
+      # et scanne le bundle pour vérifier l'absence d'URLs absolues vers
+      # /api (garde 2). Aucune régression Mixed Content possible.
     image: mgvms-frontend:latest
     container_name: mgvms-frontend
     restart: unless-stopped
