@@ -39,3 +39,9 @@ class AuthenticationError(CameraDriverError):
 class CommandTimeoutError(CameraDriverError):
     """La commande a été acceptée mais n'a pas répondu dans les délais."""
     code = "command_timeout"
+
+
+class DeviceLockedError(CameraDriverError):
+    """La caméra est temporairement verrouillée après plusieurs tentatives
+    d'authentification (protection anti-brute-force côté caméra)."""
+    code = "device_locked"

@@ -155,10 +155,31 @@ export default function CameraCenter() {
             <AlertCircle className="w-4 h-4 mt-1 text-destructive" />
             <div>
               <div className="font-medium">Impossible de lire les capacités</div>
-              <div className="text-sm text-muted-foreground">{error.message}</div>
+              {/* v1.0-rc4.5 · error.label est un message français ciblé par code
+                  (authentication_failed / device_locked / device_unreachable /
+                  command_timeout / ...) — voir useDeviceCapabilities.js.
+                  Fallback sur message brut si code inconnu. */}
+              <div className="text-sm text-muted-foreground" data-testid="cam-error-label">
+                {error.label || error.message}
+              </div>
+              {error.code && (
+                <div className="text-[10px] mt-1 uppercase tracking-wider text-muted-foreground/70 mono">
+                  code : {error.code}{error.status ? ` · HTTP ${error.status}` : ""}
+                </div>
+              )}
               {error.status === 404 && (
                 <div className="text-xs mt-1">
                   Astuce : cliquez sur <b>Détecter capacités</b> pour lancer la probe initiale.
+                </div>
+              )}
+              {error.code === "authentication_failed" && (
+                <div className="text-xs mt-1 text-[#FFAA00]">
+                  Éditez la caméra pour corriger l'identifiant/mot de passe ONVIF. Aucune nouvelle tentative n'est déclenchée automatiquement.
+                </div>
+              )}
+              {error.code === "device_locked" && (
+                <div className="text-xs mt-1 text-[#FF6666]">
+                  Attendez le déverrouillage par la caméra (souvent 5-15 min) — aucune tentative automatique n'est effectuée pendant cette période.
                 </div>
               )}
             </div>

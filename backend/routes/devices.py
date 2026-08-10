@@ -91,6 +91,7 @@ def _driver_error_response(exc: CameraDriverError) -> HTTPException:
         "camera_missing_ip": 400,
         "authentication_failed": 401,
         "camera_not_found": 404,
+        "device_locked": 423,       # v1.0-rc4.5 · protection brute-force caméra
         "device_unreachable": 503,
         "command_timeout": 503,
         "device_error": 502,

@@ -27,10 +27,81 @@ from .camera_models import (
 )
 from .exceptions import (
     DeviceConnectionError, AuthenticationError, UnsupportedCapabilityError,
+    CommandTimeoutError, DeviceLockedError,
 )
 from .registry import register_driver
 
 logger = logging.getLogger("drivers.onvif")
+
+
+def _classify_onvif_exception(exc: Exception, host: str, port: int) -> CameraDriverError:
+    """v1.0-rc4.5 · Classe une exception ONVIF brute vers une erreur typée
+    dédiée au device layer.
+
+    L'objectif est de renvoyer un ``CameraDriverError`` précis (avec le bon
+    ``code`` mappé HTTP côté route) afin que le frontend puisse afficher un
+    message utilisateur ciblé — plus jamais "Unknown error".
+
+    Priorité de détection :
+      1. Types d'exceptions typés zeep (Fault, TransportError) si présents
+      2. Attributs ``status_code`` / ``response.status_code`` (httpx/requests)
+      3. Fallback : match sensible sur la représentation textuelle
+    """
+    # --- 1. Status HTTP explicite si l'exception le porte -------------
+    status = None
+    for attr in ("status_code", "code"):
+        v = getattr(exc, attr, None)
+        if isinstance(v, int):
+            status = v
+            break
+    resp = getattr(exc, "response", None)
+    if status is None and resp is not None:
+        status = getattr(resp, "status_code", None)
+
+    text = f"{type(exc).__name__}: {str(exc) or '(no message)'}"
+    lowered = text.lower()
+
+    # --- 2. Verrouillage caméra (protection anti-brute-force) --------
+    #      Doit être testé AVANT le mapping 401/403 car les messages caméra
+    #      contiennent souvent les deux ("account locked ... 401").
+    if any(k in lowered for k in ("locked", "lockout", "temporarily disabled",
+                                    "too many", "brute", "blocked")):
+        return DeviceLockedError(
+            f"Caméra {host}:{port} temporairement verrouillée par la protection "
+            f"anti-brute-force ONVIF ({text[:120]})"
+        )
+
+    # --- 3. Authentification refusée ---------------------------------
+    if status in (401, 403) or any(k in lowered for k in
+                                    ("unauthorized", "forbidden", "401", "403",
+                                     "authentication failed", "invalid credentials",
+                                     "bad user name", "wrong password", "not authorized",
+                                     "sender not authorized")):
+        return AuthenticationError(
+            f"Authentification ONVIF refusée par {host}:{port} — vérifiez "
+            f"l'identifiant et le mot de passe ({text[:120]})"
+        )
+
+    # --- 4. Timeouts explicites --------------------------------------
+    if any(k in lowered for k in ("timed out", "timeout", "read timed out")):
+        return CommandTimeoutError(
+            f"Caméra ONVIF {host}:{port} — délai dépassé ({text[:120]})"
+        )
+
+    # --- 5. Connexion refusée / injoignable ---------------------------
+    if any(k in lowered for k in ("connection refused", "econnrefused",
+                                    "no route", "network is unreachable",
+                                    "name or service not known", "getaddrinfo",
+                                    "connection reset", "connection aborted")):
+        return DeviceConnectionError(
+            f"Service ONVIF injoignable sur {host}:{port} ({text[:120]})"
+        )
+
+    # --- 6. Fallback typé (jamais générique "Unknown error") ---------
+    return DeviceConnectionError(
+        f"ONVIF {host}:{port} — {text[:200]}"
+    )
+
 
 
 class ONVIFDriver(CameraDriver):
@@ -68,17 +139,26 @@ class ONVIFDriver(CameraDriver):
 
         L'appel ONVIF est sync (zeep) — délégué à un thread pour ne pas
         bloquer la boucle asyncio.
+
+        v1.0-rc4.5 · Classification granulaire des erreurs ONVIF pour ne
+        JAMAIS produire "Unknown error" côté frontend :
+          - HTTP 401/403           → AuthenticationError (message caméra rejeté)
+          - "locked/blocked"       → DeviceLockedError (protection brute-force cam)
+          - "timeout" / "timed out"→ CommandTimeoutError
+          - "refused" / DNS / net  → DeviceConnectionError
+
+        Aucun retry auto : l'appelant décide (l'UI ne retente pas sur 401
+        pour éviter les boucles de reconnexion sur credentials KO).
         """
         try:
             await asyncio.to_thread(self._sync_connect)
             self._connected = True
-        except AuthenticationError:
+        except CameraDriverError:
+            # Déjà typée par _sync_connect ou une couche intérieure → propager tel quel
             raise
         except Exception as e:
-            msg = str(e).lower()
-            if "auth" in msg or "unauthorized" in msg or "401" in msg:
-                raise AuthenticationError(str(e))
-            raise DeviceConnectionError(f"ONVIF connect {self.host}:{self.port} — {e}")
+            typed = _classify_onvif_exception(e, self.host, self.port)
+            raise typed from e
 
     def _sync_connect(self) -> None:
         # v0.7.c P0-2 · Factory centralisée : injecte wsdl_dir vers le bundle
