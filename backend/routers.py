@@ -286,25 +286,28 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
         )
         if keep_camera:
             fallback_mode = "direct_rtsp" if stream_mode == "auto" else stream_mode
+            # v1.0-rc4 · Fix critique : NE PAS persister stream_mode en Mongo.
+            # Marquer uniquement go2rtc_status/pipeline_status pour informer l'UI.
+            # Le stream_mode reste au choix admin (auto par défaut) → les
+            # retentatives au prochain sync_all_streams/register restent possibles.
+            # L'admin peut forcer explicitement direct_rtsp via l'UI selector.
             await db.cameras.update_one(
                 {"id": doc["id"]},
                 {"$set": {
                     "status": "offline",
                     "go2rtc_status": "error",
                     "onvif_status": "ok" if data.mode == "onvif" else "n/a",
-                    "rtsp_status": "ok",  # register_camera_stream a passé le test RTSP
+                    "rtsp_status": "ok",
                     "pipeline_status": f"direct_rtsp (Go2RTC indisponible)"
                                         if fallback_mode == "direct_rtsp"
                                         else fallback_mode,
-                    "stream_mode": fallback_mode,  # force pour cohérence runtime
                 }},
             )
             doc["status"] = "offline"
             doc["go2rtc_status"] = "error"
-            doc["stream_mode"] = fallback_mode
             await log_audit(
                 user, "camera_created_go2rtc_fallback", data.name,
-                f"ONVIF/RTSP OK · Go2RTC KO · pipeline forcé en {fallback_mode}",
+                f"ONVIF/RTSP OK · Go2RTC KO · fallback {fallback_mode} (stream_mode admin conservé)",
             )
         elif stream_mode == "go2rtc":
             # L'admin a EXPLICITEMENT choisi go2rtc → refus explicite avec suggestion.
