@@ -75,6 +75,40 @@ docker exec mgvms-frontend sh -c "grep -c 192.168 /usr/share/nginx/html/static/j
   (snapshot=25, stream=25, device_info=15, events=15, ptz=10, audio=5, reboot=3, siren=2).
   Les capacités destructives (PTZ, siren, light, audio, reboot) sont validées par **inspection
 
+### Session courante (suite) — v1.0-rc4.5 · Audit + Cleanup UI + App Debug Panel
+
+**Cleanup UI Cameras (audit "restore first")** :
+- `frontend/src/pages/Cameras.jsx` : retrait de 6 boutons/icônes de la ligne action (test-camera, diagnostic, snapshot, debug-ia, pipeline-diag, go2rtc-diag) — ne restent que Modifier (Pencil) + Supprimer (Trash2)
+- Colonnes réduites à : État · Nom · **Mode vidéo (DIRECT/GO2RTC badge)** · Résolution · Actions
+- Colonnes Site, IP, PTZ retirées de l'affichage minimal
+- Rollback complet de la page `Go2RTCDiagnostic.jsx` et de sa route (feature-freeze)
+- Endpoint backend `go2rtc-diagnostic` conservé (utilisable via curl/logs, aucune UI)
+
+**Robustesse ONVIF** :
+- `backend/streaming.py::_onvif_probe` refactoré : `create_media_service()` et `GetProfiles()` tolérants (try/except granulaire) — l'identité device (manufacturer/model) est retournée même si le service media échoue ; logs par étape (device → capabilities → media → profiles → streamUri) permettent d'identifier l'étape fautive dans les logs backend
+
+**Robustesse Camera Center — redirect /login intelligent** :
+- `frontend/src/lib/api.js` : allowlist `CRITICAL_PATHS` = `[/auth/me, /auth/refresh, /cameras, /sites, /system/]` — le redirect `/login` sur échec de refresh ne se déclenche QUE pour ces endpoints critiques. Pour les endpoints secondaires (`/devices/{id}/capabilities`, `/diagnostics/*`, `/plugins`, etc.), la 401 est simplement propagée sans détruire la session
+
+**AppDebugPanel — Volet debug caché app-level (Ctrl+Shift+D, admin only)** :
+- `frontend/src/components/AppDebugPanel.jsx` (nouveau fichier)
+- 3 onglets : Session (user/JWT/perms/error counters), Navigation (route/params/context), Build (env/backend/build)
+- Read-only, admin uniquement, invisible par défaut
+- Boutons "▶ Sonder tout" + "📋 Copier rapport" pour transmission équipe support
+- Aucune UI de production visible — panel n'apparaît QUE via Ctrl+Shift+D après login admin
+
+**Audit Go2RTC — livrable (aucune modif appliquée)** :
+- Rapport détaillé fourni : config yaml, ports Docker (1984/8554/8555 TCP+UDP), version 1.9.8 vs 1.9.9 (écart mineur upstream), test SDP réel avec ICE candidates observés dans le pod
+- Correction d'une affirmation erronée : sans `webrtc.listen` → ports éphémères. Avec `webrtc.listen: ":8555"` (config user réelle) → port fixe MUX, hardcoding IP n'est pas requis
+- Protocole de test terrain fourni (7 tests) — attend données réelles du client avant tout patch go2rtc.yaml
+- **Aucune modification** à go2rtc.yaml, docker-compose.yml, video_engine.py, streaming.py::register_camera_stream, video pipelines
+
+**Fichiers modifiés cette itération** :
+- Modifiés (3) : `frontend/src/pages/Cameras.jsx`, `frontend/src/lib/api.js`, `frontend/src/App.js`, `backend/streaming.py`
+- Nouveaux (1) : `frontend/src/components/AppDebugPanel.jsx`
+- Supprimés (1) : `frontend/src/pages/Go2RTCDiagnostic.jsx`
+
+
 ### Session courante (suite) — v1.0-rc4.5 · Refonte Go2RTC (Phases 1+2+3)
 
 **Phase 1 — Correctifs Go2RTC minimaux (root cause probable flux lents/neige/artefacts)** :
