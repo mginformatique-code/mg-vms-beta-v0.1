@@ -6,7 +6,7 @@ import CameraPluginsConfig from "@/pages/CameraPluginsConfig";
 import {
   Plus, Wifi, WifiOff, Camera as CamIcon, Trash2, Activity, Loader2, Radar,
   CheckCircle2, XCircle, AlertTriangle, Pencil, Wand2, ChevronRight, BrainCircuit,
-  Stethoscope, Wrench,
+  Stethoscope,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -321,9 +321,11 @@ export default function Cameras() {
       <div className="border border-border bg-card overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-            <th className="px-3 py-2">{t("common.status")}</th><th className="px-3 py-2">{t("common.name")}</th><th className="px-3 py-2">{t("common.site")}</th>
-            <th className="px-3 py-2">{t("cam.ip")}</th><th className="px-3 py-2">Mode</th><th className="px-3 py-2">Résolution</th>
-            <th className="px-3 py-2">{t("cam.ptz")}</th><th className="px-3 py-2 text-right">{t("common.actions")}</th>
+            <th className="px-3 py-2">{t("common.status")}</th>
+            <th className="px-3 py-2">{t("common.name")}</th>
+            <th className="px-3 py-2">Mode vidéo</th>
+            <th className="px-3 py-2">Résolution</th>
+            <th className="px-3 py-2 text-right">{t("common.actions")}</th>
           </tr></thead>
           <tbody>
             {cams.map((c) => (
@@ -331,30 +333,33 @@ export default function Cameras() {
                 <td className="px-3 py-2"><span className={`inline-flex items-center gap-1.5 text-xs ${c.status === "online" ? "mg-online" : "mg-offline"}`}>
                   {c.status === "online" ? <Wifi size={13} /> : <WifiOff size={13} />}{t(c.status === "online" ? "common.online" : "common.offline")}</span></td>
                 <td className="px-3 py-2 font-medium">{c.name}<div className="text-[10px] text-muted-foreground truncate max-w-xs">{c.manufacturer} {c.model}</div></td>
-                <td className="px-3 py-2 text-muted-foreground">{c.site_name}</td>
-                <td className="px-3 py-2 mono text-xs">{c.ip}</td>
-                <td className="px-3 py-2"><span className="text-[10px] px-1.5 py-0.5 border border-border uppercase">{c.mode || c.protocol}</span></td>
-                <td className="px-3 py-2 mono text-[11px]">
-                  {c.resolution || "—"}{c.fps ? ` @ ${c.fps}` : ""} <span className="text-muted-foreground">{c.codec}</span>
+                <td className="px-3 py-2">
                   {(() => {
-                    const [w, h] = (c.resolution || "").split(/x/i).map((n) => parseInt(n, 10) || 0);
-                    if (w > 0 && h > 0 && (w < 1280 || h < 720)) {
-                      return <span title="Résolution < HD — probable sous-flux. Modifiez la caméra et cochez le profil principal." className="ml-1 text-[9px] px-1 bg-[#FFB800] text-black font-bold" data-testid="sub-stream-badge">SUB</span>;
-                    }
-                    return null;
+                    // v1.0-rc4.5 · Audit UI · Mode vidéo persistant DIRECT/GO2RTC
+                    // (source de vérité : cameras.stream_mode). 'auto' est
+                    // affiché en attendant que l'admin choisisse explicitement.
+                    const m = (c.stream_mode || "auto").toLowerCase();
+                    const isDirect = m === "direct_rtsp" || m === "direct";
+                    const isGo2rtc = m === "go2rtc";
+                    const label = isDirect ? "DIRECT" : isGo2rtc ? "GO2RTC" : "AUTO";
+                    const color = isDirect ? "#00E5FF" : isGo2rtc ? "#FFAA00" : "#888";
+                    return (
+                      <span
+                        className="text-[10px] px-1.5 py-0.5 border font-semibold"
+                        style={{ color, borderColor: `${color}80` }}
+                        data-testid="video-mode-badge"
+                      >
+                        {label}
+                      </span>
+                    );
                   })()}
                 </td>
-                <td className="px-3 py-2 text-xs">{c.ptz_enabled ? "✓" : "—"}</td>
+                <td className="px-3 py-2 mono text-[11px]">
+                  {c.resolution || "—"}{c.fps ? ` @ ${c.fps}` : ""} <span className="text-muted-foreground">{c.codec}</span>
+                </td>
                 <td className="px-3 py-2"><div className="flex items-center justify-end gap-1">
-                  <button onClick={() => test(c)} data-testid="test-camera-btn" title="Tester" className="p-1.5 hover:bg-secondary">{testing === c.id ? <Loader2 size={15} className="animate-spin" /> : <Activity size={15} />}</button>
-                  <a href={`/camera-center/${c.id}`} data-testid="open-camera-center" title="Camera Center" className="p-1.5 hover:bg-secondary inline-flex items-center text-[#0088FF]"><Radar size={15} /></a>
-                  <button onClick={() => openDiagnostic(c)} data-testid="diagnostic-btn" title="Diagnostic complet" className="p-1.5 hover:bg-secondary text-[#00E676]"><Radar size={15} /></button>
-                  <button onClick={() => snapshot(c)} data-testid="snapshot-btn" title="Snapshot" className="p-1.5 hover:bg-secondary"><CamIcon size={15} /></button>
-                  {c.detect_enabled && <button onClick={() => openDebug(c)} data-testid="debug-ia-btn" title="Debug IA (dernier snapshot d'analyse)" className="p-1.5 hover:bg-secondary text-[#0044FF]"><BrainCircuit size={15} /></button>}
-                  <button onClick={() => openPipelineDiagnostic(c)} data-testid="pipeline-diag-btn" title="Diagnostic pipeline vidéo (RTSP → Go2RTC → WebRTC)" className="p-1.5 hover:bg-secondary text-[#00E5FF]"><Stethoscope size={15} /></button>
-                  <a href={`/diagnostics/go2rtc/${c.id}`} data-testid="go2rtc-diag-btn" title="Diagnostic Go2RTC détaillé (codecs, transport, bitrate, transcoding)" className="p-1.5 hover:bg-secondary inline-flex items-center text-[#FFAA00]"><Wrench size={15} /></a>
                   {can("technician") && <button onClick={() => openEdit(c)} data-testid="edit-camera-btn" title="Modifier" className="p-1.5 hover:bg-secondary"><Pencil size={15} /></button>}
-                  {can("technician") && <button onClick={() => del(c)} data-testid="delete-camera-btn" className="p-1.5 hover:bg-secondary text-[#FF3333]"><Trash2 size={15} /></button>}
+                  {can("technician") && <button onClick={() => del(c)} data-testid="delete-camera-btn" title="Supprimer" className="p-1.5 hover:bg-secondary text-[#FF3333]"><Trash2 size={15} /></button>}
                 </div></td>
               </tr>
             ))}

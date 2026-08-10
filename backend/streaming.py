@@ -1656,37 +1656,92 @@ class OnvifProbeInput(BaseModel):
 
 
 def _onvif_probe(ip: str, port: int, username: str, password: str) -> dict:
-    """Interroge un appareil ONVIF : infos + profils + URI RTSP (bloquant)."""
+    """Interroge un appareil ONVIF : infos + profils + URI RTSP (bloquant).
+
+    v1.0-rc4.5 · Audit ONVIF · Tolérance aux capacités secondaires manquantes :
+    - Le service Media est essentiel pour les profils/RTSP. Si absent → erreur claire.
+    - PTZ est OPTIONNEL — jamais bloquant.
+    - Chaque étape est loggée pour permettre au technicien d'identifier la
+      première étape en échec dans les logs backend (aucune UI de diagnostic).
+    """
     from wsdl_path import onvif_camera
+    logger.info("onvif_probe: connexion %s:%s user=%s", ip, port, username or "(anonyme)")
     cam = onvif_camera(ip, port, username, password)
-    device = cam.create_devicemgmt_service()
-    info = device.GetDeviceInformation()
-    media = cam.create_media_service()
-    profiles = media.GetProfiles()
-    result_profiles = []
-    for profile in profiles:
+
+    # 1. devicemgmt : identité de l'appareil (OBLIGATOIRE)
+    try:
+        device = cam.create_devicemgmt_service()
+    except Exception as e:
+        logger.warning("onvif_probe %s: create_devicemgmt_service échec — %s: %s",
+                       ip, type(e).__name__, str(e)[:200])
+        raise
+    try:
+        info = device.GetDeviceInformation()
+    except Exception as e:
+        logger.warning("onvif_probe %s: GetDeviceInformation échec — %s: %s",
+                       ip, type(e).__name__, str(e)[:200])
+        raise
+    logger.info("onvif_probe %s: identité OK — %s %s (fw=%s)",
+                ip, info.Manufacturer, info.Model, info.FirmwareVersion)
+
+    # 2. Media service : profils + RTSP (OBLIGATOIRE pour ajout caméra)
+    media = None
+    profiles: list = []
+    result_profiles: list = []
+    try:
+        media = cam.create_media_service()
+        logger.info("onvif_probe %s: media service créé", ip)
+    except Exception as e:
+        logger.warning("onvif_probe %s: create_media_service échec — %s: %s",
+                       ip, type(e).__name__, str(e)[:200])
+        # On continue quand même avec media=None → profiles vide → 400 côté routeur
+        # avec message plus explicite ("aucun profil ONVIF"). L'admin peut saisir
+        # manuellement l'URL RTSP via le mode RTSP direct.
+
+    if media is not None:
         try:
-            uri = media.GetStreamUri({
-                "StreamSetup": {"Stream": "RTP-Unicast", "Transport": {"Protocol": "RTSP"}},
-                "ProfileToken": profile.token,
-            })
-            rtsp_uri = uri.Uri
-        except Exception:
+            profiles = media.GetProfiles() or []
+            logger.info("onvif_probe %s: %d profil(s) ONVIF détecté(s)",
+                        ip, len(profiles))
+        except Exception as e:
+            logger.warning("onvif_probe %s: GetProfiles échec — %s: %s",
+                           ip, type(e).__name__, str(e)[:200])
+            profiles = []
+
+        for profile in profiles:
             rtsp_uri = None
-        enc = getattr(profile, "VideoEncoderConfiguration", None)
-        result_profiles.append({
-            "token": profile.token,
-            "name": str(profile.Name),
-            "rtsp_url": rtsp_uri,
-            "codec": str(getattr(enc, "Encoding", "")) if enc else None,
-            "resolution": (f"{enc.Resolution.Width}x{enc.Resolution.Height}"
-                           if enc and getattr(enc, "Resolution", None) else None),
-        })
+            try:
+                uri = media.GetStreamUri({
+                    "StreamSetup": {"Stream": "RTP-Unicast", "Transport": {"Protocol": "RTSP"}},
+                    "ProfileToken": profile.token,
+                })
+                rtsp_uri = uri.Uri
+                logger.info("onvif_probe %s: profil %s → RTSP %s",
+                            ip, profile.token, rtsp_uri[:80])
+            except Exception as e:
+                # Un profil sans RTSP n'est pas bloquant tant qu'un autre profil marche
+                logger.info("onvif_probe %s: profil %s sans RTSP (%s) — profil skippé",
+                            ip, profile.token, type(e).__name__)
+            enc = getattr(profile, "VideoEncoderConfiguration", None)
+            result_profiles.append({
+                "token": profile.token,
+                "name": str(profile.Name),
+                "rtsp_url": rtsp_uri,
+                "codec": str(getattr(enc, "Encoding", "")) if enc else None,
+                "resolution": (f"{enc.Resolution.Width}x{enc.Resolution.Height}"
+                               if enc and getattr(enc, "Resolution", None) else None),
+            })
+
+    # 3. PTZ : capacité OPTIONNELLE (jamais bloquante)
     ptz = False
     try:
-        ptz = bool(getattr(profiles[0], "PTZConfiguration", None))
-    except Exception:
-        pass
+        if profiles:
+            ptz = bool(getattr(profiles[0], "PTZConfiguration", None))
+    except Exception as e:
+        logger.debug("onvif_probe %s: PTZ probe échec (optionnel) — %s", ip, type(e).__name__)
+    logger.info("onvif_probe %s: PTZ=%s · profils avec RTSP=%d/%d",
+                ip, ptz, sum(1 for p in result_profiles if p.get("rtsp_url")),
+                len(result_profiles))
     return {
         "manufacturer": str(info.Manufacturer), "model": str(info.Model),
         "firmware": str(info.FirmwareVersion), "serial": str(info.SerialNumber),
