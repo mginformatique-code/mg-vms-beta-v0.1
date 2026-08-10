@@ -34,18 +34,55 @@ function _isCriticalPath(url) {
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("mg_token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  // v1.0-rc4.5 · Ring buffer axios pour AppDebugPanel onglet Réseau
+  if (typeof window !== "undefined") {
+    config.__mgvms_t0 = performance.now();
+  }
   return config;
 });
+
+// v1.0-rc4.5 · Ring buffer des 100 derniers appels axios
+function _recordAxios(entry) {
+  if (typeof window === "undefined") return;
+  window.__mgvms_axios_history = window.__mgvms_axios_history || [];
+  window.__mgvms_axios_history.push({ ts: new Date().toISOString(), ...entry });
+  if (window.__mgvms_axios_history.length > 100) {
+    window.__mgvms_axios_history.splice(0, window.__mgvms_axios_history.length - 100);
+  }
+}
 
 let refreshing = null;
 
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    _recordAxios({
+      kind: "response",
+      method: (res.config.method || "get").toUpperCase(),
+      url: (res.config.baseURL || "") + (res.config.url || ""),
+      status: res.status,
+      duration_ms: res.config.__mgvms_t0
+        ? Math.round(performance.now() - res.config.__mgvms_t0) : null,
+      bytes: Number(res.headers?.["content-length"]) || null,
+    });
+    return res;
+  },
   async (error) => {
     const original = error.config;
     const status = error.response?.status;
     const url = original?.url || "";
     const isAuthCall = url.includes("/auth/login") || url.includes("/auth/refresh") || url.includes("/auth/logout");
+
+    _recordAxios({
+      kind: "error",
+      method: (original?.method || "get").toUpperCase(),
+      url: (original?.baseURL || "") + (original?.url || ""),
+      status: status ?? null,
+      duration_ms: original?.__mgvms_t0
+        ? Math.round(performance.now() - original.__mgvms_t0) : null,
+      code: error.code || null,
+      message: error.message || null,
+      has_response: !!error.response,
+    });
 
     if (status === 401 && !original._retry && !isAuthCall) {
       const refresh = localStorage.getItem("mg_refresh");

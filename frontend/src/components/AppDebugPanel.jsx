@@ -45,9 +45,17 @@ export default function AppDebugPanel() {
   const [tab, setTab] = useState("session");
   const [results, setResults] = useState({});
   const [running, setRunning] = useState({});
+  const [netRefresh, setNetRefresh] = useState(0);
   const { user, lang, theme } = useApp() || {};
   const location = useLocation();
   const params = useParams();
+
+  // ─── Auto-refresh onglet Réseau (500ms tant que ouvert) ──────────
+  useEffect(() => {
+    if (!open || tab !== "network") return;
+    const iv = setInterval(() => setNetRefresh((n) => n + 1), 500);
+    return () => clearInterval(iv);
+  }, [open, tab]);
 
   // ─── Raccourci clavier ───────────────────────────────────────────
   useEffect(() => {
@@ -137,6 +145,12 @@ export default function AppDebugPanel() {
       "",
       "── BUILD / ENV ─────────────────────────────────────",
       JSON.stringify(env, null, 2),
+      "",
+      "── RÉSEAU (derniers 40 appels axios) ────────────────",
+      JSON.stringify(((typeof window !== "undefined" && window.__mgvms_axios_history) || []).slice(-40), null, 2),
+      "",
+      "── ERREURS JS (dernières 20) ────────────────────────",
+      JSON.stringify(((typeof window !== "undefined" && window.__mgvms_error_history) || []).slice(-20), null, 2),
       "",
       "── API PROBES ──────────────────────────────────────",
     ];
@@ -249,6 +263,7 @@ export default function AppDebugPanel() {
         <span style={{ color: "#666", fontSize: "10px" }}>v1.0-rc4.5 · admin</span>
         <div style={{ marginLeft: "auto", display: "flex", gap: "6px" }}>
           {tabBtn("session", "Session")}
+          {tabBtn("network", "Réseau")}
           {tabBtn("navigation", "Navigation")}
           {tabBtn("build", "Build")}
         </div>
@@ -292,6 +307,131 @@ export default function AppDebugPanel() {
             {results.system_health && <><div style={{ fontSize: "10px", color: "#888" }}>system-health</div>{resultBlock("system_health")}</>}
           </div>
         )}
+
+        {tab === "network" && (() => {
+          // Ring buffers alimentés par api.js (axios) et index.js (window errors)
+          const axiosHistory = (typeof window !== "undefined" && window.__mgvms_axios_history) || [];
+          const errorHistory = (typeof window !== "undefined" && window.__mgvms_error_history) || [];
+          const last = axiosHistory.slice(-40).reverse();
+          const errs = errorHistory.slice(-20).reverse();
+          const stats = axiosHistory.reduce((acc, e) => {
+            acc.total += 1;
+            if (e.kind === "error") acc.errors += 1;
+            if (e.status >= 500) acc.status5xx += 1;
+            else if (e.status >= 400) acc.status4xx += 1;
+            else if (e.status >= 200 && e.status < 300) acc.status2xx += 1;
+            if (e.duration_ms != null) { acc.total_ms += e.duration_ms; acc.timed += 1; }
+            return acc;
+          }, { total: 0, errors: 0, status2xx: 0, status4xx: 0, status5xx: 0, total_ms: 0, timed: 0 });
+          const avgMs = stats.timed > 0 ? Math.round(stats.total_ms / stats.timed) : null;
+          const statusColor = (s) => {
+            if (s == null) return "#f88";
+            if (s >= 500) return "#f66";
+            if (s >= 400) return "#fa0";
+            if (s >= 300) return "#f8f";
+            if (s >= 200) return "#8f8";
+            return "#888";
+          };
+          const clearBuffers = () => {
+            if (typeof window !== "undefined") {
+              window.__mgvms_axios_history = [];
+              window.__mgvms_error_history = [];
+              window.__mgvms_unhandled_rejections = 0;
+              window.__mgvms_window_errors = 0;
+              window.__mgvms_react_errors = 0;
+              setNetRefresh((n) => n + 1);
+            }
+          };
+          return (
+            <div data-testid="app-dbg-panel-network">
+              <div style={{ color: "#00E5FF", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "4px" }}>
+                Résumé requêtes (refresh live 500 ms)
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "6px", marginBottom: "10px", fontSize: "10px" }}>
+                <div style={{ padding: "6px", background: "#111", border: "1px solid #333" }}>
+                  <div style={{ color: "#888", fontSize: "9px", textTransform: "uppercase" }}>total</div>
+                  <div style={{ fontSize: "14px", color: "#ddd" }} data-testid="net-stat-total">{stats.total}</div>
+                </div>
+                <div style={{ padding: "6px", background: "#111", border: "1px solid #333" }}>
+                  <div style={{ color: "#888", fontSize: "9px", textTransform: "uppercase" }}>2xx</div>
+                  <div style={{ fontSize: "14px", color: "#8f8" }} data-testid="net-stat-2xx">{stats.status2xx}</div>
+                </div>
+                <div style={{ padding: "6px", background: "#111", border: "1px solid #333" }}>
+                  <div style={{ color: "#888", fontSize: "9px", textTransform: "uppercase" }}>4xx</div>
+                  <div style={{ fontSize: "14px", color: "#fa0" }} data-testid="net-stat-4xx">{stats.status4xx}</div>
+                </div>
+                <div style={{ padding: "6px", background: "#111", border: "1px solid #333" }}>
+                  <div style={{ color: "#888", fontSize: "9px", textTransform: "uppercase" }}>5xx</div>
+                  <div style={{ fontSize: "14px", color: "#f66" }} data-testid="net-stat-5xx">{stats.status5xx}</div>
+                </div>
+                <div style={{ padding: "6px", background: "#111", border: "1px solid #333" }}>
+                  <div style={{ color: "#888", fontSize: "9px", textTransform: "uppercase" }}>network err.</div>
+                  <div style={{ fontSize: "14px", color: "#f66" }} data-testid="net-stat-errors">{stats.errors}</div>
+                </div>
+                <div style={{ padding: "6px", background: "#111", border: "1px solid #333" }}>
+                  <div style={{ color: "#888", fontSize: "9px", textTransform: "uppercase" }}>lat. moy.</div>
+                  <div style={{ fontSize: "14px", color: "#ddd" }} data-testid="net-stat-avg">{avgMs != null ? `${avgMs} ms` : "—"}</div>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
+                {btn("↻ Rafraîchir", () => setNetRefresh((n) => n + 1), "net-refresh")}
+                {btn("🗑 Vider buffers", clearBuffers, "net-clear")}
+              </div>
+
+              <div style={{ color: "#00E5FF", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.1em", marginTop: "12px", marginBottom: "4px" }}>
+                Derniers appels axios ({last.length}/{axiosHistory.length}) — refresh #{netRefresh}
+              </div>
+              <div style={{ background: "#111", border: "1px solid #222", maxHeight: "40vh", overflow: "auto" }}>
+                {last.length === 0 && (
+                  <div style={{ padding: "16px", color: "#555", fontSize: "11px", textAlign: "center" }}>Aucun appel enregistré (naviguez dans l'app pour peupler)</div>
+                )}
+                {last.map((e, i) => (
+                  <div key={i} style={{ padding: "5px 8px", borderBottom: "1px dashed #222", fontSize: "10px", display: "grid", gridTemplateColumns: "70px 55px 40px 60px 1fr", gap: "6px", alignItems: "center" }}>
+                    <span style={{ color: "#666" }}>{e.ts.slice(11, 23)}</span>
+                    <span style={{ color: e.kind === "error" ? "#f66" : "#aaa", fontWeight: "bold" }}>{e.method}</span>
+                    <span style={{ color: statusColor(e.status), fontWeight: "bold" }}>{e.status ?? "—"}</span>
+                    <span style={{ color: "#888" }}>{e.duration_ms != null ? `${e.duration_ms}ms` : "—"}</span>
+                    <span style={{ color: "#ddd", wordBreak: "break-all" }}>
+                      {e.url}
+                      {e.code && <span style={{ color: "#f66", marginLeft: "6px" }}>· {e.code}</span>}
+                      {e.message && e.kind === "error" && <span style={{ color: "#faa", marginLeft: "6px" }}>· {e.message}</span>}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ color: "#00E5FF", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.1em", marginTop: "16px", marginBottom: "4px" }}>
+                Erreurs JS globales ({errs.length}/{errorHistory.length})
+              </div>
+              <div style={{ background: "#111", border: "1px solid #222", maxHeight: "25vh", overflow: "auto" }}>
+                {errs.length === 0 && (
+                  <div style={{ padding: "16px", color: "#555", fontSize: "11px", textAlign: "center" }}>Aucune erreur JS ni promise rejection · ✅</div>
+                )}
+                {errs.map((e, i) => (
+                  <div key={i} style={{ padding: "6px 8px", borderBottom: "1px dashed #222", fontSize: "10px" }}>
+                    <div style={{ color: "#f88" }}>
+                      <span style={{ color: "#666" }}>{e.ts.slice(11, 23)}</span>{" "}
+                      <span style={{ color: "#fa0", fontWeight: "bold" }}>{e.kind}</span>{" "}
+                      <span style={{ color: "#ddd" }}>{e.name}</span>
+                    </div>
+                    <div style={{ color: "#f88", marginLeft: "8px" }}>{e.message}</div>
+                    {(e.filename || e.lineno) && (
+                      <div style={{ color: "#888", marginLeft: "8px", fontSize: "9px" }}>
+                        {e.filename}:{e.lineno}:{e.colno}
+                      </div>
+                    )}
+                    {e.stack && (
+                      <details style={{ marginLeft: "8px", marginTop: "3px" }}>
+                        <summary style={{ cursor: "pointer", color: "#a88", fontSize: "9px" }}>Stack</summary>
+                        <pre style={{ color: "#f88", fontSize: "9px", whiteSpace: "pre-wrap" }}>{e.stack}</pre>
+                      </details>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {tab === "navigation" && (
           <div data-testid="app-dbg-panel-navigation">
