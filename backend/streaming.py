@@ -216,6 +216,20 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
     name = _stream_name(cam["id"])
     cam_id = cam["id"]
 
+    # v1.0-rc4.5 · Phase 1 · Root cause Go2RTC (flux lents/neige/artefacts) :
+    # Doc officielle Go2RTC recommande de forcer le transport TCP explicitement
+    # pour éviter les paquets perdus (UDP) qui produisent des artefacts "neige"
+    # sur des LAN imparfaits ou en présence de switches non-QoS. Le timeout de
+    # 15s aligne le comportement de reconnexion sur des flux industriels lents
+    # (init RTSP + première keyframe).
+    # Syntaxe Go2RTC : `rtsp://user:pass@host:port/path#transport=tcp#timeout=15`
+    # Le fragment `#...` est parsé par Go2RTC comme paramètres de source, JAMAIS
+    # transmis à la caméra elle-même. Aucun impact ONVIF/RTSP protocol level.
+    if rtsp_url.lower().startswith("rtsp://") and "#transport=" not in rtsp_url:
+        rtsp_source = f"{rtsp_url}#transport=tcp#timeout=15"
+    else:
+        rtsp_source = rtsp_url
+
     # Résolution du pipeline effectif (auto/GPU/CPU) — construit les filtres ffmpeg optimisés
     try:
         from video_engine import resolve_pipeline
@@ -231,7 +245,7 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
 
     # Config souhaitée : dict {stream_name: source_string}
     desired = {
-        name: rtsp_url,
+        name: rtsp_source,
         f"{name}_hd": f"ffmpeg:{name}#{hd_filter}",
         f"{name}_sd": f"ffmpeg:{name}#{sd_filter}",
     }
@@ -276,8 +290,9 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
             for src in (name, f"{name}_hd", f"{name}_sd"):
                 await client.delete(f"{GO2RTC_URL}/api/streams", params={"src": src})
             # 1) Source unique RTSP (un seul décodage) — utilisée par le recorder et l'IA
+            # v1.0-rc4.5 · rtsp_source inclut #transport=tcp#timeout=15 (voir plus haut)
             r = await client.put(f"{GO2RTC_URL}/api/streams",
-                                 params=[("name", name), ("src", rtsp_url)])
+                                 params=[("name", name), ("src", rtsp_source)])
             r.raise_for_status()
             # 2) Variante HD : MJPEG à résolution native (avec accel matérielle si dispo)
             r_hd = await client.put(f"{GO2RTC_URL}/api/streams",

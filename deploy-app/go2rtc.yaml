@@ -30,6 +30,25 @@ webrtc:
   ice_servers:
     - urls: [stun:stun.l.google.com:19302]
 
+# ─── FFmpeg (transcoding interne Go2RTC) ────────────────────────────────
+# v1.0-rc4.5 · Phase 1 · Root cause : sans override du template `rtsp`,
+# Go2RTC lance ffmpeg avec les paramètres par défaut qui ne forcent PAS
+# `rtsp_transport tcp`. Sur des LAN imparfaits ou en présence de firewalls
+# UDP-restrictifs, ffmpeg reçoit des paquets corrompus → artefacts "neige"
+# à l'écran et dans les enregistrements.
+#
+# Les flags ci-dessous :
+#   -fflags nobuffer      → n'attend pas de buffer avant démarrage (latence ↓)
+#   -flags low_delay      → coupe la reordering queue du décodeur
+#   -rtsp_transport tcp   → force TCP (aucun paquet perdu)
+#   -rtsp_flags prefer_tcp → double garde en cas de redirection
+#   -timeout 15000000     → timeout socket 15s (µs) — évite les hangs
+#   -analyzeduration 1M   → probe rapide du stream (2s → 1s)
+#   -probesize 1M         → probe plus rapide (par défaut 5MB)
+ffmpeg:
+  bin: ffmpeg
+  rtsp: "-fflags nobuffer -flags low_delay -rtsp_transport tcp -rtsp_flags prefer_tcp -timeout 15000000 -analyzeduration 1000000 -probesize 1000000 -i {input}"
+
 log:
   level: info
 

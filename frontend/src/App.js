@@ -41,6 +41,7 @@ import PipelineInspector from "@/pages/PipelineInspector";
 import PipelineCenter from "@/pages/PipelineCenter";
 import CameraCenter from "@/pages/CameraCenter";
 import CameraCenterDispatch from "@/pages/CameraCenterDispatch";
+import Go2RTCDiagnostic from "@/pages/Go2RTCDiagnostic";
 import UsersPage from "@/pages/Users";
 import SettingsPage from "@/pages/Settings";
 import Notifications from "@/pages/Notifications";
@@ -104,6 +105,7 @@ function AppRoutes() {
       <Route path="/pipeline-center" element={<Protected><PipelineCenter /></Protected>} />
       <Route path="/camera-center" element={<Protected><CameraCenterDispatch /></Protected>} />
       <Route path="/camera-center/:cameraId" element={<Protected><CameraCenter /></Protected>} />
+      <Route path="/diagnostics/go2rtc/:cameraId" element={<Protected><Go2RTCDiagnostic /></Protected>} />
       <Route path="/users" element={<Protected><UsersPage /></Protected>} />
       <Route path="/notifications" element={<Protected><Notifications /></Protected>} />
       <Route path="/plugins" element={<Protected><Plugins /></Protected>} />

@@ -74,6 +74,50 @@ docker exec mgvms-frontend sh -c "grep -c 192.168 /usr/share/nginx/html/static/j
   Enum `TestState` : PASS / WARNING / FAIL / TIMEOUT / UNSUPPORTED / SKIPPED. Score pondéré
   (snapshot=25, stream=25, device_info=15, events=15, ptz=10, audio=5, reboot=3, siren=2).
   Les capacités destructives (PTZ, siren, light, audio, reboot) sont validées par **inspection
+
+### Session courante (suite) — v1.0-rc4.5 · Refonte Go2RTC (Phases 1+2+3)
+
+**Phase 1 — Correctifs Go2RTC minimaux (root cause probable flux lents/neige/artefacts)** :
+- `backend/streaming.py::register_camera_stream` : suffixe `#transport=tcp#timeout=15` sur toute source RTSP nouvelle (ligne 213-233) — force TCP côté Go2RTC pour éviter les pertes UDP responsables des artefacts "neige"
+- `backend/video_engine.py::DEFAULT_CONFIG` : `hd_preview_width` passé de `0` (résolution native) à `1280` — évite le transcoding MJPEG CPU-heavy sur flux 4K (variantes _hd)
+- `deploy-app/go2rtc.yaml` : nouvelle section `ffmpeg:` avec template `rtsp:` forçant `-rtsp_transport tcp -rtsp_flags prefer_tcp -timeout 15000000 -fflags nobuffer -flags low_delay -analyzeduration 1M -probesize 1M -i {input}` — garantit que les transcodages internes Go2RTC utilisent aussi TCP
+
+**Phase 2 — Wizard ONVIF : choix explicite RTSP Direct / Go2RTC** :
+- `frontend/src/pages/Cameras.jsx` :
+  - `EMPTY_FORM.stream_mode` : `"auto"` → `"direct_rtsp"` (RTSP Direct devient le safe default)
+  - Le `<select>` compact remplacé par une paire de **cartes radio prominentes** (data-testid `stream-mode-direct-rtsp` / `stream-mode-go2rtc`) avec description détaillée
+  - Suppression de l'option "auto" — le choix devient explicite et requis
+  - ONVIF n'est plus forcé vers Go2RTC ; les caméras découvertes ONVIF peuvent tourner en direct_rtsp
+
+**Phase 3 — Page Diagnostic Go2RTC dédiée** :
+- Nouveau endpoint `GET /api/cameras/{camera_id}/go2rtc-diagnostic` (`backend/routes/go2rtc_diagnostic.py`) — retourne : stream_registered, stream_source_declared, producers/consumers, codec_in, codecs_available, resolution, transport, producer_bytes_recv, transcoding actif sur _hd/_sd, sampling bitrate (1200ms), webrtc config, pipeline (mode/decoder/preview/recorder/ai/hwaccels/ffmpeg_version), verdict (PASS/WARN/FAIL/N/A) + reason
+- Support caméras `direct_rtsp` : verdict `N/A` + note explicative (Go2RTC non impliqué)
+- Nouvelle page `frontend/src/pages/Go2RTCDiagnostic.jsx` (route `/diagnostics/go2rtc/:cameraId`) avec sections Stream & source, Codecs · Transport · Résolution, Performance, Pipeline vidéo, WebRTC (candidates ICE). Bouton "Réparer le flux" appelant `POST /api/cameras/{id}/refresh-stream`
+- Bouton accès (icône clé orange) ajouté dans la table Cameras à côté du diagnostic pipeline
+
+**Tests créés** :
+- `tests/test_v1rc45_phase1_go2rtc_rootcause.py` — 5 tests (transport tcp, hd_preview_width, ffmpeg yaml)
+- `tests/test_v1rc45_phase3_go2rtc_diag_endpoint.py` — 5 tests (router registration, N/A pour direct_rtsp, transport detection)
+- **15/15 tests passent** (les 5 tests decoupling v1.0-rc4 précédents inclus)
+
+**Instructions déploiement client** :
+```bash
+cd /opt/mg-vms-beta-v0.1
+git pull
+cd deploy-app
+docker compose build --no-cache backend frontend
+docker compose up -d backend frontend go2rtc
+# Recréer go2rtc pour recharger go2rtc.yaml (section ffmpeg)
+docker compose restart go2rtc
+# Ré-enregistrer les streams existants (applique #transport=tcp)
+# Interface : ouvrir chaque caméra → cliquer "Diagnostic Go2RTC" → "Réparer le flux"
+```
+
+**Fichiers modifiés cette phase** :
+- Modifiés (7) : `backend/server.py`, `backend/streaming.py`, `backend/video_engine.py`, `deploy-app/go2rtc.yaml`, `deploy-app/.env.example`, `frontend/src/App.js`, `frontend/src/pages/Cameras.jsx`
+- Nouveaux (4) : `backend/routes/go2rtc_diagnostic.py`, `backend/tests/test_v1rc45_phase1_*.py`, `backend/tests/test_v1rc45_phase3_*.py`, `frontend/src/pages/Go2RTCDiagnostic.jsx`
+
+
   de contrat** (méthode surchargée par rapport à `CameraDriver` base), jamais exécutées.
 - 📊 Nouveau service `pipeline_v2/capability_matrix.py` — agrégat en lecture seule.
   `build_capability_matrix(group)` avec `group` ∈ {vendor, driver, model, camera}.

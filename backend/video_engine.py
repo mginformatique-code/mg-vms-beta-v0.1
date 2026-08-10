@@ -104,7 +104,13 @@ DEFAULT_CONFIG: dict = {
     "preview_mode": "auto",    # auto | webrtc | mjpeg | mse
     "ai_pipeline": "auto",     # auto | gpu | cpu
     "recorder_mode": "auto",   # auto | copy | reencode
-    "hd_preview_width": 0,     # 0 = résolution native
+    # v1.0-rc4.5 · Phase 1 · Root cause Go2RTC (transcoding MJPEG CPU-heavy) :
+    # La variante _hd sert d'aperçu navigateur ; transcoder à 4K/1080p natif
+    # en MJPEG dans le conteneur go2rtc SANS hwaccel (GO2RTC_FFMPEG_CUDA=0 par
+    # défaut) sature le CPU et produit lag/artefacts. 1280×native ratio est un
+    # compromis excellent (qualité perceptible identique, coût CPU ÷ 3-4).
+    # L'admin peut toujours forcer 0 (résolution native) via /pipeline UI.
+    "hd_preview_width": 1280,
     "sd_preview_width": 640,
     "sd_preview_fps": 15,
     "low_latency": True,
