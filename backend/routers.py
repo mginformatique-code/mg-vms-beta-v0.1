@@ -127,6 +127,13 @@ class CameraInput(BaseModel):
     #                     pour le preview navigateur — pipeline IA découplé,
     #                     tourne même si Go2RTC est HS)
     stream_mode: str = "auto"
+    # v1.0-rc4 · Source vidéo pour la PREVIEW navigateur (indépendant de
+    # stream_mode qui, lui, concerne le pipeline IA backend) :
+    #   - "auto"    : go2rtc si disponible, sinon direct
+    #   - "go2rtc"  : preview via WebRTC/Go2RTC (fluide, ~200-500 ms)
+    #   - "direct"  : MJPEG multipart streamé par le backend depuis RTSP
+    #                 direct (bypass Go2RTC côté client ET serveur)
+    live_preview_source: str = "auto"
     allow_rtsp_override: bool = False  # créer même si le test RTSP échoue (mode ONVIF)
     lat: Optional[float] = None
     lng: Optional[float] = None

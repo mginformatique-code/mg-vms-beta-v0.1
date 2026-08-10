@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import api from "@/lib/api";
 import useDeviceCapabilities from "@/hooks/useDeviceCapabilities";
 import WebRTCPlayer from "@/components/WebRTCPlayer";
+import PreviewPlayer from "@/components/PreviewPlayer";
 import {
   Camera, Wifi, Video, Layers, Cpu, Volume2, Sun, Bell, Move3d, Wrench,
   ScanLine, RefreshCw, AlertCircle, CircleCheck, ChevronLeft, ChevronRight,
@@ -287,11 +288,64 @@ function OverviewTab({ info, caps, cameraId }) {
 }
 
 function LiveTab({ cameraId }) {
-  // v0.5.0.b · WebRTC intégré directement dans Camera Center (plus de renvoi ailleurs)
+  // v1.0-rc4 · Preview avec selector [ GO2RTC ] [ DIRECT ] par caméra
+  const [pref, setPref] = React.useState(null);
+  const [saving, setSaving] = React.useState(false);
+  const [reloadKey, setReloadKey] = React.useState(0);
+
+  React.useEffect(() => {
+    let alive = true;
+    api.get(`/cameras/${cameraId}`).then((r) => {
+      if (alive) setPref((r.data?.live_preview_source || "auto").toLowerCase());
+    }).catch(() => { if (alive) setPref("auto"); });
+    return () => { alive = false; };
+  }, [cameraId]);
+
+  const setSource = async (val) => {
+    setSaving(true);
+    try {
+      // PUT complet (le backend attend un CameraInput complet)
+      const { data: current } = await api.get(`/cameras/${cameraId}`);
+      const payload = { ...current, live_preview_source: val, allow_rtsp_override: true };
+      delete payload.id;
+      delete payload._id;
+      delete payload.password_hash;
+      await api.put(`/cameras/${cameraId}`, payload);
+      setPref(val);
+      setReloadKey((k) => k + 1);  // force remount du PreviewPlayer
+    } catch (e) {
+      // Silencieux — le player fera son fallback
+    } finally { setSaving(false); }
+  };
+
+  const btn = (val, label) => (
+    <button
+      key={val}
+      onClick={() => !saving && setSource(val)}
+      disabled={saving}
+      data-testid={`live-source-${val}`}
+      className={`text-[10px] mono uppercase tracking-wider px-2.5 py-1 border transition ${
+        pref === val
+          ? "bg-[#00E5FF]/15 border-[#00E5FF]/60 text-[#00E5FF]"
+          : "bg-secondary border-border text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {label}
+    </button>
+  );
+
   return (
-    <Card className="p-3" data-testid="cam-live">
+    <Card className="p-3 space-y-2" data-testid="cam-live">
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Source vidéo</div>
+        <div className="flex items-center gap-1">
+          {btn("go2rtc", "Go2RTC")}
+          {btn("direct", "Direct")}
+          {btn("auto", "Auto")}
+        </div>
+      </div>
       <div className="aspect-video bg-black">
-        <WebRTCPlayer cameraId={cameraId} />
+        <PreviewPlayer key={`${cameraId}-${reloadKey}`} cameraId={cameraId} className="w-full h-full" />
       </div>
     </Card>
   );

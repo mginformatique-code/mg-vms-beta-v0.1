@@ -34,6 +34,7 @@ from routes.dashboard import dashboard_router
 from routes.audit import audit_router
 from routes.users import users_router
 from routes.pipeline_diagnostic import pipeline_diag_router
+from routes.mjpeg_direct import mjpeg_direct_router
 from routes.public_status import public_router
 from routes.database_settings import database_router
 from routes.smart_zones import smart_zones_router
@@ -100,6 +101,7 @@ app.include_router(timeline_router)
 app.include_router(camera_control_router)
 app.include_router(devices_router)
 app.include_router(pipeline_diag_router)  # v1.0-rc4 · diagnostic pipeline vidéo multi-étages
+app.include_router(mjpeg_direct_router)  # v1.0-rc4 · MJPEG multipart DIRECT (bypass Go2RTC)
 app.include_router(vehicles_router)
 app.include_router(smart_search_router)
 app.include_router(discovery_router)
