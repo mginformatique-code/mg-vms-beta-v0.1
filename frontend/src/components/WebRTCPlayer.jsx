@@ -21,6 +21,7 @@ export default function WebRTCPlayer({ cameraId, className = "", muted = true,
 
   useEffect(() => {
     let cancelled = false;
+    let watchdog = null;
 
     const negotiate = async () => {
       // 1) Crée la PeerConnection avec un serveur STUN Google (gratuit, public)
@@ -46,13 +47,27 @@ export default function WebRTCPlayer({ cameraId, className = "", muted = true,
         if (cancelled) return;
         const s = pc.iceConnectionState;
         if (s === "connected" || s === "completed") {
+          if (watchdog) { clearTimeout(watchdog); watchdog = null; }
           setState("playing");
           onConnected?.();
         } else if (s === "failed" || s === "disconnected") {
+          if (watchdog) { clearTimeout(watchdog); watchdog = null; }
           setState("error");
           onError?.(`ICE state: ${s}`);
         }
       };
+
+      // Watchdog · v2.1 · si ICE ne complète pas en 10 s (UDP filtré en preview
+      // cloud, réseau restrictif…) → force le fallback via `onError`. Sans ça,
+      // le player reste bloqué sur « Négociation WebRTC… » indéfiniment.
+      watchdog = setTimeout(() => {
+        if (!cancelled && pc.iceConnectionState !== "connected"
+            && pc.iceConnectionState !== "completed") {
+          setState("error");
+          const s = pc.iceConnectionState;
+          onError?.(`WebRTC : SDP OK mais ICE=${s} (UDP filtré ? testez en LAN)`);
+        }
+      }, 10000);
 
       try {
         // 5) Créer offer local + attendre gathering ICE complet (trickle=false → simple)
@@ -99,6 +114,7 @@ export default function WebRTCPlayer({ cameraId, className = "", muted = true,
     negotiate();
     return () => {
       cancelled = true;
+      if (watchdog) { clearTimeout(watchdog); watchdog = null; }
       if (pcRef.current) {
         try { pcRef.current.close(); } catch { /* ignore */ }
         pcRef.current = null;

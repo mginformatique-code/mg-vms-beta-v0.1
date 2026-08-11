@@ -1,4 +1,10 @@
 streams:
+        cam_a9803ba7-a4da-43a0-8549-abd9563e7393:
+          - rtsp://admin:Rlwt29%23%2Bjpf@109.219.238.60:554/h264Preview_01_sub
+        cam_a9803ba7-a4da-43a0-8549-abd9563e7393_hd:
+          - ffmpeg:cam_a9803ba7-a4da-43a0-8549-abd9563e7393#video=mjpeg#low_latency
+        cam_a9803ba7-a4da-43a0-8549-abd9563e7393_sd:
+          - ffmpeg:cam_a9803ba7-a4da-43a0-8549-abd9563e7393#video=mjpeg#width=640#low_latency
   # Caméra démo 1 : mire H.264 réelle générée localement (validation du pipeline)
 
   # Caméra démo 2 : scène de rue réelle en boucle → IA YOLO + LAPI
