@@ -2,6 +2,59 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v1.0-rc4.6] — 2026-08 — Pipeline mode-aware direct_rtsp ↔ Go2RTC (root cause `Error opening input file cam_xxx`)
+
+Correctif architectural validé par diagnostic conjoint (HAR client + audit code).
+Le découplage volontaire direct_rtsp ↔ Go2RTC est CONSERVÉ — le bug était une
+incohérence de contrat : les endpoints vidéo/statut n'étaient pas mode-aware.
+
+### Fixed — Root cause Go2RTC 500 `Error opening input file cam_xxx`
+- Cause : `live_mjpeg()`, `frame_jpeg()` et `pipeline_webrtc_offer()` appelaient
+  `_ensure_variants_cached()` sans condition de mode → création de variantes
+  orphelines `cam_xxx_hd → ffmpeg:cam_xxx` dans Go2RTC alors que le flux de base
+  `cam_xxx` n'y existe pas pour une caméra `stream_mode=direct_rtsp` (exclusion
+  volontaire par `register_camera_stream`/`sync_all_streams` depuis v1.0-rc4).
+- `streaming.py::_is_direct_rtsp()` : helper mode-aware unique.
+- `streaming.py::_ensure_variants()` : garde défensive — return immédiat si
+  `direct_rtsp` (défense en profondeur, aucune variante ne peut plus être créée).
+- `streaming.py::live_mjpeg()` : mode-aware — en `direct_rtsp`, pont MJPEG
+  multipart via ffmpeg local (réutilise le générateur de `routes/mjpeg_direct.py`),
+  ZÉRO appel Go2RTC. **URL `/api/stream/{id}/live.mjpeg` inchangée → le mur vidéo
+  fonctionne sans modification frontend.** Header `X-Preview-Source: direct-ffmpeg`.
+- `streaming.py::frame_jpeg()` : mode-aware — frame depuis le worker frame_source
+  si actif (zéro session RTSP supplémentaire), sinon capture ffmpeg one-shot.
+- `streaming.py::_probe_status_once()` : en `direct_rtsp`, le statut est déterminé
+  par un probe TCP léger sur host:port RTSP — l'absence du stream dans Go2RTC
+  n'est PLUS JAMAIS interprétée comme offline (elle est normale dans ce mode).
+- `streaming.py::sync_all_streams()` : purge au démarrage des résidus Go2RTC
+  orphelins (`cam_xxx/_hd/_sd`) des caméras `direct_rtsp` (créés par l'ancien bug).
+- `routers.py::refresh_camera_stream()` : mode-aware — en `direct_rtsp`, "Réparer"
+  valide le RTSP par probe TCP + purge les résidus Go2RTC ; réponse explicite
+  `{"mode": "direct_rtsp", "go2rtc": "non utilisé", "rtsp_reachable": true|false}`.
+  (L'ancien code appelait `register_camera_stream(force=True)` qui skippait
+  silencieusement ce mode → bouton Réparer no-op mensonger.)
+- `routers.py::pipeline_webrtc_offer()` : refus propre HTTP 409 en `direct_rtsp`
+  AVANT tout appel Go2RTC (c'est ce endpoint, appelé par le mur vidéo qui tente
+  WebRTC en premier, qui créait les variantes orphelines) → le frontend bascule
+  automatiquement sur MJPEG via le fallback existant.
+- `routes/mjpeg_direct.py` : `_build_ffmpeg_cmd` accepte `max_width` (variante SD
+  640px faible bande passante) ; l'endpoint utilise le builder canonique
+  `_build_rtsp_url()` (credentials Fernet déchiffrés) au lieu de l'URL brute.
+
+### Protocole mur vidéo en direct_rtsp
+- MJPEG multipart HTTP (ffmpeg local → `<img>`), même endpoint qu'avant.
+- WebRTC reste exclusif au mode go2rtc (refus 409 propre en direct).
+
+### Tests
+- Nouveau : `tests/test_v1rc46_direct_rtsp_mode_aware.py` (10 tests) —
+  jamais `_ensure_variants` en direct, statut indépendant de Go2RTC (probe TCP),
+  refresh-stream mode-aware, WebRTC 409, non-régression du découplage rc4.
+- Fix flakiness : `test_v08rc_camera_health.py` (pattern `get_event_loop()` legacy
+  + client motor lié à un event loop fermé) → `asyncio.run` + client frais.
+- Validation e2e sur pod : caméra `direct_rtsp` réelle → frame.jpeg 200 (`direct-ffmpeg`),
+  live.mjpeg multipart OK, refresh-stream mode-aware, WebRTC 409, **zéro entrée
+  Go2RTC créée**, statut online via TCP. Suite 49/49 stable (×3 runs).
+
 ## [v1.0-rc4.5] — 2026-08 — Audit "Restore First" · Go2RTC · Cleanup UI · AppDebugPanel
 
 Session d'audit avec règle stricte "restore first, no new features". Chaque

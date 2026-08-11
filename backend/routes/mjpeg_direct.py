@@ -35,26 +35,33 @@ _SOI = b"\xff\xd8\xff"   # Start Of Image JPEG
 _EOI = b"\xff\xd9"       # End Of Image JPEG
 
 
-def _build_ffmpeg_cmd(rtsp_url: str, transport: str, target_fps: int, quality: int) -> list:
+def _build_ffmpeg_cmd(rtsp_url: str, transport: str, target_fps: int, quality: int,
+                       max_width: int = 0) -> list:
     """Construit la commande ffmpeg : RTSP → JPEGs consécutifs sur stdout.
 
     -q:v 2..8 (JPEG quality, plus petit = meilleur). Défaut 5 = équilibre.
     -r fps limite le débit de sortie pour ne pas saturer le réseau/navigateur.
     -an drop audio (économie CPU).
+    max_width > 0 → scale à cette largeur (variante SD faible bande passante).
     """
     quality = max(2, min(int(quality or 5), 15))
     fps = max(1, min(int(target_fps or 8), 15))  # 1-15 fps pour preview navigateur
-    return [
+    cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error",
         "-rtsp_transport", transport,
         "-i", rtsp_url,
         "-an",
         "-r", str(fps),
+    ]
+    if max_width and int(max_width) > 0:
+        cmd += ["-vf", f"scale={int(max_width)}:-2"]
+    cmd += [
         "-q:v", str(quality),
         "-f", "image2pipe",
         "-vcodec", "mjpeg",
         "pipe:1",
     ]
+    return cmd
 
 
 async def _mjpeg_stream_generator(cmd: list) -> AsyncGenerator[bytes, None]:
@@ -122,7 +129,11 @@ async def mjpeg_direct(
     if not cam:
         raise HTTPException(404, "Caméra introuvable")
 
-    rtsp_url = (cam.get("ai_rtsp_url") or cam.get("rtsp_url") or "").strip()
+    # v1.0-rc4.6 · Builder canonique : injecte les credentials déchiffrés (Fernet)
+    # dans l'URL RTSP — cohérent avec le reste du pipeline. ai_rtsp_url (sous-flux
+    # dédié, supposé complet) garde la priorité, comme dans ai_engine.
+    from streaming import _build_rtsp_url
+    rtsp_url = (cam.get("ai_rtsp_url") or "").strip() or _build_rtsp_url(cam)
     if not rtsp_url:
         raise HTTPException(
             400,

@@ -11,11 +11,18 @@ os.environ["TESTING"] = "1"
 class TestCameraHealthCompute:
     def test_returns_error_for_unknown_camera(self):
         import asyncio
-        from services.camera_health import compute_health
-        r = asyncio.get_event_loop().run_until_complete(compute_health("does-not-exist-999")) \
-            if not asyncio.get_event_loop().is_running() \
-            else asyncio.new_event_loop().run_until_complete(compute_health("does-not-exist-999"))
-        assert r.get("error") == "camera_not_found"
+        import motor.motor_asyncio
+
+        async def run():
+            # Client motor FRAIS lié au loop courant (le client module-level de
+            # database.py peut être lié à un event loop fermé par un test voisin)
+            import services.camera_health as ch
+            client = motor.motor_asyncio.AsyncIOMotorClient(os.environ["MONGO_URL"])
+            ch.db = client[os.environ["DB_NAME"]]
+            r = await ch.compute_health("does-not-exist-999")
+            assert r.get("error") == "camera_not_found"
+
+        asyncio.run(run())
 
     def test_band_thresholds(self):
         from services.camera_health import _band

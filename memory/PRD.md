@@ -23,7 +23,33 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 - **Équipe MG-VMS** : noyau petit et testable (~5000 lignes Python)
 - **Installateur terrain** : setup guidé 10–15 min, health dashboard clair
 
-### Session courante (Feb 2026) — v1.0-rc4.5 · Root cause + Blindage URLs relatives (P0)
+### Session courante (Aug 2026) — v1.0-rc4.6 · Pipeline mode-aware direct_rtsp ↔ Go2RTC (P0)
+
+**Root cause du 500 Go2RTC `Error opening input file cam_xxx`** (diagnostic validé
+avec le client via HAR + audit code) : incohérence de contrat mode-aware —
+`live_mjpeg()`, `frame_jpeg()` et `pipeline_webrtc_offer()` appelaient
+`_ensure_variants_cached()` sans condition, créant `cam_xxx_hd → ffmpeg:cam_xxx`
+dans Go2RTC alors que `cam_xxx` n'y existe pas en `stream_mode=direct_rtsp`
+(exclusion volontaire depuis rc4). `_probe_status_once()` marquait aussi ces
+caméras offline ("stream absent de go2rtc") et `refresh-stream` était un no-op.
+
+**Correctif rc4.6 (le découplage direct_rtsp ↔ Go2RTC est CONSERVÉ)** :
+- `streaming.py` : `_is_direct_rtsp()` · garde dans `_ensure_variants()` ·
+  `live_mjpeg` → pont MJPEG ffmpeg local (même URL, zéro Go2RTC, header
+  `X-Preview-Source: direct-ffmpeg`) · `frame_jpeg` → frame_source ou ffmpeg
+  one-shot · `_probe_status_once` → probe TCP RTSP (jamais Go2RTC) ·
+  `sync_all_streams` → purge des résidus Go2RTC orphelins au démarrage
+- `routers.py` : `refresh_camera_stream` mode-aware (probe TCP + purge, réponse
+  `{"mode":"direct_rtsp","go2rtc":"non utilisé"}`) · `pipeline_webrtc_offer`
+  → 409 immédiat en direct (le mur vidéo bascule sur MJPEG via fallback existant)
+- `routes/mjpeg_direct.py` : `max_width` (SD 640) + builder canonique `_build_rtsp_url`
+- Protocole mur vidéo en direct_rtsp : **MJPEG multipart HTTP** (ffmpeg → `<img>`),
+  WebRTC exclusif au mode go2rtc
+- Tests : `tests/test_v1rc46_direct_rtsp_mode_aware.py` (10 tests) + fix flakiness
+  `test_v08rc_camera_health.py`. Suite streaming 49/49 stable (×3). Validation e2e
+  complète sur pod (zéro entrée Go2RTC créée, statut online via TCP, mur vidéo OK).
+
+### Session (Feb 2026) — v1.0-rc4.5 · Root cause + Blindage URLs relatives (P0)
 
 **Root cause du crash post-login "Une erreur est survenue"** (validé par instrumentation DiagOverlay temporaire, retirée après diagnostic) :
 - **N'était PAS un crash React**, aucune ErrorBoundary déclenchée, aucun composant fautif

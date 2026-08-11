@@ -1010,7 +1010,26 @@ async def refresh_camera_stream(camera_id: str, user: dict = Depends(require_rol
     cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
     if not cam:
         raise HTTPException(404, "Caméra introuvable")
-    from streaming import register_camera_stream, _mask_url_password
+    from streaming import (register_camera_stream, unregister_camera_stream,
+                            _mask_url_password, _is_direct_rtsp, _camera_tcp_target, _tcp_check)
+    # v1.0-rc4.6 · Mode-aware : en direct_rtsp, Go2RTC n'est PAS utilisé (découplage
+    # volontaire). "Réparer" = valider le RTSP par probe TCP + purger d'éventuels
+    # résidus Go2RTC orphelins. Aucun register Go2RTC (l'ancien code prétendait
+    # réparer via register_camera_stream qui skippait silencieusement ce mode).
+    if _is_direct_rtsp(cam):
+        await unregister_camera_stream(camera_id,
+                                        caller=f"refresh-stream direct_rtsp user={user.get('email','?')}")
+        target = _camera_tcp_target(cam)
+        rtsp_reachable = None
+        if target:
+            rtsp_reachable = await asyncio.to_thread(_tcp_check, target[0], int(target[1]), 3.0)
+        await log_audit(user, "camera_stream_refreshed", cam.get("name", camera_id),
+                        f"mode=direct_rtsp (Go2RTC non utilisé) · RTSP joignable={rtsp_reachable} · "
+                        f"URL: {_mask_url_password(cam.get('rtsp_url',''))}")
+        return {"success": True, "camera_id": camera_id, "mode": "direct_rtsp",
+                "go2rtc": "non utilisé (stream_mode=direct_rtsp)",
+                "rtsp_reachable": rtsp_reachable,
+                "rtsp_url_masked": _mask_url_password(cam.get("rtsp_url", ""))}
     # force=True car c'est l'action explicite "Réparer" — l'utilisateur veut le DELETE+PUT
     ok = await register_camera_stream(cam, caller=f"refresh-stream user={user.get('email','?')}",
                                        force=True)
@@ -1374,8 +1393,15 @@ async def pipeline_webrtc_offer(camera_id: str, offer: WebRTCOfferInput,
     Le média (RTP DTLS-SRTP) est ensuite négocié en direct navigateur↔go2rtc
     via ICE — go2rtc utilise typiquement les ports 8555 (WebRTC) + un range UDP.
     """
-    from streaming import _stream_name, _authorize_camera, GO2RTC_URL, _ensure_variants_cached
-    await _authorize_camera(user, camera_id)
+    from streaming import _stream_name, _authorize_camera, GO2RTC_URL, _ensure_variants_cached, _is_direct_rtsp
+    cam = await _authorize_camera(user, camera_id)
+    # v1.0-rc4.6 · Mode-aware : WebRTC passe par Go2RTC — indisponible en direct_rtsp.
+    # Refus PROPRE et IMMÉDIAT, AVANT tout _ensure_variants_cached / appel Go2RTC
+    # (l'ancien code créait ici les variantes orphelines cam_xxx_hd → 500 Go2RTC).
+    # Le frontend bascule automatiquement sur le flux MJPEG (fallback existant).
+    if _is_direct_rtsp(cam):
+        raise HTTPException(409, "WebRTC indisponible en mode direct_rtsp — "
+                                  "le flux MJPEG direct (/api/stream/{id}/live.mjpeg) est utilisé")
     name = _stream_name(camera_id)
     # Vérifie que le flux source existe côté go2rtc (throttled)
     await _ensure_variants_cached(name)
