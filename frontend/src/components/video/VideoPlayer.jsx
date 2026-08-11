@@ -20,7 +20,7 @@ export function pipelineOf(camera) {
   return legacy === "direct_rtsp" ? "direct_rtsp" : "mediamtx";
 }
 
-export default function VideoPlayer({ camera, className = "", dataTestId = "video-player" }) {
+export default function VideoPlayer({ camera, hd = false, className = "", dataTestId = "video-player" }) {
   const [error, setError] = useState(null);
   const [retryKey, setRetryKey] = useState(0);
   const pipeline = pipelineOf(camera);
@@ -32,7 +32,8 @@ export default function VideoPlayer({ camera, className = "", dataTestId = "vide
   }
 
   if (pipeline === "go2rtc") {
-    return <Go2RTCPlayer key={`${camera.id}-${retryKey}`} cameraId={camera.id}
+    return <Go2RTCPlayer key={`${camera.id}-${hd ? "hd" : "sd"}-${retryKey}`}
+                          cameraId={camera.id} hd={hd}
                           className={className} dataTestId={dataTestId} />;
   }
 

@@ -8,7 +8,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL || ""}/api`;
  * MJPEG proxifié go2rtc (/api/stream/{id}/live.mjpeg) — les deux chemins
  * passent par go2rtc, cohérent avec le pipeline choisi.
  */
-export default function Go2RTCPlayer({ cameraId, className = "", dataTestId = "go2rtc-player" }) {
+export default function Go2RTCPlayer({ cameraId, hd = false, className = "", dataTestId = "go2rtc-player" }) {
   const [useMjpeg, setUseMjpeg] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const retryTimer = useRef(null);
@@ -21,8 +21,9 @@ export default function Go2RTCPlayer({ cameraId, className = "", dataTestId = "g
     return <WebRTCPlayer cameraId={cameraId} className={className} dataTestId={dataTestId}
                           onError={() => setUseMjpeg(true)} />;
   }
+  const src = `${API}/stream/${cameraId}/live.mjpeg?token=${encodeURIComponent(token)}&hd=${hd ? 1 : 0}&r=${reloadKey}`;
   return (
-    <img src={`${API}/stream/${cameraId}/live.mjpeg?token=${encodeURIComponent(token)}&r=${reloadKey}`}
+    <img src={src}
          alt="" className={`object-contain bg-black ${className}`} data-testid={dataTestId}
          onError={() => {
            if (retryTimer.current) clearTimeout(retryTimer.current);

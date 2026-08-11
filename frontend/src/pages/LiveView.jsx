@@ -94,7 +94,7 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
         <>
           {/* Player TOUJOURS monté (même si offline) — évite le remount destructeur.
              video-pipeline-v2 : dispatch strict par stream_pipeline. */}
-          <VideoPlayer camera={cam} className="w-full h-full" dataTestId="wall-player" />
+          <VideoPlayer camera={cam} hd={hd} className="w-full h-full" dataTestId="wall-player" />
           {cam?.detect_enabled && <OverlayCanvas cam={cam} boxes={boxes} showOverlay={showOverlay} />}
           {/* Overlay No Signal superposé — le player reste monté en dessous */}
           {!online && (
