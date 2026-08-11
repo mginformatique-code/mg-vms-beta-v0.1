@@ -114,6 +114,51 @@ modification a été justifiée par un rapport de root cause avant application.
 - Endpoint backend `go2rtc-diagnostic` créé mais **aucune UI de production**
   ne l'expose — conservé pour audit via curl côté serveur uniquement.
 
+### Fixed — Camera Center crash + redirect /login intempestif (fin de cycle)
+- Cause #1 : `frontend/src/lib/api.js` `CRITICAL_PATHS` incluait `/cameras`
+  qui matchait `/cameras/{id}` via `startsWith` → une 401 sur consultation
+  détail caméra + échec refresh JWT → redirect `/login` intempestif sur
+  Camera Center.
+- Cause #2 : `frontend/src/components/SessionExpiryWatcher.jsx` lisait
+  `localStorage.getItem("access_token")` alors que l'app stocke le JWT
+  sous la clé `mg_token` → watcher silencieux en permanence (bug latent).
+- Fix : `CRITICAL_PATHS` restreint à `["/auth/me"]` uniquement — seul
+  l'endpoint qui valide vraiment la session déclenche redirect ; toutes
+  les autres 401 propagent une erreur locale sans détruire la session.
+- Fix : `SessionExpiryWatcher` lit désormais la clé correcte `mg_token`.
+
+### Added — Classification granulaire erreurs ONVIF (fini "Unknown error")
+- Nouvelle exception `DeviceLockedError(code="device_locked")` dans
+  `backend/drivers/exceptions.py` pour la protection anti-brute-force
+  côté caméra (mappage HTTP 423 Locked).
+- Nouveau helper `_classify_onvif_exception()` dans
+  `backend/drivers/onvif_driver.py` — typage précis basé sur :
+  (1) types d'exceptions zeep (Fault, TransportError),
+  (2) attributs `status_code` HTTP,
+  (3) patterns robustes multi-langue (locked/timeout/refused/DNS/...).
+  Priorité au "locked" avant "401" (les messages caméra combinent souvent
+  les deux). Fallback typé sur `DeviceConnectionError` — plus jamais un
+  `driver_error` générique.
+- Frontend : nouvelle table `ERROR_LABELS` dans
+  `frontend/src/hooks/useDeviceCapabilities.js` — 8 codes d'erreur backend
+  mappés vers messages français ciblés (`authentication_failed`,
+  `device_locked`, `device_unreachable`, `command_timeout`,
+  `camera_missing_ip`, `camera_not_found`, `unsupported_capability`,
+  `no_driver_available`) exposés via `error.label`.
+- `CameraCenter.jsx` : affichage enrichi avec label ciblé + code d'erreur
+  + HTTP status + guidance conditionnelle (jamais de retry auto sur 401,
+  attente conseillée sur device_locked).
+- 10 tests unitaires dans `test_v1rc45_onvif_error_classification.py`
+  validant chaque cas connu (401, 403, locked, timeout, refused, DNS,
+  fallback inconnu, mapping HTTP 423, cohérence frontend↔backend).
+
+### Not touched (correction) — respect strict du feature freeze (bis)
+- Aucun retry auto ajouté sur erreurs ONVIF.
+- Aucune modification du flux d'authentification MG-VMS.
+- Une 401 ONVIF ne déclenchera JAMAIS de logout MG-VMS (indépendance
+  totale entre les deux systèmes d'authentification, confirmée par les
+  rapports terrain axios).
+
 ---
 
 
