@@ -53,7 +53,7 @@ async def video_mjpeg(camera_id: str, request: Request):
     if pipeline == "mediamtx":
         source = p_mediamtx.rtsp_read_url(camera_id)
     else:
-        source = camera_source_url(cam)
+        source = camera_source_url(cam, pipeline=pipeline)
         if not source.lower().startswith("rtsp://"):
             raise HTTPException(502, "Aucune URL RTSP valide pour cette caméra")
     broker = p_mjpeg.ensure_broker(camera_id, source)

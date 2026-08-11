@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Optional
 
 from drivers import (
@@ -22,6 +23,14 @@ from drivers import (
 )
 
 logger = logging.getLogger("services.camera_device")
+
+
+def _host_from_rtsp(url: str) -> Optional[str]:
+    """Extrait l'hôte d'une URL RTSP (utilisé comme fallback d'IP ONVIF)."""
+    if not url:
+        return None
+    m = re.match(r"^rtsps?://(?:[^@/]*@)?([^:/?#]+)", url, re.IGNORECASE)
+    return m.group(1) if m else None
 
 
 class CameraDeviceService:
@@ -113,10 +122,17 @@ class CameraDeviceService:
         if not cam:
             raise CameraDriverError(f"Caméra {cam_id} introuvable", code="camera_not_found")
         if not cam.get("ip") and not cam.get("host"):
-            raise CameraDriverError(
-                f"Caméra {cam_id} sans IP configurée",
-                code="camera_missing_ip",
-            )
+            # Fallback : extraire l'hôte de rtsp_url (utile quand la caméra est
+            # uniquement joignable via URL, ex. NAT/domaine). Le driver ONVIF
+            # exige un host — on prend celui de l'URL RTSP à défaut.
+            ip_from_rtsp = _host_from_rtsp(cam.get("rtsp_url") or "")
+            if ip_from_rtsp:
+                cam["ip"] = ip_from_rtsp
+            else:
+                raise CameraDriverError(
+                    f"Caméra {cam_id} sans IP configurée",
+                    code="camera_missing_ip",
+                )
         # Normalisation clés
         cam["ip"] = cam.get("ip") or cam.get("host")
         return cam

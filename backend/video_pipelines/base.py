@@ -25,13 +25,29 @@ def resolve_pipeline(cam: dict) -> str:
     return _LEGACY_MAP.get(legacy, DEFAULT_PIPELINE)
 
 
-def camera_source_url(cam: dict) -> str:
+def camera_source_url(cam: dict, pipeline: Optional[str] = None) -> str:
     """URL RTSP source de la caméra (credentials injectés, jamais exposée au frontend).
-    Les caméras démo sont servies par le relais RTSP go2rtc legacy (mires locales)."""
+
+    Si un `pipeline` est précisé, la surcharge dédiée est utilisée si renseignée :
+        - "direct_rtsp" → cam["direct_rtsp_url"]
+        - "mjpeg"       → cam["mjpeg_source_url"]
+        - "mediamtx"    → cam["mediamtx_source_url"]
+    Fallback : `rtsp_url` (avec credentials injectés via streaming._build_rtsp_url).
+    Les caméras démo sont servies par le relais RTSP go2rtc legacy (mires locales).
+    """
     import os
     cam_id = cam.get("id", "")
     if cam_id.startswith("demo-") or cam_id.startswith("demo_"):
         return f"{os.environ.get('GO2RTC_RTSP', 'rtsp://localhost:8554')}/cam_{cam_id}"
+    override_field = {
+        "direct_rtsp": "direct_rtsp_url",
+        "mjpeg": "mjpeg_source_url",
+        "mediamtx": "mediamtx_source_url",
+    }.get((pipeline or "").lower())
+    if override_field:
+        override = (cam.get(override_field) or "").strip()
+        if override.lower().startswith(("rtsp://", "rtsps://")):
+            return override
     from streaming import _build_rtsp_url
     return _build_rtsp_url(cam)
 

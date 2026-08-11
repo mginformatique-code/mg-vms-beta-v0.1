@@ -70,7 +70,11 @@ export default function WHEPPlayer({ cameraId, className = "", dataTestId = "whe
         watchdog = setTimeout(() => {
           if (!cancelled && pc.connectionState !== "connected") {
             setState("error");
-            onError?.("WebRTC : négociation OK mais média non connecté (ICE/UDP bloqué ?)");
+            const ice = pc.iceConnectionState;
+            const hint = (ice === "checking" || ice === "new" || ice === "disconnected")
+              ? "ICE bloqué (UDP sortant filtré ?). En preview cloud, l'UDP peut ne pas être routable — retestez sur le réseau local (LAN) de la caméra."
+              : `ICE=${ice}`;
+            onError?.(`WebRTC : SDP OK mais média non connecté · ${hint}`);
           }
         }, 10000);
       } catch (e) {

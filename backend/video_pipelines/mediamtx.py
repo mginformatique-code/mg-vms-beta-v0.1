@@ -56,7 +56,7 @@ def rtsp_read_url(camera_id: str) -> str:
 
 def _desired_conf(cam: dict) -> dict:
     return {
-        "source": camera_source_url(cam),
+        "source": camera_source_url(cam, pipeline="mediamtx"),
         "rtspTransport": "tcp",
         "sourceOnDemand": False,
     }

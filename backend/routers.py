@@ -102,6 +102,17 @@ class CameraInput(BaseModel):
     # crée alors un path séparé `camera/{id}_web` consommé UNIQUEMENT par le
     # navigateur. Le flux natif reste intact (recorder, direct, IA).
     webrtc_rtsp_url: str = ""
+    # video-pipeline-v2.1 · URLs RTSP par pipeline (optionnelles, surchargent
+    # `rtsp_url`). Permet une caméra multi-flux (ex. Reolink RLC-81MA : main HD
+    # / sub SD / telephoto), un flux distinct par pipeline. Vide → fallback rtsp_url.
+    #
+    # ⚠ go2rtc ne sait PAS transcoder H265→MJPEG (limitation structurelle
+    # confirmée : « codecs not matched: video:H265 => video:JPEG »). Il faut
+    # donc lui passer un flux H264 (typiquement le sub-stream de la caméra).
+    direct_rtsp_url: str = ""
+    mjpeg_source_url: str = ""
+    mediamtx_source_url: str = ""
+    go2rtc_source_url: str = ""
     username: str = ""
     password: str = ""
     # Champs profil (mode ONVIF)

@@ -985,3 +985,49 @@ Prioritisé par ROI décroissant (détails dans le rapport v0.8-rc1) :
 
 ## v1.0-rc4.2 · install.sh (2026-06)
 - deploy-app/install.sh : pull GitHub + 26 validations pré-vol (Dockerfiles/compose/requirements×3/yarn.lock sync) + mkdir /mnt/storage + .env + build/up + attente healthchecks. Options --no-pull/--check-only/--no-cache. Testé nominal + négatif.
+
+### Session (Aug 2026) — v2.1 · nettoyage Reolink 100 % réel + go2rtc réparé + MJPEG anti-stutter
+
+**Contexte client** : « go2rtc KO, MJPEG saute, delete toutes les caméras test/sandbox
+et laisse UNIQUEMENT la Reolink avec les 3 flux différents (mjpeg + go2rtc + mediamtx). »
+
+**Nettoyage** :
+- Suppression des 7 caméras non-Reolink (2 démos + 3 test/sandbox + 3 E2E)
+- Blocage du re-seed automatique des démos au démarrage
+  (`streaming._ensure_demo_camera` : skip si au moins 1 caméra réelle est en base
+  ou si `MGVMS_SEED_DEMOS=false`)
+- État base final : 1 caméra REOLINK RLC-81MA (test réel), pipeline=mediamtx
+
+**video-pipeline-v2.1 · 4 URLs par pipeline** (multi-flux par caméra) :
+- Nouveaux champs `direct_rtsp_url`, `mjpeg_source_url`, `mediamtx_source_url`, `go2rtc_source_url`
+- Chaque pipeline lit son URL dédiée, fallback rtsp_url si vide
+- `base.camera_source_url(cam, pipeline)` : dispatch pipeline-aware
+- Formulaire caméra : 4 champs URL supplémentaires + hint « H264 obligatoire » sur go2rtc
+
+**Bugs corrigés** :
+- 🔴 ONVIF `camera_missing_ip` HTTP 400 → IP renseignée + auto-extract depuis rtsp_url
+  (`services/camera_device_service.py::_host_from_rtsp`) si `ip` vide
+- 🔴 go2rtc `streams: Get "tcp": unsupported protocol scheme ""` → root cause :
+  fragments `#transport=tcp#timeout=15` mal parsés par go2rtc (interprétés comme média
+  inexistant « tcp »). Correctif : URL RTSP brute (transport TCP par défaut go2rtc)
+- 🔴 go2rtc `codecs not matched: video:H265 => video:JPEG` → limitation structurelle
+  go2rtc (pas de transcode H265→MJPEG natif). Correctif : `go2rtc_source_url` renseigne
+  le sub-stream H264, prouvé fonctionnel (177 frames en 25s sur la Reolink)
+- 🟠 MJPEG « saute » → FPS 10→20 (matche 20 fps natif Reolink), retrait du `-r` forcé
+  (créait un stutter visible), filtre `fps=` doux, quality JPEG 6→5, résultat mesuré :
+  20.2 fps en flux réel (139 frames en 12s)
+- 🟠 WHEP watchdog UI : message ICE explicite en préview cloud
+  (« ICE bloqué (UDP sortant filtré ?) — retestez sur le réseau local »)
+
+**Validation temps réel sur la Reolink (109.219.238.60 via NAT)** :
+| Pipeline  | Source RTSP                              | Résultat mesuré |
+|-----------|------------------------------------------|-----------------|
+| MediaMTX  | main H265 (+ `_web` H264 pour WHEP)      | ready=True, tracks H265+H264, 9.7 Mo ingérés, WHEP 201 answer H264 |
+| MJPEG     | sub H264 (broker ffmpeg partagé)         | **20.2 fps · 139 frames en 12s** (fluide) |
+| go2rtc    | sub H264 (transcode MJPEG côté go2rtc)   | **177 frames en 25s** ✅ |
+| direct_rtsp | main H265 (VLC/NVR compatible)         | probe DESCRIBE OK (hevc 3840×2160@20) |
+
+**Tests pytest** : 7 passed, 6 skipped (mire démo indisponible = attendu), 0 failed.
+
+**⚠ Rappel client** : les ports NAT 554/8000 restent ouverts pendant le test réel.
+Les 4 URLs restent persistées côté DB — bascule instantanée entre pipelines via l'UI.

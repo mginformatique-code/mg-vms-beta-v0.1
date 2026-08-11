@@ -30,9 +30,9 @@ _SOI = b"\xff\xd8\xff"
 _EOI = b"\xff\xd9"
 BOUNDARY = "mgvms-mjpeg-v2"
 
-_MAX_FPS = int(os.environ.get("MGVMS_MJPEG_FPS", "10"))
+_MAX_FPS = int(os.environ.get("MGVMS_MJPEG_FPS", "20"))
 _MAX_WIDTH = int(os.environ.get("MGVMS_MJPEG_MAX_WIDTH", "1280"))
-_JPEG_QUALITY = int(os.environ.get("MGVMS_MJPEG_QUALITY", "6"))   # 2..15, petit = mieux
+_JPEG_QUALITY = int(os.environ.get("MGVMS_MJPEG_QUALITY", "5"))   # 2..15, petit = mieux
 _RTSP_TIMEOUT_SEC = 15
 _WATCHDOG_NO_FRAME_SEC = 20.0      # aucune frame → restart ffmpeg
 _IDLE_STOP_SEC = 30.0              # 0 viewer pendant 30 s → arrêt du broker
@@ -41,15 +41,18 @@ _BACKOFF_MAX = 10.0
 
 
 def _ffmpeg_cmd(source_url: str) -> list[str]:
+    # v2.1 · anti-stutter : on garde la cadence native de la caméra (pas de `-r` forcé),
+    # buffers réduits, keyframes autorisées → l'affichage suit le vrai rythme.
     return [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
         "-rtsp_transport", "tcp",
         "-timeout", str(_RTSP_TIMEOUT_SEC * 1_000_000),   # µs (options RTSP)
-        "-fflags", "nobuffer", "-flags", "low_delay",
+        "-fflags", "nobuffer+discardcorrupt", "-flags", "low_delay",
+        "-use_wallclock_as_timestamps", "1",
         "-i", source_url,
         "-an", "-sn",
-        "-r", str(_MAX_FPS),
-        "-vf", f"scale=min({_MAX_WIDTH}\\,iw):-2",
+        "-vsync", "passthrough",
+        "-vf", f"fps=fps={_MAX_FPS}:round=near,scale=min({_MAX_WIDTH}\\,iw):-2",
         "-q:v", str(_JPEG_QUALITY),
         "-f", "image2pipe", "-vcodec", "mjpeg",
         "pipe:1",

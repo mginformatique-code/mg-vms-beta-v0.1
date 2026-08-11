@@ -22,6 +22,7 @@ const EMPTY_FORM = {
   record_mode: "continuous", storage_pool_id: "", storage_max_size_gb: 0,
   rtsp_transport: "tcp", preferred_codec: "auto", stream_mode: "direct_rtsp",
   stream_pipeline: "mediamtx", webrtc_rtsp_url: "",
+  direct_rtsp_url: "", mjpeg_source_url: "", mediamtx_source_url: "", go2rtc_source_url: "",
   // Assistant RTSP
   wiz_brand: "", wiz_model_idx: 0, wiz_stream: "main", wiz_channel: 1,
 };
@@ -81,6 +82,10 @@ export default function Cameras() {
       stream_mode: c.stream_mode || "auto",
       stream_pipeline: c.stream_pipeline || "mediamtx",
       webrtc_rtsp_url: c.webrtc_rtsp_url || "",
+      direct_rtsp_url: c.direct_rtsp_url || "",
+      mjpeg_source_url: c.mjpeg_source_url || "",
+      mediamtx_source_url: c.mediamtx_source_url || "",
+      go2rtc_source_url: c.go2rtc_source_url || "",
     });
     setConnCheck(null); setProfiles([]); setOpen(true);
     // Charge assignation de stockage existante
@@ -609,6 +614,69 @@ export default function Cameras() {
                     </p>
                   </div>
                 )}
+                {/* video-pipeline-v2.1 · surcharges d'URL par pipeline (multi-flux) */}
+                <div className="mt-4 border-t border-border pt-3 space-y-3" data-testid="pipeline-urls-block">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    URLs RTSP par pipeline <span className="normal-case text-muted-foreground/70">— optionnel, vide = utilise l&apos;URL principale ci-dessus</span>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                      URL Direct RTSP (ex. flux principal HD)
+                    </label>
+                    <input
+                      value={form.direct_rtsp_url}
+                      onChange={(e) => setForm({ ...form, direct_rtsp_url: e.target.value })}
+                      placeholder="rtsp://user:pass@host:554/h264Preview_01_main"
+                      className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
+                      data-testid="direct-rtsp-url-input"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                      URL Source MJPEG (ex. sub-stream SD)
+                    </label>
+                    <input
+                      value={form.mjpeg_source_url}
+                      onChange={(e) => setForm({ ...form, mjpeg_source_url: e.target.value })}
+                      placeholder="rtsp://user:pass@host:554/h264Preview_01_sub"
+                      className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
+                      data-testid="mjpeg-source-url-input"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                      URL Source MediaMTX (ex. flux téléobjectif / canal 2)
+                    </label>
+                    <input
+                      value={form.mediamtx_source_url}
+                      onChange={(e) => setForm({ ...form, mediamtx_source_url: e.target.value })}
+                      placeholder="rtsp://user:pass@host:554/h264Preview_02_main"
+                      className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
+                      data-testid="mediamtx-source-url-input"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                      URL Source go2rtc (H264 obligatoire)
+                    </label>
+                    <input
+                      value={form.go2rtc_source_url}
+                      onChange={(e) => setForm({ ...form, go2rtc_source_url: e.target.value })}
+                      placeholder="rtsp://user:pass@host:554/h264Preview_01_sub (H264 !)"
+                      className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
+                      data-testid="go2rtc-source-url-input"
+                    />
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      ⚠ go2rtc ne convertit pas H265 → MJPEG. Renseignez impérativement un flux H264
+                      (typiquement le sub-stream) sinon les aperçus MJPEG resteront vides.
+                    </p>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    Pour une caméra multi-flux (ex. Reolink RLC-81MA : main / sub / telephoto), chaque pipeline
+                    peut consommer un flux distinct. L&apos;URL principale sert de valeur par défaut pour les
+                    pipelines sans surcharge.
+                  </p>
+                </div>
               </div>
             </div>
 

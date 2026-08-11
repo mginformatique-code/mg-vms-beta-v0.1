@@ -215,7 +215,14 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
     if (cam.get("stream_mode") or "auto").lower() == "direct_rtsp":
         logger.info("register_camera_stream: skip %s (stream_mode=direct_rtsp)", cam.get("id"))
         return True
-    rtsp_url = _build_rtsp_url(cam)
+    # video-pipeline-v2.1 · URL RTSP dédiée go2rtc (surcharge de rtsp_url).
+    # ⚠ go2rtc ne transcode PAS H265→MJPEG : il FAUT un flux H264 en source.
+    # Fallback : rtsp_url (avec credentials injectés).
+    go2rtc_override = (cam.get("go2rtc_source_url") or "").strip()
+    if go2rtc_override.lower().startswith("rtsp://"):
+        rtsp_url = go2rtc_override
+    else:
+        rtsp_url = _build_rtsp_url(cam)
     if not rtsp_url.lower().startswith(("rtsp://", "rtmp://", "http://", "https://")):
         return False
     name = _stream_name(cam["id"])
@@ -230,10 +237,12 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
     # Syntaxe Go2RTC : `rtsp://user:pass@host:port/path#transport=tcp#timeout=15`
     # Le fragment `#...` est parsé par Go2RTC comme paramètres de source, JAMAIS
     # transmis à la caméra elle-même. Aucun impact ONVIF/RTSP protocol level.
-    if rtsp_url.lower().startswith("rtsp://") and "#transport=" not in rtsp_url:
-        rtsp_source = f"{rtsp_url}#transport=tcp#timeout=15"
-    else:
-        rtsp_source = rtsp_url
+    # v2.1 · Fix critique : go2rtc n'accepte PAS les fragments `#transport=tcp#timeout=15`.
+    # Il parse chaque `#xxx` comme un média à extraire → erreur
+    # `streams: Get "tcp": unsupported protocol scheme ""`. Le transport TCP est
+    # négocié automatiquement par go2rtc (TCP puis UDP fallback), donc on passe
+    # l'URL RTSP brute sans suffixe magique.
+    rtsp_source = rtsp_url
 
     # Résolution du pipeline effectif (auto/GPU/CPU) — construit les filtres ffmpeg optimisés
     try:
@@ -545,7 +554,18 @@ async def reconcile_streams_with_go2rtc() -> dict:
 
 
 async def _ensure_demo_camera() -> None:
-    """Caméras de démonstration : vrais flux H.264 générés localement (pipeline réel)."""
+    """Caméras de démonstration : vrais flux H.264 générés localement (pipeline réel).
+
+    Skip conditions :
+        - MGVMS_SEED_DEMOS=false → jamais de démos
+        - au moins une caméra réelle en base (non-démo) → on ne re-sème pas les démos
+          (le client a demandé un setup propre avec sa vraie caméra uniquement)
+    """
+    if (os.environ.get("MGVMS_SEED_DEMOS", "auto") or "").lower() in ("false", "0", "no"):
+        return
+    real_count = await db.cameras.count_documents({"id": {"$nin": list(DEMO_IDS)}})
+    if real_count > 0:
+        return
     site = await db.sites.find_one({}, {"_id": 0})
     if not site:
         return

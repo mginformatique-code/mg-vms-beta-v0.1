@@ -20,6 +20,7 @@ authentifiée : il fait partie de la checklist LAN (192.168.1.51).
 import asyncio
 import os
 import socket
+import subprocess
 import sys
 import time
 import uuid
@@ -27,6 +28,30 @@ import uuid
 import pytest
 
 DEMO_RTSP = "rtsp://127.0.0.1:8554/cam_demo-cam-001"   # mire locale go2rtc (source RTSP réelle)
+
+
+def _demo_stream_available() -> bool:
+    """Vérifie que la mire démo go2rtc est disponible (skip élégant sinon).
+
+    Le seed démo peut être désactivé (MGVMS_SEED_DEMOS=false ou caméra réelle en
+    base) → les tests d'intégration ci-dessous sont skippés proprement plutôt
+    que d'échouer avec un DESCRIBE 404 non informatif.
+    """
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-rtsp_transport", "tcp",
+                            "-select_streams", "v:0", "-show_entries",
+                            "stream=codec_name", "-of", "csv=p=0", DEMO_RTSP],
+                           capture_output=True, timeout=5)
+        return r.returncode == 0 and bool((r.stdout or b"").strip())
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+demo_stream = pytest.mark.skipif(
+    not _demo_stream_available(),
+    reason="mire démo go2rtc indisponible (MGVMS_SEED_DEMOS=false ou caméra réelle "
+           "en base) — tests d'intégration RTSP skippés",
+)
 
 
 def _fresh_motor_client():
@@ -46,6 +71,7 @@ def _cam(pipeline: str, rtsp_url: str = DEMO_RTSP) -> dict:
 
 
 # ── 1. RTSP valide → direct_rtsp online (probe réel DESCRIBE) ────────────────
+@demo_stream
 def test_direct_rtsp_valid_source_online():
     async def run():
         _fresh_motor_client()
@@ -100,6 +126,7 @@ def test_camera_back_online():
 
 
 # ── 6. pipeline MJPEG : frames réelles, FPS, statut ──────────────────────────
+@demo_stream
 def test_mjpeg_broker_produces_frames():
     async def run():
         from video_pipelines import mjpeg as p
@@ -119,6 +146,7 @@ def test_mjpeg_broker_produces_frames():
 
 
 # ── 9. plusieurs viewers : 1 SEUL ffmpeg partagé, fraîcheur pour chacun ──────
+@demo_stream
 def test_mjpeg_multiple_viewers_share_one_ffmpeg():
     async def run():
         from video_pipelines import mjpeg as p
@@ -145,6 +173,7 @@ def test_mjpeg_multiple_viewers_share_one_ffmpeg():
 
 
 # ── 5. reconnexion après coupure : ffmpeg tué → frames de nouveau produites ──
+@demo_stream
 def test_mjpeg_reconnect_after_kill():
     async def run():
         from video_pipelines import mjpeg as p
@@ -167,6 +196,7 @@ def test_mjpeg_reconnect_after_kill():
 
 
 # ── 7. pipeline MediaMTX : path dynamique + statut online ────────────────────
+@demo_stream
 def test_mediamtx_path_and_status():
     async def run():
         from video_pipelines import mediamtx as p
@@ -190,6 +220,7 @@ def test_mediamtx_path_and_status():
 
 
 # ── 8. MediaMTX WebRTC : négociation WHEP officielle ─────────────────────────
+@demo_stream
 def test_mediamtx_whep_exchange():
     async def run():
         from video_pipelines import mediamtx as p

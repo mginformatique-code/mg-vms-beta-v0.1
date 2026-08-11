@@ -28,13 +28,13 @@ _probe_cache: dict[str, tuple[float, dict]] = {}
 
 
 def masked_url(cam: dict) -> str:
-    url = camera_source_url(cam)
+    url = camera_source_url(cam, pipeline="direct_rtsp")
     return re.sub(r"(rtsp://[^:@/]+):([^@/]+)@", r"\1:******@", url, count=1,
                   flags=re.IGNORECASE)
 
 
 def tcp_target(cam: dict) -> Optional[tuple]:
-    url = camera_source_url(cam)
+    url = camera_source_url(cam, pipeline="direct_rtsp")
     m = re.match(r"^rtsp://(?:[^@/]*@)?([^:/?#]+)(?::(\d+))?", url, re.IGNORECASE)
     return (m.group(1), int(m.group(2) or 554)) if m else None
 
@@ -90,7 +90,7 @@ async def probe(cam: dict, *, use_cache: bool = True) -> dict:
         hit = _probe_cache.get(cam_id)
         if hit and now - hit[0] < _PROBE_TTL:
             return hit[1]
-    url = camera_source_url(cam)
+    url = camera_source_url(cam, pipeline="direct_rtsp")
     if not url.lower().startswith("rtsp://"):
         result = {"available": False, "connect_ms": None,
                   "error": "aucune URL RTSP configurée"}
