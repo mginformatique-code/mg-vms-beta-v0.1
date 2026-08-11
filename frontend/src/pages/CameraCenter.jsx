@@ -353,7 +353,7 @@ function LiveTab({ cameraId }) {
   );
 
   const stateColor = vs?.status === "online" ? "text-[#00E676]" : "text-[#FF3333]";
-  const PIPELINE_LABEL = { mediamtx: "MediaMTX", mjpeg: "MJPEG", direct_rtsp: "Direct RTSP" };
+  const PIPELINE_LABEL = { mediamtx: "MediaMTX", mjpeg: "MJPEG", direct_rtsp: "Direct RTSP", go2rtc: "go2rtc (legacy)" };
   return (
     <Card className="p-3 space-y-2" data-testid="cam-live">
       <div className="flex items-center justify-between">
@@ -362,6 +362,7 @@ function LiveTab({ cameraId }) {
           {btn("direct_rtsp", "Direct RTSP")}
           {btn("mjpeg", "MJPEG")}
           {btn("mediamtx", "MediaMTX")}
+          {btn("go2rtc", "go2rtc")}
         </div>
       </div>
       <div className="flex items-center gap-3 text-[10px] mono border border-border px-2 py-1" data-testid="pipeline-status-band">

@@ -79,8 +79,11 @@ async def _start_ffmpeg(cam: dict) -> None:
     else:
         from video_pipelines import mediamtx as p_mediamtx
         from video_pipelines.base import camera_source_url, resolve_pipeline
-        if resolve_pipeline(cam) == "mediamtx":
+        pipeline = resolve_pipeline(cam)
+        if pipeline == "mediamtx":
             src = p_mediamtx.rtsp_read_url(camera_id)
+        elif pipeline == "go2rtc":
+            src = f"{GO2RTC_RTSP}/cam_{camera_id}"
         else:
             src = camera_source_url(cam)
     cmd = [

@@ -23,7 +23,21 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 - **Équipe MG-VMS** : noyau petit et testable (~5000 lignes Python)
 - **Installateur terrain** : setup guidé 10–15 min, health dashboard clair
 
-### Session courante (Aug 2026) — v2.0-video · REFONTE couche vidéo (video-pipeline-v2)
+### Session courante (Aug 2026) — v2.0.1 · CHANTIER 1 : debug live H265/WebRTC
+
+- **Cause prouvée** (reproduction locale) : caméra H265 → navigateurs n'offrent pas
+  H265 en WebRTC → MediaMTX `400 codecs not supported by client` (ingestion/WHEP/ICE sains)
+- Correctifs : garde codec 409 explicite · champ `webrtc_rtsp_url` (sub-stream H264 →
+  path MediaMTX `camera/{id}_web` réservé au WHEP, flux natif intact) · aperçu d'ajout
+  de caméra par capture ffmpeg (H265 OK, zéro Go2RTC) servie par preview.jpeg en cache
+  mémoire · 4e pipeline « go2rtc (legacy) » restauré dans l'UI (§8 client)
+- Validé pod : WHEP 409→201, decode HEVC ok, bascule go2rtc ok, 46/46 pytest
+- **Reste à valider client (LAN)** : Reolink 192.168.1.53 → renseigner
+  `webrtc_rtsp_url = rtsp://admin:***@192.168.1.53:554/h264Preview_01_sub` puis live
+  WebRTC dans le navigateur ; vérifier candidats ICE (ajouter `webrtcAdditionalHosts`
+  si l'IP LAN n'est pas annoncée)
+
+### Session (Aug 2026) — v2.0-video · REFONTE couche vidéo (video-pipeline-v2)
 
 **Décision utilisateur : nouveau chantier, on ne répare plus Go2RTC.** Audit repo
 complet (12 points) validé, puis refonte en 6 phases :

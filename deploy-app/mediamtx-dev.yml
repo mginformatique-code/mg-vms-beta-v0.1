@@ -1,0 +1,31 @@
+# MG-VMS · MediaMTX config DEV (pod préview) — v1.15.5
+# Ports décalés : go2rtc legacy occupe 8554/8555 dans le pod.
+# NOTE fork : /opt n'est pas persisté — ce fichier est copié depuis
+# /app/deploy-app/mediamtx-dev.yml par scripts/setup_mediamtx_dev.sh
+logLevel: info
+
+api: yes
+apiAddress: 127.0.0.1:9997
+
+rtsp: yes
+rtspAddress: :8654
+rtspTransports: [tcp]
+
+webrtc: yes
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: :8189
+webrtcIPsFromInterfaces: yes
+
+rtmp: no
+hls: no
+srt: no
+playback: no
+metrics: no
+pprof: no
+
+pathDefaults:
+  rtspTransport: tcp
+  sourceOnDemand: no
+
+paths: {}

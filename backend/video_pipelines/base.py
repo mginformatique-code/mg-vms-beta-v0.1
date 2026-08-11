@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-PIPELINES = ("direct_rtsp", "mjpeg", "mediamtx")
+PIPELINES = ("direct_rtsp", "mjpeg", "mediamtx", "go2rtc")
 DEFAULT_PIPELINE = "mediamtx"
 
 # Mapping legacy → v2 (migration douce, champ historique stream_mode)

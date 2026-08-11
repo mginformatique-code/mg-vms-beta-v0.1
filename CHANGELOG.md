@@ -2,6 +2,43 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v2.0.1-video] — 2026-08 — CHANTIER 1 · Debug live H265/WebRTC + aperçu d'ajout sans Go2RTC
+
+Diagnostic prouvé par reproduction locale : caméra **H265** (Reolink 4K) + navigateur
+(offre SDP H264/VP8/VP9/AV1, jamais H265) → MediaMTX refuse au signaling WHEP avec
+`400 codecs not supported by client`. Ingestion RTSP→MediaMTX, WHEP, proxy, ICE et
+lecteur étaient sains.
+
+### Fixed
+- **Garde codec explicite** (`routes/video.py::video_whep`) : si le path MediaMTX ne
+  contient aucune piste lisible navigateur (H264/VP8/VP9/AV1) → **409** avec message
+  précis (plus de 400/502 cryptiques ni de sessions WebRTC inutiles).
+- **Aperçu d'ajout de caméra sans Go2RTC** (`streaming.py::test_connectivity`) :
+  l'étape « go2rtc » est remplacée par une étape **`decode`** = capture ffmpeg
+  one-shot (décode H264 **ET H265**) mise en cache mémoire (TTL 3 min) et servie par
+  `/api/stream/preview.jpeg`. Résout « go2rtc n'a pas réussi à décoder » +
+  « Aperçu indisponible » sur les caméras HEVC.
+
+### Added
+- **Champ caméra `webrtc_rtsp_url` (optionnel)** : URL RTSP H264 dédiée au navigateur
+  (ex. Reolink `…/h264Preview_01_sub`). MediaMTX crée un second path
+  `camera/{id}_web` consommé UNIQUEMENT par le WHEP ; le flux natif H265 4K reste
+  intact pour recorder/direct/IA (zéro transcodage). Champ visible dans le formulaire
+  caméra quand le pipeline MediaMTX est sélectionné.
+- **4e choix de pipeline « go2rtc (legacy) »** (exigence §8) : sélectionnable dans le
+  formulaire caméra et le Centre Caméras. Statut/refresh/lecture/enregistrement/IA
+  pipeline-aware (registre go2rtc uniquement pour ce choix explicite) ;
+  `Go2RTCPlayer.jsx` (WebRTC go2rtc + repli MJPEG proxifié go2rtc).
+- `scripts/setup_mediamtx_dev.sh` + `deploy-app/mediamtx-dev.yml` (réinstallation du
+  binaire MediaMTX dans le pod dev après un fork).
+
+### Validé (pod)
+- Caméra H265 sans `webrtc_rtsp_url` → WHEP **409** message exploitable ✔
+- Caméra H265 avec `webrtc_rtsp_url` H264 → path `_web` ready + WHEP **201** ✔
+- test-connectivity sur flux HEVC → `decode ok` + aperçu JPEG servi ✔
+- Bascule pipeline → go2rtc : registre + statut online + retour mjpeg ✔
+- Suite : 46/46 pytest verts. Aucun retry en boucle côté lecteur (retry manuel).
+
 ## [v2.0-video] — 2026-08 — REFONTE ARCHITECTURALE couche vidéo (video-pipeline-v2)
 
 Refonte complète validée par audit préalable du repo (12 points). Go2RTC n'est

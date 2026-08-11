@@ -79,7 +79,7 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
   // Détection sous-flux (résolution < 1280x720) — le user a probablement gardé un sub-stream
   const [subW, subH] = (cam?.resolution || "").split(/x/i).map((n) => parseInt(n, 10) || 0);
   const isSubStream = online && subW > 0 && subH > 0 && (subW < 1280 || subH < 720);
-  const PIPELINE_BADGE = { mediamtx: ["MEDIAMTX", "#00E5FF"], mjpeg: ["MJPEG", "#00E676"], direct_rtsp: ["RTSP", "#FFB800"] };
+  const PIPELINE_BADGE = { mediamtx: ["MEDIAMTX", "#00E5FF"], mjpeg: ["MJPEG", "#00E676"], direct_rtsp: ["RTSP", "#FFB800"], go2rtc: ["GO2RTC", "#FFAA00"] };
   const [pipelineLabel, pipelineColor] = PIPELINE_BADGE[pipeline] || ["—", "#888"];
 
   return (

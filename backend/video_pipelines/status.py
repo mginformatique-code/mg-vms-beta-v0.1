@@ -17,6 +17,10 @@ async def get_video_status(cam: dict) -> dict:
         return await p_mediamtx.get_status(cam)
     if pipeline == "direct_rtsp":
         return await p_direct.get_status(cam)
+    if pipeline == "go2rtc":
+        status, err = await _go2rtc_probe(cam)
+        return video_status_payload(cam["id"], "go2rtc", status=status, error=err or None,
+                                     extra={"legacy": True})
     # MJPEG : broker actif → métriques réelles ; broker arrêté (0 viewer) →
     # pipeline "à la demande", disponibilité prouvée par TCP check léger.
     frag = p_mjpeg.get_status(cam["id"])
@@ -35,11 +39,25 @@ async def get_video_status(cam: dict) -> dict:
         extra={"viewers": 0, "state": "on-demand" if ok else "stopped"})
 
 
+async def _go2rtc_probe(cam: dict) -> tuple[str, str]:
+    """Pipeline legacy go2rtc (choix explicite admin) : statut via go2rtc."""
+    from streaming import _stream_registered, _stream_bytes_recv, _stream_name
+    name = _stream_name(cam["id"])
+    if not await _stream_registered(name):
+        return "offline", "flux non enregistré dans go2rtc — cliquer Réparer"
+    if await _stream_bytes_recv(name) > 0:
+        return "online", ""
+    ok, err = await p_direct.tcp_only_check(cam)
+    return ("online", "") if ok else ("offline", err)
+
+
 async def quick_probe(cam: dict) -> tuple[str, str]:
     """Probe LÉGER pour la boucle périodique de statut (camera_status_loop).
     Retourne (status, error). Jamais de session RTSP supplémentaire, jamais Go2RTC.
     """
     pipeline = resolve_pipeline(cam)
+    if pipeline == "go2rtc":
+        return await _go2rtc_probe(cam)
     if pipeline == "mediamtx":
         state = await p_mediamtx.get_path_state(cam["id"])
         if state is None:

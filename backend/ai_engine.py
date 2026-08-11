@@ -530,6 +530,9 @@ async def _sync_frame_source_workers(cams: list[dict], *,
         if is_demo:
             rtsp_url = f"{go2rtc_rtsp}/cam_{cam_id}"
             source_type = "demo-go2rtc-relay"
+        elif pipeline == "go2rtc":
+            rtsp_url = f"{go2rtc_rtsp}/cam_{cam_id}"
+            source_type = "go2rtc-relay"
         elif ai_url:
             rtsp_url = ai_url
             source_type = "direct-ai"

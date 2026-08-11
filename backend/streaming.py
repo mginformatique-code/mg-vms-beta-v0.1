@@ -439,6 +439,11 @@ async def sync_all_streams() -> None:
             await _ensure_variants(_stream_name(cam["id"]))
             continue
         name = _stream_name(cam["id"])
+        # Pipeline "go2rtc" choisi EXPLICITEMENT par l'admin → enregistrement legacy
+        from video_pipelines.base import resolve_pipeline as _rp
+        if _rp(cam) == "go2rtc":
+            await register_camera_stream(cam, caller="sync_all_streams@go2rtc_pipeline")
+            continue
         if go2rtc_names & {name, f"{name}_hd", f"{name}_sd"}:
             await unregister_camera_stream(cam["id"], caller="sync_all_streams@video_v2_purge")
             n_purged += 1
@@ -1037,44 +1042,26 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
         else:
             add("rtsp_open", "skip", "Ignoré (URL RTSP invalide ou port fermé)")
 
-    # 6) Test go2rtc : enregistre temporairement le flux et récupère une frame
-    go2rtc_ok = False
+    # 6) Décodage vidéo — capture ffmpeg one-shot (décode H264 ET H265).
+    #    video-pipeline-v2 : l'aperçu d'ajout de caméra ne dépend PLUS de Go2RTC.
+    decode_ok = False
     preview_url = None
     if rtsp_final_url.lower().startswith("rtsp://") and any(s["name"] == "rtsp_open" and s["status"] == "ok" for s in steps):
         tmp_name = f"probe_{int(time.time()*1000)}"
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                r = await client.put(f"{GO2RTC_URL}/api/streams",
-                                     params=[("name", tmp_name), ("src", rtsp_final_url)])
-                r.raise_for_status()
-                # Attend jusqu'à 6 s qu'une frame soit produite
-                for _ in range(6):
-                    fr = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": tmp_name})
-                    if fr.status_code == 200 and fr.content[:3] == b"\xff\xd8\xff":
-                        go2rtc_ok = True
-                        preview_url = f"/api/stream/preview.jpeg?name={tmp_name}"
-                        break
-                    await asyncio.sleep(1)
-        except httpx.HTTPError:
-            pass
-        finally:
-            # nettoie l'enregistrement de test après quelques secondes
-            async def _cleanup(n: str) -> None:
-                await asyncio.sleep(30)
-                try:
-                    async with httpx.AsyncClient(timeout=5) as c:
-                        await c.delete(f"{GO2RTC_URL}/api/streams", params={"src": n})
-                except httpx.HTTPError:
-                    pass
-            asyncio.create_task(_cleanup(tmp_name))
-        add("go2rtc", "ok" if go2rtc_ok else "warn",
-            "go2rtc ouvre le flux et fournit une image" if go2rtc_ok
-            else "go2rtc n'a pas réussi à décoder — mais l'URL RTSP est valide",
+        jpeg = await _oneshot_probe_jpeg(rtsp_final_url,
+                                          (validated_transport or "tcp") if rtsp_url_validated else "tcp")
+        if jpeg:
+            _PROBE_PREVIEWS[tmp_name] = (time.monotonic(), jpeg)
+            decode_ok = True
+            preview_url = f"/api/stream/preview.jpeg?name={tmp_name}"
+        add("decode", "ok" if decode_ok else "warn",
+            "Décodage vidéo OK (ffmpeg) — aperçu généré" if decode_ok
+            else "Capture d'image impossible — mais l'URL RTSP est valide",
             preview_url=preview_url, temp_stream=tmp_name)
     else:
-        add("go2rtc", "skip", "Ignoré (aucun flux RTSP valide)")
+        add("decode", "skip", "Ignoré (aucun flux RTSP valide)")
 
-    # 7) Aperçu vidéo (identique à go2rtc.preview_url si dispo)
+    # 7) Aperçu vidéo
     add("preview", "ok" if preview_url else "skip",
         "Aperçu vidéo disponible" if preview_url else "Aperçu indisponible",
         preview_url=preview_url)
@@ -1316,6 +1303,29 @@ async def _open_mjpeg_upstream(src: str) -> tuple[httpx.AsyncClient, httpx.Respo
 
 
 # ============ Pont vidéo direct_rtsp (ZÉRO Go2RTC) ============
+# Aperçus du test de connexion (capture ffmpeg one-shot en mémoire, TTL 3 min)
+_PROBE_PREVIEWS: dict = {}
+
+
+async def _oneshot_probe_jpeg(rtsp_url: str, transport: str = "tcp"):
+    """Capture 1 frame JPEG (640px) — décode H264 ET H265, zéro Go2RTC."""
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error",
+           "-rtsp_transport", transport if transport in ("tcp", "udp") else "tcp",
+           "-i", rtsp_url, "-frames:v", "1", "-vf", "scale=640:-2",
+           "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"]
+    try:
+        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE,
+                                                     stderr=asyncio.subprocess.DEVNULL)
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=12)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        return None
+    return out if out[:3] == b"\xff\xd8\xff" else None
+
+
 async def _video_v2_mjpeg_response(cam: dict, request: Request, user: dict):
     """video-pipeline-v2 · Sert le flux MJPEG du pipeline choisi (broker partagé).
     L'URL historique /api/stream/{id}/live.mjpeg reste valide pour le mur vidéo."""
@@ -1464,7 +1474,9 @@ async def live_mjpeg(camera_id: str, request: Request,
     # (mjpeg → broker partagé · mediamtx → broker sur relais MediaMTX ·
     #  direct_rtsp → 409 explicite). ZÉRO Go2RTC, zéro variantes cam_xxx_hd/_sd.
     if camera_id not in DEMO_IDS:
-        return await _video_v2_mjpeg_response(cam_doc, request, user)
+        from video_pipelines.base import resolve_pipeline as _rp
+        if _rp(cam_doc) != "go2rtc":
+            return await _video_v2_mjpeg_response(cam_doc, request, user)
     src = _mjpeg_stream(camera_id, hd=want_hd)
     # Garantit la variante côté go2rtc (throttled → 1 appel par caméra / 60 s)
     await _ensure_variants_cached(_stream_name(camera_id))
@@ -1578,10 +1590,12 @@ async def frame_jpeg(camera_id: str, hd: int = 1, user: dict = Depends(stream_us
     # ── video-pipeline-v2 · Caméras RÉELLES : snapshot pipeline-aware, ZÉRO Go2RTC ──
     # (frame_source si worker IA actif → broker MJPEG si actif → capture one-shot).
     if camera_id not in DEMO_IDS:
-        data = await _direct_frame_jpeg(cam_doc, want_hd)
-        return Response(content=data, media_type="image/jpeg",
-                        headers={"Cache-Control": "no-store",
-                                 "X-Preview-Source": "direct-ffmpeg"})
+        from video_pipelines.base import resolve_pipeline as _rp
+        if _rp(cam_doc) != "go2rtc":
+            data = await _direct_frame_jpeg(cam_doc, want_hd)
+            return Response(content=data, media_type="image/jpeg",
+                            headers={"Cache-Control": "no-store",
+                                     "X-Preview-Source": "direct-ffmpeg"})
     name = _stream_name(camera_id)
     # Garantit que les variantes HD/SD existent (auto-migration après upgrade, throttled)
     await _ensure_variants_cached(name)
@@ -1685,17 +1699,17 @@ async def cameras_auto_detect(body: AutoDetectInput, user: dict = Depends(requir
 # ============ Aperçu vidéo depuis un flux temporaire (utilisé par Test Connexion) ============
 @stream_router.get("/stream/preview.jpeg")
 async def stream_preview(name: str = Query(...), user: dict = Depends(require_role("technician"))):
-    """Récupère une image d'un flux temporaire enregistré via l'endpoint test-connectivity."""
+    """Aperçu du test de connexion — capture ffmpeg en mémoire (zéro Go2RTC)."""
     if not re.match(r"^probe_[0-9a-z_-]+$", name):
         raise HTTPException(400, "Nom de flux temporaire invalide")
-    try:
-        async with httpx.AsyncClient(timeout=6) as client:
-            r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": name})
-    except httpx.HTTPError:
-        raise HTTPException(502, "Aperçu indisponible")
-    if r.status_code != 200:
-        raise HTTPException(502, "Aperçu indisponible")
-    return Response(content=r.content, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+    # purge des aperçus expirés (> 3 min)
+    now = time.monotonic()
+    for k in [k for k, (ts, _) in _PROBE_PREVIEWS.items() if now - ts > 180]:
+        _PROBE_PREVIEWS.pop(k, None)
+    hit = _PROBE_PREVIEWS.get(name)
+    if not hit:
+        raise HTTPException(404, "Aperçu expiré — relancez le test de connexion")
+    return Response(content=hit[1], media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 # ============ Découverte ONVIF réelle ============

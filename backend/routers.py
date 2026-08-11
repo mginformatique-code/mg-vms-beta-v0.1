@@ -97,6 +97,11 @@ class CameraInput(BaseModel):
     # compression pour meilleure détection & ANPR) et un sous-flux pour le
     # streaming go2rtc (léger, temps réel). Vide → l'IA utilise `rtsp_url`.
     ai_rtsp_url: str = ""
+    # video-pipeline-v2 · URL RTSP H264 dédiée au WebRTC navigateur (optionnelle).
+    # Utile quand le flux principal est H265 (non lisible en WebRTC) : MediaMTX
+    # crée alors un path séparé `camera/{id}_web` consommé UNIQUEMENT par le
+    # navigateur. Le flux natif reste intact (recorder, direct, IA).
+    webrtc_rtsp_url: str = ""
     username: str = ""
     password: str = ""
     # Champs profil (mode ONVIF)
@@ -278,6 +283,10 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
                        else "mediamtx (path non enregistré — service injoignable ?)"}})
         if not ok:
             logger.warning("create_camera %s : path MediaMTX non enregistré (caméra conservée)", doc["id"])
+    elif pipeline == "go2rtc":
+        from streaming import register_camera_stream
+        await register_camera_stream(doc, caller=f"POST /api/cameras go2rtc user={user.get('email','?')}")
+        await db.cameras.update_one({"id": doc["id"]}, {"$set": {"pipeline_status": "go2rtc"}})
     else:
         await db.cameras.update_one({"id": doc["id"]}, {"$set": {"pipeline_status": pipeline}})
     # v0.7.e · Wave A · Hot Reload chirurgical : signale l'ajout au moteur IA
@@ -455,6 +464,12 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
         await p_mediamtx.ensure_path(updated)
     elif old_pipeline == "mediamtx":
         await p_mediamtx.remove_path(camera_id)
+    if new_pipeline == "go2rtc":
+        from streaming import register_camera_stream
+        await register_camera_stream(updated, caller=f"PUT /api/cameras/{camera_id} go2rtc")
+    elif old_pipeline == "go2rtc":
+        from streaming import unregister_camera_stream
+        await unregister_camera_stream(camera_id, caller=f"PUT /api/cameras/{camera_id} switch pipeline")
     if old_pipeline == "mjpeg" or new_pipeline != "mjpeg":
         # URL/credentials ou pipeline modifiés → le broker sera relancé à la demande
         p_mjpeg.stop_broker(camera_id)
@@ -982,8 +997,18 @@ async def refresh_camera_stream(camera_id: str, user: dict = Depends(require_rol
     from streaming import _mask_url_password, unregister_camera_stream
     from video_pipelines.base import resolve_pipeline
     pipeline = resolve_pipeline(cam)
-    # video-pipeline-v2 : "Réparer" est pipeline-aware. Purge systématique des
-    # résidus Go2RTC legacy (aucun nouveau code ne dépend de Go2RTC).
+    # video-pipeline-v2 : "Réparer" est pipeline-aware.
+    if pipeline == "go2rtc":
+        from streaming import register_camera_stream
+        ok = await register_camera_stream(cam, caller=f"refresh-stream go2rtc user={user.get('email','?')}",
+                                           force=True)
+        await log_audit(user, "camera_stream_refreshed", cam.get("name", camera_id),
+                        f"pipeline=go2rtc · registered={ok}")
+        if not ok:
+            raise HTTPException(502, "Impossible d'enregistrer le flux dans go2rtc")
+        return {"success": True, "camera_id": camera_id, "pipeline": "go2rtc",
+                "rtsp_url_masked": _mask_url_password(cam.get("rtsp_url", ""))}
+    # Purge systématique des résidus Go2RTC legacy pour les autres pipelines.
     await unregister_camera_stream(camera_id, caller=f"refresh-stream user={user.get('email','?')}")
     if pipeline == "mediamtx":
         from video_pipelines import mediamtx as p_mediamtx

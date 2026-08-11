@@ -83,19 +83,31 @@ async def video_whep(camera_id: str, request: Request,
     # Path garanti (idempotent) + attente courte que la source soit prête
     # (évite un 502 transitoire si le path vient d'être créé/rechargé)
     await p_mediamtx.ensure_path(cam)
+    path = p_mediamtx.whep_path(cam)   # `_web` (H264 dédié) si webrtc_rtsp_url défini
     import asyncio as _aio
+    state = None
     for _ in range(10):
-        state = await p_mediamtx.get_path_state(camera_id)
+        state = await p_mediamtx.get_path_state_by_name(path)
         if state and state.get("ready"):
             break
         await _aio.sleep(0.5)
+    # ── Garde codec : les navigateurs ne lisent pas H265/HEVC en WebRTC ──
+    tracks = {str(t).upper() for t in ((state or {}).get("tracks") or [])}
+    browser_ok = {"H264", "VP8", "VP9", "AV1"}
+    if tracks and not (tracks & browser_ok):
+        src_codec = ", ".join(sorted(t for t in tracks if t not in ("MPEG-4 AUDIO", "OPUS", "G711")))
+        raise HTTPException(409,
+            f"Caméra en {src_codec or 'H265'} : les navigateurs ne lisent pas ce codec en WebRTC. "
+            "Renseignez « URL RTSP WebRTC (H264) » dans la fiche caméra (ex. Reolink : "
+            "…/h264Preview_01_sub), passez le flux principal de la caméra en H264, "
+            "ou choisissez le pipeline MJPEG.")
     try:
-        answer, session = await p_mediamtx.whep_exchange(camera_id, offer_sdp)
+        answer, session = await p_mediamtx.whep_exchange(path, offer_sdp)
     except ValueError:
         # Retry unique (path en cours de warm-up côté MediaMTX)
         await _aio.sleep(0.8)
         try:
-            answer, session = await p_mediamtx.whep_exchange(camera_id, offer_sdp)
+            answer, session = await p_mediamtx.whep_exchange(path, offer_sdp)
         except ValueError as e:
             raise HTTPException(502, str(e))
     headers = {"Content-Type": "application/sdp"}

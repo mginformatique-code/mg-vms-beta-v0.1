@@ -21,7 +21,7 @@ const EMPTY_FORM = {
   enabled_plugins: [],
   record_mode: "continuous", storage_pool_id: "", storage_max_size_gb: 0,
   rtsp_transport: "tcp", preferred_codec: "auto", stream_mode: "direct_rtsp",
-  stream_pipeline: "mediamtx",
+  stream_pipeline: "mediamtx", webrtc_rtsp_url: "",
   // Assistant RTSP
   wiz_brand: "", wiz_model_idx: 0, wiz_stream: "main", wiz_channel: 1,
 };
@@ -80,6 +80,7 @@ export default function Cameras() {
       preferred_codec: c.preferred_codec || "auto",
       stream_mode: c.stream_mode || "auto",
       stream_pipeline: c.stream_pipeline || "mediamtx",
+      webrtc_rtsp_url: c.webrtc_rtsp_url || "",
     });
     setConnCheck(null); setProfiles([]); setOpen(true);
     // Charge assignation de stockage existante
@@ -344,6 +345,7 @@ export default function Cameras() {
                       mediamtx:    ["MEDIAMTX", "#00E5FF"],
                       mjpeg:       ["MJPEG", "#00E676"],
                       direct_rtsp: ["DIRECT RTSP", "#FFB800"],
+                      go2rtc:      ["GO2RTC", "#FFAA00"],
                     };
                     const [label, color] = META[p] || ["—", "#888"];
                     return (
@@ -543,7 +545,7 @@ export default function Cameras() {
                 <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
                   Pipeline vidéo <span className="text-[#00E5FF]">· choix requis</span>
                 </label>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3" data-testid="stream-pipeline-radio-group">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3" data-testid="stream-pipeline-radio-group">
                   {[
                     { val: "direct_rtsp", title: "Direct RTSP",
                       desc: "Flux RTSP natif pour consommateurs compatibles (VLC, NVR, IA). Pas de preview navigateur." },
@@ -551,6 +553,8 @@ export default function Cameras() {
                       desc: "Image fiable dans le navigateur via un processus ffmpeg partagé. Simple et robuste." },
                     { val: "mediamtx", title: "MediaMTX (recommandé)",
                       desc: "WebRTC faible latence + redistribution RTSP via MediaMTX. Zéro transcodage H.264." },
+                    { val: "go2rtc", title: "go2rtc (legacy)",
+                      desc: "Ancien moteur de streaming centralisé. Conservé pour compatibilité." },
                   ].map((opt) => (
                     <label key={opt.val}
                       className={`cursor-pointer border p-3 transition-colors ${
@@ -584,7 +588,27 @@ export default function Cameras() {
                   <option value="direct_rtsp">Direct RTSP</option>
                   <option value="mjpeg">MJPEG</option>
                   <option value="mediamtx">MediaMTX</option>
+                  <option value="go2rtc">go2rtc (legacy)</option>
                 </select>
+                {form.stream_pipeline === "mediamtx" && (
+                  <div className="mt-3">
+                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                      URL RTSP WebRTC (H264) — optionnel
+                    </label>
+                    <input
+                      value={form.webrtc_rtsp_url}
+                      onChange={(e) => setForm({ ...form, webrtc_rtsp_url: e.target.value })}
+                      placeholder="rtsp://…/h264Preview_01_sub (si le flux principal est H265)"
+                      className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
+                      data-testid="webrtc-rtsp-url-input"
+                    />
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      Les navigateurs ne lisent pas le H265 en WebRTC. Si votre flux principal est H265
+                      (ex. Reolink 4K), indiquez ici le sub-stream H264 : il sera utilisé UNIQUEMENT pour
+                      la lecture navigateur — enregistrement et IA restent sur le flux natif.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 

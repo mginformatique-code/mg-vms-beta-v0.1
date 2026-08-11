@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import WHEPPlayer from "@/components/video/WHEPPlayer";
 import MJPEGPlayer from "@/components/video/MJPEGPlayer";
 import DirectRTSPCard from "@/components/video/DirectRTSPCard";
+import Go2RTCPlayer from "@/components/video/Go2RTCPlayer";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 
 /**
@@ -14,7 +15,7 @@ import { AlertTriangle, RefreshCw } from "lucide-react";
  */
 export function pipelineOf(camera) {
   const p = (camera?.stream_pipeline || "").toLowerCase();
-  if (["direct_rtsp", "mjpeg", "mediamtx"].includes(p)) return p;
+  if (["direct_rtsp", "mjpeg", "mediamtx", "go2rtc"].includes(p)) return p;
   const legacy = (camera?.stream_mode || "auto").toLowerCase();
   return legacy === "direct_rtsp" ? "direct_rtsp" : "mediamtx";
 }
@@ -28,6 +29,11 @@ export default function VideoPlayer({ camera, className = "", dataTestId = "vide
 
   if (pipeline === "direct_rtsp") {
     return <DirectRTSPCard cameraId={camera.id} className={className} dataTestId={dataTestId} />;
+  }
+
+  if (pipeline === "go2rtc") {
+    return <Go2RTCPlayer key={`${camera.id}-${retryKey}`} cameraId={camera.id}
+                          className={className} dataTestId={dataTestId} />;
   }
 
   if (error) {
