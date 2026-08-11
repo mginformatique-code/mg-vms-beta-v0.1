@@ -1311,6 +1311,7 @@ async def _oneshot_probe_jpeg(rtsp_url: str, transport: str = "tcp"):
     """Capture 1 frame JPEG (640px) — décode H264 ET H265, zéro Go2RTC."""
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error",
            "-rtsp_transport", transport if transport in ("tcp", "udp") else "tcp",
+           "-skip_frame", "nokey",
            "-i", rtsp_url, "-frames:v", "1", "-vf", "scale=640:-2",
            "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"]
     try:
@@ -1432,7 +1433,8 @@ async def _direct_frame_jpeg(cam: dict, want_hd: bool) -> bytes:
     if transport not in ("tcp", "udp"):
         transport = "tcp"
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error",
-           "-rtsp_transport", transport, "-i", rtsp_url, "-frames:v", "1"]
+           "-rtsp_transport", transport, "-skip_frame", "nokey",
+           "-i", rtsp_url, "-frames:v", "1"]
     if not want_hd:
         cmd += ["-vf", "scale=640:-2"]
     cmd += ["-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"]

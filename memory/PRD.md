@@ -25,6 +25,14 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 
 ### Session courante (Aug 2026) — v2.0.1 · CHANTIER 1 : debug live H265/WebRTC
 
+**TEST RÉEL RÉUSSI sur la caméra du client via NAT (109.219.238.60:554/8000)** :
+main HEVC 3840x2160@20 + sub H264 896x512@20 confirmés · paths MediaMTX main+_web
+ready · WHEP **201** avec answer H264 (path _web) · video-status online ·
+flux MJPEG réel décodé (image de rue nette, vision IR) · snapshot one-shot corrigé
+(`-skip_frame nokey` → attend la keyframe HEVC, plus d'image grise).
+Caméra « REOLINK RLC-81MA (test réel) » laissée en base (id a9803ba7…).
+⚠ Rappeler au client de refermer les ports NAT 554/8000 après validation.
+
 - **Cause prouvée** (reproduction locale) : caméra H265 → navigateurs n'offrent pas
   H265 en WebRTC → MediaMTX `400 codecs not supported by client` (ingestion/WHEP/ICE sains)
 - Correctifs : garde codec 409 explicite · champ `webrtc_rtsp_url` (sub-stream H264 →
