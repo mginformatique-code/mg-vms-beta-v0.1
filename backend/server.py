@@ -106,6 +106,8 @@ app.include_router(go2rtc_diag_router)     # v1.0-rc4.5 · diagnostic Go2RTC dé
 app.include_router(mjpeg_direct_router)  # v1.0-rc4 · MJPEG multipart DIRECT (bypass Go2RTC)
 from routes.video import video_router
 app.include_router(video_router)   # video-pipeline-v2 · video-status + MJPEG broker + WHEP
+from routes.camera_api import camera_api_router
+app.include_router(camera_api_router)   # camera-api-v2.2 · HTTP/HTTPS layer (Reolink+)
 app.include_router(vehicles_router)
 app.include_router(smart_search_router)
 app.include_router(discovery_router)

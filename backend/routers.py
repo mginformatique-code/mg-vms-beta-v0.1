@@ -143,6 +143,17 @@ class CameraInput(BaseModel):
     #                     pour le preview navigateur — pipeline IA découplé,
     #                     tourne même si Go2RTC est HS)
     stream_mode: str = "auto"
+    # camera-api-v2.2 · Couche API HTTP/HTTPS (indépendante du pipeline vidéo).
+    # Utilisée par le provider (Reolink JSON / Hikvision ISAPI / Dahua CGI /
+    # ONVIF) pour infos + capacités + contrôles physiques + metadata SD.
+    # `api_verify_ssl=false` autorise les self-signed LAN (PER-CAMERA, jamais global).
+    api_host: str = ""
+    api_port: Optional[int] = None
+    api_scheme: str = "https"     # "http" | "https"
+    api_verify_ssl: bool = False
+    api_username: str = ""
+    api_password: str = ""        # transit uniquement — encrypté avant persist
+    api_provider: str = ""        # "" = auto-detect (via manufacturer/model)
     # video-pipeline-v2 · CHAMP UNIQUE de pipeline vidéo (remplace stream_mode
     # + live_preview_source) :
     #   - "direct_rtsp" : consommateurs RTSP natifs (pas de preview navigateur)
@@ -269,6 +280,11 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
     from crypto_utils import encrypt_secret
     if payload.get("password"):
         payload["password"] = encrypt_secret(payload["password"])
+    # camera-api-v2.2 : chiffrement du password API caméra (séparé du RTSP,
+    # même s'ils sont souvent identiques). Stocké sous `api_password_enc`.
+    if payload.get("api_password"):
+        payload["api_password_enc"] = encrypt_secret(payload["api_password"])
+    payload.pop("api_password", None)
     doc = {
         "id": str(uuid.uuid4()), "status": "offline", "last_seen": now, "created_at": now,
         "site_name": site["name"],
@@ -461,6 +477,10 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
     from crypto_utils import encrypt_secret
     if payload.get("password"):
         payload["password"] = encrypt_secret(payload["password"])
+    # camera-api-v2.2 : idem pour l'API caméra. Vide → on préserve l'ancien enc.
+    if payload.get("api_password"):
+        payload["api_password_enc"] = encrypt_secret(payload["api_password"])
+    payload.pop("api_password", None)
 
     await db.cameras.update_one({"id": camera_id}, {"$set": payload})
     await log_audit(user, "camera_updated", data.name, f"Mode: {data.mode}")

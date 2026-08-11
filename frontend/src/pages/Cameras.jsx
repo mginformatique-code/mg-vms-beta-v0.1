@@ -23,6 +23,9 @@ const EMPTY_FORM = {
   rtsp_transport: "tcp", preferred_codec: "auto", stream_mode: "direct_rtsp",
   stream_pipeline: "mediamtx", webrtc_rtsp_url: "",
   direct_rtsp_url: "", mjpeg_source_url: "", mediamtx_source_url: "", go2rtc_source_url: "",
+  // camera-api-v2.2 · Couche API HTTP/HTTPS (indépendante du pipeline vidéo)
+  api_host: "", api_port: null, api_scheme: "https", api_verify_ssl: false,
+  api_username: "", api_password: "", api_provider: "",
   // Assistant RTSP
   wiz_brand: "", wiz_model_idx: 0, wiz_stream: "main", wiz_channel: 1,
 };
@@ -86,6 +89,14 @@ export default function Cameras() {
       mjpeg_source_url: c.mjpeg_source_url || "",
       mediamtx_source_url: c.mediamtx_source_url || "",
       go2rtc_source_url: c.go2rtc_source_url || "",
+      // camera-api-v2.2 · API caméra (HTTP/HTTPS)
+      api_host: c.api_host || "",
+      api_port: c.api_port || null,
+      api_scheme: c.api_scheme || "https",
+      api_verify_ssl: c.api_verify_ssl === true,
+      api_username: c.api_username || "",
+      api_password: "",     // jamais renvoyé par le backend, à re-saisir si changé
+      api_provider: c.api_provider || "",
     });
     setConnCheck(null); setProfiles([]); setOpen(true);
     // Charge assignation de stockage existante
@@ -678,6 +689,93 @@ export default function Cameras() {
                   </p>
                 </div>
               </div>
+            </div>
+
+            {/* camera-api-v2.2 · Section API HTTP/HTTPS caméra (couche INDÉPENDANTE du pipeline vidéo) */}
+            <div className="col-span-2 border border-border p-3 space-y-3 bg-secondary/20" data-testid="camera-api-block">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                API caméra (HTTP/HTTPS)
+                <span className="text-[9px] text-muted-foreground/70 normal-case">
+                  · contrôle physique + capacités + metadata SD — indépendant du flux vidéo
+                </span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Hôte</label>
+                  <input value={form.api_host} onChange={(e) => setForm({ ...form, api_host: e.target.value })}
+                         placeholder="192.168.1.55"
+                         className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
+                         data-testid="api-host-input" />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Schéma</label>
+                  <select value={form.api_scheme} onChange={(e) => setForm({ ...form, api_scheme: e.target.value })}
+                          className="w-full bg-secondary border border-border px-2 py-1.5 text-sm"
+                          data-testid="api-scheme-select">
+                    <option value="https">HTTPS</option>
+                    <option value="http">HTTP</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Port</label>
+                  <input type="number" value={form.api_port || ""}
+                         onChange={(e) => setForm({ ...form, api_port: e.target.value ? Number(e.target.value) : null })}
+                         placeholder={form.api_scheme === "https" ? "443" : "80"}
+                         className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
+                         data-testid="api-port-input" />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Provider</label>
+                  <select value={form.api_provider} onChange={(e) => setForm({ ...form, api_provider: e.target.value })}
+                          className="w-full bg-secondary border border-border px-2 py-1.5 text-sm"
+                          data-testid="api-provider-select">
+                    <option value="">Auto (via marque/modèle)</option>
+                    <option value="reolink">Reolink</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Utilisateur API</label>
+                  <input value={form.api_username} onChange={(e) => setForm({ ...form, api_username: e.target.value })}
+                         placeholder="admin"
+                         className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
+                         data-testid="api-username-input" />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Mot de passe API</label>
+                  <input type="password" value={form.api_password}
+                         onChange={(e) => setForm({ ...form, api_password: e.target.value })}
+                         placeholder={editingId ? "(inchangé)" : ""}
+                         className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
+                         data-testid="api-password-input" />
+                </div>
+                <label className="flex items-center gap-2 mt-6 text-sm text-white/80" data-testid="api-verify-ssl-label">
+                  <input type="checkbox" checked={form.api_verify_ssl}
+                         onChange={(e) => setForm({ ...form, api_verify_ssl: e.target.checked })}
+                         data-testid="api-verify-ssl-checkbox" />
+                  Vérifier le certificat SSL
+                  <span className="text-[10px] text-muted-foreground">(décoché = self-signed LAN OK)</span>
+                </label>
+              </div>
+              {editingId && (
+                <div className="pt-1">
+                  <button type="button"
+                          onClick={async () => {
+                            try {
+                              const r = await api.post(`/camera-devices/${editingId}/discover`);
+                              toast.success(`API OK · ${r.data.provider} · ${r.data.device_info?.model || ""}`);
+                              load();
+                            } catch (e) {
+                              toast.error(formatApiErrorDetail(e) || "Discover API a échoué");
+                            }
+                          }}
+                          className="text-[10px] mono uppercase px-3 py-1.5 border border-[#00E5FF] text-[#00E5FF] hover:bg-[#00E5FF]/10"
+                          data-testid="api-discover-btn">
+                    Tester l&apos;API (Discover)
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Config enregistrement avancée : mode + canal ONVIF + disque cible */}
