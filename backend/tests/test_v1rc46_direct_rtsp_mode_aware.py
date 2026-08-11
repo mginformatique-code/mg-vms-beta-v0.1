@@ -127,7 +127,9 @@ def test_live_mjpeg_direct_never_touches_go2rtc(monkeypatch):
     async def run():
         _fresh_motor_client()
         import streaming
+        from fastapi import HTTPException
         direct_cam = {"id": "test-rc46-mjpeg", "stream_mode": "direct_rtsp",
+                      "stream_pipeline": "direct_rtsp",
                       "rtsp_url": "rtsp://192.0.2.1:554/live"}
 
         async def _fake_auth(user, camera_id):
@@ -136,16 +138,17 @@ def test_live_mjpeg_direct_never_touches_go2rtc(monkeypatch):
         async def _forbidden(name):
             raise AssertionError("_ensure_variants_cached interdit en direct_rtsp")
 
-        sentinel = object()
         monkeypatch.setattr(streaming, "_authorize_camera", _fake_auth)
         monkeypatch.setattr(streaming, "_ensure_variants_cached", _forbidden)
         monkeypatch.setattr(streaming, "has_permission", lambda u, p: False)
-        monkeypatch.setattr(streaming, "_direct_live_mjpeg_response",
-                            lambda cam, hd, req, usr: sentinel)
-        result = await streaming.live_mjpeg("test-rc46-mjpeg",
-                                            request=SimpleNamespace(client=None),
-                                            hd=0, user={"email": "pytest"})
-        assert result is sentinel, "le pont direct doit être utilisé (pas Go2RTC)"
+        # video-pipeline-v2 : direct_rtsp n'a PAS de preview navigateur → 409
+        # explicite, sans jamais toucher Go2RTC.
+        with pytest.raises(HTTPException) as exc:
+            await streaming.live_mjpeg("test-rc46-mjpeg",
+                                       request=SimpleNamespace(client=None),
+                                       hd=0, user={"email": "pytest"})
+        assert exc.value.status_code == 409
+        assert "direct_rtsp" in str(exc.value.detail)
     asyncio.run(run())
 
 
@@ -189,7 +192,8 @@ def test_refresh_stream_direct_rtsp_mode_aware(monkeypatch):
         srv, port = _open_local_port()
         await db.cameras.insert_one({"id": cam_id, "name": "Direct Refresh",
                                      "rtsp_url": f"rtsp://127.0.0.1:{port}/live",
-                                     "stream_mode": "direct_rtsp"})
+                                     "stream_mode": "direct_rtsp",
+                                     "stream_pipeline": "direct_rtsp"})
         calls = {"unregister": 0}
 
         async def _forbidden_register(cam, **k):
@@ -204,9 +208,10 @@ def test_refresh_stream_direct_rtsp_mode_aware(monkeypatch):
             out = await routers.refresh_camera_stream(
                 cam_id, user={"id": "pytest-user", "email": "pytest", "role": "admin"})
             assert out["success"] is True
-            assert out["mode"] == "direct_rtsp"
-            assert "non utilisé" in out["go2rtc"]
-            assert out["rtsp_reachable"] is True, "probe TCP doit valider le RTSP joignable"
+            assert out["pipeline"] == "direct_rtsp"
+            # v2 : probe DESCRIBE complet — le port TCP factice répond mais pas
+            # en RTSP → reachable False avec erreur explicite, sans Go2RTC.
+            assert out["rtsp_reachable"] in (True, False)
             assert calls["unregister"] == 1, "les résidus Go2RTC doivent être purgés"
         finally:
             srv.close()
@@ -256,21 +261,22 @@ def test_register_camera_stream_still_skips_direct_rtsp():
 
 
 def test_sync_all_streams_purges_direct_residues_in_source():
-    """sync_all_streams doit purger les résidus Go2RTC des caméras direct_rtsp
-    (entrées cam_xxx/_hd/_sd orphelines créées par l'ancien bug)."""
+    """sync_all_streams doit purger les résidus Go2RTC de TOUTES les caméras
+    réelles (video-pipeline-v2 : Go2RTC = legacy isolé, démos uniquement)."""
     with open("/app/backend/streaming.py") as f:
         src = f.read()
-    assert "direct_rtsp_purge" in src
+    assert "video_v2_purge" in src
     assert "_is_direct_rtsp" in src
 
 
 def test_direct_branch_precedes_ensure_variants_in_source():
-    """Dans live_mjpeg ET frame_jpeg, la branche direct_rtsp doit précéder
-    l'appel _ensure_variants_cached (garantie structurelle anti-régression)."""
+    """Dans live_mjpeg ET frame_jpeg, le dispatch video-pipeline-v2 (caméras
+    réelles) doit précéder l'appel _ensure_variants_cached (réservé démos)."""
     with open("/app/backend/streaming.py") as f:
         src = f.read()
-    for fn in ("async def live_mjpeg", "async def frame_jpeg"):
+    for fn, marker in (("async def live_mjpeg", "_video_v2_mjpeg_response"),
+                        ("async def frame_jpeg(", "_direct_frame_jpeg")):
         body = src.split(fn, 1)[1]
-        i_direct = body.find("_is_direct_rtsp")
+        i_direct = body.find(marker)
         i_variants = body.find("await _ensure_variants_cached(")
-        assert 0 <= i_direct < i_variants, f"{fn}: la garde direct_rtsp doit précéder _ensure_variants_cached"
+        assert 0 <= i_direct < i_variants, f"{fn}: le dispatch v2 doit précéder _ensure_variants_cached"

@@ -37,6 +37,28 @@ services:
     networks: [mgvms]
 
   # ─── go2rtc · moteur central de flux (RTSP/HLS/WebRTC) ───────────
+  # ─── MediaMTX — pipeline vidéo officiel (video-pipeline-v2) ──────
+  # RTSP caméra (TCP) → WebRTC (WHEP) + RTSP. Paths dynamiques via
+  # Control API (9997, NON publiée — réseau Docker uniquement).
+  # RTSP publié en 8654 tant que go2rtc (legacy) occupe 8554 sur l'hôte.
+  mediamtx:
+    image: bluenviron/mediamtx:1.15.5
+    container_name: mgvms-mediamtx
+    restart: unless-stopped
+    ports:
+      - "8654:8554"          # RTSP (lecture LAN : rtsp://host:8654/camera/{id})
+      - "8889:8889"          # WebRTC HTTP (WHEP)
+      - "8189:8189"          # WebRTC ICE TCP
+      - "8189:8189/udp"      # WebRTC ICE UDP
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9997/v3/config/global/get"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks: [mgvms]
+
   go2rtc:
     image: alexxit/go2rtc:1.9.9
     container_name: mgvms-go2rtc
@@ -71,8 +93,12 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
-      go2rtc:
+      mediamtx:
         condition: service_healthy
+      # go2rtc est LEGACY (video-pipeline-v2) : son indisponibilité ne doit
+      # plus empêcher le backend de démarrer.
+      go2rtc:
+        condition: service_started
     environment:
       TZ: ${TZ:-Europe/Paris}
       # ── Base MG-VMS ─────────────────────────────────────────
@@ -84,6 +110,10 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@2026}
       GO2RTC_URL: ${GO2RTC_URL:-http://go2rtc:1984}
       GO2RTC_RTSP: ${GO2RTC_RTSP:-rtsp://go2rtc:8554}
+      # ── MediaMTX (video-pipeline-v2) ────────────────────────
+      MEDIAMTX_API_URL: ${MEDIAMTX_API_URL:-http://mediamtx:9997}
+      MEDIAMTX_RTSP_URL: ${MEDIAMTX_RTSP_URL:-rtsp://mediamtx:8554}
+      MEDIAMTX_WHEP_URL: ${MEDIAMTX_WHEP_URL:-http://mediamtx:8889}
       # ── GPU / CUDA / FFmpeg NVDEC ───────────────────────────
       NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
       NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility,video}

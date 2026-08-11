@@ -24,7 +24,7 @@ import { toast } from "sonner";
 import api from "@/lib/api";
 import useDeviceCapabilities from "@/hooks/useDeviceCapabilities";
 import WebRTCPlayer from "@/components/WebRTCPlayer";
-import PreviewPlayer from "@/components/PreviewPlayer";
+import VideoPlayer from "@/components/video/VideoPlayer";
 import {
   Camera, Wifi, Video, Layers, Cpu, Volume2, Sun, Bell, Move3d, Wrench,
   ScanLine, RefreshCw, AlertCircle, CircleCheck, ChevronLeft, ChevronRight,
@@ -309,64 +309,73 @@ function OverviewTab({ info, caps, cameraId }) {
 }
 
 function LiveTab({ cameraId }) {
-  // v1.0-rc4 · Preview avec selector [ GO2RTC ] [ DIRECT ] par caméra
-  const [pref, setPref] = React.useState(null);
+  // video-pipeline-v2 · UN SEUL choix de pipeline par caméra :
+  //   ○ Direct RTSP  ○ MJPEG  ○ MediaMTX
+  // + bandeau statut (Pipeline / État / FPS / latence) via /video-status.
+  const [cam, setCam] = React.useState(null);
+  const [vs, setVs] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
   const [reloadKey, setReloadKey] = React.useState(0);
 
   React.useEffect(() => {
     let alive = true;
-    api.get(`/cameras/${cameraId}`).then((r) => {
-      if (alive) setPref((r.data?.live_preview_source || "auto").toLowerCase());
-    }).catch(() => { if (alive) setPref("auto"); });
-    return () => { alive = false; };
-  }, [cameraId]);
+    api.get(`/cameras/${cameraId}`).then((r) => { if (alive) setCam(r.data); }).catch(() => {});
+    const loadVs = () => api.get(`/cameras/${cameraId}/video-status`)
+      .then((r) => { if (alive) setVs(r.data); }).catch(() => { if (alive) setVs(null); });
+    loadVs();
+    const t = setInterval(loadVs, 10000);
+    return () => { alive = false; clearInterval(t); };
+  }, [cameraId, reloadKey]);
 
-  const setSource = async (val) => {
+  const setPipeline = async (val) => {
     setSaving(true);
     try {
-      // PUT complet (le backend attend un CameraInput complet)
       const { data: current } = await api.get(`/cameras/${cameraId}`);
-      const payload = { ...current, live_preview_source: val, allow_rtsp_override: true };
-      delete payload.id;
-      delete payload._id;
-      delete payload.password_hash;
+      const payload = { ...current, stream_pipeline: val, allow_rtsp_override: true };
+      delete payload.id; delete payload._id; delete payload.password_hash;
       await api.put(`/cameras/${cameraId}`, payload);
-      setPref(val);
-      setReloadKey((k) => k + 1);  // force remount du PreviewPlayer
-    } catch (e) {
-      // Silencieux — le player fera son fallback
-    } finally { setSaving(false); }
+      setCam((c) => ({ ...c, stream_pipeline: val }));
+      setReloadKey((k) => k + 1);  // remount player + refresh statut
+    } catch (e) { /* le bandeau statut affichera l'erreur */ } finally { setSaving(false); }
   };
 
+  const current = (cam?.stream_pipeline || "mediamtx").toLowerCase();
   const btn = (val, label) => (
-    <button
-      key={val}
-      onClick={() => !saving && setSource(val)}
-      disabled={saving}
-      data-testid={`live-source-${val}`}
+    <button key={val} onClick={() => !saving && setPipeline(val)} disabled={saving}
+      data-testid={`pipeline-${val}`}
       className={`text-[10px] mono uppercase tracking-wider px-2.5 py-1 border transition ${
-        pref === val
+        current === val
           ? "bg-[#00E5FF]/15 border-[#00E5FF]/60 text-[#00E5FF]"
           : "bg-secondary border-border text-muted-foreground hover:text-foreground"
-      }`}
-    >
+      }`}>
       {label}
     </button>
   );
 
+  const stateColor = vs?.status === "online" ? "text-[#00E676]" : "text-[#FF3333]";
+  const PIPELINE_LABEL = { mediamtx: "MediaMTX", mjpeg: "MJPEG", direct_rtsp: "Direct RTSP" };
   return (
     <Card className="p-3 space-y-2" data-testid="cam-live">
       <div className="flex items-center justify-between">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Source vidéo</div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Pipeline vidéo</div>
         <div className="flex items-center gap-1">
-          {btn("go2rtc", "Go2RTC")}
-          {btn("direct", "Direct")}
-          {btn("auto", "Auto")}
+          {btn("direct_rtsp", "Direct RTSP")}
+          {btn("mjpeg", "MJPEG")}
+          {btn("mediamtx", "MediaMTX")}
         </div>
       </div>
+      <div className="flex items-center gap-3 text-[10px] mono border border-border px-2 py-1" data-testid="pipeline-status-band">
+        <span>Pipeline : <b>{PIPELINE_LABEL[vs?.pipeline] || PIPELINE_LABEL[current]}</b></span>
+        <span className={stateColor} data-testid="pipeline-status-state">
+          État : <b>{vs ? (vs.status === "online" ? "CONNECTÉ" : (vs.status || "?").toUpperCase()) : "…"}</b>
+        </span>
+        {vs?.fps != null && <span>FPS : <b>{vs.fps}</b></span>}
+        {vs?.latency_ms != null && <span>Latence ≈ <b>{vs.latency_ms} ms</b></span>}
+        {vs?.codec && <span className="text-muted-foreground">{String(vs.codec).toUpperCase()}</span>}
+        {vs?.error && <span className="text-[#FF3333] truncate max-w-[280px]" title={vs.error} data-testid="pipeline-status-error">{vs.error}</span>}
+      </div>
       <div className="aspect-video bg-black">
-        <PreviewPlayer key={`${cameraId}-${reloadKey}`} cameraId={cameraId} className="w-full h-full" />
+        {cam && <VideoPlayer key={`${cameraId}-${reloadKey}`} camera={cam} className="w-full h-full" dataTestId="center-player" />}
       </div>
     </Card>
   );

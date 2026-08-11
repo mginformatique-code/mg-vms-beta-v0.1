@@ -79,14 +79,12 @@ def test_streaming_module_documents_stream_mode_respect():
 
 
 def test_routers_documents_go2rtc_decoupling():
-    """Le code de create_camera doit implémenter la logique keep_camera."""
+    """video-pipeline-v2 : create_camera applique le pipeline choisi, sans Go2RTC."""
     with open("/app/backend/routers.py") as f:
         src = f.read()
-    assert "keep_camera" in src
-    assert "camera_created_go2rtc_fallback" in src
-    assert 'stream_mode == "direct_rtsp"' in src
-    # Le message d'erreur pour go2rtc-mode explicite est clair
-    assert "Mode pipeline" in src or "RTSP direct" in src
+    assert "stream_pipeline" in src
+    assert "video-pipeline-v2" in src
+    assert "ensure_path" in src
 
 
 def test_camera_input_stream_mode_field_in_model():

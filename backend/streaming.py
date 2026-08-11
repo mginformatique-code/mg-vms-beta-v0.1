@@ -428,41 +428,22 @@ async def sync_all_streams() -> None:
             go2rtc_names = set((r.json() or {}).keys()) if r.status_code == 200 else set()
     except httpx.HTTPError:
         go2rtc_names = set()
-    # 3) (Re)-enregistrement des caméras réelles
+    # 3) video-pipeline-v2 · Go2RTC = LEGACY ISOLÉ : les caméras réelles ne sont
+    #    PLUS JAMAIS inscrites dans Go2RTC, quel que soit leur pipeline.
+    #    Purge des résidus cam_xxx/_hd/_sd hérités des versions antérieures.
     cams = await db.cameras.find({}, {"_id": 0}).to_list(1000)
-    n_new = 0
-    n_upgraded = 0
+    n_purged = 0
     for cam in cams:
         if cam.get("id") in DEMO_IDS:
-            # Les démos : variantes _hd et _sd déjà déclarées statiquement dans go2rtc.yaml,
-            # mais on garantit qu'elles existent quand même (utile après upgrade).
+            # Les démos restent servies par go2rtc (mires locales statiques).
             await _ensure_variants(_stream_name(cam["id"]))
             continue
-        # v1.0-rc4 · Respecter le stream_mode choisi par l'admin :
-        # les caméras en "direct_rtsp" ne sont PAS inscrites dans Go2RTC
-        # (l'IA lit RTSP en direct, aucune dépendance à Go2RTC pour le pipeline).
-        if _is_direct_rtsp(cam):
-            # v1.0-rc4.6 · Purge des résidus Go2RTC orphelins (cam_xxx/_hd/_sd)
-            # créés par l'ancien bug _ensure_variants non mode-aware.
-            name = _stream_name(cam["id"])
-            if go2rtc_names & {name, f"{name}_hd", f"{name}_sd"}:
-                await unregister_camera_stream(cam["id"], caller="sync_all_streams@direct_rtsp_purge")
-                logger.info("sync_all_streams: purge résidus Go2RTC pour %s (stream_mode=direct_rtsp)", cam["id"])
-            else:
-                logger.debug("sync_all_streams: skip %s (stream_mode=direct_rtsp)", cam["id"])
-            continue
         name = _stream_name(cam["id"])
-        if await _stream_registered(name):
-            # Producteur principal déjà présent → on ajoute uniquement les variantes manquantes
-            # (migration transparente depuis les versions antérieures à v2.13.0 qui n'avaient
-            # pas la variante _hd).
-            await _ensure_variants(name)
-            n_upgraded += 1
-            continue
-        if await register_camera_stream(cam, caller="sync_all_streams@startup"):
-            n_new += 1
-    logger.info("go2rtc: %d flux caméra enregistrés (nouveaux) · %d variantes HD/SD garanties (existants)",
-                n_new, n_upgraded)
+        if go2rtc_names & {name, f"{name}_hd", f"{name}_sd"}:
+            await unregister_camera_stream(cam["id"], caller="sync_all_streams@video_v2_purge")
+            n_purged += 1
+            logger.info("sync_all_streams: résidus Go2RTC purgés pour %s (video-pipeline-v2)", cam["id"])
+    logger.info("go2rtc: legacy isolé — %d caméra(s) réelle(s) purgée(s), démos conservées", n_purged)
 
 
 async def reconcile_streams_with_go2rtc() -> dict:
@@ -1156,82 +1137,26 @@ async def _probe_status_once(cam: dict) -> tuple[str, str, bool]:
     except Exception:
         pass
 
-    # ── v1.0-rc4.6 · Mode-aware : direct_rtsp ne dépend JAMAIS de Go2RTC ──
-    # L'absence du stream cam_xxx dans Go2RTC est NORMALE dans ce mode (découplage
-    # volontaire). Le statut est déterminé par un probe TCP léger sur host:port RTSP.
-    if not is_demo and _is_direct_rtsp(cam):
-        target = _camera_tcp_target(cam)
-        if target is None:
-            # Aucune IP connue → impossible de vérifier sans ouvrir de session : online.
-            return ("online", "", False)
-        host, port = target
-        if await asyncio.to_thread(_tcp_check, host, int(port), 3.0):
-            return ("online", "", False)
-        return ("offline_transient", f"caméra injoignable (TCP {host}:{port})", False)
-
-    # ── Étape 1 : vérifier la présence du stream dans go2rtc (léger, pas de decode) ──
+    # ── video-pipeline-v2 · Caméras RÉELLES : statut PIPELINE-AWARE ──
+    # Le statut ne dépend JAMAIS de Go2RTC : il est calculé par le pipeline
+    # réellement sélectionné (mediamtx: path ready · mjpeg: broker/TCP ·
+    # direct_rtsp: probe TCP RTSP).
     if not is_demo:
-        sources = await _get_go2rtc_stream_sources(name)
-        if sources is None:
-            # go2rtc lui-même unreachable OU stream absent — impossible de distinguer
-            # via un simple 404. On tente une seconde requête légère pour distinguer :
-            try:
-                async with httpx.AsyncClient(timeout=3) as client:
-                    r = await client.get(f"{GO2RTC_URL}/api/streams")
-                if r.status_code == 200:
-                    # go2rtc répond mais le stream est absent → anomalie MG-VMS interne
-                    _lc_record(cam_id, "stream_absent_from_go2rtc",
-                               reason="go2rtc OK mais stream introuvable — NON auto-réparé, action manuelle requise",
-                               caller="probe")
-                    return ("offline", "stream absent de go2rtc — cliquer Réparer", True)
-                else:
-                    # go2rtc HS
-                    return ("offline", f"go2rtc HTTP {r.status_code}", False)
-            except httpx.HTTPError as e:
-                return ("offline", f"go2rtc unreachable: {type(e).__name__}", False)
+        from video_pipelines.status import quick_probe
+        status, err = await quick_probe(cam)
+        if status == "online":
+            return ("online", "", False)
+        return ("offline_transient", err, False)
 
-    # ── Étape 2 : probe NON-INVASIF ──
-    # ⚠ NE PLUS UTILISER frame.jpeg pour les caméras réelles : chaque appel forçait
-    # go2rtc à ouvrir une session RTSP on-demand vers la caméra physique (connect +
-    # décodage H.265 + disconnect toutes les 30 s). Beaucoup de caméras (Reolink…)
-    # limitent les sessions simultanées → ce churn faisait tomber les sessions des
-    # autres consommateurs (viewers/recorder) = « caméras qui se déconnectent ».
-    # Nouveau probe :
-    #   a) producteur go2rtc ACTIF avec bytes_recv qui augmente → online (coût zéro)
-    #   b) producteur idle (aucun consommateur) → simple TCP check IP:port RTSP
-    if is_demo:
-        # Les démos sont générées localement par go2rtc → frame.jpeg reste OK ici.
-        try:
-            async with httpx.AsyncClient(timeout=8) as client:
-                r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": name})
-            if r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff":
-                return ("online", "", False)
-            return ("offline_transient", f"go2rtc frame HTTP {r.status_code}", False)
-        except httpx.HTTPError as e:
-            return ("offline_transient", f"HTTP client error: {type(e).__name__}", False)
-
-    # a) Producteur actif ? (bytes_recv > 0 = go2rtc est connecté à la caméra)
-    bytes_recv = await _stream_bytes_recv(name)
-    if bytes_recv > 0:
-        prev = _probe_last_bytes.get(cam_id)
-        _probe_last_bytes[cam_id] = bytes_recv
-        if prev is not None and bytes_recv == prev:
-            return ("offline_transient",
-                    "producteur go2rtc gelé (0 octet reçu depuis le dernier probe)", False)
-        return ("online", "", False)
-    _probe_last_bytes.pop(cam_id, None)
-
-    # b) Producteur idle (go2rtc on-demand, aucun consommateur actif) →
-    #    TCP check léger sur la caméra : n'ouvre AUCUNE session RTSP/décodage.
-    target = _camera_tcp_target(cam)
-    if target is None:
-        # Aucune IP connue → impossible de vérifier sans ouvrir de session : online.
-        return ("online", "", False)
-    host, port = target
-    ok = await asyncio.to_thread(_tcp_check, host, port, 3.0)
-    if ok:
-        return ("online", "", False)
-    return ("offline_transient", f"caméra injoignable (TCP {host}:{port})", False)
+    # ── Démos : générées localement par go2rtc → frame.jpeg reste OK ici. ──
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": name})
+        if r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff":
+            return ("online", "", False)
+        return ("offline_transient", f"go2rtc frame HTTP {r.status_code}", False)
+    except httpx.HTTPError as e:
+        return ("offline_transient", f"HTTP client error: {type(e).__name__}", False)
 
 
 async def camera_status_loop() -> None:
@@ -1391,6 +1316,37 @@ async def _open_mjpeg_upstream(src: str) -> tuple[httpx.AsyncClient, httpx.Respo
 
 
 # ============ Pont vidéo direct_rtsp (ZÉRO Go2RTC) ============
+async def _video_v2_mjpeg_response(cam: dict, request: Request, user: dict):
+    """video-pipeline-v2 · Sert le flux MJPEG du pipeline choisi (broker partagé).
+    L'URL historique /api/stream/{id}/live.mjpeg reste valide pour le mur vidéo."""
+    from video_pipelines import mediamtx as p_mediamtx
+    from video_pipelines import mjpeg as p_mjpeg
+    from video_pipelines.base import camera_source_url, resolve_pipeline
+    pipeline = resolve_pipeline(cam)
+    cam_id = cam["id"]
+    if pipeline == "direct_rtsp":
+        raise HTTPException(409, "Pipeline direct_rtsp : flux RTSP natif uniquement — "
+                                  "pas de preview navigateur (choisir MJPEG ou MediaMTX)")
+    source = p_mediamtx.rtsp_read_url(cam_id) if pipeline == "mediamtx" \
+        else camera_source_url(cam)
+    if not source.lower().startswith("rtsp://"):
+        raise HTTPException(502, "Aucune URL RTSP valide pour cette caméra")
+    broker = p_mjpeg.ensure_broker(cam_id, source)
+    if not await p_mjpeg.wait_first_frame(broker):
+        raise HTTPException(502, f"Flux MJPEG indisponible ({broker.last_error or 'aucune frame reçue'})")
+    from lifecycle import record as _lc_record
+    client_ip = request.client.host if request.client else "?"
+    _lc_record(cam_id, "consumer_attached", reason=f"live.mjpeg pipeline={pipeline}",
+               caller=f"{user.get('email','?')}@{client_ip}",
+               extra={"src": source.split("@")[-1]})
+    return StreamingResponse(
+        p_mjpeg.multipart_generator(broker),
+        media_type=f"multipart/x-mixed-replace; boundary={p_mjpeg.BOUNDARY}",
+        headers={"Cache-Control": "no-store, no-cache",
+                 "X-Accel-Buffering": "no",
+                 "X-Video-Pipeline": pipeline})
+
+
 def _direct_live_mjpeg_response(cam: dict, want_hd: bool, request: Request, user: dict):
     """Pont vidéo pour stream_mode=direct_rtsp : RTSP → ffmpeg local → MJPEG
     multipart HTTP (lisible par <img>). Réutilise le générateur éprouvé de
@@ -1444,7 +1400,22 @@ async def _direct_frame_jpeg(cam: dict, want_hd: bool) -> bytes:
                 return buf.tobytes()
     except Exception:
         logger.debug("frame_jpeg direct: frame_source indisponible pour %s", cam_id, exc_info=True)
-    rtsp_url = (cam.get("ai_rtsp_url") or "").strip() or _build_rtsp_url(cam)
+    # video-pipeline-v2 · Broker MJPEG déjà actif ? → dernière frame gratuite.
+    try:
+        from video_pipelines import mjpeg as p_mjpeg
+        b = p_mjpeg._brokers.get(cam_id)
+        if b is not None and b.latest is not None \
+                and time.monotonic() - b.last_frame_ts < 10.0:
+            return b.latest
+    except Exception:
+        pass
+    # Source pipeline-aware : mediamtx → relais (1 seule session caméra), sinon RTSP natif.
+    from video_pipelines import mediamtx as p_mediamtx
+    from video_pipelines.base import camera_source_url, resolve_pipeline
+    if resolve_pipeline(cam) == "mediamtx":
+        rtsp_url = p_mediamtx.rtsp_read_url(cam_id)
+    else:
+        rtsp_url = camera_source_url(cam)
     if not rtsp_url.lower().startswith("rtsp://"):
         raise HTTPException(502, "Aucune URL RTSP valide pour cette caméra (mode direct_rtsp)")
     transport = (cam.get("rtsp_transport") or "tcp").lower()
@@ -1489,10 +1460,11 @@ async def live_mjpeg(camera_id: str, request: Request,
     """
     cam_doc = await _authorize_camera(user, camera_id)
     want_hd = bool(int(hd or 0)) and has_permission(user, "stream_hd")
-    # v1.0-rc4.6 · Mode-aware : direct_rtsp → pont MJPEG ffmpeg local.
-    # JAMAIS _ensure_variants_cached ni cam_xxx_hd/_sd en mode direct.
-    if camera_id not in DEMO_IDS and _is_direct_rtsp(cam_doc):
-        return _direct_live_mjpeg_response(cam_doc, want_hd, request, user)
+    # ── video-pipeline-v2 · Caméras RÉELLES : dispatch strict par pipeline ──
+    # (mjpeg → broker partagé · mediamtx → broker sur relais MediaMTX ·
+    #  direct_rtsp → 409 explicite). ZÉRO Go2RTC, zéro variantes cam_xxx_hd/_sd.
+    if camera_id not in DEMO_IDS:
+        return await _video_v2_mjpeg_response(cam_doc, request, user)
     src = _mjpeg_stream(camera_id, hd=want_hd)
     # Garantit la variante côté go2rtc (throttled → 1 appel par caméra / 60 s)
     await _ensure_variants_cached(_stream_name(camera_id))
@@ -1603,9 +1575,9 @@ async def frame_jpeg(camera_id: str, hd: int = 1, user: dict = Depends(stream_us
     """
     cam_doc = await _authorize_camera(user, camera_id)
     want_hd = bool(int(hd or 0)) and has_permission(user, "stream_hd")
-    # v1.0-rc4.6 · Mode-aware : direct_rtsp → snapshot sans Go2RTC
-    # (frame_source si worker actif, sinon capture ffmpeg one-shot).
-    if camera_id not in DEMO_IDS and _is_direct_rtsp(cam_doc):
+    # ── video-pipeline-v2 · Caméras RÉELLES : snapshot pipeline-aware, ZÉRO Go2RTC ──
+    # (frame_source si worker IA actif → broker MJPEG si actif → capture one-shot).
+    if camera_id not in DEMO_IDS:
         data = await _direct_frame_jpeg(cam_doc, want_hd)
         return Response(content=data, media_type="image/jpeg",
                         headers={"Cache-Control": "no-store",

@@ -21,6 +21,7 @@ const EMPTY_FORM = {
   enabled_plugins: [],
   record_mode: "continuous", storage_pool_id: "", storage_max_size_gb: 0,
   rtsp_transport: "tcp", preferred_codec: "auto", stream_mode: "direct_rtsp",
+  stream_pipeline: "mediamtx",
   // Assistant RTSP
   wiz_brand: "", wiz_model_idx: 0, wiz_stream: "main", wiz_channel: 1,
 };
@@ -78,6 +79,7 @@ export default function Cameras() {
       rtsp_transport: c.rtsp_transport || "tcp",
       preferred_codec: c.preferred_codec || "auto",
       stream_mode: c.stream_mode || "auto",
+      stream_pipeline: c.stream_pipeline || "mediamtx",
     });
     setConnCheck(null); setProfiles([]); setOpen(true);
     // Charge assignation de stockage existante
@@ -212,7 +214,7 @@ export default function Cameras() {
       let camId = editingId;
       if (editingId) {
         await api.put(`/cameras/${editingId}`, payload);
-        toast.success("Caméra mise à jour (go2rtc rechargé)");
+        toast.success("Caméra mise à jour");
       } else {
         const { data: created } = await api.post("/cameras", payload);
         camId = created.id;
@@ -335,14 +337,15 @@ export default function Cameras() {
                 <td className="px-3 py-2 font-medium">{c.name}<div className="text-[10px] text-muted-foreground truncate max-w-xs">{c.manufacturer} {c.model}</div></td>
                 <td className="px-3 py-2">
                   {(() => {
-                    // v1.0-rc4.5 · Audit UI · Mode vidéo persistant DIRECT/GO2RTC
-                    // (source de vérité : cameras.stream_mode). 'auto' est
-                    // affiché en attendant que l'admin choisisse explicitement.
-                    const m = (c.stream_mode || "auto").toLowerCase();
-                    const isDirect = m === "direct_rtsp" || m === "direct";
-                    const isGo2rtc = m === "go2rtc";
-                    const label = isDirect ? "DIRECT" : isGo2rtc ? "GO2RTC" : "AUTO";
-                    const color = isDirect ? "#00E5FF" : isGo2rtc ? "#FFAA00" : "#888";
+                    // video-pipeline-v2 · Badge = pipeline vidéo de la caméra
+                    const p = (c.stream_pipeline || "").toLowerCase()
+                      || ((c.stream_mode || "auto").toLowerCase() === "direct_rtsp" ? "direct_rtsp" : "mediamtx");
+                    const META = {
+                      mediamtx:    ["MEDIAMTX", "#00E5FF"],
+                      mjpeg:       ["MJPEG", "#00E676"],
+                      direct_rtsp: ["DIRECT RTSP", "#FFB800"],
+                    };
+                    const [label, color] = META[p] || ["—", "#888"];
                     return (
                       <span
                         className="text-[10px] px-1.5 py-0.5 border font-semibold"
@@ -535,69 +538,52 @@ export default function Cameras() {
                 <p className="text-[10px] text-muted-foreground mt-0.5">Live/IA préfèrent H.264, l&apos;enregistrement peut utiliser H.265</p>
               </div>
               <div className="col-span-2">
-                {/* v1.0-rc4.5 · Phase 2 · Choix explicite du pipeline vidéo
-                    (Go2RTC n'est plus imposé, même pour les caméras ONVIF).
-                    Ce choix devient définitivement la configuration de la caméra.
-                    L'admin peut basculer ultérieurement via l'édition. */}
+                {/* video-pipeline-v2 · UN SEUL choix : le pipeline vidéo de la caméra.
+                    Go2RTC n'est plus proposé (legacy isolé). */}
                 <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
-                  Mode pipeline vidéo <span className="text-[#00E5FF]">· choix requis</span>
+                  Pipeline vidéo <span className="text-[#00E5FF]">· choix requis</span>
                 </label>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="stream-mode-radio-group">
-                  <label
-                    className={`cursor-pointer border p-3 transition-colors ${
-                      form.stream_mode === "direct_rtsp"
-                        ? "border-[#00E5FF] bg-[#00E5FF]/5"
-                        : "border-border hover:border-muted-foreground/60"
-                    }`}
-                    data-testid="stream-mode-direct-rtsp"
-                  >
-                    <input
-                      type="radio"
-                      name="stream_mode"
-                      value="direct_rtsp"
-                      checked={form.stream_mode === "direct_rtsp"}
-                      onChange={() => setForm({ ...form, stream_mode: "direct_rtsp" })}
-                      className="mr-2 align-middle"
-                    />
-                    <span className="font-semibold text-sm">RTSP → MG-VMS direct</span>
-                    <div className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
-                      Pipeline IA lit RTSP directement. <strong>Aucune dépendance à Go2RTC</strong>.
-                      Recommandé par défaut, aussi bien pour les caméras ONVIF que RTSP manuelles.
-                    </div>
-                  </label>
-                  <label
-                    className={`cursor-pointer border p-3 transition-colors ${
-                      form.stream_mode === "go2rtc"
-                        ? "border-[#00E5FF] bg-[#00E5FF]/5"
-                        : "border-border hover:border-muted-foreground/60"
-                    }`}
-                    data-testid="stream-mode-go2rtc"
-                  >
-                    <input
-                      type="radio"
-                      name="stream_mode"
-                      value="go2rtc"
-                      checked={form.stream_mode === "go2rtc"}
-                      onChange={() => setForm({ ...form, stream_mode: "go2rtc" })}
-                      className="mr-2 align-middle"
-                    />
-                    <span className="font-semibold text-sm">RTSP → Go2RTC → MG-VMS</span>
-                    <div className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
-                      Streaming centralisé (preview WebRTC/MJPEG, multi-consommateurs).
-                      Requiert Go2RTC actif.
-                    </div>
-                  </label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3" data-testid="stream-pipeline-radio-group">
+                  {[
+                    { val: "direct_rtsp", title: "Direct RTSP",
+                      desc: "Flux RTSP natif pour consommateurs compatibles (VLC, NVR, IA). Pas de preview navigateur." },
+                    { val: "mjpeg", title: "MJPEG",
+                      desc: "Image fiable dans le navigateur via un processus ffmpeg partagé. Simple et robuste." },
+                    { val: "mediamtx", title: "MediaMTX (recommandé)",
+                      desc: "WebRTC faible latence + redistribution RTSP via MediaMTX. Zéro transcodage H.264." },
+                  ].map((opt) => (
+                    <label key={opt.val}
+                      className={`cursor-pointer border p-3 transition-colors ${
+                        form.stream_pipeline === opt.val
+                          ? "border-[#00E5FF] bg-[#00E5FF]/5"
+                          : "border-border hover:border-muted-foreground/60"
+                      }`}
+                      data-testid={`stream-pipeline-${opt.val}`}
+                    >
+                      <input
+                        type="radio"
+                        name="stream_pipeline"
+                        value={opt.val}
+                        checked={form.stream_pipeline === opt.val}
+                        onChange={() => setForm({ ...form, stream_pipeline: opt.val })}
+                        className="mr-2 align-middle"
+                      />
+                      <span className="font-semibold text-sm">{opt.title}</span>
+                      <div className="text-[11px] text-muted-foreground mt-1 leading-relaxed">{opt.desc}</div>
+                    </label>
+                  ))}
                 </div>
                 {/* Selector caché pour compat tests existants + accessibilité clavier */}
                 <select
-                  value={form.stream_mode}
-                  onChange={(e) => setForm({ ...form, stream_mode: e.target.value })}
+                  value={form.stream_pipeline}
+                  onChange={(e) => setForm({ ...form, stream_pipeline: e.target.value })}
                   className="sr-only"
-                  data-testid="stream-mode"
-                  aria-label="Mode pipeline vidéo"
+                  data-testid="stream-pipeline"
+                  aria-label="Pipeline vidéo"
                 >
-                  <option value="direct_rtsp">RTSP → MG-VMS direct (IA sans Go2RTC)</option>
-                  <option value="go2rtc">RTSP → Go2RTC → MG-VMS (streaming centralisé)</option>
+                  <option value="direct_rtsp">Direct RTSP</option>
+                  <option value="mjpeg">MJPEG</option>
+                  <option value="mediamtx">MediaMTX</option>
                 </select>
               </div>
             </div>

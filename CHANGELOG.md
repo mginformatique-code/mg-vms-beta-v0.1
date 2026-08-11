@@ -2,6 +2,69 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v2.0-video] — 2026-08 — REFONTE ARCHITECTURALE couche vidéo (video-pipeline-v2)
+
+Refonte complète validée par audit préalable du repo (12 points). Go2RTC n'est
+PLUS le composant obligatoire du système vidéo : il est isolé en legacy (sert
+uniquement les mires démo). 3 pipelines INDÉPENDANTS, choisis PAR CAMÉRA via le
+champ unique `stream_pipeline` (remplace `stream_mode` + `live_preview_source`).
+
+### Added — 3 pipelines indépendants
+- **`direct_rtsp`** (`video_pipelines/direct_rtsp.py`) : consommateurs RTSP natifs
+  (VLC/NVR/IA). Statut par VRAI probe RTSP (TCP + DESCRIBE ffprobe, cache 30 s,
+  erreurs classées : 401/404/refusée/timeout — jamais de « Unknown error »).
+  Le navigateur reçoit un état honnête DISPONIBLE/NON DISPONIBLE (aucune fausse preview).
+- **`mjpeg`** (`video_pipelines/mjpeg.py`) : broker ffmpeg **PARTAGÉ** (1 processus
+  par caméra, fanout N viewers), RTSP TCP, fraîcheur d'abord (dernière frame seule,
+  un client lent saute des frames), reconnect backoff, watchdog 20 s, arrêt propre
+  à 0 viewer (30 s), FPS/last_frame_at/restarts/viewers exposés.
+- **`mediamtx`** (`video_pipelines/mediamtx.py` + service Docker `bluenviron/mediamtx:1.15.5`) :
+  paths dynamiques `camera/{id}` via Control API v3, ingestion RTSP TCP,
+  **WebRTC WHEP officiel** (aucun SDP bricolé), H.264 copy/remux zéro transcodage,
+  purge des paths orphelins au démarrage. **Pipeline PAR DÉFAUT.**
+- `GET /api/cameras/{id}/video-status` : contrat JSON UNIQUE pour les 3 pipelines
+  {camera_id, pipeline, status, source, codec, fps, last_frame_at, latency_ms, error}.
+- `POST/DELETE /api/video/{id}/whep` : signaling WHEP proxifié + authentifié JWT
+  (les credentials RTSP ne quittent jamais le backend) ; `GET /api/video/{id}/mjpeg`.
+- Frontend : dispatcher unique `components/video/VideoPlayer.jsx`
+  (WHEPPlayer / MJPEGPlayer / DirectRTSPCard) — mur vidéo et Centre Caméras
+  utilisent EXACTEMENT le pipeline choisi, aucune logique parallèle ni fallback caché.
+- Centre Caméras simplifié : ○ Direct RTSP ○ MJPEG ○ MediaMTX + bandeau
+  Pipeline / État / FPS / latence. Page Appareils : 3 radios + badge pipeline.
+- Docker : service `mediamtx` (RTSP hôte 8654 tant que go2rtc occupe 8554,
+  WHEP 8889, ICE 8189/tcp+udp, API 9997 NON publiée) ; `deploy-app/mediamtx.yml` ;
+  backend ne dépend plus du healthcheck go2rtc pour démarrer.
+
+### Changed — pipeline-aware partout
+- Statut caméra (`_probe_status_once`) : calculé par le pipeline réellement
+  sélectionné. **Une caméra n'est plus JAMAIS déclarée offline parce qu'elle
+  n'existe pas dans Go2RTC.**
+- `refresh-stream`, `live.mjpeg`, `frame.jpeg`, create/update/delete caméra :
+  dispatch strict par pipeline (+ purge systématique des résidus Go2RTC).
+- Recorder : source `rtsp://mediamtx:8554/camera/{id}` (pipeline mediamtx) ou
+  RTSP natif (mjpeg/direct) — plus de dépendance Go2RTC pour l'enregistrement.
+- Moteur IA (frame_source) : direct natif ou relais MediaMTX — plus de relais Go2RTC
+  pour les caméras réelles.
+- Migration douce automatique au démarrage : `stream_mode`/`live_preview_source`
+  → `stream_pipeline` (direct_rtsp→direct_rtsp, go2rtc/auto→mediamtx, démos→mjpeg).
+
+### Isolated — Go2RTC legacy
+- `sync_all_streams` : purge les entrées `cam_xxx/_hd/_sd` de TOUTES les caméras
+  réelles ; go2rtc ne sert plus que les 2 mires démo. Aucun nouveau code vidéo
+  ne dépend de Go2RTC (garanti par test structurel).
+
+### Tests
+- `tests/test_videov2_pipelines.py` (13) + `tests/test_video_pipeline_v2_e2e.py` (18,
+  agent de test) + `tests/test_v1rc46_direct_rtsp_mode_aware.py` mis à jour (10).
+  Scénarios couverts : RTSP valide/invalide/inaccessible, reconnexion après coupure
+  (kill ffmpeg → watchdog), multi-viewers (1 seul ffmpeg), MediaMTX path+statut,
+  WHEP 201/409, changement de pipeline, offline→online, isolation Go2RTC.
+- Agent de test E2E : backend 100 %, frontend 95 % (WebRTC média non joignable en
+  préview cloud — ICE/UDP — comportement attendu, erreur propre + bouton Réessayer).
+- ⚠ Reste à valider sur LAN client : caméra réelle 192.168.1.51 (checklist : MJPEG,
+  MediaMTX WebRTC, RTSP direct, mauvais mot de passe → 401, stabilité 5 min,
+  temps 1re image/FPS/latence/CPU/RAM).
+
 ## [v1.0-rc4.6] — 2026-08 — Pipeline mode-aware direct_rtsp ↔ Go2RTC (root cause `Error opening input file cam_xxx`)
 
 Correctif architectural validé par diagnostic conjoint (HAR client + audit code).

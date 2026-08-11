@@ -1,0 +1,38 @@
+{
+  "summary": "Video pipeline v2 (MG-VMS) full E2E validated. 18/18 backend tests pass (video-status contract for 3 pipelines, MJPEG dispatch on /api/stream/{id}/live.mjpeg and /api/video/{id}/mjpeg with X-Video-Pipeline header, WHEP 201 for mediamtx + 409 for mjpeg/direct_rtsp, refresh-stream pipeline-aware, camera create/delete mediamtx lifecycle with MediaMTX path publish, /api/cameras exposes stream_pipeline with demos=mjpeg, Go2RTC isolation confirmed — no real cam_{id} entries). Frontend: login OK, /live wall shows 2 wall-player + MJPEG feed-quality badges live, /cameras shows 3-radio stream-pipeline-radio-group and video-mode-badge (MJPEG/MEDIAMTX/DIRECT RTSP), /camera-center/{id} Live tab exposes 3 pipeline switch buttons + pipeline-status-band. Direct-RTSP honest card renders on switch (text: 'PIPELINE : DIRECT RTSP — Flux RTSP natif non lisible par ce navigateur — utilisez VLC/NVR, ou choisissez MJPEG / MediaMTX.'). Mediamtx WHEP player shows clean error state with Réessayer button as expected in preview env.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "CameraCenter LiveTab · DirectRTSP view", "issue": "The Direct-RTSP honest card rendered in LiveTab is not the shared DirectRTSPCard component (or its data-testid is not propagated) — [data-testid=\"direct-rtsp-card\"] not found in DOM although the visual card is correctly displayed with expected FR copy. Consider mounting the shared DirectRTSPCard component or forwarding the same testid so automated regression can assert on it.", "selector": "[data-testid=\"direct-rtsp-card\"]", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "WHEP signaling from browser (mediamtx camera)", "issue": "Player shows 'Request failed with status code 502' before falling back to clean error+Réessayer. Backend POST /api/video/{id}/whep returns 201 with valid SDP answer in pytest (verified). The 502 seen in browser is likely transient ingress buffering of the SDP request/response (or a delete/cleanup call on unmount). Not blocking per review note (WHEP media playback not expected in cloud preview due to ICE/UDP), but worth investigating with a controlled repro. Retry button works.", "affected_selectors": ["[data-testid=\"video-player-retry\"]"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_video_pipeline_v2_e2e.py",
+    "/app/test_reports/pytest/v2_e2e.xml"
+  ],
+  "action_items": [
+    "(LOW) Ensure the Direct RTSP honest view in CameraCenter LiveTab exposes data-testid=\"direct-rtsp-card\" (use the shared DirectRTSPCard component or forward the testid) so E2E can assert on it.",
+    "(LOW) Investigate transient 502 seen on first WHEP POST from browser — backend endpoint itself is healthy (pytest returns 201 with SDP answer + X-Whep-Session)."
+  ],
+  "critical_code_review_comments": [
+    "Contrat unifié /video-status implémenté proprement, tous les champs présents (browser_playable, rtsp_url_masked pour direct_rtsp, codec h264 pour mediamtx).",
+    "X-Video-Pipeline header correctement propagé sur les 2 endpoints MJPEG (backwards-compat /api/stream/{id}/live.mjpeg et nouveau /api/video/{id}/mjpeg).",
+    "WHEP dispatch strict : 409 propres sur mjpeg/direct_rtsp — bonne séparation des pipelines.",
+    "Isolation Go2RTC confirmée : après création+suppression d'une caméra mediamtx et probes sur les 3 E2E, /api/streams (go2rtc) ne contient toujours que cam_demo-cam-001/002.",
+    "Cameras.jsx : hydration warning React (<span> as child of <option>) causé par l'injection dev-tooling `x-source-*` — pas un bug fonctionnel mais du bruit dans la console (peut être atténué en désactivant l'instrumentation en prod)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_video_pipeline_v2_e2e.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "95%"},
+  "test_credentials": "admin@mg-vms.com / Admin@2026",
+  "seed_data_creation": "Aucune donnée persistée : la caméra TEST_v2_mediamtx_lifecycle est créée puis supprimée dans le même test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest complet à /app/backend/tests/test_video_pipeline_v2_e2e.py (18 tests). Utiliser IDs E2E fixes : mediamtx=286eeced-ec07-4914-935a-85b232e24b19, mjpeg=b875a677-8f45-4abd-8783-4b6eb2c8a68a, direct_rtsp=0da7f4f3-4e50-40a8-a0b2-4bd73dc5cf3e. Live tab de CameraCenter accessible via /camera-center/{id} (pas /cameras/center). Ne pas s'attendre à voir le media WebRTC en preview (ICE/UDP inaccessibles), vérifier signaling+retry uniquement.",
+  "rca of the issue": "N/A — aucun bug bloquant détecté."
+}

@@ -23,7 +23,36 @@ Les 4 piliers : VMS professionnel · Plateforme IA · Moteur d'automatisation ·
 - **Équipe MG-VMS** : noyau petit et testable (~5000 lignes Python)
 - **Installateur terrain** : setup guidé 10–15 min, health dashboard clair
 
-### Session courante (Aug 2026) — v1.0-rc4.6 · Pipeline mode-aware direct_rtsp ↔ Go2RTC (P0)
+### Session courante (Aug 2026) — v2.0-video · REFONTE couche vidéo (video-pipeline-v2)
+
+**Décision utilisateur : nouveau chantier, on ne répare plus Go2RTC.** Audit repo
+complet (12 points) validé, puis refonte en 6 phases :
+- **3 pipelines indépendants** par caméra via champ UNIQUE `stream_pipeline`
+  (remplace `stream_mode` + `live_preview_source`, migration auto au démarrage) :
+  · `direct_rtsp` : probe RTSP réel (TCP+DESCRIBE classé), état honnête navigateur
+  · `mjpeg` : broker ffmpeg PARTAGÉ (1 ffmpeg/caméra, fanout, watchdog, backoff,
+    fraîcheur d'abord, arrêt auto 0 viewer)
+  · `mediamtx` (DÉFAUT) : MediaMTX 1.15.5 (Docker + binaire supervisé dev),
+    paths dynamiques Control API v3, WebRTC **WHEP officiel** proxifié JWT
+- Backend : package `video_pipelines/` + `routes/video.py`
+  (`GET /api/cameras/{id}/video-status` contrat unique, `POST /api/video/{id}/whep`,
+  `GET /api/video/{id}/mjpeg`) ; statut/refresh/live.mjpeg/frame.jpeg/CRUD caméra
+  pipeline-aware ; recorder + IA sourcés MediaMTX/natif (plus de Go2RTC)
+- Frontend : `components/video/VideoPlayer.jsx` (dispatch strict, zéro fallback
+  caché) + WHEPPlayer/MJPEGPlayer/DirectRTSPCard ; mur vidéo + Centre Caméras
+  (3 boutons + bandeau Pipeline/État/FPS) + page Appareils (3 radios + badge)
+- **Go2RTC = legacy isolé** : purge des cam_xxx/_hd/_sd réelles au démarrage,
+  ne sert plus que les 2 mires démo (pipeline mjpeg)
+- Docker : service mediamtx (8654 RTSP hôte, 8889 WHEP, 8189 ICE, API 9997 interne),
+  `deploy-app/mediamtx.yml`, `.env.example` + install.sh à jour
+- Piège dev résolu : `localhost` non résolu par les ffmpeg enfants du backend
+  → `MEDIAMTX_RTSP_URL=rtsp://127.0.0.1:8654` (IP littérale) en dev
+- Tests : 31 pytest v2 verts + agent de test (backend 100 %, frontend 95 % —
+  média WebRTC injoignable en préview cloud = attendu, ICE/UDP)
+- **À VALIDER PAR LE CLIENT sur LAN** : caméra réelle 192.168.1.51 (MJPEG,
+  MediaMTX WebRTC, direct RTSP, 401 mauvais mdp, stabilité 5 min, métriques)
+
+### Session (Aug 2026) — v1.0-rc4.6 · Pipeline mode-aware direct_rtsp ↔ Go2RTC (P0)
 
 **Root cause du 500 Go2RTC `Error opening input file cam_xxx`** (diagnostic validé
 avec le client via HAR + audit code) : incohérence de contrat mode-aware —

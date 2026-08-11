@@ -104,6 +104,8 @@ app.include_router(devices_router)
 app.include_router(pipeline_diag_router)  # v1.0-rc4 · diagnostic pipeline vidéo multi-étages
 app.include_router(go2rtc_diag_router)     # v1.0-rc4.5 · diagnostic Go2RTC détaillé par caméra
 app.include_router(mjpeg_direct_router)  # v1.0-rc4 · MJPEG multipart DIRECT (bypass Go2RTC)
+from routes.video import video_router
+app.include_router(video_router)   # video-pipeline-v2 · video-status + MJPEG broker + WHEP
 app.include_router(vehicles_router)
 app.include_router(smart_search_router)
 app.include_router(discovery_router)
@@ -180,6 +182,16 @@ async def on_startup():
     # Re-hydrate le journal lifecycle depuis MongoDB (survit aux redémarrages backend)
     from lifecycle import hydrate_journal_from_db
     await hydrate_journal_from_db()
+    # ── video-pipeline-v2 : migration modèle + sync des paths MediaMTX ──
+    try:
+        from video_pipelines.migrate import migrate_stream_pipeline
+        await migrate_stream_pipeline()
+        from database import db as _db
+        from video_pipelines import mediamtx as _p_mediamtx
+        _cams = await _db.cameras.find({}, {"_id": 0}).to_list(1000)
+        asyncio.create_task(_p_mediamtx.sync_paths(_cams))
+    except Exception:
+        logger.exception("video-pipeline-v2 : init MediaMTX/migration a échoué (non bloquant)")
     asyncio.create_task(metrics_broadcaster())
     asyncio.create_task(network_poll_broadcaster())
     asyncio.create_task(sync_all_streams())
@@ -202,6 +214,12 @@ async def on_shutdown():
     try:
         from frame_source import stop_all as _fs_stop_all
         _fs_stop_all()
+    except Exception:
+        pass
+    # video-pipeline-v2 : arrêt propre des brokers MJPEG partagés
+    try:
+        from video_pipelines.mjpeg import stop_all as _mjpeg_stop_all
+        _mjpeg_stop_all()
     except Exception:
         pass
     logger.info("MG-VMS API arrêté — enregistreurs ffmpeg + workers IA terminés")

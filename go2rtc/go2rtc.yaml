@@ -12,17 +12,5 @@ streams:
     - ffmpeg:cam_demo-cam-002#video=mjpeg#low_latency
   cam_demo-cam-002_sd:
     - ffmpeg:cam_demo-cam-002#video=mjpeg#width=640#low_latency
-  cam_8a79d3f4-5d60-4ac6-8f90-227623ed28be:
-    - rtsp://10.0.0.99:554/live
-  cam_8a79d3f4-5d60-4ac6-8f90-227623ed28be_hd:
-    - ffmpeg:cam_8a79d3f4-5d60-4ac6-8f90-227623ed28be#video=mjpeg#low_latency
-  cam_8a79d3f4-5d60-4ac6-8f90-227623ed28be_sd:
-    - ffmpeg:cam_8a79d3f4-5d60-4ac6-8f90-227623ed28be#video=mjpeg#width=640#low_latency
-  cam_cf9d03ce-c86b-4d48-a076-29a6249f99f9:
-    - rtsp://10.0.0.98:554/live
-  cam_cf9d03ce-c86b-4d48-a076-29a6249f99f9_hd:
-    - ffmpeg:cam_cf9d03ce-c86b-4d48-a076-29a6249f99f9#video=mjpeg#low_latency
-  cam_cf9d03ce-c86b-4d48-a076-29a6249f99f9_sd:
-    - ffmpeg:cam_cf9d03ce-c86b-4d48-a076-29a6249f99f9#video=mjpeg#width=640#low_latency
   cam_demo-cam-001_hd:
     - ffmpeg:cam_demo-cam-001#video=mjpeg#low_latency

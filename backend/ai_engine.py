@@ -500,7 +500,6 @@ async def _sync_frame_source_workers(cams: list[dict], *,
     """
     import frame_source
     go2rtc_rtsp = os.environ.get("GO2RTC_RTSP", "rtsp://go2rtc:8554")
-    use_direct = os.environ.get("MGVMS_AI_DIRECT_RTSP", "1").lower() not in ("0", "false", "no")
 
     partial = only is not None
     if partial:
@@ -520,29 +519,27 @@ async def _sync_frame_source_workers(cams: list[dict], *,
         native_url = (cam.get("rtsp_url") or "").strip()
         is_demo = cam_id.startswith("demo-") or cam_id.startswith("demo_")
 
-        # v1.0-rc4 · Résolution du mode pipeline vidéo per-camera.
-        # Le champ `stream_mode` prime sur l'env global `MGVMS_AI_DIRECT_RTSP`.
-        # Valeurs : "auto" (env global) · "direct_rtsp" (force direct) · "go2rtc" (force relais).
-        stream_mode = (cam.get("stream_mode") or "auto").lower()
-        if stream_mode == "direct_rtsp":
-            direct_this_cam = True
-        elif stream_mode == "go2rtc":
-            direct_this_cam = False
-        else:
-            direct_this_cam = use_direct
+        # video-pipeline-v2 · Source IA pipeline-aware (plus jamais Go2RTC pour
+        # les caméras réelles) :
+        #   - démos             → relais go2rtc legacy (mires locales)
+        #   - pipeline mediamtx → relais MediaMTX (économise une session caméra)
+        #   - direct_rtsp/mjpeg → RTSP natif (ai_rtsp_url prioritaire)
+        from video_pipelines.base import resolve_pipeline as _resolve_pipeline
+        pipeline = _resolve_pipeline(cam)
 
         if is_demo:
             rtsp_url = f"{go2rtc_rtsp}/cam_{cam_id}"
             source_type = "demo-go2rtc-relay"
-        elif direct_this_cam and ai_url:
+        elif ai_url:
             rtsp_url = ai_url
             source_type = "direct-ai"
-        elif direct_this_cam and native_url:
+        elif pipeline == "mediamtx":
+            from video_pipelines import mediamtx as _p_mediamtx
+            rtsp_url = _p_mediamtx.rtsp_read_url(cam_id)
+            source_type = "mediamtx-relay"
+        elif native_url:
             rtsp_url = native_url
             source_type = "direct-native"
-        elif native_url or ai_url:
-            rtsp_url = f"{go2rtc_rtsp}/cam_{cam_id}"
-            source_type = "go2rtc-relay"
         else:
             logger.warning("frame_source: skip %s (aucune URL RTSP configurée)", cam_id)
             continue

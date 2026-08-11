@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
-import WebRTCPlayer from "@/components/WebRTCPlayer";
+import VideoPlayer, { pipelineOf } from "@/components/video/VideoPlayer";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, User, Car, Truck, Bike, PawPrint, ScanLine, Flame, AlertOctagon, HardHat, MapPin, Activity, Lightbulb, Moon, Siren, Volume2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -64,27 +64,13 @@ function OverlayCanvas({ cam, boxes, showOverlay }) {
   return <canvas ref={ref} className="absolute inset-0 w-full h-full pointer-events-none" data-testid="ai-overlay" />;
 }
 
-function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onToggleFocus, previewMode }) {
+function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onToggleFocus }) {
   const [hover, setHover] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
-  const [webrtcFailed, setWebrtcFailed] = useState(false);
-  const retryTimer = useRef(null);
   const online = cam?.status === "online";
-  // Décide le mode de prévisualisation effectif :
-  //  - previewMode='webrtc' explicite ou 'auto' → tenter WebRTC
-  //  - fallback MJPEG si WebRTC échoue (webrtcFailed=true)
-  //  - MJPEG direct si l'utilisateur force
-  const wantWebRTC = previewMode !== "mjpeg" && !webrtcFailed;
-  // Reset reloadKey lors d'un changement de caméra OU d'un toggle HD/SD (force le rechargement du <img>).
-  // IMPORTANT : ne PAS dépendre de `online`/`cam?.status` ici — sinon on force un
-  // reload à chaque flip online↔offline, ce qui recrée la connexion MJPEG et
-  // provoque le cycle de reconnexion historique.
-  useEffect(() => { setReloadKey((k) => k + 1); setWebrtcFailed(false); }, [cam?.id, hd, previewMode]);
-  useEffect(() => () => { if (retryTimer.current) clearTimeout(retryTimer.current); }, []);
-  const handleError = () => {
-    if (retryTimer.current) clearTimeout(retryTimer.current);
-    retryTimer.current = setTimeout(() => setReloadKey((k) => k + 1), 2500);
-  };
+  // video-pipeline-v2 · Le mur vidéo utilise EXACTEMENT le pipeline choisi
+  // pour la caméra (camera.stream_pipeline) via le dispatcher VideoPlayer.
+  // Aucune logique parallèle, aucun fallback caché, zéro Go2RTC.
+  const pipeline = pipelineOf(cam);
   const ptz = async (command) => { try { await api.post(`/cameras/${cam.id}/ptz?command=${command}`); } catch (e) { /* ignore */ } };
 
   const boxes = aiState?.boxes || [];
@@ -93,7 +79,8 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
   // Détection sous-flux (résolution < 1280x720) — le user a probablement gardé un sub-stream
   const [subW, subH] = (cam?.resolution || "").split(/x/i).map((n) => parseInt(n, 10) || 0);
   const isSubStream = online && subW > 0 && subH > 0 && (subW < 1280 || subH < 720);
-  const usingWebRTC = wantWebRTC && !webrtcFailed;
+  const PIPELINE_BADGE = { mediamtx: ["MEDIAMTX", "#00E5FF"], mjpeg: ["MJPEG", "#00E676"], direct_rtsp: ["RTSP", "#FFB800"] };
+  const [pipelineLabel, pipelineColor] = PIPELINE_BADGE[pipeline] || ["—", "#888"];
 
   return (
     <div
@@ -105,23 +92,9 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
     >
       {cam?.id ? (
         <>
-          {/* Player TOUJOURS monté (même si offline) — évite le remount destructeur qui
-             recrée MJPEG/WebRTC à chaque flip cam.status.  L'overlay "No Signal" se superpose. */}
-          {usingWebRTC ? (
-            <WebRTCPlayer cameraId={cam.id}
-                            className="w-full h-full"
-                            dataTestId="webrtc-player"
-                            onError={(msg) => {
-                              console.warn(`[Camera ${cam.id}] player: WebRTC fallback → MJPEG :`, msg);
-                              setWebrtcFailed(true);
-                            }} />
-          ) : (
-            <img
-              src={`${streamUrl(cam.id, hd)}&r=${reloadKey}`}
-              alt="" className="w-full h-full object-contain bg-black"
-              onError={handleError} data-testid="live-stream"
-            />
-          )}
+          {/* Player TOUJOURS monté (même si offline) — évite le remount destructeur.
+             video-pipeline-v2 : dispatch strict par stream_pipeline. */}
+          <VideoPlayer camera={cam} className="w-full h-full" dataTestId="wall-player" />
           {cam?.detect_enabled && <OverlayCanvas cam={cam} boxes={boxes} showOverlay={showOverlay} />}
           {/* Overlay No Signal superposé — le player reste monté en dessous */}
           {!online && (
@@ -150,8 +123,8 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
             <span className="text-[9px] mono px-1 text-white/80 bg-black/50" data-testid="feed-resolution">{cam.resolution}</span>
           )}
           {online && <span data-testid="feed-quality" className="text-[8px] mono px-1 font-bold"
-                              style={{ color: usingWebRTC ? "#00E5FF" : (hd ? "#00E676" : "#FFB800") }}>
-            {usingWebRTC ? "WEBRTC" : (hd ? "HD" : "SD")}
+                              style={{ color: pipelineColor }}>
+            {pipelineLabel}
           </span>}
           {online && <span className="flex items-center gap-1 text-[9px] mono text-[#00E676]"><Circle size={6} className="fill-[#00E676] rec-dot" /> LIVE</span>}
           {focused && <X size={13} className="text-white/80" />}
@@ -235,12 +208,12 @@ const Feed = React.memo(FeedInner, (prev, next) => {
   // Comparaison rapide des props scalaires
   if (prev.idx !== next.idx || prev.canPtz !== next.canPtz || prev.hd !== next.hd
       || prev.showOverlay !== next.showOverlay || prev.focused !== next.focused
-      || prev.previewMode !== next.previewMode
       || prev.onToggleFocus !== next.onToggleFocus) return false;
   // Comparaison des propriétés utiles de la caméra (ignore `last_seen` etc.)
   const a = prev.cam || {}; const b = next.cam || {};
   if (a.id !== b.id) return false;
   if (a.status !== b.status) return false;
+  if (a.stream_pipeline !== b.stream_pipeline) return false;
   if (a.name !== b.name) return false;
   if (a.site_name !== b.site_name) return false;
   if (a.resolution !== b.resolution) return false;
@@ -473,13 +446,11 @@ export default function LiveView() {
   const [focusedId, setFocusedId] = useState(null);  // camera_id focalisée (single-view) — null = mosaïque
   const [showTimeline, setShowTimeline] = useState(true);
   const [previewEvent, setPreviewEvent] = useState(null);  // événement cliqué depuis la timeline
-  const [previewMode, setPreviewMode] = useState("auto");  // mode preview global (config pipeline)
+  const [previewMode] = useState("auto");  // legacy — plus utilisé (video-pipeline-v2 : pipeline par caméra)
   const canPtz = can("technician");
 
   useEffect(() => {
     api.get("/cameras").then((r) => setCams(r.data));
-    // Charge la config pipeline pour connaître le mode preview (auto/webrtc/mjpeg/mse)
-    api.get("/pipeline/config").then((r) => setPreviewMode(r.data?.config?.preview_mode || "auto")).catch(() => { /* fallback auto */ });
     const iv = setInterval(() => api.get("/cameras").then((r) => setCams(r.data)).catch(() => { /* ignore */ }), 20000);
     return () => clearInterval(iv);
   }, []);
@@ -575,8 +546,7 @@ export default function LiveView() {
         {focusedCam ? (
           <>
             <Feed cam={focusedCam} idx={0} canPtz={canPtz} hd={hd} showOverlay={showOverlay}
-                  aiState={aiDetections[focusedCam.id]} focused={true} onToggleFocus={toggleFocus}
-                  previewMode={previewMode} />
+                  aiState={aiDetections[focusedCam.id]} focused={true} onToggleFocus={toggleFocus} />
             {showTimeline && <FocusTimeline cameraId={focusedCam.id} onSelect={setPreviewEvent} />}
           </>
         ) : (
@@ -584,7 +554,7 @@ export default function LiveView() {
             <Feed key={i} cam={cams[i]} idx={i} canPtz={canPtz} hd={hd}
                   showOverlay={showOverlay} focused={false}
                   aiState={cams[i] ? aiDetections[cams[i].id] : null}
-                  onToggleFocus={toggleFocus} previewMode={previewMode} />
+                  onToggleFocus={toggleFocus} />
           ))
         )}
       </div>

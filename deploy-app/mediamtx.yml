@@ -1,0 +1,57 @@
+# MG-VMS · MediaMTX — pipeline vidéo officiel (video-pipeline-v2)
+# Version image : bluenviron/mediamtx:1.15.5
+#
+# Rôle : ingestion RTSP caméra (TCP) → redistribution WebRTC (WHEP) + RTSP.
+# Les paths sont créés dynamiquement par le backend via la Control API
+# (POST /v3/config/paths/add/camera/{camera_id}) — jamais de credentials
+# caméra dans ce fichier.
+#
+# Sécurité :
+# - L'API (9997) n'est PAS publiée sur l'hôte (réseau Docker interne uniquement).
+# - Le signaling WHEP est proxifié par le backend MG-VMS (authentifié JWT).
+# - HLS/RTMP/SRT désactivés (hors périmètre v2 — premier objectif = WebRTC).
+logLevel: info
+
+api: yes
+apiAddress: :9997
+
+rtsp: yes
+rtspAddress: :8554
+rtspTransports: [tcp]
+
+webrtc: yes
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: :8189
+webrtcIPsFromInterfaces: yes
+# Ajouter ici l'IP LAN du serveur si les candidats ICE ne la contiennent pas :
+# webrtcAdditionalHosts: [192.168.1.21]
+
+rtmp: no
+hls: no
+srt: no
+playback: no
+metrics: no
+pprof: no
+
+authMethod: internal
+authInternalUsers:
+  # Lecture/publication : réservées au réseau interne + LAN (VMS on-premise).
+- user: any
+  pass:
+  ips: []
+  permissions:
+  - action: publish
+  - action: read
+  # API : port non publié → joignable uniquement depuis le réseau Docker (backend).
+- user: any
+  pass:
+  ips: []
+  permissions:
+  - action: api
+
+pathDefaults:
+  rtspTransport: tcp
+  sourceOnDemand: no
+
+paths: {}
