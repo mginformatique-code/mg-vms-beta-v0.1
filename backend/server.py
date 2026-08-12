@@ -108,6 +108,8 @@ from routes.video import video_router
 app.include_router(video_router)   # video-pipeline-v2 · video-status + MJPEG broker + WHEP
 from routes.camera_api import camera_api_router
 app.include_router(camera_api_router)   # camera-api-v2.2 · HTTP/HTTPS layer (Reolink+)
+from routes.live_v3 import live_v3_router
+app.include_router(live_v3_router)   # video-engine-v3 · RTSP-native + aiortc WHEP
 app.include_router(vehicles_router)
 app.include_router(smart_search_router)
 app.include_router(discovery_router)
@@ -207,10 +209,41 @@ async def on_startup():
     from pipeline_v2.stability_watcher import watcher as _stability_watcher
     _stability_watcher.start()
     logger.info("MG-VMS API démarré - données initialisées + broadcaster temps réel actif")
+    # video-engine-v3 · migration + auto-start Video Core
+    try:
+        from database import db as _db_v3
+        upd = await _db_v3.cameras.update_many(
+            {"video_engine": {"$ne": "rtsp_native"}},
+            {"$set": {"video_engine": "rtsp_native"}})
+        if upd.modified_count:
+            logger.info("video-engine-v3: migré %d caméras vers rtsp_native",
+                         upd.modified_count)
+        from video_core import VideoCoreManager as _VCM
+        _vcm = _VCM.instance()
+        _cams_v3 = await _db_v3.cameras.find(
+            {"rtsp_url": {"$regex": "^rtsps?://"}}, {"_id": 0}).to_list(1000)
+        for _c in _cams_v3:
+            try:
+                await _vcm.ensure_camera(_c)
+            except Exception as _e:
+                logger.warning("video-engine-v3: ensure %s failed: %s", _c.get("id"), _e)
+        logger.info("video-engine-v3: %d source(s) RTSP lancée(s)", len(_cams_v3))
+    except Exception:
+        logger.exception("video-engine-v3 : init a échoué (non bloquant)")
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
+    # video-engine-v3 · fermeture propre du Video Core + WebRTC gateway
+    try:
+        from webrtc_gateway import shutdown_all as _webrtc_shutdown
+        await _webrtc_shutdown()
+        from video_core import VideoCoreManager as _VCM
+        _vcm = _VCM.instance()
+        for _cid in list(_vcm.list_cameras()):
+            await _vcm.stop_camera(_cid)
+    except Exception:
+        logger.exception("video-engine-v3 shutdown erreur (non bloquant)")
     await stop_all_recorders()
     # Arrêt propre des workers ffmpeg-CUDA persistants (frame_source)
     try:
