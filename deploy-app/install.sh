@@ -13,7 +13,7 @@
 #   3. Création des dossiers de stockage /mnt/storage/...
 #   4. Copie de .env.example → .env (jamais écrasé s'il existe)
 #   5. docker compose config → build → up -d
-#   6. Attente des healthchecks (mongo → go2rtc → backend → frontend)
+#   6. Attente des healthchecks (mongo → backend → frontend)
 #
 # Options :
 #   --no-pull      ne pas tirer le dernier commit GitHub
@@ -77,7 +77,7 @@ titre "2/6 · Validation des fichiers de build"
 # ── 2a. Présence des fichiers critiques ──
 for f in \
   backend/Dockerfile frontend/Dockerfile .dockerignore \
-  deploy-app/docker-compose.yml deploy-app/go2rtc.yaml deploy-app/mediamtx.yml deploy-app/.env.example \
+  deploy-app/docker-compose.yml deploy-app/.env.example \
   backend/requirements.txt backend/requirements-dev.txt backend/requirements-ai.txt \
   frontend/package.json frontend/yarn.lock frontend/nginx.conf frontend/docker-entrypoint.sh
 do
@@ -221,7 +221,7 @@ ok "stack démarrée"
 # ══════════════════════════════════════════════════════════════════════
 # 6. Attente des healthchecks
 # ══════════════════════════════════════════════════════════════════════
-titre "6/6 · Attente des healthchecks (mongo → mediamtx → backend → frontend)"
+titre "6/6 · Attente des healthchecks (mongo → backend → frontend)"
 DELAI=420   # 7 min (start_period backend 90 s + téléchargement modèles au 1er boot)
 DEBUT=$(date +%s)
 while :; do
@@ -252,6 +252,6 @@ echo -e "${VERT}  MG-VMS installé et opérationnel ✔${NC}"
 echo -e "  Application : http://${IP:-<ip-serveur>}:${PORT_HTTP}"
 echo -e "  API         : http://${IP:-<ip-serveur>}:8001/api/"
 echo -e "  MediaMTX    : WebRTC http://${IP:-<ip-serveur>}:8889 · RTSP rtsp://${IP:-<ip-serveur>}:8654/camera/<id>"
-echo -e "  go2rtc      : http://${IP:-<ip-serveur>}:1984 (legacy — démos uniquement)"
+echo -e "  API         : http://${IP:-<ip-serveur>}:8001"
 echo -e "  Compte admin : voir ADMIN_EMAIL / ADMIN_PASSWORD dans .env"
 echo -e "${VERT}════════════════════════════════════════════════════${NC}"

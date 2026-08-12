@@ -70,22 +70,10 @@ async def _start_ffmpeg(cam: dict) -> None:
     camera_id = cam["id"]
     out_dir = _cam_target_dir(cam)
     out = out_dir / "%Y%m%d_%H%M%S.mp4"
-    # video-pipeline-v2 · Source d'enregistrement pipeline-aware (copy, zéro transcodage) :
-    #   - démos            → relais go2rtc legacy (mires locales)
-    #   - pipeline mediamtx → relais MediaMTX (1 seule session RTSP vers la caméra)
-    #   - mjpeg/direct_rtsp → RTSP natif caméra
-    if camera_id.startswith("demo-") or camera_id.startswith("demo_"):
-        src = f"{GO2RTC_RTSP}/cam_{camera_id}"
-    else:
-        from video_pipelines import mediamtx as p_mediamtx
-        from video_pipelines.base import camera_source_url, resolve_pipeline
-        pipeline = resolve_pipeline(cam)
-        if pipeline == "mediamtx":
-            src = p_mediamtx.rtsp_read_url(camera_id)
-        elif pipeline == "go2rtc":
-            src = f"{GO2RTC_RTSP}/cam_{camera_id}"
-        else:
-            src = camera_source_url(cam)
+    # video-engine-v3 · recorder RTSP-native : lecture DIRECTE de la caméra
+    # (plus de proxy go2rtc/mediamtx), copie sans transcodage.
+    from streaming import _build_rtsp_url
+    src = _build_rtsp_url(cam)
     cmd = [
         "ffmpeg", "-nostdin", "-loglevel", "error",
         "-rtsp_transport", "tcp", "-i", src,

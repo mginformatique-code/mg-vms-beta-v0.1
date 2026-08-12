@@ -34,8 +34,7 @@ from routes.dashboard import dashboard_router
 from routes.audit import audit_router
 from routes.users import users_router
 from routes.pipeline_diagnostic import pipeline_diag_router
-from routes.go2rtc_diagnostic import go2rtc_diag_router
-from routes.mjpeg_direct import mjpeg_direct_router
+# video-engine-v3 · legacy routes SUPPRIMÉES : go2rtc_diagnostic, mjpeg_direct, video
 from routes.public_status import public_router
 from routes.database_settings import database_router
 from routes.smart_zones import smart_zones_router
@@ -102,10 +101,7 @@ app.include_router(timeline_router)
 app.include_router(camera_control_router)
 app.include_router(devices_router)
 app.include_router(pipeline_diag_router)  # v1.0-rc4 · diagnostic pipeline vidéo multi-étages
-app.include_router(go2rtc_diag_router)     # v1.0-rc4.5 · diagnostic Go2RTC détaillé par caméra
-app.include_router(mjpeg_direct_router)  # v1.0-rc4 · MJPEG multipart DIRECT (bypass Go2RTC)
-from routes.video import video_router
-app.include_router(video_router)   # video-pipeline-v2 · video-status + MJPEG broker + WHEP
+# video-engine-v3 · legacy routes SUPPRIMÉES (go2rtc_diag, mjpeg_direct, /api/video/*)
 from routes.camera_api import camera_api_router
 app.include_router(camera_api_router)   # camera-api-v2.2 · HTTP/HTTPS layer (Reolink+)
 from routes.live_v3 import live_v3_router
@@ -186,19 +182,11 @@ async def on_startup():
     # Re-hydrate le journal lifecycle depuis MongoDB (survit aux redémarrages backend)
     from lifecycle import hydrate_journal_from_db
     await hydrate_journal_from_db()
-    # ── video-pipeline-v2 : migration modèle + sync des paths MediaMTX ──
-    try:
-        from video_pipelines.migrate import migrate_stream_pipeline
-        await migrate_stream_pipeline()
-        from database import db as _db
-        from video_pipelines import mediamtx as _p_mediamtx
-        _cams = await _db.cameras.find({}, {"_id": 0}).to_list(1000)
-        asyncio.create_task(_p_mediamtx.sync_paths(_cams))
-    except Exception:
-        logger.exception("video-pipeline-v2 : init MediaMTX/migration a échoué (non bloquant)")
+    # video-engine-v3 : migration & auto-start du Video Core RTSP-native
+    # (les anciennes migrations pipeline v2 + MediaMTX sont supprimées)
     asyncio.create_task(metrics_broadcaster())
     asyncio.create_task(network_poll_broadcaster())
-    asyncio.create_task(sync_all_streams())
+    # video-engine-v3 · sync_all_streams (go2rtc) supprimé
     asyncio.create_task(camera_status_loop())
     asyncio.create_task(recorder_loop())
     asyncio.create_task(ai_loop())
@@ -251,12 +239,7 @@ async def on_shutdown():
         _fs_stop_all()
     except Exception:
         pass
-    # video-pipeline-v2 : arrêt propre des brokers MJPEG partagés
-    try:
-        from video_pipelines.mjpeg import stop_all as _mjpeg_stop_all
-        _mjpeg_stop_all()
-    except Exception:
-        pass
+    # video-engine-v3 : brokers MJPEG partagés supprimés
     logger.info("MG-VMS API arrêté — enregistreurs ffmpeg + workers IA terminés")
 
 

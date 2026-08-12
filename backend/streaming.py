@@ -412,12 +412,14 @@ async def _ensure_variants_cached(name: str) -> None:
 
 
 async def sync_all_streams() -> None:
-    """Synchronise TOUS les flux caméra + supprime les flux temporaires (`probe_*`).
-    Idempotent : appelé au démarrage."""
-    # 1) Nettoyage des flux temporaires orphelins (test-connectivity ayant survécu à un restart)
-    try:
-        async with httpx.AsyncClient(timeout=6) as client:
-            r = await client.get(f"{GO2RTC_URL}/api/streams")
+    """video-engine-v3 · fonction NO-OP conservée pour compat (les callers historiques)."""
+    return
+
+
+async def _sync_all_streams_deprecated() -> None:
+    """[DÉSACTIVÉ v3] Ancien code go2rtc — conservé le temps de la migration."""
+    return
+    if True:
             if r.status_code == 200:
                 for name in (r.json() or {}):
                     if name.startswith("probe_"):
@@ -426,9 +428,18 @@ async def sync_all_streams() -> None:
                             logger.info("go2rtc: flux temporaire nettoyé — %s", name)
                         except httpx.HTTPError:
                             pass
-    except httpx.HTTPError:
-        pass
-    # 2) Garantir la caméra de démonstration
+    return  # video-engine-v3 · fin de la fonction NO-OP
+
+
+async def _sync_all_streams_dead_code_v2(cams=None) -> None:
+    """[MORT · V3] Ancien code de reconciliation Go2RTC — jamais appelé."""
+    return
+    if False:
+        try:
+            pass
+        except httpx.HTTPError:
+            pass
+        # 2) Garantir la caméra de démonstration
     await _ensure_demo_camera()
     # v1.0-rc4.6 · Snapshot des noms de streams Go2RTC (purge ciblée direct_rtsp)
     try:

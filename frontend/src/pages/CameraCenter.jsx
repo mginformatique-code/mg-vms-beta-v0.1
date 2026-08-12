@@ -327,53 +327,24 @@ function LiveTab({ cameraId }) {
     return () => { alive = false; clearInterval(t); };
   }, [cameraId, reloadKey]);
 
-  const setPipeline = async (val) => {
-    setSaving(true);
-    try {
-      const { data: current } = await api.get(`/cameras/${cameraId}`);
-      const payload = { ...current, stream_pipeline: val, allow_rtsp_override: true };
-      delete payload.id; delete payload._id; delete payload.password_hash;
-      await api.put(`/cameras/${cameraId}`, payload);
-      setCam((c) => ({ ...c, stream_pipeline: val }));
-      setReloadKey((k) => k + 1);  // remount player + refresh statut
-    } catch (e) { /* le bandeau statut affichera l'erreur */ } finally { setSaving(false); }
-  };
-
-  const current = (cam?.stream_pipeline || "mediamtx").toLowerCase();
-  const btn = (val, label) => (
-    <button key={val} onClick={() => !saving && setPipeline(val)} disabled={saving}
-      data-testid={`pipeline-${val}`}
-      className={`text-[10px] mono uppercase tracking-wider px-2.5 py-1 border transition ${
-        current === val
-          ? "bg-[#00E5FF]/15 border-[#00E5FF]/60 text-[#00E5FF]"
-          : "bg-secondary border-border text-muted-foreground hover:text-foreground"
-      }`}>
-      {label}
-    </button>
-  );
-
+  // video-engine-v3 · UN SEUL moteur vidéo, plus de sélecteur pipeline.
   const stateColor = vs?.status === "online" ? "text-[#00E676]" : "text-[#FF3333]";
-  const PIPELINE_LABEL = { mediamtx: "MediaMTX", mjpeg: "MJPEG", direct_rtsp: "Direct RTSP", go2rtc: "go2rtc (legacy)" };
   return (
     <Card className="p-3 space-y-2" data-testid="cam-live">
       <div className="flex items-center justify-between">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Pipeline vidéo</div>
-        <div className="flex items-center gap-1">
-          {btn("direct_rtsp", "Direct RTSP")}
-          {btn("mjpeg", "MJPEG")}
-          {btn("mediamtx", "MediaMTX")}
-          {btn("go2rtc", "go2rtc")}
-        </div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Moteur vidéo</div>
+        <div className="text-[10px] mono uppercase tracking-wider px-2.5 py-1 border border-[#00E5FF]/60 bg-[#00E5FF]/15 text-[#00E5FF]"
+              data-testid="video-engine-badge">RTSP-NATIVE · WHEP</div>
       </div>
       <div className="flex items-center gap-3 text-[10px] mono border border-border px-2 py-1" data-testid="pipeline-status-band">
-        <span>Pipeline : <b>{PIPELINE_LABEL[vs?.pipeline] || PIPELINE_LABEL[current]}</b></span>
         <span className={stateColor} data-testid="pipeline-status-state">
           État : <b>{vs ? (vs.status === "online" ? "CONNECTÉ" : (vs.status || "?").toUpperCase()) : "…"}</b>
         </span>
         {vs?.fps != null && <span>FPS : <b>{vs.fps}</b></span>}
-        {vs?.latency_ms != null && <span>Latence ≈ <b>{vs.latency_ms} ms</b></span>}
+        {vs?.width != null && vs?.height != null && <span>{vs.width}×{vs.height}</span>}
         {vs?.codec && <span className="text-muted-foreground">{String(vs.codec).toUpperCase()}</span>}
-        {vs?.error && <span className="text-[#FF3333] truncate max-w-[280px]" title={vs.error} data-testid="pipeline-status-error">{vs.error}</span>}
+        {vs?.viewers != null && <span>Viewers : <b>{vs.viewers}</b></span>}
+        {vs?.last_error && <span className="text-[#FF3333] truncate max-w-[280px]" title={vs.last_error} data-testid="pipeline-status-error">{vs.last_error}</span>}
       </div>
       <div className="aspect-video bg-black">
         {cam && <VideoPlayer key={`${cameraId}-${reloadKey}`} camera={cam} className="w-full h-full" dataTestId="center-player" />}

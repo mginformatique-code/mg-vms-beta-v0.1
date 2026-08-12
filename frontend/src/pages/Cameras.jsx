@@ -21,8 +21,7 @@ const EMPTY_FORM = {
   enabled_plugins: [],
   record_mode: "continuous", storage_pool_id: "", storage_max_size_gb: 0,
   rtsp_transport: "tcp", preferred_codec: "auto", stream_mode: "direct_rtsp",
-  stream_pipeline: "mediamtx", webrtc_rtsp_url: "",
-  direct_rtsp_url: "", mjpeg_source_url: "", mediamtx_source_url: "", go2rtc_source_url: "",
+  stream_pipeline: "rtsp_native", webrtc_rtsp_url: "",
   // camera-api-v2.2 · Couche API HTTP/HTTPS (indépendante du pipeline vidéo)
   api_host: "", api_port: null, api_scheme: "https", api_verify_ssl: false,
   api_username: "", api_password: "", api_provider: "",
@@ -83,12 +82,8 @@ export default function Cameras() {
       rtsp_transport: c.rtsp_transport || "tcp",
       preferred_codec: c.preferred_codec || "auto",
       stream_mode: c.stream_mode || "auto",
-      stream_pipeline: c.stream_pipeline || "mediamtx",
+      stream_pipeline: "rtsp_native",
       webrtc_rtsp_url: c.webrtc_rtsp_url || "",
-      direct_rtsp_url: c.direct_rtsp_url || "",
-      mjpeg_source_url: c.mjpeg_source_url || "",
-      mediamtx_source_url: c.mediamtx_source_url || "",
-      go2rtc_source_url: c.go2rtc_source_url || "",
       // camera-api-v2.2 · API caméra (HTTP/HTTPS)
       api_host: c.api_host || "",
       api_port: c.api_port || null,
@@ -556,138 +551,23 @@ export default function Cameras() {
                 <p className="text-[10px] text-muted-foreground mt-0.5">Live/IA préfèrent H.264, l&apos;enregistrement peut utiliser H.265</p>
               </div>
               <div className="col-span-2">
-                {/* video-pipeline-v2 · UN SEUL choix : le pipeline vidéo de la caméra.
-                    Go2RTC n'est plus proposé (legacy isolé). */}
-                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
-                  Pipeline vidéo <span className="text-[#00E5FF]">· choix requis</span>
+                {/* video-engine-v3 · Un SEUL moteur vidéo (RTSP-native + WebRTC WHEP aiortc).
+                    Plus de sélecteur de pipeline. Seul un sub H264 optionnel pour WebRTC. */}
+                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                  URL RTSP WebRTC (H264) — optionnel
                 </label>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3" data-testid="stream-pipeline-radio-group">
-                  {[
-                    { val: "direct_rtsp", title: "Direct RTSP",
-                      desc: "Flux RTSP natif pour consommateurs compatibles (VLC, NVR, IA). Pas de preview navigateur." },
-                    { val: "mjpeg", title: "MJPEG",
-                      desc: "Image fiable dans le navigateur via un processus ffmpeg partagé. Simple et robuste." },
-                    { val: "mediamtx", title: "MediaMTX (recommandé)",
-                      desc: "WebRTC faible latence + redistribution RTSP via MediaMTX. Zéro transcodage H.264." },
-                    { val: "go2rtc", title: "go2rtc (legacy)",
-                      desc: "Ancien moteur de streaming centralisé. Conservé pour compatibilité." },
-                  ].map((opt) => (
-                    <label key={opt.val}
-                      className={`cursor-pointer border p-3 transition-colors ${
-                        form.stream_pipeline === opt.val
-                          ? "border-[#00E5FF] bg-[#00E5FF]/5"
-                          : "border-border hover:border-muted-foreground/60"
-                      }`}
-                      data-testid={`stream-pipeline-${opt.val}`}
-                    >
-                      <input
-                        type="radio"
-                        name="stream_pipeline"
-                        value={opt.val}
-                        checked={form.stream_pipeline === opt.val}
-                        onChange={() => setForm({ ...form, stream_pipeline: opt.val })}
-                        className="mr-2 align-middle"
-                      />
-                      <span className="font-semibold text-sm">{opt.title}</span>
-                      <div className="text-[11px] text-muted-foreground mt-1 leading-relaxed">{opt.desc}</div>
-                    </label>
-                  ))}
-                </div>
-                {/* Selector caché pour compat tests existants + accessibilité clavier */}
-                <select
-                  value={form.stream_pipeline}
-                  onChange={(e) => setForm({ ...form, stream_pipeline: e.target.value })}
-                  className="sr-only"
-                  data-testid="stream-pipeline"
-                  aria-label="Pipeline vidéo"
-                >
-                  <option value="direct_rtsp">Direct RTSP</option>
-                  <option value="mjpeg">MJPEG</option>
-                  <option value="mediamtx">MediaMTX</option>
-                  <option value="go2rtc">go2rtc (legacy)</option>
-                </select>
-                {form.stream_pipeline === "mediamtx" && (
-                  <div className="mt-3">
-                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                      URL RTSP WebRTC (H264) — optionnel
-                    </label>
-                    <input
-                      value={form.webrtc_rtsp_url}
-                      onChange={(e) => setForm({ ...form, webrtc_rtsp_url: e.target.value })}
-                      placeholder="rtsp://…/h264Preview_01_sub (si le flux principal est H265)"
-                      className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
-                      data-testid="webrtc-rtsp-url-input"
-                    />
-                    <p className="text-[10px] text-muted-foreground mt-1">
-                      Les navigateurs ne lisent pas le H265 en WebRTC. Si votre flux principal est H265
-                      (ex. Reolink 4K), indiquez ici le sub-stream H264 : il sera utilisé UNIQUEMENT pour
-                      la lecture navigateur — enregistrement et IA restent sur le flux natif.
-                    </p>
-                  </div>
-                )}
-                {/* video-pipeline-v2.1 · surcharges d'URL par pipeline (multi-flux) */}
-                <div className="mt-4 border-t border-border pt-3 space-y-3" data-testid="pipeline-urls-block">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    URLs RTSP par pipeline <span className="normal-case text-muted-foreground/70">— optionnel, vide = utilise l&apos;URL principale ci-dessus</span>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                      URL Direct RTSP (ex. flux principal HD)
-                    </label>
-                    <input
-                      value={form.direct_rtsp_url}
-                      onChange={(e) => setForm({ ...form, direct_rtsp_url: e.target.value })}
-                      placeholder="rtsp://user:pass@host:554/h264Preview_01_main"
-                      className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
-                      data-testid="direct-rtsp-url-input"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                      URL Source MJPEG (ex. sub-stream SD)
-                    </label>
-                    <input
-                      value={form.mjpeg_source_url}
-                      onChange={(e) => setForm({ ...form, mjpeg_source_url: e.target.value })}
-                      placeholder="rtsp://user:pass@host:554/h264Preview_01_sub"
-                      className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
-                      data-testid="mjpeg-source-url-input"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                      URL Source MediaMTX (ex. flux téléobjectif / canal 2)
-                    </label>
-                    <input
-                      value={form.mediamtx_source_url}
-                      onChange={(e) => setForm({ ...form, mediamtx_source_url: e.target.value })}
-                      placeholder="rtsp://user:pass@host:554/h264Preview_02_main"
-                      className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
-                      data-testid="mediamtx-source-url-input"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                      URL Source go2rtc (H264 obligatoire)
-                    </label>
-                    <input
-                      value={form.go2rtc_source_url}
-                      onChange={(e) => setForm({ ...form, go2rtc_source_url: e.target.value })}
-                      placeholder="rtsp://user:pass@host:554/h264Preview_01_sub (H264 !)"
-                      className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
-                      data-testid="go2rtc-source-url-input"
-                    />
-                    <p className="text-[10px] text-muted-foreground mt-1">
-                      ⚠ go2rtc ne convertit pas H265 → MJPEG. Renseignez impérativement un flux H264
-                      (typiquement le sub-stream) sinon les aperçus MJPEG resteront vides.
-                    </p>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground">
-                    Pour une caméra multi-flux (ex. Reolink RLC-81MA : main / sub / telephoto), chaque pipeline
-                    peut consommer un flux distinct. L&apos;URL principale sert de valeur par défaut pour les
-                    pipelines sans surcharge.
-                  </p>
-                </div>
+                <input
+                  value={form.webrtc_rtsp_url}
+                  onChange={(e) => setForm({ ...form, webrtc_rtsp_url: e.target.value })}
+                  placeholder="rtsp://…/h264Preview_01_sub (obligatoire si votre flux principal est H265)"
+                  className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
+                  data-testid="webrtc-rtsp-url-input"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Les navigateurs ne lisent pas le H265 en WebRTC. Si votre flux principal est H265
+                  (ex. Reolink 4K), indiquez ici le sub-stream H264 : il sera utilisé UNIQUEMENT pour
+                  la lecture navigateur — enregistrement et IA restent sur le flux natif.
+                </p>
               </div>
             </div>
 

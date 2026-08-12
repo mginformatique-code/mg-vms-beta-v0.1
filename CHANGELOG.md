@@ -2,7 +2,52 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.0.0-video-engine] — 2026-08 — REFONTE COMPLÈTE · Moteur vidéo unique RTSP-native
+
+### Changement d'architecture (breaking)
+Remplacement TOTAL du système vidéo multi-pipelines (go2rtc + MediaMTX + MJPEG proxy + variantes _hd/_sd) par un moteur UNIQUE natif Python.
+
+**Architecture cible atteinte** :
+```
+CAMERA RTSP ─► video_core.RtspSource (PyAV, TCP, 1 connexion amont par caméra)
+             │
+             ├─► subscribers packets (recorder ffmpeg -c copy, AI, WebRTC)
+             └─► webrtc_gateway (aiortc, WHEP endpoint /api/live/{id}/whep)
+                 → SDP answer H264 pass-through vers navigateur
+```
+
+### Nouveau code
+- `backend/video_core/` — manager singleton, RtspSource PyAV, camera_runtime Mongo (fps/codec/status/viewers)
+- `backend/webrtc_gateway/` — aiortc, `_H264RelayTrack`, gestion multi-viewers
+- `backend/routes/live_v3.py` — endpoints unifiés `/api/live/{id}/{status|start|stop|whep}`
+- `frontend/components/video/LivePlayer.jsx` — player UNIQUE (WHEP direct)
+- `frontend/components/video/VideoPlayer.jsx` — ré-exporte `LivePlayer`
+
+### Supprimé (Phase D · big-bang cleanup)
+- **Backend** : `backend/video_pipelines/` (mediamtx, mjpeg, direct_rtsp, base, status) · `backend/routes/video.py` · `backend/routes/go2rtc_diagnostic.py` · `backend/routes/mjpeg_direct.py` · `backend/tests/test_videov2_pipelines.py` · fonctions `register_camera_stream`, `unregister_camera_stream`, `sync_all_streams` (NO-OP legacy) dans `streaming.py`
+- **Frontend** : `Go2RTCPlayer.jsx` · `WHEPPlayer.jsx` (v2) · `MJPEGPlayer.jsx` · `DirectRTSPCard.jsx` · `WebRTCPlayer.jsx` · sélecteur de pipeline dans `Cameras.jsx` · sélecteur de pipeline dans `CameraCenter.jsx` · 4 champs URL par pipeline (`direct_rtsp_url`, `mjpeg_source_url`, `mediamtx_source_url`, `go2rtc_source_url`)
+- **Docker/deploy** : services `mediamtx` + `go2rtc` dans `docker-compose.yml` · fichiers `go2rtc.yaml`, `mediamtx.yml`, `mediamtx-dev.yml` · configs `/app/go2rtc/` · configs supervisor `go2rtc.conf` + `mediamtx.conf` · vars env `MEDIAMTX_*`, `GO2RTC_*`, `GO2RTC_FFMPEG_CUDA`
+- **install.sh** : plus aucune référence go2rtc/mediamtx
+
+### Migration & compatibilité
+- Startup hook : `video_engine="rtsp_native"` forcé sur toutes les caméras existantes
+- Auto-start du Video Core pour chaque caméra RTSP au démarrage backend
+- Field `stream_pipeline` conservé dans le modèle Camera pour compat DB (valeur fixe `"rtsp_native"`)
+- Recorder + AI engine migrés sur RTSP direct caméra (plus de proxy go2rtc/MediaMTX)
+
+### Validation live (Reolink 109.219.238.60, HEVC 3840×2160)
+- Video Core : `hevc 3840×2160 @ 20.3 fps online` dans `camera_runtime`
+- WHEP endpoint aiortc : `HTTP 200 · rtpmap:96 H264/90000` (SDP answer valide)
+- Source WebRTC séparée sur `webrtc_rtsp_url` (sub H264) pour navigateur
+- Zéro régression sur Camera API v2.2 (Vague 1 Reolink) : 15/15 tests verts
+
+### Bonus (mêmes session)
+- **Camera API HTTP/HTTPS v2.2 (Vague 1)** : `backend/camera_api/` + `ReolinkProvider` (`/cgi-bin/api.cgi` token) + routes `/api/camera-devices/*` (discover/info/capabilities/network/users + stubs IR/PTZ/Light/Siren pour Vague 2)
+- **UI Fiche caméra** : bloc API HTTPS (host/scheme/port/user/mdp/verify_ssl) + bouton "Tester l'API (Discover)"
+- **Sécurité** : password API caméra chiffré Fernet séparé du RTSP · redact tokens dans logs · timeouts explicites
+
 ## [v2.0.1-video] — 2026-08 — CHANTIER 1 · Debug live H265/WebRTC + aperçu d'ajout sans Go2RTC
+
 
 Diagnostic prouvé par reproduction locale : caméra **H265** (Reolink 4K) + navigateur
 (offre SDP H264/VP8/VP9/AV1, jamais H265) → MediaMTX refuse au signaling WHEP avec

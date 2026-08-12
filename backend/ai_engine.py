@@ -517,29 +517,12 @@ async def _sync_frame_source_workers(cams: list[dict], *,
             continue
         ai_url = (cam.get("ai_rtsp_url") or "").strip()
         native_url = (cam.get("rtsp_url") or "").strip()
-        is_demo = cam_id.startswith("demo-") or cam_id.startswith("demo_")
-
-        # video-pipeline-v2 · Source IA pipeline-aware (plus jamais Go2RTC pour
-        # les caméras réelles) :
-        #   - démos             → relais go2rtc legacy (mires locales)
-        #   - pipeline mediamtx → relais MediaMTX (économise une session caméra)
-        #   - direct_rtsp/mjpeg → RTSP natif (ai_rtsp_url prioritaire)
-        from video_pipelines.base import resolve_pipeline as _resolve_pipeline
-        pipeline = _resolve_pipeline(cam)
-
-        if is_demo:
-            rtsp_url = f"{go2rtc_rtsp}/cam_{cam_id}"
-            source_type = "demo-go2rtc-relay"
-        elif pipeline == "go2rtc":
-            rtsp_url = f"{go2rtc_rtsp}/cam_{cam_id}"
-            source_type = "go2rtc-relay"
-        elif ai_url:
+        # video-engine-v3 · Source IA RTSP-native directe caméra (plus jamais
+        # de proxy go2rtc/MediaMTX). `ai_rtsp_url` reste prioritaire si l'admin
+        # a configuré un flux dédié IA (typiquement le sub H264 low-res).
+        if ai_url:
             rtsp_url = ai_url
             source_type = "direct-ai"
-        elif pipeline == "mediamtx":
-            from video_pipelines import mediamtx as _p_mediamtx
-            rtsp_url = _p_mediamtx.rtsp_read_url(cam_id)
-            source_type = "mediamtx-relay"
         elif native_url:
             rtsp_url = native_url
             source_type = "direct-native"

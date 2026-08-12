@@ -97,22 +97,11 @@ class CameraInput(BaseModel):
     # compression pour meilleure détection & ANPR) et un sous-flux pour le
     # streaming go2rtc (léger, temps réel). Vide → l'IA utilise `rtsp_url`.
     ai_rtsp_url: str = ""
-    # video-pipeline-v2 · URL RTSP H264 dédiée au WebRTC navigateur (optionnelle).
-    # Utile quand le flux principal est H265 (non lisible en WebRTC) : MediaMTX
-    # crée alors un path séparé `camera/{id}_web` consommé UNIQUEMENT par le
-    # navigateur. Le flux natif reste intact (recorder, direct, IA).
+    # video-engine-v3 · URL RTSP H264 dédiée au WebRTC navigateur (optionnelle).
+    # Utile quand `rtsp_url` est H265 (non lisible browser) — video_core lance alors
+    # une seconde source PyAV sur ce sub-stream juste pour le WHEP navigateur.
+    # Le recorder et l'IA restent sur `rtsp_url` (main).
     webrtc_rtsp_url: str = ""
-    # video-pipeline-v2.1 · URLs RTSP par pipeline (optionnelles, surchargent
-    # `rtsp_url`). Permet une caméra multi-flux (ex. Reolink RLC-81MA : main HD
-    # / sub SD / telephoto), un flux distinct par pipeline. Vide → fallback rtsp_url.
-    #
-    # ⚠ go2rtc ne sait PAS transcoder H265→MJPEG (limitation structurelle
-    # confirmée : « codecs not matched: video:H265 => video:JPEG »). Il faut
-    # donc lui passer un flux H264 (typiquement le sub-stream de la caméra).
-    direct_rtsp_url: str = ""
-    mjpeg_source_url: str = ""
-    mediamtx_source_url: str = ""
-    go2rtc_source_url: str = ""
     username: str = ""
     password: str = ""
     # Champs profil (mode ONVIF)
@@ -143,7 +132,10 @@ class CameraInput(BaseModel):
     #                     pour le preview navigateur — pipeline IA découplé,
     #                     tourne même si Go2RTC est HS)
     stream_mode: str = "auto"
-    # camera-api-v2.2 · Couche API HTTP/HTTPS (indépendante du pipeline vidéo).
+    # video-engine-v3 · les URLs par pipeline (direct_rtsp/mjpeg/mediamtx/go2rtc)
+    # sont SUPPRIMÉES · plus qu'une source RTSP (`rtsp_url`) + optionnel sub H264
+    # pour WebRTC navigateur (`webrtc_rtsp_url`, souvent le sub-stream H264).
+    webrtc_rtsp_url: str = ""
     # Utilisée par le provider (Reolink JSON / Hikvision ISAPI / Dahua CGI /
     # ONVIF) pour infos + capacités + contrôles physiques + metadata SD.
     # `api_verify_ssl=false` autorise les self-signed LAN (PER-CAMERA, jamais global).
@@ -156,16 +148,11 @@ class CameraInput(BaseModel):
     api_provider: str = ""        # "" = auto-detect (via manufacturer/model)
     # video-pipeline-v2 · CHAMP UNIQUE de pipeline vidéo (remplace stream_mode
     # + live_preview_source) :
-    #   - "direct_rtsp" : consommateurs RTSP natifs (pas de preview navigateur)
-    #   - "mjpeg"       : broker ffmpeg partagé → HTTP multipart → <img>
-    #   - "mediamtx"    : MediaMTX → WebRTC (WHEP) + RTSP  ← DÉFAUT
-    stream_pipeline: str = "mediamtx"
-    # v1.0-rc4 · Source vidéo pour la PREVIEW navigateur (indépendant de
-    # stream_mode qui, lui, concerne le pipeline IA backend) :
-    #   - "auto"    : go2rtc si disponible, sinon direct
-    #   - "go2rtc"  : preview via WebRTC/Go2RTC (fluide, ~200-500 ms)
-    #   - "direct"  : MJPEG multipart streamé par le backend depuis RTSP
-    #                 direct (bypass Go2RTC côté client ET serveur)
+    # video-engine-v3 · Un SEUL moteur vidéo (RTSP-native + aiortc WHEP).
+    # `stream_pipeline` reste dans le modèle pour la compat DB mais n'a plus
+    # aucune influence sur le pipeline vidéo actif (voir camera_runtime).
+    stream_pipeline: str = "rtsp_native"
+    # v1.0-rc4 · Source preview navigateur — v3 : ignoré (toujours WHEP aiortc).
     live_preview_source: str = "auto"
     allow_rtsp_override: bool = False  # créer même si le test RTSP échoue (mode ONVIF)
     lat: Optional[float] = None
@@ -294,28 +281,18 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
     }
     await db.cameras.insert_one(dict(doc))
     await log_audit(user, "camera_created", data.name, f"Site: {site['name']} · Mode: {data.mode}")
-    # ── video-pipeline-v2 : application du pipeline choisi (ZÉRO Go2RTC) ──
-    from video_pipelines.base import PIPELINES, resolve_pipeline
-    if (payload.get("stream_pipeline") or "").lower() not in PIPELINES:
-        payload["stream_pipeline"] = "mediamtx"
-        await db.cameras.update_one({"id": doc["id"]}, {"$set": {"stream_pipeline": "mediamtx"}})
-        doc["stream_pipeline"] = "mediamtx"
-    pipeline = resolve_pipeline(doc)
-    if pipeline == "mediamtx":
-        from video_pipelines import mediamtx as p_mediamtx
-        ok = await p_mediamtx.ensure_path(doc)
-        await db.cameras.update_one(
-            {"id": doc["id"]},
-            {"$set": {"pipeline_status": "mediamtx" if ok
-                       else "mediamtx (path non enregistré — service injoignable ?)"}})
-        if not ok:
-            logger.warning("create_camera %s : path MediaMTX non enregistré (caméra conservée)", doc["id"])
-    elif pipeline == "go2rtc":
-        from streaming import register_camera_stream
-        await register_camera_stream(doc, caller=f"POST /api/cameras go2rtc user={user.get('email','?')}")
-        await db.cameras.update_one({"id": doc["id"]}, {"$set": {"pipeline_status": "go2rtc"}})
-    else:
-        await db.cameras.update_one({"id": doc["id"]}, {"$set": {"pipeline_status": pipeline}})
+    # video-engine-v3 · déclenche le Video Core sur cette nouvelle caméra
+    try:
+        payload["stream_pipeline"] = "rtsp_native"
+        await db.cameras.update_one({"id": doc["id"]},
+                                     {"$set": {"stream_pipeline": "rtsp_native",
+                                               "pipeline_status": "rtsp_native"}})
+        doc["stream_pipeline"] = "rtsp_native"
+        from video_core import VideoCoreManager
+        await VideoCoreManager.instance().ensure_camera(doc)
+    except Exception:
+        logger.warning("create_camera %s : Video Core init a échoué (non bloquant)",
+                        doc.get("id"))
     # v0.7.e · Wave A · Hot Reload chirurgical : signale l'ajout au moteur IA
     # pour qu'il ne resynchronise QUE cette caméra au prochain cycle
     # (aucun impact sur les autres caméras / le pipeline global).
@@ -485,26 +462,14 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
     await db.cameras.update_one({"id": camera_id}, {"$set": payload})
     await log_audit(user, "camera_updated", data.name, f"Mode: {data.mode}")
     updated = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
-    # ── video-pipeline-v2 : ré-application du pipeline choisi (ZÉRO Go2RTC) ──
-    from video_pipelines import mediamtx as p_mediamtx
-    from video_pipelines import mjpeg as p_mjpeg
-    from video_pipelines.base import resolve_pipeline
-    old_pipeline = resolve_pipeline(existing)
-    new_pipeline = resolve_pipeline(updated)
-    if new_pipeline == "mediamtx":
-        await p_mediamtx.ensure_path(updated)
-    elif old_pipeline == "mediamtx":
-        await p_mediamtx.remove_path(camera_id)
-    if new_pipeline == "go2rtc":
-        from streaming import register_camera_stream
-        await register_camera_stream(updated, caller=f"PUT /api/cameras/{camera_id} go2rtc")
-    elif old_pipeline == "go2rtc":
-        from streaming import unregister_camera_stream
-        await unregister_camera_stream(camera_id, caller=f"PUT /api/cameras/{camera_id} switch pipeline")
-    if old_pipeline == "mjpeg" or new_pipeline != "mjpeg":
-        # URL/credentials ou pipeline modifiés → le broker sera relancé à la demande
-        p_mjpeg.stop_broker(camera_id)
-    await db.cameras.update_one({"id": camera_id}, {"$set": {"pipeline_status": new_pipeline}})
+    # video-engine-v3 · Video Core recycle automatiquement la source RTSP
+    try:
+        from video_core import VideoCoreManager
+        await VideoCoreManager.instance().ensure_camera(updated)
+        await db.cameras.update_one({"id": camera_id}, {"$set": {"pipeline_status": "rtsp_native"}})
+    except Exception:
+        logger.warning("update_camera %s : Video Core refresh a échoué (non bloquant)",
+                        camera_id)
     # v0.7.e · Wave A · Hot Reload chirurgical : signale la modification au
     # moteur IA — seule CETTE caméra sera re-synchronisée (worker ffmpeg
     # relancé UNIQUEMENT si l'URL / codec / résolution ont changé).
@@ -522,8 +487,12 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
 async def delete_camera(camera_id: str, user: dict = Depends(require_role("technician"))):
     cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
     await db.cameras.delete_one({"id": camera_id})
-    from streaming import unregister_camera_stream
-    await unregister_camera_stream(camera_id, caller=f"DELETE /api/cameras user={user.get('email','?')}")
+    # video-engine-v3 · stop la source RTSP dédiée à cette caméra
+    try:
+        from video_core import VideoCoreManager
+        await VideoCoreManager.instance().stop_camera(camera_id)
+    except Exception:
+        pass
     # v0.7.e · Wave A · Hot Reload chirurgical : signale la suppression au
     # moteur IA — seul le worker de cette caméra sera stoppé (les autres
     # workers ffmpeg continuent à tourner sans interruption).
@@ -1025,49 +994,17 @@ async def refresh_camera_stream(camera_id: str, user: dict = Depends(require_rol
     cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
     if not cam:
         raise HTTPException(404, "Caméra introuvable")
-    from streaming import _mask_url_password, unregister_camera_stream
-    from video_pipelines.base import resolve_pipeline
-    pipeline = resolve_pipeline(cam)
-    # video-pipeline-v2 : "Réparer" est pipeline-aware.
-    if pipeline == "go2rtc":
-        from streaming import register_camera_stream
-        ok = await register_camera_stream(cam, caller=f"refresh-stream go2rtc user={user.get('email','?')}",
-                                           force=True)
-        await log_audit(user, "camera_stream_refreshed", cam.get("name", camera_id),
-                        f"pipeline=go2rtc · registered={ok}")
-        if not ok:
-            raise HTTPException(502, "Impossible d'enregistrer le flux dans go2rtc")
-        return {"success": True, "camera_id": camera_id, "pipeline": "go2rtc",
-                "rtsp_url_masked": _mask_url_password(cam.get("rtsp_url", ""))}
-    # Purge systématique des résidus Go2RTC legacy pour les autres pipelines.
-    await unregister_camera_stream(camera_id, caller=f"refresh-stream user={user.get('email','?')}")
-    if pipeline == "mediamtx":
-        from video_pipelines import mediamtx as p_mediamtx
-        ok = await p_mediamtx.ensure_path(cam, force=True)
-        state = await p_mediamtx.get_path_state(camera_id)
-        await log_audit(user, "camera_stream_refreshed", cam.get("name", camera_id),
-                        f"pipeline=mediamtx · ready={bool(state and state.get('ready'))}")
-        if not ok:
-            raise HTTPException(502, "Impossible d'enregistrer le path MediaMTX "
-                                      "(service injoignable ou URL RTSP invalide)")
-        return {"success": True, "camera_id": camera_id, "pipeline": "mediamtx",
-                "ready": bool(state and state.get("ready")),
-                "rtsp_url_masked": _mask_url_password(cam.get("rtsp_url", ""))}
-    if pipeline == "mjpeg":
-        from video_pipelines import mjpeg as p_mjpeg
-        p_mjpeg.stop_broker(camera_id)  # relancé automatiquement au prochain viewer
-        await log_audit(user, "camera_stream_refreshed", cam.get("name", camera_id),
-                        "pipeline=mjpeg · broker redémarré")
-        return {"success": True, "camera_id": camera_id, "pipeline": "mjpeg",
-                "note": "broker MJPEG redémarré (relance à la demande)",
-                "rtsp_url_masked": _mask_url_password(cam.get("rtsp_url", ""))}
-    # direct_rtsp : probe RTSP réel, jamais Go2RTC/MediaMTX
-    from video_pipelines import direct_rtsp as p_direct
-    probe = await p_direct.probe(cam, use_cache=False)
+    from streaming import _mask_url_password
+    # video-engine-v3 · le "refresh" recycle la source RTSP dans le Video Core.
+    try:
+        from video_core import VideoCoreManager
+        await VideoCoreManager.instance().stop_camera(camera_id)
+        await VideoCoreManager.instance().ensure_camera(cam)
+    except Exception as e:
+        raise HTTPException(502, f"Video Core refresh a échoué : {e}")
     await log_audit(user, "camera_stream_refreshed", cam.get("name", camera_id),
-                    f"pipeline=direct_rtsp · disponible={probe['available']}")
-    return {"success": True, "camera_id": camera_id, "pipeline": "direct_rtsp",
-            "rtsp_reachable": probe["available"], "error": probe.get("error"),
+                    "video-engine-v3 · rtsp_native recyclé")
+    return {"success": True, "camera_id": camera_id, "pipeline": "rtsp_native",
             "rtsp_url_masked": _mask_url_password(cam.get("rtsp_url", ""))}
 
 
