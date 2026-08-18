@@ -1355,7 +1355,8 @@ def _direct_live_mjpeg_response(cam: dict, want_hd: bool, request: Request, user
     # SD : limite la largeur à 640px (faible bande passante mur multi-caméras)
     cmd = _direct_cmd(rtsp_url, transport, target_fps=10 if want_hd else 8,
                       quality=4 if want_hd else 6,
-                      max_width=0 if want_hd else 640)
+                      max_width=0 if want_hd else 640,
+                      codec=cam.get("codec") or "")
     from lifecycle import record as _lc_record
     client_ip = request.client.host if request.client else "?"
     _lc_record(cam["id"], "consumer_attached",
