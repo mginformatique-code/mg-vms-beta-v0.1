@@ -1138,7 +1138,15 @@ async def _probe_status_once(cam: dict) -> tuple[str, str, bool]:
     # — module inexistant, qui faisait planter TOUT le cycle de camera_status_loop
     # (except Exception englobant tout le `for cam in cams`) dès la 1re caméra réelle.
     if not is_demo and _is_direct_rtsp(cam):
-        return ("offline_transient", "aucune frame récente (direct_rtsp)", False)
+        # Pas de frame_source récente (IA/détection désactivée ou pas encore
+        # démarrée) ne veut pas dire caméra injoignable — probe TCP réel sur
+        # le port RTSP avant de conclure "offline" (évite un faux NO SIGNAL
+        # alors que le pont MJPEG direct fonctionne très bien).
+        ip = (cam.get("ip") or "").strip()
+        port = int(cam.get("rtsp_port") or 554)
+        if ip and await asyncio.to_thread(_tcp_check, ip, port, 3.0):
+            return ("online", "", False)
+        return ("offline_transient", "aucune frame récente et port RTSP injoignable (direct_rtsp)", False)
     try:
         async with httpx.AsyncClient(timeout=8) as client:
             r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": name})

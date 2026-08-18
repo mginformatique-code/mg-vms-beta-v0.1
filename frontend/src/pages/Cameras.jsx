@@ -20,7 +20,7 @@ const EMPTY_FORM = {
   ptz_enabled: false, record_enabled: true, detect_enabled: false,
   enabled_plugins: [],
   record_mode: "continuous", storage_pool_id: "", storage_max_size_gb: 0,
-  rtsp_transport: "tcp", preferred_codec: "auto", stream_mode: "direct_rtsp",
+  rtsp_transport: "tcp", preferred_codec: "auto", stream_mode: "auto",
   stream_pipeline: "rtsp_native", webrtc_rtsp_url: "",
   // camera-api-v2.2 · Couche API HTTP/HTTPS (indépendante du pipeline vidéo)
   api_host: "", api_port: null, api_scheme: "https", api_verify_ssl: false,
@@ -551,8 +551,28 @@ export default function Cameras() {
                 <p className="text-[10px] text-muted-foreground mt-0.5">Live/IA préfèrent H.264, l&apos;enregistrement peut utiliser H.265</p>
               </div>
               <div className="col-span-2">
-                {/* video-engine-v3 · Un SEUL moteur vidéo (RTSP-native + WebRTC WHEP aiortc).
-                    Plus de sélecteur de pipeline. Seul un sub H264 optionnel pour WebRTC. */}
+                {/* P0-fix · Solution B (Go2RTC + MJPEG) : un seul vrai choix,
+                    stream_mode. "auto" = Go2RTC (par défaut, recommandé) ;
+                    "direct_rtsp" = pont ffmpeg local, sans Go2RTC (dépannage). */}
+                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                  Mode vidéo
+                </label>
+                <select
+                  value={form.stream_mode}
+                  onChange={(e) => setForm({ ...form, stream_mode: e.target.value })}
+                  className="inp"
+                  data-testid="stream-mode-select"
+                >
+                  <option value="auto">Auto — Go2RTC (recommandé)</option>
+                  <option value="direct_rtsp">Direct RTSP — sans Go2RTC (dépannage)</option>
+                </select>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  Go2RTC centralise le flux (1 seule connexion caméra, aperçu fluide). Direct RTSP
+                  ouvre une connexion ffmpeg par visionnage — à réserver au dépannage si Go2RTC échoue
+                  sur cette caméra.
+                </p>
+              </div>
+              <div className="col-span-2">
                 <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
                   URL RTSP WebRTC (H264) — optionnel
                 </label>
