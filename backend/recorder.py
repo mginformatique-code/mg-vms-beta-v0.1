@@ -70,10 +70,19 @@ async def _start_ffmpeg(cam: dict) -> None:
     camera_id = cam["id"]
     out_dir = _cam_target_dir(cam)
     out = out_dir / "%Y%m%d_%H%M%S.mp4"
-    # video-engine-v3 · recorder RTSP-native : lecture DIRECTE de la caméra
-    # (plus de proxy go2rtc/mediamtx), copie sans transcodage.
-    from streaming import _build_rtsp_url
-    src = _build_rtsp_url(cam)
+    # P0-fix · Connexion RTSP mutualisée : certaines caméras (Reolink
+    # notamment) refusent une 2e connexion RTSP concurrente — le recorder
+    # ouvrait sa propre connexion en plus de celle de l'IA (frame_source),
+    # provoquant des timeouts/déconnexions en boucle. Sauf stream_mode=
+    # direct_rtsp (contournement explicite de Go2RTC), le recorder lit
+    # maintenant depuis le relais Go2RTC déjà ouvert (1 seule connexion
+    # réelle vers la caméra, partagée avec l'IA/preview/statut) — copie
+    # brute, zéro transcodage, même qualité qu'une lecture directe.
+    from streaming import _build_rtsp_url, _is_direct_rtsp, _stream_name
+    if _is_direct_rtsp(cam):
+        src = _build_rtsp_url(cam)
+    else:
+        src = f"{GO2RTC_RTSP}/{_stream_name(camera_id)}"
     cmd = [
         "ffmpeg", "-nostdin", "-loglevel", "error",
         "-rtsp_transport", "tcp", "-i", src,

@@ -499,6 +499,7 @@ async def _sync_frame_source_workers(cams: list[dict], *,
           intact. Marque ``topology_syncs_partial``.
     """
     import frame_source
+    from streaming import _is_direct_rtsp, _stream_name
     go2rtc_rtsp = os.environ.get("GO2RTC_RTSP", "rtsp://go2rtc:8554")
 
     partial = only is not None
@@ -517,12 +518,22 @@ async def _sync_frame_source_workers(cams: list[dict], *,
             continue
         ai_url = (cam.get("ai_rtsp_url") or "").strip()
         native_url = (cam.get("rtsp_url") or "").strip()
-        # video-engine-v3 · Source IA RTSP-native directe caméra (plus jamais
-        # de proxy go2rtc/MediaMTX). `ai_rtsp_url` reste prioritaire si l'admin
-        # a configuré un flux dédié IA (typiquement le sub H264 low-res).
+        # `ai_rtsp_url` reste prioritaire si l'admin a configuré un flux DÉDIÉ IA
+        # (profil caméra distinct, ex. sub H264 low-res) — ce flux n'est pas
+        # enregistré dans Go2RTC, donc reste une connexion directe assumée.
+        #
+        # P0-fix · Connexion RTSP mutualisée : sinon (flux natif), on partage la
+        # connexion Go2RTC déjà ouverte pour le recorder/preview/statut au lieu
+        # d'ouvrir une 2e connexion directe vers la caméra — certaines caméras
+        # (Reolink notamment) refusent plusieurs connexions RTSP concurrentes,
+        # ce qui faisait échouer frame_source en boucle (0 FPS, reconnects).
+        # stream_mode=direct_rtsp reste la seule exception (Go2RTC non utilisé).
         if ai_url:
             rtsp_url = ai_url
             source_type = "direct-ai"
+        elif native_url and not _is_direct_rtsp(cam):
+            rtsp_url = f"{go2rtc_rtsp}/{_stream_name(cam_id)}"
+            source_type = "go2rtc-shared"
         elif native_url:
             rtsp_url = native_url
             source_type = "direct-native"
