@@ -2,11 +2,11 @@ import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
+import LivePlayer from "@/components/video/LivePlayer";
 import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, User, Car, Truck, Bike, PawPrint, ScanLine, Flame, AlertOctagon, HardHat, MapPin, Activity, Lightbulb, Moon, Siren, Volume2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 const LAYOUTS = [1, 4, 9, 16, 25, 36, 49, 64];
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // Palette IA — une couleur distincte par classe
 const CLASS_COLORS = {
@@ -21,11 +21,6 @@ const CLASS_COLORS = {
   "Chat":       "#B47CFF",
 };
 const colorFor = (label) => CLASS_COLORS[label] || "#FF3333";
-
-function streamUrl(camId, hd = false) {
-  const token = localStorage.getItem("mg_token");
-  return `${API}/stream/${camId}/live.mjpeg?token=${encodeURIComponent(token || "")}&hd=${hd ? 1 : 0}`;
-}
 
 function OverlayCanvas({ cam, boxes, showOverlay }) {
   const ref = useRef(null);
@@ -74,10 +69,6 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
   // Détection sous-flux (résolution < 1280x720) — le user a probablement gardé un sub-stream
   const [subW, subH] = (cam?.resolution || "").split(/x/i).map((n) => parseInt(n, 10) || 0);
   const isSubStream = online && subW > 0 && subH > 0 && (subW < 1280 || subH < 720);
-  // P0-fix · Solution B (Go2RTC + MJPEG) : plus qu'un seul transport, badge fixe.
-  const pipelineLabel = "GO2RTC";
-  const pipelineColor = "#FFAA00";
-
   return (
     <div
       className={`relative bg-black overflow-hidden group aspect-video cursor-pointer transition-shadow ${focused ? "ring-2 ring-[#00E5FF]" : "hover:ring-1 hover:ring-[#0044FF]/60"}`}
@@ -88,9 +79,7 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
     >
       {cam?.id ? (
         <>
-          {/* P0-fix · Solution B (Go2RTC + MJPEG) : <img> simple, zéro WebRTC/WHEP. */}
-          <img src={streamUrl(cam.id, hd)} alt={cam?.name || "Live"}
-               className="w-full h-full object-contain" data-testid="wall-player" />
+          <LivePlayer camera={cam} hd={hd} className="w-full h-full" dataTestId="wall-player" />
           {cam?.detect_enabled && <OverlayCanvas cam={cam} boxes={boxes} showOverlay={showOverlay} />}
           {/* Overlay No Signal superposé — le player reste monté en dessous */}
           {!online && (
@@ -118,10 +107,6 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
           {online && cam?.resolution && (
             <span className="text-[9px] mono px-1 text-white/80 bg-black/50" data-testid="feed-resolution">{cam.resolution}</span>
           )}
-          {online && <span data-testid="feed-quality" className="text-[8px] mono px-1 font-bold"
-                              style={{ color: pipelineColor }}>
-            {pipelineLabel}
-          </span>}
           {online && <span className="flex items-center gap-1 text-[9px] mono text-[#00E676]"><Circle size={6} className="fill-[#00E676] rec-dot" /> LIVE</span>}
           {focused && <X size={13} className="text-white/80" />}
         </div>
