@@ -88,8 +88,16 @@ api.interceptors.response.use(
       original._retry = true;
       try {
         if (!refreshing) {
+          // v3.1.1 · Le backend fait une rotation à usage unique du refresh
+          // token (blackliste l'ancien à chaque appel /auth/refresh). Si on
+          // ne persiste pas le nouveau ici, le 2e 401 de la session (n'importe
+          // où) réutilise un refresh token déjà consommé → le backend détecte
+          // la réutilisation et révoque TOUTES les sessions → déconnexion.
           refreshing = axios.post(`${API}/auth/refresh`, {}, { headers: { Authorization: `Bearer ${refresh}` } })
-            .then((r) => r.data.access_token)
+            .then((r) => {
+              if (r.data.refresh_token) localStorage.setItem("mg_refresh", r.data.refresh_token);
+              return r.data.access_token;
+            })
             .finally(() => { refreshing = null; });
         }
         const newToken = await refreshing;
