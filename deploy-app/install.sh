@@ -10,15 +10,19 @@
 #   1. Mise à jour du dépôt (dernier build GitHub, --ff-only)     [--no-pull]
 #   2. Validation des fichiers de build (Dockerfiles, compose, go2rtc.yaml,
 #      requirements ×3, yarn.lock synchronisé avec package.json)
-#   3. Création des dossiers de stockage /mnt/storage/...
-#   4. Copie de .env.example → .env (jamais écrasé s'il existe)
-#   5. docker compose config → build → up -d
-#   6. Attente des healthchecks (mongo → go2rtc → backend → frontend)
+#   3. Prérequis Docker
+#   4. Nettoyage pré-installation (down + prune images/cache)    [--no-cleanup]
+#   5. Création des dossiers de stockage /mnt/storage/... + .env
+#   6. docker compose config → build → up -d
+#   7. Attente des healthchecks (mongo → go2rtc → backend → frontend)
+#
+# Le résumé final affiche la montée de version (commit avant → après pull).
 #
 # Options :
 #   --no-pull      ne pas tirer le dernier commit GitHub
 #   --check-only   valider les fichiers puis s'arrêter (aucun docker requis)
 #   --no-cache     build avec --no-cache
+#   --no-cleanup   ne pas faire down + prune avant le build
 # ==============================================================================
 set -euo pipefail
 
@@ -31,12 +35,13 @@ titre(){ echo -e "\n${BLEU}━━━ $* ━━━${NC}"; }
 ERREURS=0
 ko()   { err "$*"; ERREURS=$((ERREURS+1)); }
 
-NO_PULL=0; CHECK_ONLY=0; NO_CACHE=""
+NO_PULL=0; CHECK_ONLY=0; NO_CACHE=""; NO_CLEANUP=0
 for arg in "$@"; do
   case "$arg" in
     --no-pull)    NO_PULL=1 ;;
     --check-only) CHECK_ONLY=1 ;;
     --no-cache)   NO_CACHE="--no-cache" ;;
+    --no-cleanup) NO_CLEANUP=1 ;;
     *) err "Option inconnue : $arg"; exit 2 ;;
   esac
 done
@@ -47,10 +52,14 @@ REPO="$(dirname "$SCRIPT_DIR")"
 cd "$REPO"
 echo -e "${BLEU}MG-VMS · Installation v1.0-rc4.5${NC} — repo : $REPO"
 
+# ─── État avant pull (pour le résumé de montée de version en fin de script) ──
+AVANT_REV=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo "?")
+AVANT_VERSION=$(grep -m1 -oE '\[v[^]]+\]' "$REPO/CHANGELOG.md" 2>/dev/null | tr -d '[]' || echo "?")
+
 # ══════════════════════════════════════════════════════════════════════
 # 1. Dernier build GitHub
 # ══════════════════════════════════════════════════════════════════════
-titre "1/6 · Mise à jour du dépôt (GitHub)"
+titre "1/7 · Mise à jour du dépôt (GitHub)"
 if [ "$NO_PULL" = 1 ]; then
   warn "--no-pull : dépôt utilisé tel quel ($(git -C "$REPO" log --oneline -1 2>/dev/null || echo 'pas de git'))"
 elif [ -d "$REPO/.git" ] && git -C "$REPO" remote get-url origin >/dev/null 2>&1; then
@@ -72,7 +81,7 @@ fi
 # ══════════════════════════════════════════════════════════════════════
 # 2. Validation des fichiers de build
 # ══════════════════════════════════════════════════════════════════════
-titre "2/6 · Validation des fichiers de build"
+titre "2/7 · Validation des fichiers de build"
 
 # ── 2a. Présence des fichiers critiques ──
 for f in \
@@ -157,7 +166,7 @@ fi
 # ══════════════════════════════════════════════════════════════════════
 # 3. Prérequis Docker
 # ══════════════════════════════════════════════════════════════════════
-titre "3/6 · Prérequis Docker"
+titre "3/7 · Prérequis Docker"
 command -v docker >/dev/null || { err "docker introuvable — installez Docker Engine"; exit 1; }
 docker compose version >/dev/null 2>&1 || { err "Docker Compose v2 requis (docker compose version)"; exit 1; }
 ok "docker $(docker --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) · $(docker compose version --short 2>/dev/null | head -1)"
@@ -168,9 +177,37 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════
-# 4. Stockage /mnt/storage + .env
+# 4. Nettoyage pré-installation
 # ══════════════════════════════════════════════════════════════════════
-titre "4/6 · Stockage & configuration"
+# Objectif : repartir d'un état propre à chaque install (conteneurs arrêtés
+# proprement, images orphelines et cache de build purgés) sans jamais toucher
+# aux données. Volontairement PAS de `docker volume prune` ni `system prune -a` :
+# ce compose n'utilise que des bind mounts host (/mnt/storage/...), aucun volume
+# Docker nommé — rien à perdre côté volumes, mais un `-a`/`system prune` global
+# supprimerait aussi des images sans rapport avec MG-VMS si l'hôte en héberge
+# d'autres. Portée volontairement limitée à ce projet + images/cache orphelins.
+titre "4/7 · Nettoyage pré-installation"
+cd "$SCRIPT_DIR"
+if [ "$NO_CLEANUP" = 1 ]; then
+  warn "--no-cleanup : down + prune ignorés"
+else
+  if [ -n "$(docker compose ps -q 2>/dev/null)" ]; then
+    docker compose down --remove-orphans
+    ok "conteneurs arrêtés et retirés (down --remove-orphans, données/.env intacts)"
+  else
+    ok "aucun conteneur MG-VMS en cours — rien à arrêter"
+  fi
+  N_DANGLING=$(docker images -f "dangling=true" -q | wc -l | tr -d ' ')
+  docker image prune -f >/dev/null
+  ok "images orphelines supprimées ($N_DANGLING image(s) dangling nettoyée(s))"
+  docker builder prune -f >/dev/null
+  ok "cache de build Docker purgé"
+fi
+
+# ══════════════════════════════════════════════════════════════════════
+# 5. Stockage /mnt/storage + .env
+# ══════════════════════════════════════════════════════════════════════
+titre "5/7 · Stockage & configuration"
 for d in \
   /mnt/storage/mongodb \
   /mnt/storage/video-datastore/recordings \
@@ -209,9 +246,9 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════
-# 5. Build & démarrage
+# 6. Build & démarrage
 # ══════════════════════════════════════════════════════════════════════
-titre "5/6 · docker compose config → build → up"
+titre "6/7 · docker compose config → build → up"
 docker compose config --quiet && ok "docker compose config : OK"
 docker compose build $NO_CACHE
 ok "build terminé"
@@ -219,9 +256,9 @@ docker compose up -d
 ok "stack démarrée"
 
 # ══════════════════════════════════════════════════════════════════════
-# 6. Attente des healthchecks
+# 7. Attente des healthchecks
 # ══════════════════════════════════════════════════════════════════════
-titre "6/6 · Attente des healthchecks (mongo → go2rtc → backend → frontend)"
+titre "7/7 · Attente des healthchecks (mongo → go2rtc → backend → frontend)"
 DELAI=420   # 7 min (start_period backend 90 s + téléchargement modèles au 1er boot)
 DEBUT=$(date +%s)
 while :; do
@@ -249,8 +286,22 @@ fi
 
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 PORT_HTTP=$(grep -E '^FRONTEND_HTTP_PORT=' .env | cut -d= -f2); PORT_HTTP=${PORT_HTTP:-3000}
+
+# ─── Montée de version (comparaison avec l'état capturé avant le pull) ──────
+APRES_REV=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo "?")
+APRES_VERSION=$(grep -m1 -oE '\[v[^]]+\]' "$REPO/CHANGELOG.md" 2>/dev/null | tr -d '[]' || echo "?")
+if [ "$AVANT_REV" = "?" ] || [ "$APRES_REV" = "?" ]; then
+  VERSION_LIGNE="  Version      : $APRES_VERSION ($APRES_REV)"
+elif [ "$AVANT_REV" = "$APRES_REV" ]; then
+  VERSION_LIGNE="  Version      : $APRES_VERSION ($APRES_REV) — inchangée"
+else
+  N_COMMITS=$(git -C "$REPO" rev-list --count "${AVANT_REV}..${APRES_REV}" 2>/dev/null || echo "?")
+  VERSION_LIGNE="  Version      : $AVANT_VERSION ($AVANT_REV) → $APRES_VERSION ($APRES_REV) — $N_COMMITS nouveau(x) commit(s)"
+fi
+
 echo -e "\n${VERT}════════════════════════════════════════════════════${NC}"
 echo -e "${VERT}  MG-VMS installé et opérationnel ✔${NC}"
+echo -e "$VERSION_LIGNE"
 echo -e "  Application : http://${IP:-<ip-serveur>}:${PORT_HTTP}"
 echo -e "  API         : http://${IP:-<ip-serveur>}:8001/api/"
 echo -e "  Go2RTC      : http://${IP:-<ip-serveur>}:1984 (interne ; utilisé par le backend uniquement)"
