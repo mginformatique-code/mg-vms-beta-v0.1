@@ -305,8 +305,13 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
                 await client.delete(f"{GO2RTC_URL}/api/streams", params={"src": src})
             # 1) Source unique RTSP (un seul décodage) — utilisée par le recorder et l'IA
             # v1.0-rc4.5 · rtsp_source inclut #transport=tcp#timeout=15 (voir plus haut)
-            r = await client.put(f"{GO2RTC_URL}/api/streams",
-                                 params=[("name", name), ("src", rtsp_source)])
+            # P0-fix · `rtsp_source` contient déjà des identifiants percent-encodés
+            # (via _build_rtsp_url). Passer cette chaîne DÉJÀ encodée dans `params=`
+            # la fait ré-encoder une 2e fois par httpx (`%23` → `%2523`) → go2rtc
+            # reçoit une URL illisible et rejette avec 400 Bad Request. On construit
+            # donc l'URL manuellement pour que rtsp_source ne soit encodé qu'une fois.
+            r = await client.put(
+                f"{GO2RTC_URL}/api/streams?name={urlquote(name, safe='')}&src={rtsp_source}")
             r.raise_for_status()
             # 2) Variante HD : MJPEG à résolution native (avec accel matérielle si dispo)
             r_hd = await client.put(f"{GO2RTC_URL}/api/streams",
