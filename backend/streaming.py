@@ -412,63 +412,40 @@ async def _ensure_variants_cached(name: str) -> None:
 
 
 async def sync_all_streams() -> None:
-    """video-engine-v3 · fonction NO-OP conservée pour compat (les callers historiques)."""
-    return
+    """P0-fix · Solution B (Go2RTC + MJPEG) : réconcilie DB ↔ Go2RTC.
 
-
-async def _sync_all_streams_deprecated() -> None:
-    """[DÉSACTIVÉ v3] Ancien code go2rtc — conservé le temps de la migration."""
-    return
-    if True:
-            if r.status_code == 200:
-                for name in (r.json() or {}):
-                    if name.startswith("probe_"):
-                        try:
-                            await client.delete(f"{GO2RTC_URL}/api/streams", params={"src": name})
-                            logger.info("go2rtc: flux temporaire nettoyé — %s", name)
-                        except httpx.HTTPError:
-                            pass
-    return  # video-engine-v3 · fin de la fonction NO-OP
-
-
-async def _sync_all_streams_dead_code_v2(cams=None) -> None:
-    """[MORT · V3] Ancien code de reconciliation Go2RTC — jamais appelé."""
-    return
-    if False:
-        try:
-            pass
-        except httpx.HTTPError:
-            pass
-        # 2) Garantir la caméra de démonstration
+    Utile après un restart de Go2RTC (les flux enregistrés dynamiquement via
+    `PUT /api/streams` ne sont PAS persistés dans go2rtc.yaml — seules les
+    démos le sont) : ré-enregistre chaque caméra "auto"/go2rtc, purge les
+    résidus des caméras stream_mode=direct_rtsp ou supprimées. Remplace les
+    3 anciennes fonctions (NO-OP + 2 versions mortes) laissées par la
+    migration "video-engine-v3", qui référençaient encore video_pipelines
+    (module supprimé).
+    """
     await _ensure_demo_camera()
-    # v1.0-rc4.6 · Snapshot des noms de streams Go2RTC (purge ciblée direct_rtsp)
     try:
         async with httpx.AsyncClient(timeout=6) as client:
             r = await client.get(f"{GO2RTC_URL}/api/streams")
             go2rtc_names = set((r.json() or {}).keys()) if r.status_code == 200 else set()
     except httpx.HTTPError:
         go2rtc_names = set()
-    # 3) video-pipeline-v2 · Go2RTC = LEGACY ISOLÉ : les caméras réelles ne sont
-    #    PLUS JAMAIS inscrites dans Go2RTC, quel que soit leur pipeline.
-    #    Purge des résidus cam_xxx/_hd/_sd hérités des versions antérieures.
     cams = await db.cameras.find({}, {"_id": 0}).to_list(1000)
+    n_registered = 0
     n_purged = 0
     for cam in cams:
         if cam.get("id") in DEMO_IDS:
-            # Les démos restent servies par go2rtc (mires locales statiques).
             await _ensure_variants(_stream_name(cam["id"]))
             continue
         name = _stream_name(cam["id"])
-        # Pipeline "go2rtc" choisi EXPLICITEMENT par l'admin → enregistrement legacy
-        from video_pipelines.base import resolve_pipeline as _rp
-        if _rp(cam) == "go2rtc":
-            await register_camera_stream(cam, caller="sync_all_streams@go2rtc_pipeline")
+        if _is_direct_rtsp(cam):
+            if go2rtc_names & {name, f"{name}_hd", f"{name}_sd"}:
+                await unregister_camera_stream(cam["id"], caller="sync_all_streams@direct_rtsp_purge")
+                n_purged += 1
             continue
-        if go2rtc_names & {name, f"{name}_hd", f"{name}_sd"}:
-            await unregister_camera_stream(cam["id"], caller="sync_all_streams@video_v2_purge")
-            n_purged += 1
-            logger.info("sync_all_streams: résidus Go2RTC purgés pour %s (video-pipeline-v2)", cam["id"])
-    logger.info("go2rtc: legacy isolé — %d caméra(s) réelle(s) purgée(s), démos conservées", n_purged)
+        if await register_camera_stream(cam, caller="sync_all_streams"):
+            n_registered += 1
+    logger.info("sync_all_streams: %d caméra(s) réconciliée(s) avec go2rtc, %d résidu(s) purgé(s)",
+                n_registered, n_purged)
 
 
 async def reconcile_streams_with_go2rtc() -> dict:
@@ -1351,37 +1328,6 @@ async def _oneshot_probe_jpeg(rtsp_url: str, transport: str = "tcp"):
             pass
         return None
     return out if out[:3] == b"\xff\xd8\xff" else None
-
-
-async def _video_v2_mjpeg_response(cam: dict, request: Request, user: dict):
-    """video-pipeline-v2 · Sert le flux MJPEG du pipeline choisi (broker partagé).
-    L'URL historique /api/stream/{id}/live.mjpeg reste valide pour le mur vidéo."""
-    from video_pipelines import mediamtx as p_mediamtx
-    from video_pipelines import mjpeg as p_mjpeg
-    from video_pipelines.base import camera_source_url, resolve_pipeline
-    pipeline = resolve_pipeline(cam)
-    cam_id = cam["id"]
-    if pipeline == "direct_rtsp":
-        raise HTTPException(409, "Pipeline direct_rtsp : flux RTSP natif uniquement — "
-                                  "pas de preview navigateur (choisir MJPEG ou MediaMTX)")
-    source = p_mediamtx.rtsp_read_url(cam_id) if pipeline == "mediamtx" \
-        else camera_source_url(cam)
-    if not source.lower().startswith("rtsp://"):
-        raise HTTPException(502, "Aucune URL RTSP valide pour cette caméra")
-    broker = p_mjpeg.ensure_broker(cam_id, source)
-    if not await p_mjpeg.wait_first_frame(broker):
-        raise HTTPException(502, f"Flux MJPEG indisponible ({broker.last_error or 'aucune frame reçue'})")
-    from lifecycle import record as _lc_record
-    client_ip = request.client.host if request.client else "?"
-    _lc_record(cam_id, "consumer_attached", reason=f"live.mjpeg pipeline={pipeline}",
-               caller=f"{user.get('email','?')}@{client_ip}",
-               extra={"src": source.split("@")[-1]})
-    return StreamingResponse(
-        p_mjpeg.multipart_generator(broker),
-        media_type=f"multipart/x-mixed-replace; boundary={p_mjpeg.BOUNDARY}",
-        headers={"Cache-Control": "no-store, no-cache",
-                 "X-Accel-Buffering": "no",
-                 "X-Video-Pipeline": pipeline})
 
 
 def _direct_live_mjpeg_response(cam: dict, want_hd: bool, request: Request, user: dict):

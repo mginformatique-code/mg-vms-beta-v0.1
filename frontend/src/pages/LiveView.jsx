@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
-import VideoPlayer, { pipelineOf } from "@/components/video/VideoPlayer";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, User, Car, Truck, Bike, PawPrint, ScanLine, Flame, AlertOctagon, HardHat, MapPin, Activity, Lightbulb, Moon, Siren, Volume2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -67,10 +66,6 @@ function OverlayCanvas({ cam, boxes, showOverlay }) {
 function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onToggleFocus }) {
   const [hover, setHover] = useState(false);
   const online = cam?.status === "online";
-  // video-pipeline-v2 · Le mur vidéo utilise EXACTEMENT le pipeline choisi
-  // pour la caméra (camera.stream_pipeline) via le dispatcher VideoPlayer.
-  // Aucune logique parallèle, aucun fallback caché, zéro Go2RTC.
-  const pipeline = pipelineOf(cam);
   const ptz = async (command) => { try { await api.post(`/cameras/${cam.id}/ptz?command=${command}`); } catch (e) { /* ignore */ } };
 
   const boxes = aiState?.boxes || [];
@@ -79,8 +74,9 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
   // Détection sous-flux (résolution < 1280x720) — le user a probablement gardé un sub-stream
   const [subW, subH] = (cam?.resolution || "").split(/x/i).map((n) => parseInt(n, 10) || 0);
   const isSubStream = online && subW > 0 && subH > 0 && (subW < 1280 || subH < 720);
-  const PIPELINE_BADGE = { mediamtx: ["MEDIAMTX", "#00E5FF"], mjpeg: ["MJPEG", "#00E676"], direct_rtsp: ["RTSP", "#FFB800"], go2rtc: ["GO2RTC", "#FFAA00"] };
-  const [pipelineLabel, pipelineColor] = PIPELINE_BADGE[pipeline] || ["—", "#888"];
+  // P0-fix · Solution B (Go2RTC + MJPEG) : plus qu'un seul transport, badge fixe.
+  const pipelineLabel = "GO2RTC";
+  const pipelineColor = "#FFAA00";
 
   return (
     <div
@@ -92,9 +88,9 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
     >
       {cam?.id ? (
         <>
-          {/* Player TOUJOURS monté (même si offline) — évite le remount destructeur.
-             video-pipeline-v2 : dispatch strict par stream_pipeline. */}
-          <VideoPlayer camera={cam} hd={hd} className="w-full h-full" dataTestId="wall-player" />
+          {/* P0-fix · Solution B (Go2RTC + MJPEG) : <img> simple, zéro WebRTC/WHEP. */}
+          <img src={streamUrl(cam.id, hd)} alt={cam?.name || "Live"}
+               className="w-full h-full object-contain" data-testid="wall-player" />
           {cam?.detect_enabled && <OverlayCanvas cam={cam} boxes={boxes} showOverlay={showOverlay} />}
           {/* Overlay No Signal superposé — le player reste monté en dessous */}
           {!online && (
