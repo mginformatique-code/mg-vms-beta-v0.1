@@ -281,17 +281,17 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
     }
     await db.cameras.insert_one(dict(doc))
     await log_audit(user, "camera_created", data.name, f"Site: {site['name']} · Mode: {data.mode}")
-    # video-engine-v3 · déclenche le Video Core sur cette nouvelle caméra
+    # P0-fix · Solution B (Go2RTC + MJPEG) : enregistre la caméra dans Go2RTC
+    # dès la création (respecte stream_mode=direct_rtsp, idempotent, no-op
+    # pour les démos). Remplace l'ancien câblage systématique vers VideoCoreManager
+    # (WHEP), qui laissait Go2RTC orphelin pour toute caméra créée normalement.
     try:
-        payload["stream_pipeline"] = "rtsp_native"
+        from streaming import register_camera_stream
+        registered = await register_camera_stream(doc, caller="create_camera")
         await db.cameras.update_one({"id": doc["id"]},
-                                     {"$set": {"stream_pipeline": "rtsp_native",
-                                               "pipeline_status": "rtsp_native"}})
-        doc["stream_pipeline"] = "rtsp_native"
-        from video_core import VideoCoreManager
-        await VideoCoreManager.instance().ensure_camera(doc)
+                                     {"$set": {"pipeline_status": "go2rtc" if registered else "register_failed"}})
     except Exception:
-        logger.warning("create_camera %s : Video Core init a échoué (non bloquant)",
+        logger.warning("create_camera %s : enregistrement Go2RTC a échoué (non bloquant)",
                         doc.get("id"))
     # v0.7.e · Wave A · Hot Reload chirurgical : signale l'ajout au moteur IA
     # pour qu'il ne resynchronise QUE cette caméra au prochain cycle
@@ -462,13 +462,15 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
     await db.cameras.update_one({"id": camera_id}, {"$set": payload})
     await log_audit(user, "camera_updated", data.name, f"Mode: {data.mode}")
     updated = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
-    # video-engine-v3 · Video Core recycle automatiquement la source RTSP
+    # P0-fix · Solution B (Go2RTC + MJPEG) : re-déclare la caméra dans Go2RTC
+    # (force=True car l'URL/les identifiants ont pu changer).
     try:
-        from video_core import VideoCoreManager
-        await VideoCoreManager.instance().ensure_camera(updated)
-        await db.cameras.update_one({"id": camera_id}, {"$set": {"pipeline_status": "rtsp_native"}})
+        from streaming import register_camera_stream
+        registered = await register_camera_stream(updated, caller="update_camera", force=True)
+        await db.cameras.update_one({"id": camera_id},
+                                     {"$set": {"pipeline_status": "go2rtc" if registered else "register_failed"}})
     except Exception:
-        logger.warning("update_camera %s : Video Core refresh a échoué (non bloquant)",
+        logger.warning("update_camera %s : enregistrement Go2RTC a échoué (non bloquant)",
                         camera_id)
     # v0.7.e · Wave A · Hot Reload chirurgical : signale la modification au
     # moteur IA — seule CETTE caméra sera re-synchronisée (worker ffmpeg
@@ -487,10 +489,10 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
 async def delete_camera(camera_id: str, user: dict = Depends(require_role("technician"))):
     cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
     await db.cameras.delete_one({"id": camera_id})
-    # video-engine-v3 · stop la source RTSP dédiée à cette caméra
+    # P0-fix · Solution B (Go2RTC + MJPEG) : retire la caméra de Go2RTC.
     try:
-        from video_core import VideoCoreManager
-        await VideoCoreManager.instance().stop_camera(camera_id)
+        from streaming import unregister_camera_stream
+        await unregister_camera_stream(camera_id, caller="delete_camera")
     except Exception:
         pass
     # v0.7.e · Wave A · Hot Reload chirurgical : signale la suppression au

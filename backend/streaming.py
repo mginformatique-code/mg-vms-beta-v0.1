@@ -1155,18 +1155,13 @@ async def _probe_status_once(cam: dict) -> tuple[str, str, bool]:
     except Exception:
         pass
 
-    # ── video-pipeline-v2 · Caméras RÉELLES : statut PIPELINE-AWARE ──
-    # Le statut ne dépend JAMAIS de Go2RTC : il est calculé par le pipeline
-    # réellement sélectionné (mediamtx: path ready · mjpeg: broker/TCP ·
-    # direct_rtsp: probe TCP RTSP).
-    if not is_demo:
-        from video_pipelines.status import quick_probe
-        status, err = await quick_probe(cam)
-        if status == "online":
-            return ("online", "", False)
-        return ("offline_transient", err, False)
-
-    # ── Démos : générées localement par go2rtc → frame.jpeg reste OK ici. ──
+    # P0-fix · Solution B (Go2RTC + MJPEG) : statut basé sur Go2RTC pour toute
+    # caméra go2rtc (réelle ou démo) ; stream_mode=direct_rtsp dépend uniquement
+    # de frame_source (déjà vérifié plus haut). Remplace video_pipelines.status
+    # — module inexistant, qui faisait planter TOUT le cycle de camera_status_loop
+    # (except Exception englobant tout le `for cam in cams`) dès la 1re caméra réelle.
+    if not is_demo and _is_direct_rtsp(cam):
+        return ("offline_transient", "aucune frame récente (direct_rtsp)", False)
     try:
         async with httpx.AsyncClient(timeout=8) as client:
             r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": name})
@@ -1442,22 +1437,9 @@ async def _direct_frame_jpeg(cam: dict, want_hd: bool) -> bytes:
                 return buf.tobytes()
     except Exception:
         logger.debug("frame_jpeg direct: frame_source indisponible pour %s", cam_id, exc_info=True)
-    # video-pipeline-v2 · Broker MJPEG déjà actif ? → dernière frame gratuite.
-    try:
-        from video_pipelines import mjpeg as p_mjpeg
-        b = p_mjpeg._brokers.get(cam_id)
-        if b is not None and b.latest is not None \
-                and time.monotonic() - b.last_frame_ts < 10.0:
-            return b.latest
-    except Exception:
-        pass
-    # Source pipeline-aware : mediamtx → relais (1 seule session caméra), sinon RTSP natif.
-    from video_pipelines import mediamtx as p_mediamtx
-    from video_pipelines.base import camera_source_url, resolve_pipeline
-    if resolve_pipeline(cam) == "mediamtx":
-        rtsp_url = p_mediamtx.rtsp_read_url(cam_id)
-    else:
-        rtsp_url = camera_source_url(cam)
+    # P0-fix · Solution B : pas de mediamtx ni de broker video_pipelines
+    # (module inexistant) — capture directement l'URL RTSP de la caméra.
+    rtsp_url = (cam.get("ai_rtsp_url") or "").strip() or _build_rtsp_url(cam)
     if not rtsp_url.lower().startswith("rtsp://"):
         raise HTTPException(502, "Aucune URL RTSP valide pour cette caméra (mode direct_rtsp)")
     transport = (cam.get("rtsp_transport") or "tcp").lower()
@@ -1503,13 +1485,12 @@ async def live_mjpeg(camera_id: str, request: Request,
     """
     cam_doc = await _authorize_camera(user, camera_id)
     want_hd = bool(int(hd or 0)) and has_permission(user, "stream_hd")
-    # ── video-pipeline-v2 · Caméras RÉELLES : dispatch strict par pipeline ──
-    # (mjpeg → broker partagé · mediamtx → broker sur relais MediaMTX ·
-    #  direct_rtsp → 409 explicite). ZÉRO Go2RTC, zéro variantes cam_xxx_hd/_sd.
-    if camera_id not in DEMO_IDS:
-        from video_pipelines.base import resolve_pipeline as _rp
-        if _rp(cam_doc) != "go2rtc":
-            return await _video_v2_mjpeg_response(cam_doc, request, user)
+    # P0-fix · Solution B (Go2RTC + MJPEG) : seule stream_mode=direct_rtsp
+    # contourne Go2RTC (pont ffmpeg local). Tout le reste passe par le
+    # chemin Go2RTC éprouvé ci-dessous. (Remplace l'ancien dispatch
+    # video_pipelines.base.resolve_pipeline — module inexistant, ModuleNotFoundError.)
+    if camera_id not in DEMO_IDS and _is_direct_rtsp(cam_doc):
+        return _direct_live_mjpeg_response(cam_doc, want_hd, request, user)
     src = _mjpeg_stream(camera_id, hd=want_hd)
     # Garantit la variante côté go2rtc (throttled → 1 appel par caméra / 60 s)
     await _ensure_variants_cached(_stream_name(camera_id))
@@ -1620,15 +1601,13 @@ async def frame_jpeg(camera_id: str, hd: int = 1, user: dict = Depends(stream_us
     """
     cam_doc = await _authorize_camera(user, camera_id)
     want_hd = bool(int(hd or 0)) and has_permission(user, "stream_hd")
-    # ── video-pipeline-v2 · Caméras RÉELLES : snapshot pipeline-aware, ZÉRO Go2RTC ──
-    # (frame_source si worker IA actif → broker MJPEG si actif → capture one-shot).
-    if camera_id not in DEMO_IDS:
-        from video_pipelines.base import resolve_pipeline as _rp
-        if _rp(cam_doc) != "go2rtc":
-            data = await _direct_frame_jpeg(cam_doc, want_hd)
-            return Response(content=data, media_type="image/jpeg",
-                            headers={"Cache-Control": "no-store",
-                                     "X-Preview-Source": "direct-ffmpeg"})
+    # P0-fix · Solution B (Go2RTC + MJPEG) : même logique que live_mjpeg —
+    # seul stream_mode=direct_rtsp contourne Go2RTC.
+    if camera_id not in DEMO_IDS and _is_direct_rtsp(cam_doc):
+        data = await _direct_frame_jpeg(cam_doc, want_hd)
+        return Response(content=data, media_type="image/jpeg",
+                        headers={"Cache-Control": "no-store",
+                                 "X-Preview-Source": "direct-ffmpeg"})
     name = _stream_name(camera_id)
     # Garantit que les variantes HD/SD existent (auto-migration après upgrade, throttled)
     await _ensure_variants_cached(name)
