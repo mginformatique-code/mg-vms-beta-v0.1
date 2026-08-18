@@ -36,10 +36,32 @@ services:
       retries: 5
     networks: [mgvms]
 
-  # video-engine-v3 · Services go2rtc & MediaMTX SUPPRIMÉS.
-  # Le moteur vidéo est désormais 100% intégré au backend (video_core PyAV +
-  # webrtc_gateway aiortc). Une seule connexion RTSP par caméra, WHEP servi
-  # nativement par FastAPI. Zéro proxy vidéo.
+  # ─── go2rtc · moteur central de flux (RTSP → MJPEG preview) ──────
+  # P0-fix · Solution B (Go2RTC + MJPEG) : ce service avait été retiré du
+  # compose lors de la migration "video-engine-v3" (WHEP-only), mais le
+  # code backend (streaming.py::register_camera_stream, live.mjpeg,
+  # camera_status_loop) en dépend toujours et n'a jamais cessé de l'appeler.
+  # Sans ce service, aucune caméra réelle ne peut afficher de preview.
+  # Pas de MediaMTX : une seule techno de proxy vidéo, comme demandé.
+  go2rtc:
+    image: alexxit/go2rtc:1.9.9
+    container_name: mgvms-go2rtc
+    restart: unless-stopped
+    ports:
+      - "1984:1984"       # HTTP API + WebSocket
+      - "8554:8554"       # RTSP
+      - "8555:8555"       # WebRTC ICE TCP
+      - "8555:8555/udp"   # WebRTC ICE UDP
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml:ro
+      - ${RECORDINGS_PATH:-/mnt/storage/video-datastore/recordings}:/app/media:ro
+      - ../media:/demo-media:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:1984/api"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks: [mgvms]
 
   # ─── Backend FastAPI + Pipeline IA (CUDA) ────────────────────────
   backend:
@@ -53,6 +75,8 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+      go2rtc:
+        condition: service_healthy
     environment:
       TZ: ${TZ:-Europe/Paris}
       # ── Base MG-VMS ─────────────────────────────────────────
@@ -62,8 +86,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:-please_change_this_secret_in_production}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@mg-vms.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@2026}
-      # video-engine-v3 · Moteur vidéo intégré au backend (aiortc + PyAV).
-      # Aucune dépendance externe go2rtc/MediaMTX.
+      GO2RTC_URL: ${GO2RTC_URL:-http://go2rtc:1984}
+      GO2RTC_RTSP: ${GO2RTC_RTSP:-rtsp://go2rtc:8554}
       # ── GPU / CUDA / FFmpeg NVDEC ───────────────────────────
       NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
       NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility,video}
