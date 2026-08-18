@@ -26,8 +26,8 @@ from .camera_models import (
     CameraCapabilities, DeviceInfo, DeviceStatus, StreamInfo, IRMode, LightMode,
 )
 from .exceptions import (
-    DeviceConnectionError, AuthenticationError, UnsupportedCapabilityError,
-    CommandTimeoutError, DeviceLockedError,
+    CameraDriverError, DeviceConnectionError, AuthenticationError,
+    UnsupportedCapabilityError, CommandTimeoutError, DeviceLockedError,
 )
 from .registry import register_driver
 
