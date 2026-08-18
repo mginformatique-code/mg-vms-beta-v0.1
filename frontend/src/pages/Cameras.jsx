@@ -606,11 +606,28 @@ export default function Cameras() {
 
             {/* camera-api-v2.2 · Section API HTTP/HTTPS caméra (couche INDÉPENDANTE du pipeline vidéo) */}
             <div className="col-span-2 border border-border p-3 space-y-3 bg-secondary/20" data-testid="camera-api-block">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                API caméra (HTTP/HTTPS)
-                <span className="text-[9px] text-muted-foreground/70 normal-case">
-                  · contrôle physique + capacités + metadata SD — indépendant du flux vidéo
-                </span>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                  API caméra (HTTP/HTTPS)
+                  <span className="text-[9px] text-muted-foreground/70 normal-case">
+                    · contrôle physique + capacités + metadata SD — indépendant du flux vidéo
+                  </span>
+                </div>
+                <button type="button"
+                        onClick={() => setForm((f) => ({
+                          ...f,
+                          api_host: f.ip,
+                          api_username: f.username,
+                          // Le mot de passe ONVIF n'est jamais pré-rempli en édition
+                          // ("inchangé si vide") — ne l'écrase que s'il a été retapé.
+                          api_password: f.password ? f.password : f.api_password,
+                        }))}
+                        disabled={!form.ip}
+                        title="Réutilise l'adresse IP + identifiant (+ mot de passe si retapé) ONVIF saisis plus haut"
+                        className="text-[10px] mono uppercase px-2.5 py-1 border border-border hover:bg-secondary disabled:opacity-40"
+                        data-testid="api-copy-onvif-creds-btn">
+                  Copier les identifiants ONVIF
+                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <div>
