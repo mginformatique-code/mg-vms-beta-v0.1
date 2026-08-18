@@ -2,6 +2,101 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.1.1-go2rtc-runtime-fixes] — 2026-08 — Enregistrement Go2RTC en prod + réactivation WebRTC (WHEP) avec repli MJPEG
+
+Suite directe de `v3.1.0-go2rtc-stabilization` : la restauration du service Go2RTC
+et le routage `stream_mode` corrigeaient l'architecture, mais aucune caméra réelle
+ne parvenait encore à s'enregistrer dynamiquement en prod (`PUT /api/streams` en
+échec permanent). Diagnostic mené en conditions réelles (logs de prod + go2rtc,
+pas de simulation) sur toute la session — PR : [#1](https://github.com/mginformatique-code/mg-vms-beta-v0.1/pull/1).
+
+Décision produit en cours de session : le Go2RTC de ce déploiement souffre d'un
+artefact d'image chronique ("neige") sous charge, préexistant à cette PR. Plutôt
+que de continuer à le déboguer, réactivation de WebRTC (WHEP/aiortc, H264
+pass-through, zéro ré-encodage) comme chemin **primaire**, avec repli MJPEG
+automatique (watchdog 8 s) si WHEP échoue — Go2RTC reste indispensable dans les
+deux cas (relais RTSP mutualisé), MJPEG n'est plus jamais désactivé en prod.
+
+### Root cause (3 bugs empilés dans l'enregistrement dynamique Go2RTC)
+- `register_camera_stream()` repassait une URL RTSP déjà pourcent-encodée dans
+  `params=` httpx, qui l'encodait une 2ᵉ fois (`%23`→`%2523`) → 400 systématique
+  dès qu'un mot de passe caméra contenait un caractère spécial.
+- **Cause principale** : le mount `go2rtc.yaml` du `docker-compose.yml`
+  restauré par `v3.1.0` portait un `:ro` (copié tel quel de l'ancienne branche
+  sans le remettre en question) — or Go2RTC réécrit ce fichier à chaque
+  `PUT /api/streams` pour persister les flux enregistrés dynamiquement. Résultat :
+  `open /config/go2rtc.yaml: read-only file system` sur CHAQUE tentative
+  d'enregistrement, un bug introduit par cette PR elle-même, pas par le code
+  historique. Trouvé uniquement en lisant le corps de la réponse HTTP renvoyée
+  par Go2RTC (jamais visible côté client httpx), après avoir perdu du temps sur
+  de fausses pistes (encodage, puis identifiants).
+- `recorder.py` et `ai_engine.py` ouvraient chacun leur propre connexion RTSP
+  directe vers la caméra, en plus de celle de Go2RTC — les caméras Reolink
+  limitent les connexions RTSP concurrentes (confirmé par un test TCP direct qui
+  timeout pendant que le recorder tenait sa connexion). Les deux consomment
+  désormais le flux relayé par Go2RTC (`GO2RTC_RTSP`) au lieu d'ouvrir une
+  connexion caméra indépendante — une seule connexion RTSP en amont, comme prévu
+  dès `v3.1.0` mais jamais effectif.
+
+### Fixed
+- `streaming.py::register_camera_stream` : construction manuelle de l'URL PUT
+  (plus de double encodage).
+- `deploy-app/docker-compose.yml` : retrait du `:ro` sur le mount `go2rtc.yaml`
+  (les mounts recordings/demo-media restent `:ro`, eux corrects).
+- `backend/routes/mjpeg_direct.py` : décodage NVDEC (`hevc_cuvid`/`h264_cuvid`)
+  ajouté au pont ffmpeg par-viewer `direct_rtsp`, qui décodait en logiciel un
+  flux 4K HEVC (cause du freeze/saccades HD "1 seconde dure 3").
+- `backend/drivers/onvif_driver.py` : import manquant `CameraDriverError` dans
+  `connect()` — chaque échec de connexion caméra (auth, timeout, DNS) levait un
+  `NameError` interne au lieu de l'erreur typée attendue, transformant tout en
+  500 générique côté `/api/devices/{id}/{capabilities,info}`. Cause probable du
+  "Camera Center API 503 device_unreachable" resté irrésolu depuis `v3.1.0`.
+- `frontend/pages/Cameras.jsx` : `stream_mode` par défaut remis à `"auto"`
+  (Go2RTC) au lieu de `"direct_rtsp"` — silencieusement contournait Go2RTC pour
+  toute nouvelle caméra créée depuis l'UI, sans sélecteur visible. Sélecteur
+  2 options (`auto`/`direct_rtsp`) restauré. Boutons d'action caméra
+  (test/diagnostic/snapshot/debug IA) et bouton "copier identifiants ONVIF"
+  restaurés dans le tableau caméras.
+- `deploy-app/install.sh` : nombre de services attendus au healthcheck rendu
+  dynamique (était figé à 4, cassait avec go2rtc restauré) ; référence
+  MediaMTX résiduelle retirée.
+
+### Réactivé
+- `frontend/components/video/LivePlayer.jsx` : recréé — tente WHEP en premier
+  (watchdog 8 s), repli automatique sur `<img>` MJPEG si échec/timeout, badge
+  affiche le mode réellement actif (WEBRTC/MJPEG). `CameraCenter.jsx` et
+  `LiveView.jsx` re-basculés dessus (`v3.1.0` les avait mis sur MJPEG simple
+  sans repli).
+
+### Ajouté
+- `backend/requirements.txt` : `aiortc==1.9.0` + `av==12.3.0`. Le code WHEP
+  (`webrtc_gateway/`, `routes/live_v3.py`) existe depuis `v3.0.0-video-engine`
+  et a toujours été câblé, mais **le paquet `aiortc` n'a jamais figuré dans
+  `requirements.txt`** (confirmé par l'historique git) — chaque appel
+  `POST /api/live/{id}/whep` échouait donc en 500 `ModuleNotFoundError` depuis
+  l'origine. WHEP n'a donc littéralement jamais fonctionné en prod, sur aucune
+  version antérieure de ce dépôt, malgré la validation "HTTP 200 · SDP answer
+  valide" annoncée par `v3.0.0-video-engine`.
+
+### ⚠️ Non validé en conditions réelles
+- **Go2RTC (relais MJPEG/RTSP)** : enregistrement dynamique confirmé
+  fonctionnel (`status: online`, frame JPEG réelle 3840×2160 récupérée). Le
+  relais MJPEG backend→navigateur a tenu une connexion sans coupure lors d'un
+  test isolé (~53 s), mais l'affichage effectif à l'écran pendant ce test n'a
+  pas été confirmé visuellement — l'écran noir précédemment observé sur le mur
+  vidéo n'est pas formellement clos.
+- **Enregistrements vidéo** : toujours affichés noirs en lecture navigateur —
+  cause distincte identifiée (HEVC natif, non décodable par `<video>` HTML5) et
+  volontairement **non traitée** dans cette PR (transcodage à la volée
+  HEVC→H264 à la lecture, hors scope, priorité donnée au live).
+- **WHEP** : le fix `aiortc` n'a pas encore été validé par un rebuild réussi au
+  moment de cette entrée. Même une fois le paquet installé, la caméra de test
+  diffuse en HEVC sur son flux principal — WHEP refusera avec 415 tant qu'un
+  sous-flux H264 (`webrtc_rtsp_url`) n'est pas configuré sur cette caméra.
+- **Fix `onvif_driver.py`** : corrige un bug confirmé par traceback de prod,
+  mais l'effet sur le 503 Camera Center n'a pas encore été revérifié après
+  rebuild.
+
 ## [v3.1.0-go2rtc-stabilization] — 2026-08 — CORRECTIF P0 · Restauration Go2RTC + MJPEG (stabilité avant sophistication)
 
 Mission explicite : la preview vidéo ne fonctionnait pour AUCUNE caméra réelle.
