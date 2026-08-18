@@ -53,7 +53,12 @@ services:
       - "8555:8555"       # WebRTC ICE TCP
       - "8555:8555/udp"   # WebRTC ICE UDP
     volumes:
-      - ./go2rtc.yaml:/config/go2rtc.yaml:ro
+      # P0-fix · PAS de :ro ici : go2rtc écrit dans ce fichier à chaque
+      # PUT /api/streams pour persister les flux enregistrés dynamiquement
+      # par MG-VMS (register_camera_stream). En lecture seule, tout
+      # enregistrement échouait avec 400 "read-only file system" — aucun
+      # rapport avec les identifiants caméra ni le code applicatif.
+      - ./go2rtc.yaml:/config/go2rtc.yaml
       - ${RECORDINGS_PATH:-/mnt/storage/video-datastore/recordings}:/app/media:ro
       - ../media:/demo-media:ro
     healthcheck:
