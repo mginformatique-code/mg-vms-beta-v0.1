@@ -8,12 +8,12 @@
 #
 # Étapes :
 #   1. Mise à jour du dépôt (dernier build GitHub, --ff-only)     [--no-pull]
-#   2. Validation des fichiers de build (Dockerfiles, compose,
+#   2. Validation des fichiers de build (Dockerfiles, compose, go2rtc.yaml,
 #      requirements ×3, yarn.lock synchronisé avec package.json)
 #   3. Création des dossiers de stockage /mnt/storage/...
 #   4. Copie de .env.example → .env (jamais écrasé s'il existe)
 #   5. docker compose config → build → up -d
-#   6. Attente des healthchecks (mongo → backend → frontend)
+#   6. Attente des healthchecks (mongo → go2rtc → backend → frontend)
 #
 # Options :
 #   --no-pull      ne pas tirer le dernier commit GitHub
@@ -77,7 +77,7 @@ titre "2/6 · Validation des fichiers de build"
 # ── 2a. Présence des fichiers critiques ──
 for f in \
   backend/Dockerfile frontend/Dockerfile .dockerignore \
-  deploy-app/docker-compose.yml deploy-app/.env.example \
+  deploy-app/docker-compose.yml deploy-app/go2rtc.yaml deploy-app/.env.example \
   backend/requirements.txt backend/requirements-dev.txt backend/requirements-ai.txt \
   frontend/package.json frontend/yarn.lock frontend/nginx.conf frontend/docker-entrypoint.sh
 do
@@ -221,15 +221,17 @@ ok "stack démarrée"
 # ══════════════════════════════════════════════════════════════════════
 # 6. Attente des healthchecks
 # ══════════════════════════════════════════════════════════════════════
-titre "6/6 · Attente des healthchecks (mongo → backend → frontend)"
+titre "6/6 · Attente des healthchecks (mongo → go2rtc → backend → frontend)"
 DELAI=420   # 7 min (start_period backend 90 s + téléchargement modèles au 1er boot)
 DEBUT=$(date +%s)
 while :; do
   SAINS=$(docker compose ps --format '{{.Name}} {{.Health}}' 2>/dev/null | grep -c healthy || true)
+  # Compte dynamique (pas de chiffre en dur) : évite la dérive silencieuse déjà
+  # observée quand un service change dans docker-compose.yml sans mise à jour ici.
   TOTAL=$(docker compose ps --format '{{.Name}}' 2>/dev/null | wc -l)
   ECOULE=$(( $(date +%s) - DEBUT ))
   echo -ne "\r  services healthy : $SAINS/$TOTAL (${ECOULE}s)   "
-  [ "$SAINS" -ge 4 ] && { echo; break; }
+  [ "$TOTAL" -gt 0 ] && [ "$SAINS" -ge "$TOTAL" ] && { echo; break; }
   if [ "$ECOULE" -gt "$DELAI" ]; then
     echo; err "Timeout ${DELAI}s — état actuel :"
     docker compose ps
@@ -251,7 +253,6 @@ echo -e "\n${VERT}════════════════════�
 echo -e "${VERT}  MG-VMS installé et opérationnel ✔${NC}"
 echo -e "  Application : http://${IP:-<ip-serveur>}:${PORT_HTTP}"
 echo -e "  API         : http://${IP:-<ip-serveur>}:8001/api/"
-echo -e "  MediaMTX    : WebRTC http://${IP:-<ip-serveur>}:8889 · RTSP rtsp://${IP:-<ip-serveur>}:8654/camera/<id>"
-echo -e "  API         : http://${IP:-<ip-serveur>}:8001"
+echo -e "  Go2RTC      : http://${IP:-<ip-serveur>}:1984 (interne ; utilisé par le backend uniquement)"
 echo -e "  Compte admin : voir ADMIN_EMAIL / ADMIN_PASSWORD dans .env"
 echo -e "${VERT}════════════════════════════════════════════════════${NC}"
