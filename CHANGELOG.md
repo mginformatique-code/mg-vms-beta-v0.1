@@ -2,6 +2,79 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.1.0-go2rtc-stabilization] — 2026-08 — CORRECTIF P0 · Restauration Go2RTC + MJPEG (stabilité avant sophistication)
+
+Mission explicite : la preview vidéo ne fonctionnait pour AUCUNE caméra réelle.
+Priorité absolue donnée à un chemin simple et qui marche (Solution B : Go2RTC +
+MJPEG) plutôt qu'à la poursuite du moteur WHEP-only introduit par
+`v3.0.0-video-engine`, qui avait laissé le système dans un état non fonctionnel
+malgré son changelog annonçant « 15/15 tests verts ». PR : [#1](https://github.com/mginformatique-code/mg-vms-beta-v0.1/pull/1).
+
+### Root cause (4 causes empilées, découvertes par audit du code réel)
+- `streaming.py::live_mjpeg` / `frame_jpeg` important `video_pipelines.base`
+  (module supprimé depuis `v3.0.0-video-engine`, jamais recréé) →
+  `ModuleNotFoundError` sur **toute caméra non-démo**, à chaque requête preview.
+- `camera_status_loop` (tâche de fond démarrée au boot) : même import cassé
+  (`video_pipelines.status`), mais son `except Exception` englobe toute la
+  boucle `for cam in cams` → dès qu'une caméra réelle existait, le cycle de
+  sonde entier plantait, toutes les 30 s, indéfiniment (statut bloqué "offline").
+- `routers.py::create_camera/update_camera/delete_camera` câblés exclusivement
+  vers `VideoCoreManager` (WHEP) — `register_camera_stream()` (Go2RTC) n'était
+  jamais appelé automatiquement, seulement via le bouton manuel "Test connexion".
+- `deploy-app/docker-compose.yml` : le service `go2rtc` avait été retiré du
+  compose par `v3.0.0-video-engine`, sans que le code ci-dessus (qui l'appelle
+  toujours) ne soit adapté. `.env.example` et `docker-compose.prod.yml`
+  gardaient pourtant leurs références `GO2RTC_URL`/`GO2RTC_RTSP`.
+
+### Fixed
+- `streaming.py` : `live_mjpeg`/`frame_jpeg` routent désormais sur le champ
+  `stream_mode` existant (`direct_rtsp` → pont ffmpeg local déjà présent mais
+  orphelin ; sinon → Go2RTC). `camera_status_loop` sondé via Go2RTC au lieu du
+  module inexistant. `_direct_frame_jpeg` : fallback mediamtx cassé remplacé
+  par capture RTSP directe.
+- `routers.py` : `create_camera`/`update_camera`/`delete_camera` appellent
+  désormais `register_camera_stream()`/`unregister_camera_stream()` (Go2RTC),
+  au lieu de `VideoCoreManager` (WHEP).
+- `sync_all_streams()` : NO-OP depuis `v3.0.0-video-engine` — réimplémentée
+  pour de vrai (réconciliation DB ↔ Go2RTC après restart, utile car Go2RTC ne
+  persiste pas les flux enregistrés dynamiquement).
+- Frontend `CameraCenter.jsx` et `LiveView.jsx` (mur vidéo) : rendu vidéo
+  basculé sur `<img>` MJPEG simple (`/api/stream/{id}/live.mjpeg`), au lieu de
+  `LivePlayer` (WHEP-only, « aucun fallback MJPEG légitime en prod » selon son
+  propre commentaire — contraire à la consigne de stabilité).
+
+### Restauré
+- `deploy-app/docker-compose.yml` : service `go2rtc` (image `alexxit/go2rtc:1.9.9`,
+  healthcheck, ordre de démarrage mongo→go2rtc→backend déjà documenté en tête
+  de fichier mais plus respecté) + `deploy-app/go2rtc.yaml`, reconstruits à
+  l'identique depuis la branche `mg-vms-beta-v1.0-rc4.5`. **Pas de MediaMTX**
+  (une seule techno de proxy vidéo, conformément à la consigne).
+
+### Supprimé (code mort confirmé, zéro appelant)
+- `streaming.py::_video_v2_mjpeg_response` (imports `video_pipelines` cassés)
+  et 2 anciennes versions de `sync_all_streams` (NO-OP + dead code v2).
+- `frontend/components/PreviewPlayer.jsx` (import `WebRTCPlayer` vers un
+  fichier déjà supprimé, cassait le build ; composant lui-même non importé
+  ailleurs).
+- `frontend/components/video/VideoPlayer.jsx` + `LivePlayer.jsx` (WHEP-only) :
+  devenus orphelins après la bascule MJPEG de `CameraCenter.jsx`/`LiveView.jsx`.
+
+### Volontairement non touché
+- `backend/video_core/`, `backend/webrtc_gateway/` : routes API `/api/live/{id}/{start|whep}`
+  encore fonctionnelles mais sans consommateur frontend. Les supprimer est une
+  décision distincte (WHEP pourrait revenir en Phase 3 pour du bas-latence),
+  pas un simple nettoyage de code mort.
+- `backend/frame_source.py` : capture RTSP indépendante utilisée par l'IA —
+  hors sujet preview vidéo.
+
+### ⚠️ Non validé en conditions réelles
+Développé et vérifié statiquement (relecture manuelle, greps de cohérence)
+dans un environnement sans Python ni Node.js installés — **aucun test réel**
+(build backend/frontend, `docker compose up`, caméra Reolink physique) n'a pu
+être exécuté depuis cette session, contrairement à ce que les entrées
+précédentes de ce changelog affirmaient pour leurs propres changements. La PR
+contient une checklist de validation explicite à cocher avant merge.
+
 ## [v3.0.0-video-engine] — 2026-08 — REFONTE COMPLÈTE · Moteur vidéo unique RTSP-native
 
 ### Changement d'architecture (breaking)
