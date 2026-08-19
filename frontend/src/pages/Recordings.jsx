@@ -6,7 +6,20 @@ import { Film, Play, Calendar, Clock, HardDrive, Activity, Cctv, AlertTriangle, 
 import { toast } from "sonner";
 
 const MODE_COLORS = { continuous: "#0044FF", motion: "#FFB800", ai: "#00E676" };
-const HOURS = Array.from({ length: 25 });
+const DAY_SEC = 86400;
+const MIN_SPAN_SEC = 60; // zoom max : fenêtre d'1 minute
+
+// Pas de graduation adapté à la largeur de fenêtre visible (vise ~6-12 graduations)
+const TICK_STEPS = [60, 300, 600, 900, 1800, 3600, 2 * 3600, 4 * 3600, 6 * 3600, 12 * 3600, DAY_SEC];
+function pickTickStep(spanSec) {
+  for (const step of TICK_STEPS) if (spanSec / step <= 12) return step;
+  return DAY_SEC;
+}
+function fmtTick(sec, step) {
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
+  return step < 60 ? `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`
+    : `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+}
 
 function fmtDur(sec) {
   const h = Math.floor(sec / 3600);
@@ -53,8 +66,12 @@ export default function Recordings() {
   const [format, setFormat] = useState("zip");
   const [exporting, setExporting] = useState(false);
   const [exports, setExports] = useState([]);
+  const [viewStart, setViewStart] = useState(0);
+  const [viewEnd, setViewEnd] = useState(DAY_SEC);
   const timelineRef = useRef(null);
   const dragRef = useRef(null);
+  const viewRef = useRef({ start: 0, end: DAY_SEC });
+  viewRef.current = { start: viewStart, end: viewEnd };
 
   useEffect(() => {
     api.get("/cameras", { params: { status: "online" } })
@@ -74,6 +91,7 @@ export default function Recordings() {
     if (!cameraId) return;
     setLoading(true);
     setSelected(null);
+    setViewStart(0); setViewEnd(DAY_SEC); // reset zoom : nouvelle caméra/jour = nouvelle fenêtre
     api.get("/recordings/timeline", { params: { camera_id: cameraId, date } })
       .then((r) => setData(r.data))
       .catch(() => setData(null))
@@ -81,12 +99,16 @@ export default function Recordings() {
   }, [cameraId, date]);
 
   const segments = data?.segments || [];
+  const viewSpan = viewEnd - viewStart;
+  const zoomed = viewSpan < DAY_SEC - 1;
+
+  const secToX = (sec) => ((sec - viewStart) / viewSpan) * 100;
 
   const segPos = (seg) => {
     const s = new Date(seg.start);
     const startSec = s.getHours() * 3600 + s.getMinutes() * 60 + s.getSeconds();
-    const left = (startSec / 86400) * 100;
-    const width = (seg.duration_sec / 86400) * 100;
+    const left = secToX(startSec);
+    const width = (seg.duration_sec / viewSpan) * 100;
     return { left: `${left}%`, width: `${Math.max(width, 0.3)}%` };
   };
 
@@ -100,7 +122,7 @@ export default function Recordings() {
     if (!el) return 0;
     const rect = el.getBoundingClientRect();
     const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-    return Math.round(ratio * 86400);
+    return Math.round(viewStart + ratio * viewSpan);
   };
   const onDown = (e) => { dragRef.current = { x: e.clientX, sec: xToSec(e.clientX), moved: false }; };
   const onMove = (e) => {
@@ -112,6 +134,33 @@ export default function Recordings() {
     setSelStart(a); setSelEnd(b); setHasSel(true);
   };
   const onUp = () => { dragRef.current = null; };
+  const resetZoom = () => { setViewStart(0); setViewEnd(DAY_SEC); };
+
+  // Zoom molette centré sur le curseur. Écouteur natif non-passif (obligatoire pour
+  // pouvoir appeler preventDefault() sur "wheel" — React attache onWheel en passif
+  // par défaut depuis la v17, ce qui bloquerait silencieusement le zoom sinon).
+  useEffect(() => {
+    const el = timelineRef.current;
+    if (!el) return;
+    const onWheelNative = (e) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+      const { start, end } = viewRef.current;
+      const span = end - start;
+      const cursorSec = start + ratio * span;
+      const factor = e.deltaY < 0 ? 0.8 : 1.25; // molette haut = zoom avant
+      let newSpan = Math.min(DAY_SEC, Math.max(MIN_SPAN_SEC, span * factor));
+      let newStart = cursorSec - ratio * newSpan;
+      let newEnd = newStart + newSpan;
+      if (newStart < 0) { newEnd -= newStart; newStart = 0; }
+      if (newEnd > DAY_SEC) { newStart -= (newEnd - DAY_SEC); newEnd = DAY_SEC; }
+      newStart = Math.max(0, newStart);
+      setViewStart(newStart); setViewEnd(newEnd);
+    };
+    el.addEventListener("wheel", onWheelNative, { passive: false });
+    return () => el.removeEventListener("wheel", onWheelNative);
+  }, [cameraId, date]);
 
   const isoFromSec = (sec) => {
     const d = new Date(`${date}T00:00:00`);
@@ -147,7 +196,10 @@ export default function Recordings() {
     } catch (e) { toast.error("Téléchargement indisponible (MP4 = production)"); }
   };
 
-  const selPct = { left: `${(selStart / 86400) * 100}%`, width: `${((selEnd - selStart) / 86400) * 100}%` };
+  const selPct = { left: `${secToX(selStart)}%`, width: `${((selEnd - selStart) / viewSpan) * 100}%` };
+  const tickStep = pickTickStep(viewSpan);
+  const ticks = [];
+  for (let t = Math.ceil(viewStart / tickStep) * tickStep; t <= viewEnd; t += tickStep) ticks.push(t);
 
   return (
     <div className="p-4 md:p-6 space-y-5" data-testid="recordings-page">
@@ -220,14 +272,23 @@ export default function Recordings() {
                 )}
               </div>
 
-              {/* Timeline 24h */}
+              {/* Timeline 24h — molette pour zoomer, glisser pour sélectionner un export */}
               <div className="border border-border bg-card p-3" data-testid="rec-timeline">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] text-muted-foreground">Molette : zoomer/dézoomer · glisser-déposer : sélectionner un export</span>
+                  {zoomed && (
+                    <button onClick={resetZoom} data-testid="rec-zoom-reset"
+                      className="text-[10px] px-1.5 py-0.5 border border-border hover:bg-secondary text-muted-foreground">
+                      Réinitialiser le zoom ({fmtDur(Math.round(viewSpan))})
+                    </button>
+                  )}
+                </div>
                 <div ref={timelineRef} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
                   className="relative h-10 bg-secondary/50 overflow-hidden cursor-crosshair select-none">
-                  {/* hour grid */}
-                  {HOURS.map((_, h) => (
-                    <div key={h} className="absolute top-0 bottom-0 border-l border-border/40"
-                      style={{ left: `${(h / 24) * 100}%` }} />
+                  {/* graduations (pas adapté au niveau de zoom) */}
+                  {ticks.map((tk) => (
+                    <div key={tk} className="absolute top-0 bottom-0 border-l border-border/40"
+                      style={{ left: `${secToX(tk)}%` }} />
                   ))}
                   {/* selection overlay */}
                   {hasSel && (
@@ -243,11 +304,11 @@ export default function Recordings() {
                     </button>
                   ))}
                 </div>
-                {/* hour labels */}
+                {/* graduations horaires */}
                 <div className="relative h-4 mt-1">
-                  {[0, 4, 8, 12, 16, 20, 24].map((h) => (
-                    <span key={h} className="absolute text-[9px] mono text-muted-foreground -translate-x-1/2"
-                      style={{ left: `${(h / 24) * 100}%` }}>{h.toString().padStart(2, "0")}:00</span>
+                  {ticks.map((tk) => (
+                    <span key={tk} className="absolute text-[9px] mono text-muted-foreground -translate-x-1/2"
+                      style={{ left: `${secToX(tk)}%` }}>{fmtTick(tk, tickStep)}</span>
                   ))}
                 </div>
                 {/* legend */}
