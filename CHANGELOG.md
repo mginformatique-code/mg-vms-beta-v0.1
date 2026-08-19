@@ -64,6 +64,16 @@ torch, jamais épinglées à la main.
   build, désactivable via `--no-cleanup`) et affichage de la montée de
   version (commit + version CHANGELOG avant → après) dans le résumé final.
 
+### Fixed (suite)
+- `backend/Dockerfile` : `CHANGELOG.md` (racine du dépôt) n'était jamais copié
+  dans l'image — seuls `backend/.` et `data/plugins/` l'étaient. Le Welcome
+  Center (page d'accueil) lit `/app/CHANGELOG.md` pour son changelog ET pour
+  le numéro de version affiché (`_current_version()` = 1ʳᵉ entrée du fichier)
+  — sans lui : changelog toujours vide, version "unknown", aucune erreur
+  visible. Même famille de bug que `requirements-ai.txt` plus haut dans cette
+  entrée. Le viewer de changelog intégré existait déjà côté UI ; pas besoin de
+  lien externe GitHub une fois le fichier réellement présent dans l'image.
+
 ### ⚠️ Non validé en conditions réelles
 - Résolution IA par caméra, transcodage HEVC→H264 à la lecture, champ
   `ai_rtsp_url` : codés et poussés, pas encore retestés après rebuild au
