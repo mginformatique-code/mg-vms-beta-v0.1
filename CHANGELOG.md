@@ -73,6 +73,16 @@ torch, jamais épinglées à la main.
   visible. Même famille de bug que `requirements-ai.txt` plus haut dans cette
   entrée. Le viewer de changelog intégré existait déjà côté UI ; pas besoin de
   lien externe GitHub une fois le fichier réellement présent dans l'image.
+- `backend/ai_engine.py` : gel complet du backend (`/health` en timeout,
+  toutes les sessions bloquées sur "Chargement...") au changement de
+  résolution IA d'une caméra. `frame_source.stop()` fait un
+  `reader_thread.join(timeout=5)` bloquant, appelé en synchrone depuis la
+  boucle asyncio principale (`--workers 1`) — bug structurel préexistant,
+  resté dormant tant que `frame_source.start()` était toujours appelé avec
+  les mêmes valeurs figées (1280×720), donc sans jamais vraiment déclencher
+  `stop()`. La résolution par caméra (ci-dessus) rend les changements réels
+  pour la première fois, exposant le blocage. Fix : `asyncio.to_thread()` sur
+  les deux appels.
 
 ### ⚠️ Non validé en conditions réelles
 - Résolution IA par caméra, transcodage HEVC→H264 à la lecture, champ
