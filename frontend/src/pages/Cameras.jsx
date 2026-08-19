@@ -22,6 +22,7 @@ const EMPTY_FORM = {
   record_mode: "continuous", storage_pool_id: "", storage_max_size_gb: 0,
   rtsp_transport: "tcp", preferred_codec: "auto", stream_mode: "auto",
   stream_pipeline: "rtsp_native", webrtc_rtsp_url: "",
+  ai_resolution: "720p",
   // camera-api-v2.2 · Couche API HTTP/HTTPS (indépendante du pipeline vidéo)
   api_host: "", api_port: null, api_scheme: "https", api_verify_ssl: false,
   api_username: "", api_password: "", api_provider: "",
@@ -84,6 +85,7 @@ export default function Cameras() {
       stream_mode: c.stream_mode || "auto",
       stream_pipeline: "rtsp_native",
       webrtc_rtsp_url: c.webrtc_rtsp_url || "",
+      ai_resolution: c.ai_resolution || "720p",
       // camera-api-v2.2 · API caméra (HTTP/HTTPS)
       api_host: c.api_host || "",
       api_port: c.api_port || null,
@@ -562,6 +564,29 @@ export default function Cameras() {
                   <option value="h265">H.265 (HEVC — bande passante réduite)</option>
                 </select>
                 <p className="text-[10px] text-muted-foreground mt-0.5">Live/IA préfèrent H.264, l&apos;enregistrement peut utiliser H.265</p>
+              </div>
+              <div>
+                {/* v3.1.1 · Résolution envoyée à YOLO/ANPR uniquement — l'enregistrement
+                    est toujours natif (recorder.py fait `-c copy`, jamais concerné). */}
+                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                  Résolution IA / ANPR
+                </label>
+                <select
+                  value={form.ai_resolution}
+                  onChange={(e) => setForm({ ...form, ai_resolution: e.target.value })}
+                  className="inp"
+                  data-testid="ai-resolution-select"
+                >
+                  <option value="720p">720p — léger (recommandé à grande échelle)</option>
+                  <option value="1080p">1080p — équilibré</option>
+                  <option value="native">Native — qualité max (coût GPU le plus élevé)</option>
+                </select>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  Résolution de l&apos;image analysée par YOLO/ANPR — n&apos;affecte PAS l&apos;enregistrement
+                  (toujours natif). Plus haut = meilleure lecture de plaque à distance, mais plus lent
+                  par caméra. &laquo; Native &raquo; nécessite que la résolution ait déjà été détectée
+                  ci-dessus (bouton Tester la connexion).
+                </p>
               </div>
               <div className="col-span-2">
                 {/* P0-fix · Solution B (Go2RTC + MJPEG) : un seul vrai choix,

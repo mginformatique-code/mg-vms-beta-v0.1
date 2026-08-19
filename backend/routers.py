@@ -115,6 +115,13 @@ class CameraInput(BaseModel):
     ptz_enabled: bool = False
     record_enabled: bool = True
     detect_enabled: bool = False
+    # v3.1.1 · Résolution de la frame envoyée à YOLO/ANPR (frame_source.py).
+    # N'affecte PAS l'enregistrement (recorder.py fait toujours `-c copy`,
+    # déjà natif/max qualité, aucun downscale). "720p" = comportement
+    # historique (léger, beaucoup de caméras supportables par GPU) ;
+    # "native" = qualité de lecture de plaque max, coût GPU le plus élevé
+    # par caméra — voir AI_RESOLUTION_PRESETS dans ai_engine.py.
+    ai_resolution: str = "720p"  # "720p" | "1080p" | "native"
     # v0.3 · Config caméra modulaire : liste des plugins IA activés sur cette
     # caméra. Vide → comportement legacy (piloté par detect_enabled). Chaque
     # entrée est un ``name`` de plugin enregistré sur le Plugin Bus (ex :

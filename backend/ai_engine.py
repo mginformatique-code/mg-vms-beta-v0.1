@@ -15,6 +15,7 @@ sont conservées comme wrappers/re-exports de compatibilité.
 import asyncio
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -487,6 +488,41 @@ async def _fetch_frame(camera_id: str):
     return None
 
 
+# v3.1.1 · Presets de résolution IA/ANPR, réglables par caméra (champ
+# ``ai_resolution`` sur le document Camera). N'affecte QUE la frame envoyée
+# à YOLO/ANPR (frame_source.py) — l'enregistrement (recorder.py) fait
+# toujours `-c copy`, déjà natif, aucun rapport avec ce réglage.
+AI_RESOLUTION_PRESETS = {
+    "720p": (1280, 720),
+    "1080p": (1920, 1080),
+}
+
+
+def _resolve_ai_resolution(cam: dict) -> tuple[int, int]:
+    """(width, height) pour frame_source.start() selon ``cam.ai_resolution``.
+
+    "native" résout la résolution réelle depuis ``cam.resolution`` (déjà
+    sondée à la création/ONVIF, ex. "3840x2160") plutôt que de passer
+    width=0/height=0 : le thread lecteur de frame_source.py suppose une
+    taille de buffer fixe (1280×720 par défaut) quand width/height=0, donc
+    un vrai "0 = natif" désynchroniserait la lecture au lieu de fonctionner
+    (voir frame_source.py::_reader_loop, commentaire "Simplification").
+    """
+    preset = (cam.get("ai_resolution") or "720p").lower()
+    if preset in AI_RESOLUTION_PRESETS:
+        return AI_RESOLUTION_PRESETS[preset]
+    if preset == "native":
+        res = (cam.get("resolution") or "").lower().replace(" ", "")
+        m = re.match(r"^(\d{2,5})x(\d{2,5})$", res)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+        logger.warning(
+            "ai_resolution=native mais cam.resolution absent/invalide (%s) pour %s — fallback 720p",
+            res or "vide", cam.get("id"),
+        )
+    return AI_RESOLUTION_PRESETS["720p"]
+
+
 async def _sync_frame_source_workers(cams: list[dict], *,
                                        only: Optional[set[str]] = None) -> None:
     """Synchronise les workers ffmpeg persistants avec les caméras actives.
@@ -548,10 +584,12 @@ async def _sync_frame_source_workers(cams: list[dict], *,
         if codec == "hevc":
             codec = "h265"
         try:
-            frame_source.start(cam_id, rtsp_url, codec=codec, width=1280, height=720)
+            ai_w, ai_h = _resolve_ai_resolution(cam)
+            frame_source.start(cam_id, rtsp_url, codec=codec, width=ai_w, height=ai_h)
             _hot_reload_metrics["frame_source_starts"] += 1
-            logger.info("frame_source.start %s src=%s codec=%s (%s)",
-                        cam_id, source_type, codec, rtsp_url[:60] + ("…" if len(rtsp_url) > 60 else ""))
+            logger.info("frame_source.start %s src=%s codec=%s %dx%d (%s)",
+                        cam_id, source_type, codec, ai_w, ai_h,
+                        rtsp_url[:60] + ("…" if len(rtsp_url) > 60 else ""))
         except Exception as e:
             logger.warning("frame_source.start(%s) échec: %s", cam_id, e)
 
