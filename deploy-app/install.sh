@@ -12,6 +12,7 @@
 #      requirements ×3, yarn.lock synchronisé avec package.json)
 #   3. Prérequis Docker
 #   4. Nettoyage pré-installation (down + prune images/cache)    [--no-cleanup]
+#      → question interactive : nettoyage Docker complet en plus (au choix)  [--big-cleanup]
 #   5. Création des dossiers de stockage /mnt/storage/... + .env
 #   6. docker compose config → build → up -d
 #   7. Attente des healthchecks (mongo → go2rtc → backend → frontend)
@@ -23,6 +24,8 @@
 #   --check-only   valider les fichiers puis s'arrêter (aucun docker requis)
 #   --no-cache     build avec --no-cache
 #   --no-cleanup   ne pas faire down + prune avant le build
+#   --big-cleanup  nettoyage Docker COMPLET (system+builder -a, tout l'hôte,
+#                  pas juste MG-VMS) sans passer par la question interactive
 # ==============================================================================
 set -euo pipefail
 
@@ -35,13 +38,14 @@ titre(){ echo -e "\n${BLEU}━━━ $* ━━━${NC}"; }
 ERREURS=0
 ko()   { err "$*"; ERREURS=$((ERREURS+1)); }
 
-NO_PULL=0; CHECK_ONLY=0; NO_CACHE=""; NO_CLEANUP=0
+NO_PULL=0; CHECK_ONLY=0; NO_CACHE=""; NO_CLEANUP=0; BIG_CLEANUP=0
 for arg in "$@"; do
   case "$arg" in
-    --no-pull)    NO_PULL=1 ;;
-    --check-only) CHECK_ONLY=1 ;;
-    --no-cache)   NO_CACHE="--no-cache" ;;
-    --no-cleanup) NO_CLEANUP=1 ;;
+    --no-pull)     NO_PULL=1 ;;
+    --check-only)  CHECK_ONLY=1 ;;
+    --no-cache)    NO_CACHE="--no-cache" ;;
+    --no-cleanup)  NO_CLEANUP=1 ;;
+    --big-cleanup) BIG_CLEANUP=1 ;;
     *) err "Option inconnue : $arg"; exit 2 ;;
   esac
 done
@@ -179,13 +183,15 @@ fi
 # ══════════════════════════════════════════════════════════════════════
 # 4. Nettoyage pré-installation
 # ══════════════════════════════════════════════════════════════════════
-# Objectif : repartir d'un état propre à chaque install (conteneurs arrêtés
-# proprement, images orphelines et cache de build purgés) sans jamais toucher
-# aux données. Volontairement PAS de `docker volume prune` ni `system prune -a` :
-# ce compose n'utilise que des bind mounts host (/mnt/storage/...), aucun volume
-# Docker nommé — rien à perdre côté volumes, mais un `-a`/`system prune` global
-# supprimerait aussi des images sans rapport avec MG-VMS si l'hôte en héberge
-# d'autres. Portée volontairement limitée à ce projet + images/cache orphelins.
+# Par défaut : nettoyage SCOPÉ à ce projet + orphelins Docker (conteneurs
+# arrêtés, images dangling, cache de build) — jamais de `docker volume prune`
+# ni `system prune -a` automatiques : ce compose n'utilise que des bind
+# mounts host (/mnt/storage/...), aucun volume Docker nommé (rien à perdre
+# côté volumes), mais un `-a`/`system prune` global supprimerait aussi des
+# images sans rapport avec MG-VMS si l'hôte en héberge d'autres — jamais fait
+# sans confirmation explicite. Le nettoyage complet reste disponible EN PLUS,
+# sur choix interactif (ou --big-cleanup) : repartir d'un système Docker
+# totalement vide (images/cache/system), au choix de l'opérateur.
 titre "4/7 · Nettoyage pré-installation"
 cd "$SCRIPT_DIR"
 if [ "$NO_CLEANUP" = 1 ]; then
@@ -197,11 +203,30 @@ else
   else
     ok "aucun conteneur MG-VMS en cours — rien à arrêter"
   fi
-  N_DANGLING=$(docker images -f "dangling=true" -q | wc -l | tr -d ' ')
-  docker image prune -f >/dev/null
-  ok "images orphelines supprimées ($N_DANGLING image(s) dangling nettoyée(s))"
-  docker builder prune -f >/dev/null
-  ok "cache de build Docker purgé"
+
+  FAIRE_BIG_CLEANUP=0
+  if [ "$BIG_CLEANUP" = 1 ]; then
+    FAIRE_BIG_CLEANUP=1
+  elif [ -t 0 ]; then
+    echo -ne "${JAUNE}  Nettoyage Docker COMPLET (system + builder + TOUTES les images inutilisées de l'hôte, pas seulement MG-VMS) ? [y/N] ${NC}"
+    read -r REPONSE_CLEANUP || REPONSE_CLEANUP=""
+    case "$REPONSE_CLEANUP" in
+      [oOyY]|[oOyY][uUeE][iIsS]) FAIRE_BIG_CLEANUP=1 ;;
+    esac
+  fi
+
+  if [ "$FAIRE_BIG_CLEANUP" = 1 ]; then
+    warn "Nettoyage complet : supprime TOUTES les images/cache Docker inutilisés de l'hôte (pas seulement MG-VMS)."
+    docker system prune -af
+    docker builder prune -af
+    ok "nettoyage complet effectué (system + builder, -a) — Docker reparti à vide côté images/cache"
+  else
+    N_DANGLING=$(docker images -f "dangling=true" -q | wc -l | tr -d ' ')
+    docker image prune -f >/dev/null
+    ok "images orphelines supprimées ($N_DANGLING image(s) dangling nettoyée(s))"
+    docker builder prune -f >/dev/null
+    ok "cache de build Docker purgé"
+  fi
 fi
 
 # ══════════════════════════════════════════════════════════════════════
