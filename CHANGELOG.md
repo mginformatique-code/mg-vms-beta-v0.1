@@ -97,6 +97,55 @@ torch, jamais épinglées à la main.
   compilation depuis les sources (hors scope, coût/fragilité jugés trop
   élevés pour un déploiement client "simple").
 
+## [v3.1.3-gpu-first-anpr] — 2026-08 — Scan continu léger + crops HD à la demande (plus de 4K en continu) + ANPR sur GPU
+
+Suite immédiate de `v3.1.2` : le réglage `ai_resolution=native` ajouté dans
+cette même entrée a effectivement amélioré la qualité des crops, mais en
+faisant décoder frame_source.py en continu à 3840x2160 — testé en conditions
+réelles, ça a rendu le live "horrible" (latence très forte, caméras
+inutilisables). Mandat explicite : pas de compromis sur la qualité/résolution,
+tout passer par le GPU plutôt que dégrader les flux. PR :
+[#1](https://github.com/mginformatique-code/mg-vms-beta-v0.1/pull/1).
+
+### Root cause (mesurée, pas supposée)
+`nvidia-smi` pendant le test : GPU quasi idle (0% util, 23 W). `docker stats` :
+conteneur backend à **629% CPU**. Le GPU n'était pas le problème — c'est le
+volume de données : une frame brute 4K fait ~25 Mo contre ~2,8 Mo en 720p
+(~9x plus), copié du GPU vers le CPU à chaque frame captée (~20/s), en
+PERMANENCE, que quelque chose se passe ou non dans le champ de la caméra.
+Ce volume continu saturait le CPU et affamait le relais MJPEG du live.
+
+### Fixed
+- `ai_engine.py` : le scan continu (YOLO/motion, `frame_source.py`) tourne
+  maintenant TOUJOURS en résolution fixe et légère (1280×720), quel que soit
+  `ai_resolution` — jamais plus de 4K en continu. Supprime
+  `_resolve_ai_resolution()`/`AI_RESOLUTION_PRESETS` (dead code après ce
+  changement).
+- `pipeline_v2/camera_worker.py::_stage_roi` : `ai_resolution` pilote
+  maintenant un grab HD **à la demande** — quand un véhicule est détecté ET
+  que la caméra demande mieux que 720p, une frame native est récupérée via
+  go2rtc (`frame.jpeg`, mécanisme déjà prouvé fonctionnel — même endpoint que
+  `/api/stream/{id}/frame.jpeg`) pour construire les crops véhicule/plaque en
+  pleine qualité. Coût payé une fois par cycle AVEC détection, pas 20×/s pour
+  rien. Bbox mise à l'échelle (ratio HD/scan). Échec du grab (go2rtc
+  indisponible, timeout réseau) → repli silencieux sur le crop basse
+  résolution, jamais bloquant pour le pipeline IA.
+- `requirements.txt` : `onnxruntime-gpu` remplace `onnxruntime` (CPU) —
+  l'ANPR/OCR (fast-alpr, open-image-models) tournait entièrement en CPU
+  malgré le GPU actif pour YOLO, contribuant à la charge mesurée. Version
+  alignée sur le combo déjà validé dans `deploy-app/DEPENDENCIES.md` (CUDA
+  12.x + cuDNN 9.x). Risque non éliminé : le runtime doit retrouver les libs
+  CUDA/cuDNN au démarrage — `backend/gpu.py` détecte déjà ça (panneau
+  "Runtimes d'accélération" du Pipeline Center), à vérifier après build.
+
+### ⚠️ Non validé en conditions réelles
+Codé et poussé suite à un rapport de latence urgent, pas encore retesté en
+prod au moment de cette entrée : fluidité du live après rebuild, qualité
+réelle des crops HD à la demande, comportement du repli silencieux si go2rtc
+est temporairement indisponible pendant une détection, et confirmation que
+`onnxruntime-gpu` trouve bien ses libs CUDA au runtime (sinon fallback CPU
+propre mais sans le gain attendu).
+
 ## [v3.1.1-go2rtc-runtime-fixes] — 2026-08 — Enregistrement Go2RTC en prod + réactivation WebRTC (WHEP) avec repli MJPEG
 
 Suite directe de `v3.1.0-go2rtc-stabilization` : la restauration du service Go2RTC
