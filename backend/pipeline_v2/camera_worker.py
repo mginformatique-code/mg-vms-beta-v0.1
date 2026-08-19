@@ -35,14 +35,15 @@ def get_debug_snapshot(camera_id: str) -> dict:
     return _last_debug.get(camera_id, {})
 
 
-# v3.1.2 · Grab HD à la demande pour les crops (voir _stage_roi ci-dessous).
-# Le scan continu (YOLO/motion) tourne en résolution fixe et légère
-# (ai_engine._CONTINUOUS_SCAN_RES) — jamais de flux 4K en continu, ça a
-# saturé le CPU du backend et affamé le live (mesuré en prod : 629% CPU).
-# Quand un véhicule est détecté ET que la caméra demande mieux que 720p
-# (``ai_resolution``), UNE frame native est récupérée via go2rtc
-# (frame.jpeg, même mécanisme déjà utilisé par /api/stream/{id}/frame.jpeg)
-# — coût payé une fois par cycle avec détection, pas 20x/s pour rien.
+# v3.1.3 · Grab HD à la demande pour les crops (voir _stage_roi ci-dessous).
+# Filet de sécurité : le scan continu (YOLO/motion) suit désormais
+# ``cam.ai_resolution`` (ai_engine._resolve_ai_resolution), rendu tenable
+# même en "native" par la limitation de débit de frame_source.py
+# (MGVMS_AI_OUTPUT_FPS — ne matérialise/télécharge plus qu'à la cadence de
+# consommation IA, pas à la cadence caméra). Si jamais ctx.image n'était pas
+# déjà en pleine résolution pour une caméra donnée, ce grab HD via go2rtc
+# (frame.jpeg, même mécanisme que /api/stream/{id}/frame.jpeg) reste
+# disponible comme repli, déclenché uniquement au moment d'une détection.
 def _fetch_hd_crop_source(camera_id: str):
     """Frame BGR (numpy) en résolution native via go2rtc, ou None si échec.
 
