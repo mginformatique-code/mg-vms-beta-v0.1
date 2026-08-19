@@ -2,6 +2,81 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.1.2-gpu-quality] — 2026-08 — GPU IA réactivé + qualité/résolution par caméra + lecture HEVC
+
+Suite de `v3.1.1` : une fois le live stabilisé, tests en conditions réelles
+(caméra allumée en continu) ont fait remonter que le GPU n'était jamais
+utilisé par l'IA malgré un pipeline vidéo fonctionnel, et que les
+enregistrements/aperçus vidéo restaient illisibles (son sans image). PR :
+[#1](https://github.com/mginformatique-code/mg-vms-beta-v0.1/pull/1).
+
+### Root cause GPU (mesurée, pas supposée)
+`torch.cuda.is_available()` renvoyait `False` avec
+`"CUDA initialization: The NVIDIA driver on your system is too old (found
+version 12040)"` — le driver hôte (550.163.01) plafonne à CUDA 12.4, mais
+`torch==2.12.1` avait été installé sans `--extra-index-url` PyTorch dédié
+(résolu depuis l'index par défaut, build CUDA plus récente). Confirmé par
+`nvidia-smi` pendant un cycle IA actif : 0% util, 9 MiB utilisés — aucun
+contexte CUDA alloué, ni NVDEC ni torch. `requirements.txt` épinglait aussi
+en dur ~15 paquets `nvidia-*-cu13` (probable capture d'un `pip freeze` sur un
+environnement déjà cassé), alors que `deploy-app/DEPENDENCIES.md` documentait
+depuis l'origine qu'ils devaient rester des dépendances **transitives** de
+torch, jamais épinglées à la main.
+
+### Fixed
+- `backend/requirements.txt` + `backend/Dockerfile` : `torch==2.4.1+cu124`,
+  `torchvision==0.19.1+cu124` (build validée dans DEPENDENCIES.md, jamais
+  réellement appliquée jusqu'ici), 2ᵉ `--extra-index-url` PyTorch cu124 dans
+  le Dockerfile, test de build qui échoue si pip retombe sur une build sans
+  `+cu124`. Retrait des pins `nvidia-*-cu13`/`triton` en dur (redeviennent
+  transitifs). **Validé en prod** : `torch.cuda.is_available()==True`, VRAM
+  9 MiB → 951 MiB pendant un cycle IA.
+- `backend/drivers/onvif_driver.py` (via PR précédente, re-testé ici) :
+  import manquant `CameraDriverError` — chaque échec de connexion caméra
+  renvoyait un 500 générique au lieu du code HTTP typé attendu.
+- `frontend/src/lib/api.js` : le refresh token tourné par le backend (rotation
+  à usage unique, blackliste l'ancien à chaque `/auth/refresh`) n'était jamais
+  persisté après un refresh réussi — le 2ᵉ 401 de la session (n'importe où)
+  réutilisait un token déjà consommé, déclenchant la révocation de toutes les
+  sessions côté backend et une déconnexion complète de l'UI. Repéré via un
+  déconnexion inattendue en ouvrant Centre Caméras.
+- `GET /api/recordings/{id}/media` (enregistrements ET aperçus vidéo
+  événements/alertes, même route pour les deux) : servait le fichier brut
+  sans condition. Une caméra HEVC produit des `.mp4` HEVC (`recorder.py` fait
+  `-c copy`, jamais de ré-encodage à l'écriture) — `<video>` HTML5 ne décode
+  pas HEVC nativement, d'où le son qui joue sans image. Transcodage HEVC→H264
+  à la volée (GPU si possible, sinon CPU), déclenché uniquement si le fichier
+  sondé est réellement HEVC — zéro changement pour les caméras H264.
+
+### Ajouté
+- Résolution IA/ANPR réglable **par caméra** (720p / 1080p / native), au lieu
+  d'une valeur 1280×720 figée en dur dans `ai_engine.py` (le réglage global
+  `MGVMS_AI_FRAME_WIDTH/HEIGHT` était en fait mort — jamais lu). "native"
+  résout la résolution réelle depuis le champ déjà sondé sur la caméra plutôt
+  que de s'appuyer sur le chemin `width=0` de `frame_source.py`, dont le
+  thread lecteur suppose une taille de buffer fixe et désynchroniserait la
+  lecture. N'affecte que l'analyse IA — l'enregistrement reste toujours natif.
+- Champ `ai_rtsp_url` (flux RTSP dédié IA/ANPR, distinct de l'enregistrement)
+  exposé dans la fiche caméra — existait côté backend depuis `video-engine-v3`
+  mais jamais dans l'UI.
+- `deploy-app/install.sh` : nouvelle étape de nettoyage pré-installation
+  (`docker compose down --remove-orphans` + prune images orphelines/cache de
+  build, désactivable via `--no-cleanup`) et affichage de la montée de
+  version (commit + version CHANGELOG avant → après) dans le résumé final.
+
+### ⚠️ Non validé en conditions réelles
+- Résolution IA par caméra, transcodage HEVC→H264 à la lecture, champ
+  `ai_rtsp_url` : codés et poussés, pas encore retestés après rebuild au
+  moment de cette entrée.
+- `onnxruntime` (CPU) vs `onnxruntime-gpu` : le paquet CPU est installé,
+  l'OCR ANPR ne bénéficie donc pas de l'accélération GPU obtenue pour YOLO.
+  Non traité dans cette PR (impact à mesurer avant de décider si ça vaut le
+  changement).
+- OpenCV : les wheels pip (`opencv-python*`) ne sont jamais compilées avec
+  CUDA — accélération GPU OpenCV non disponible, nécessiterait une
+  compilation depuis les sources (hors scope, coût/fragilité jugés trop
+  élevés pour un déploiement client "simple").
+
 ## [v3.1.1-go2rtc-runtime-fixes] — 2026-08 — Enregistrement Go2RTC en prod + réactivation WebRTC (WHEP) avec repli MJPEG
 
 Suite directe de `v3.1.0-go2rtc-stabilization` : la restauration du service Go2RTC
