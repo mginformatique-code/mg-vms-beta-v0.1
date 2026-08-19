@@ -10,6 +10,22 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+// v3.1.3 · Injecte user:pass dans une URL RTSP nue (profils ONVIF renvoyés
+// sans identifiants) — webrtc_rtsp_url est utilisée telle quelle côté
+// backend (video_core/manager.py::_webrtc_rtsp_url_of), pas de fusion
+// automatique avec cam.username/password comme pour rtsp_url.
+function withRtspCredentials(bareUrl, username, password) {
+  if (!bareUrl) return "";
+  const m = /^(rtsps?:\/\/)(.*)$/i.exec(bareUrl.trim());
+  if (!m) return bareUrl;
+  const [, scheme, rest] = m;
+  if (!username) return bareUrl;
+  const auth = password
+    ? `${encodeURIComponent(username)}:${encodeURIComponent(password)}@`
+    : `${encodeURIComponent(username)}@`;
+  return `${scheme}${auth}${rest}`;
+}
+
 const EMPTY_FORM = {
   name: "", site_id: "", mode: "onvif",
   ip: "", rtsp_port: 554, onvif_port: 80,
@@ -617,6 +633,39 @@ export default function Cameras() {
                 <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
                   URL RTSP WebRTC (H264) — optionnel
                 </label>
+                {profiles.length > 0 && (
+                  <select
+                    className="inp mb-1.5"
+                    data-testid="webrtc-profile-select"
+                    value=""
+                    onChange={(e) => {
+                      const p = profiles.find((pp) => (pp.token || pp.rtsp_url) === e.target.value);
+                      if (!p) return;
+                      // v3.1.3 · En édition, le mot de passe n'est jamais renvoyé par le
+                      // backend (vide tant qu'il n'est pas retapé) — prévenir plutôt que
+                      // générer silencieusement une URL sans identifiants.
+                      if (editingId && !form.password) {
+                        toast.warning("Retapez le mot de passe caméra ci-dessus avant de choisir un profil — sinon l'URL générée sera incomplète.");
+                      }
+                      setForm({
+                        ...form,
+                        webrtc_rtsp_url: withRtspCredentials(p.rtsp_url, form.username, form.password),
+                      });
+                    }}
+                  >
+                    <option value="">— Choisir un profil détecté sur la caméra —</option>
+                    {profiles.map((p, i) => {
+                      const codec = (p.codec || "").toUpperCase().replace("VIDEO", "").trim();
+                      const compatible = codec === "H264" || codec === "";
+                      return (
+                        <option key={p.token || i} value={p.token || p.rtsp_url}>
+                          {p.name || `Profil ${i + 1}`} — {p.resolution || "?"} {codec || "codec inconnu"}
+                          {compatible ? " ✓ compatible WebRTC" : " ✗ incompatible (pas H264)"}
+                        </option>
+                      );
+                    })}
+                  </select>
+                )}
                 <input
                   value={form.webrtc_rtsp_url}
                   onChange={(e) => setForm({ ...form, webrtc_rtsp_url: e.target.value })}
@@ -626,8 +675,9 @@ export default function Cameras() {
                 />
                 <p className="text-[10px] text-muted-foreground mt-1">
                   Les navigateurs ne lisent pas le H265 en WebRTC. Si votre flux principal est H265
-                  (ex. Reolink 4K), indiquez ici le sub-stream H264 : il sera utilisé UNIQUEMENT pour
-                  la lecture navigateur — enregistrement et IA restent sur le flux natif.
+                  (ex. Reolink 4K), choisissez ci-dessus le sous-flux H264 détecté automatiquement
+                  (ou saisissez l&apos;URL manuellement) : il sera utilisé UNIQUEMENT pour la lecture
+                  navigateur — enregistrement et IA restent sur le flux natif.
                 </p>
               </div>
               <div className="col-span-2">
