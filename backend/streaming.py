@@ -890,13 +890,28 @@ def needs_transcode_for_browser(path: str) -> bool:
     return (details or {}).get("codec", "") in ("HEVC", "H265")
 
 
-async def stream_transcoded_mp4(path: str, start_sec: float = 0.0):
-    """Générateur async : transcode HEVC→H264 à la volée, streamé au fur et à
-    mesure vers le client (fragmented MP4, aucun fichier temporaire écrit sur
-    disque). `start_sec` : seek AVANT décodage (rapide, par keyframe) — utilisé
-    pour caler la lecture sur l'instant précis d'un événement/alerte, puisque
-    le seek CÔTÉ NAVIGATEUR (`video.currentTime`) ne fonctionne pas sur un flux
-    transcodé en direct (pas de support HTTP Range sur un pipe live)."""
+async def transcode_to_temp_mp4(path: str, start_sec: float = 0.0) -> str:
+    """Transcode HEVC→H264 vers un fichier temporaire COMPLET, pas un flux
+    streamé en direct.
+
+    v3.1.3 · Fix : la première version streamait le MP4 fragmenté
+    (`frag_keyframe+empty_moov`) au fur et à mesure via un pipe, sans fichier
+    sur disque. Repéré en usage réel : `<video>` HTML5 standard ne gère pas
+    de façon fiable la durée/le seek sur ce genre de flux "live" — lecture
+    qui semblait s'arrêter après ~2s au lieu des 2 min réelles du segment
+    (aucun `moov` connu à l'avance = durée non déterminable proprement côté
+    navigateur). Un fichier complet, une fois le transcodage terminé, se
+    comporte comme un vrai MP4 (Range HTTP natif via FileResponse, durée/
+    seek fiables) — coût : attend la fin du transcodage avant de répondre
+    (rapide sur un segment de 2 min avec accélération GPU) plutôt que de
+    streamer au fur et à mesure.
+
+    `start_sec` : seek AVANT décodage (rapide, par keyframe) — utilisé pour
+    caler le début du fichier généré sur l'instant précis d'un événement.
+    L'appelant est responsable de supprimer le fichier retourné après usage
+    (voir `BackgroundTask` dans la route qui consomme cette fonction).
+    """
+    import tempfile
     use_gpu_decode = False
     try:
         from frame_source import _use_gpu  # réutilise la détection NVDEC existante
@@ -905,7 +920,10 @@ async def stream_transcoded_mp4(path: str, start_sec: float = 0.0):
         pass
     use_gpu_encode = _ffmpeg_supports_nvenc_h264()
 
-    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-nostdin"]
+    fd, out_path = tempfile.mkstemp(suffix=".mp4", prefix="mgvms_transcode_")
+    os.close(fd)
+
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "warning", "-nostdin"]
     if start_sec > 0:
         cmd += ["-ss", str(max(0.0, start_sec))]
     if use_gpu_decode:
@@ -915,26 +933,28 @@ async def stream_transcoded_mp4(path: str, start_sec: float = 0.0):
         cmd += ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "23"]
     else:
         cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]
-    cmd += [
-        "-c:a", "aac", "-b:a", "128k",
-        "-movflags", "frag_keyframe+empty_moov+default_base_moof",
-        "-f", "mp4", "pipe:1",
-    ]
-    logger.info("recording-transcode: start (gpu_decode=%s gpu_encode=%s ss=%s) %s",
-                use_gpu_decode, use_gpu_encode, start_sec, os.path.basename(path))
+    # +faststart : réordonne le moov en tête de fichier une fois l'encodage
+    # terminé — démarrage rapide côté lecteur, mais fichier COMPLET normal
+    # (à ne pas confondre avec le MP4 fragmenté abandonné ci-dessus).
+    cmd += ["-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-f", "mp4", out_path]
+
+    logger.info("recording-transcode: start (gpu_decode=%s gpu_encode=%s ss=%s) %s → %s",
+                use_gpu_decode, use_gpu_encode, start_sec, os.path.basename(path), out_path)
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
-    try:
-        while True:
-            chunk = await proc.stdout.read(65536)
-            if not chunk:
-                break
-            yield chunk
-    finally:
-        if proc.returncode is None:
-            proc.kill()
-            await proc.wait()
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
+        try:
+            os.unlink(out_path)
+        except OSError:
+            pass
+        logger.warning("recording-transcode: échec (rc=%s) %s", proc.returncode,
+                        (stderr or b"")[:300].decode(errors="replace"))
+        raise RuntimeError("transcodage HEVC→H264 échoué")
+    logger.info("recording-transcode: terminé (%d octets) %s",
+                os.path.getsize(out_path), os.path.basename(out_path))
+    return out_path
 
 
 async def probe_camera(cam: dict) -> dict:

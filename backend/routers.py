@@ -1873,13 +1873,20 @@ async def recordings_media(recording_id: str, request: Request, t: float = 0):
 
     v3.1.1 · `t` (secondes, optionnel) : position de départ — utilisé par
     EventViewer.jsx pour caler la lecture sur l'instant d'un événement. Sans
-    effet sur le chemin FileResponse (le navigateur seek nativement via
-    `video.currentTime` grâce au support HTTP Range) ; utilisé côté serveur
-    (ffmpeg -ss) uniquement sur le chemin transcodé, où un pipe live ne
-    supporte pas le seek côté client.
+    effet sur le chemin FileResponse direct (le navigateur seek nativement
+    via `video.currentTime` grâce au support HTTP Range) ; utilisé côté
+    serveur (ffmpeg -ss) sur le chemin transcodé.
+
+    v3.1.3 · Le chemin transcodé (HEVC→H264) génère désormais un fichier
+    temporaire COMPLET avant de répondre, au lieu de streamer un MP4
+    fragmenté en direct — un `<video>` HTML5 standard ne gérait pas la
+    durée/le seek de façon fiable dessus (lecture qui semblait s'arrêter
+    après ~2s au lieu de la durée réelle du segment). Voir
+    streaming.py::transcode_to_temp_mp4 pour le détail.
     """
-    from streaming import stream_user, needs_transcode_for_browser, stream_transcoded_mp4
+    from streaming import stream_user, needs_transcode_for_browser, transcode_to_temp_mp4
     from fastapi.responses import FileResponse
+    from starlette.background import BackgroundTask
     user = await stream_user(request, request.query_params.get("token"))
     if not has_permission(user, "view_recordings"):
         raise HTTPException(403, "Permission requise : view_recordings")
@@ -1893,7 +1900,12 @@ async def recordings_media(recording_id: str, request: Request, t: float = 0):
     if not path or not os.path.exists(path):
         raise HTTPException(404, "Fichier vidéo introuvable")
     if await asyncio.to_thread(needs_transcode_for_browser, path):
-        return StreamingResponse(stream_transcoded_mp4(path, start_sec=t), media_type="video/mp4")
+        try:
+            temp_path = await transcode_to_temp_mp4(path, start_sec=t)
+        except Exception:
+            raise HTTPException(502, "Transcodage HEVC→H264 échoué")
+        return FileResponse(temp_path, media_type="video/mp4",
+                             background=BackgroundTask(os.unlink, temp_path))
     return FileResponse(path, media_type="video/mp4", filename=os.path.basename(path))
 
 
