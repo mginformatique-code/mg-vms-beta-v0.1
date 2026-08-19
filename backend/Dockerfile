@@ -113,6 +113,13 @@ COPY backend/. .
 # Plugins dynamiques : le loader résout `<backend>/data/plugins` = /app/data/plugins
 COPY data/plugins/ /app/data/plugins/
 
+# v3.1.2 · routes/welcome.py lit /app/CHANGELOG.md (racine du dépôt, PAS sous
+# backend/) pour le changelog du Welcome Center ET le numéro de version
+# affiché dans l'UI (_current_version() = 1re entrée du fichier). Sans cette
+# ligne le fichier n'existe jamais dans l'image → changelog vide, version
+# "unknown", en silence (pas d'erreur visible côté utilisateur).
+COPY CHANGELOG.md ./CHANGELOG.md
+
 # ------------------------------------------------------------------------------
 # Dossiers persistants (mount points — les données réelles arrivent via volumes)
 # ------------------------------------------------------------------------------
