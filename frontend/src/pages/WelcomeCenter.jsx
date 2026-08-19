@@ -68,11 +68,16 @@ const CENTERS = [
   { to: "/settings",         label: "Settings Center",  icon: Settings,desc: "Utilisateurs, réseau, backups et 2FA" },
 ];
 
+// v3.1.2 · Les 4 liens pointaient vers des URLs factices (mg-vms.local
+// n'existe pas, github.com/mg-vms n'est pas le vrai dépôt) — jamais
+// vérifiées après leur ajout initial. Documentation/Support renvoient vers
+// le site public (pas de pages /docs ou /support dédiées côté site pour
+// l'instant — /contact existe et sert de page support réelle).
 const DOC_LINKS = [
-  { label: "Documentation",  href: "https://mg-vms.local/docs",           icon: BookOpen },
-  { label: "GitHub",         href: "https://github.com/mg-vms",           icon: Github },
-  { label: "Changelog",      href: "#changelog",                          icon: Newspaper, internal: true },
-  { label: "Support",        href: "https://mg-vms.local/support",        icon: LifeBuoy },
+  { label: "Documentation",  href: "https://mg-vms.com/fr",                                        icon: BookOpen },
+  { label: "GitHub",         href: "https://github.com/mginformatique-code/mg-vms-beta-v0.1",       icon: Github },
+  { label: "Changelog",      href: "#changelog",                                                    icon: Newspaper, internal: true },
+  { label: "Support",        href: "https://mg-vms.com/fr/contact",                                 icon: LifeBuoy },
 ];
 
 // ─────────────────────────────────────────────────────────────────────
