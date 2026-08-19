@@ -1864,9 +1864,17 @@ async def recordings_playback(recording_id: str, user: dict = Depends(require_pe
 
 
 @api_router.get("/recordings/{recording_id}/media")
-async def recordings_media(recording_id: str, request: Request):
-    """Fichier MP4 réel (lecture <video> — token accepté en query)."""
-    from streaming import stream_user
+async def recordings_media(recording_id: str, request: Request, t: float = 0):
+    """Fichier MP4 (lecture <video> — token accepté en query).
+
+    v3.1.1 · `t` (secondes, optionnel) : position de départ — utilisé par
+    EventViewer.jsx pour caler la lecture sur l'instant d'un événement. Sans
+    effet sur le chemin FileResponse (le navigateur seek nativement via
+    `video.currentTime` grâce au support HTTP Range) ; utilisé côté serveur
+    (ffmpeg -ss) uniquement sur le chemin transcodé, où un pipe live ne
+    supporte pas le seek côté client.
+    """
+    from streaming import stream_user, needs_transcode_for_browser, stream_transcoded_mp4
     from fastapi.responses import FileResponse
     user = await stream_user(request, request.query_params.get("token"))
     if not has_permission(user, "view_recordings"):
@@ -1880,6 +1888,8 @@ async def recordings_media(recording_id: str, request: Request):
     path = rec.get("file_path")
     if not path or not os.path.exists(path):
         raise HTTPException(404, "Fichier vidéo introuvable")
+    if await asyncio.to_thread(needs_transcode_for_browser, path):
+        return StreamingResponse(stream_transcoded_mp4(path, start_sec=t), media_type="video/mp4")
     return FileResponse(path, media_type="video/mp4", filename=os.path.basename(path))
 
 

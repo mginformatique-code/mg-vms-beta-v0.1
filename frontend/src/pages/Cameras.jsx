@@ -21,7 +21,7 @@ const EMPTY_FORM = {
   enabled_plugins: [],
   record_mode: "continuous", storage_pool_id: "", storage_max_size_gb: 0,
   rtsp_transport: "tcp", preferred_codec: "auto", stream_mode: "auto",
-  stream_pipeline: "rtsp_native", webrtc_rtsp_url: "",
+  stream_pipeline: "rtsp_native", webrtc_rtsp_url: "", ai_rtsp_url: "",
   ai_resolution: "720p",
   // camera-api-v2.2 · Couche API HTTP/HTTPS (indépendante du pipeline vidéo)
   api_host: "", api_port: null, api_scheme: "https", api_verify_ssl: false,
@@ -85,6 +85,7 @@ export default function Cameras() {
       stream_mode: c.stream_mode || "auto",
       stream_pipeline: "rtsp_native",
       webrtc_rtsp_url: c.webrtc_rtsp_url || "",
+      ai_rtsp_url: c.ai_rtsp_url || "",
       ai_resolution: c.ai_resolution || "720p",
       // camera-api-v2.2 · API caméra (HTTP/HTTPS)
       api_host: c.api_host || "",
@@ -625,6 +626,27 @@ export default function Cameras() {
                   Les navigateurs ne lisent pas le H265 en WebRTC. Si votre flux principal est H265
                   (ex. Reolink 4K), indiquez ici le sub-stream H264 : il sera utilisé UNIQUEMENT pour
                   la lecture navigateur — enregistrement et IA restent sur le flux natif.
+                </p>
+              </div>
+              <div className="col-span-2">
+                {/* v3.1.1 · Champ existant côté backend (ai_rtsp_url) mais jamais
+                    exposé en UI jusqu'ici. */}
+                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                  URL RTSP dédiée IA / ANPR — optionnel
+                </label>
+                <input
+                  value={form.ai_rtsp_url}
+                  onChange={(e) => setForm({ ...form, ai_rtsp_url: e.target.value })}
+                  placeholder="rtsp://…/h264Preview_01_sub (laisser vide = flux principal utilisé)"
+                  className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
+                  data-testid="ai-rtsp-url-input"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Vide = l&apos;IA/ANPR analyse le flux principal (`rtsp_url`), quel que soit son codec.
+                  Renseignez un flux différent ici seulement si votre caméra expose un second profil
+                  utile pour l&apos;analyse — attention : un sub-stream est souvent aussi en résolution
+                  réduite, ce qui peut nuire à la lecture de plaque à distance malgré le gain en
+                  légèreté. À réserver aux caméras où le profil alternatif reste en bonne résolution.
                 </p>
               </div>
             </div>

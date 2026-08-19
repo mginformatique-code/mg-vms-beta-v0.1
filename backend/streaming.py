@@ -849,6 +849,94 @@ def _ffprobe_validate_exact(base_url: str, transport: str,
     return base_url, None, attempts
 
 
+# ─── Transcodage à la volée HEVC → H264 pour lecture navigateur ───────────
+# v3.1.1 · Les navigateurs ne décodent pas HEVC nativement en <video>. Les
+# enregistrements sont servis tels quels (recorder.py fait `-c copy`, jamais
+# de ré-encodage à l'écriture) : une caméra HEVC produit des fichiers HEVC
+# sur disque. Plutôt que d'exiger un sous-flux H264 dédié pour l'enregistrement
+# (dégraderait la qualité stockée), on transcode UNIQUEMENT à la lecture — coût
+# borné par le nombre de lectures simultanées (typiquement 1-3 personnes qui
+# consultent des clips), pas par le nombre de caméras de la flotte. Utilisé par
+# GET /api/recordings/{id}/media (routers.py) — recordings ET aperçus vidéo
+# d'événements/alertes (EventViewer.jsx) passent tous par cette même route.
+_HAS_NVENC_H264: Optional[bool] = None
+
+
+def _ffmpeg_supports_nvenc_h264() -> bool:
+    """Vérifie une fois (résultat caché en mémoire) que ffmpeg a l'encodeur
+    h264_nvenc. Indépendant de la détection NVDEC (décodage) de frame_source.py
+    — décoder et encoder sur GPU sont deux capacités distinctes."""
+    global _HAS_NVENC_H264
+    if _HAS_NVENC_H264 is not None:
+        return _HAS_NVENC_H264
+    try:
+        out = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
+                              capture_output=True, text=True, timeout=5)
+        text = (out.stdout or "") + (out.stderr or "")
+        _HAS_NVENC_H264 = "h264_nvenc" in text
+    except Exception:
+        _HAS_NVENC_H264 = False
+    logger.info("recording-transcode: h264_nvenc %s",
+                "disponible ✅" if _HAS_NVENC_H264 else "indisponible — fallback CPU (libx264)")
+    return _HAS_NVENC_H264
+
+
+def needs_transcode_for_browser(path: str) -> bool:
+    """True si le fichier local est dans un codec que <video> HTML5 ne décode
+    pas (HEVC/H265). Sonde le FICHIER réel via ffprobe plutôt que de faire
+    confiance au champ `codec` Mongo (peut être stale si la caméra a changé
+    d'encodage après l'enregistrement)."""
+    details = _ffprobe(path)
+    return (details or {}).get("codec", "") in ("HEVC", "H265")
+
+
+async def stream_transcoded_mp4(path: str, start_sec: float = 0.0):
+    """Générateur async : transcode HEVC→H264 à la volée, streamé au fur et à
+    mesure vers le client (fragmented MP4, aucun fichier temporaire écrit sur
+    disque). `start_sec` : seek AVANT décodage (rapide, par keyframe) — utilisé
+    pour caler la lecture sur l'instant précis d'un événement/alerte, puisque
+    le seek CÔTÉ NAVIGATEUR (`video.currentTime`) ne fonctionne pas sur un flux
+    transcodé en direct (pas de support HTTP Range sur un pipe live)."""
+    use_gpu_decode = False
+    try:
+        from frame_source import _use_gpu  # réutilise la détection NVDEC existante
+        use_gpu_decode = _use_gpu()
+    except Exception:
+        pass
+    use_gpu_encode = _ffmpeg_supports_nvenc_h264()
+
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-nostdin"]
+    if start_sec > 0:
+        cmd += ["-ss", str(max(0.0, start_sec))]
+    if use_gpu_decode:
+        cmd += ["-hwaccel", "cuda", "-c:v", "hevc_cuvid"]
+    cmd += ["-i", path]
+    if use_gpu_encode:
+        cmd += ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "23"]
+    else:
+        cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]
+    cmd += [
+        "-c:a", "aac", "-b:a", "128k",
+        "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+        "-f", "mp4", "pipe:1",
+    ]
+    logger.info("recording-transcode: start (gpu_decode=%s gpu_encode=%s ss=%s) %s",
+                use_gpu_decode, use_gpu_encode, start_sec, os.path.basename(path))
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        while True:
+            chunk = await proc.stdout.read(65536)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        if proc.returncode is None:
+            proc.kill()
+            await proc.wait()
+
+
 async def probe_camera(cam: dict) -> dict:
     """Test de connexion réel : frame via go2rtc + ffprobe sur l'URL RTSP."""
     await register_camera_stream(cam, caller="probe_camera(explicit test)")

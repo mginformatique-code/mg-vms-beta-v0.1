@@ -105,7 +105,12 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
         throw new Error("Item sans identifiant");
       }
       const token = localStorage.getItem("mg_token");
-      const url = `${process.env.REACT_APP_BACKEND_URL}/api${data.stream_url}?token=${encodeURIComponent(token || "")}`;
+      const offset = Math.max(0, data.offset_sec || 0);
+      // v3.1.1 · `t` en query : le seek côté serveur (ffmpeg -ss) est le seul
+      // qui fonctionne quand la vidéo source est HEVC (transcodée à la volée,
+      // pas de support HTTP Range sur un flux live) — video.currentTime plus
+      // bas reste utile pour le cas H264 (FileResponse, Range natif).
+      const url = `${process.env.REACT_APP_BACKEND_URL}/api${data.stream_url}?token=${encodeURIComponent(token || "")}&t=${offset}`;
       setRecInfo({ ...data, url });
       setShowVideo(true);
       setTimeout(() => {
