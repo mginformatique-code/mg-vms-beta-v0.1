@@ -495,39 +495,21 @@ async def _fetch_frame(camera_id: str):
     return None
 
 
-# v3.1.1 · Presets de résolution IA/ANPR, réglables par caméra (champ
-# ``ai_resolution`` sur le document Camera). N'affecte QUE la frame envoyée
-# à YOLO/ANPR (frame_source.py) — l'enregistrement (recorder.py) fait
-# toujours `-c copy`, déjà natif, aucun rapport avec ce réglage.
-AI_RESOLUTION_PRESETS = {
-    "720p": (1280, 720),
-    "1080p": (1920, 1080),
-}
-
-
-def _resolve_ai_resolution(cam: dict) -> tuple[int, int]:
-    """(width, height) pour frame_source.start() selon ``cam.ai_resolution``.
-
-    "native" résout la résolution réelle depuis ``cam.resolution`` (déjà
-    sondée à la création/ONVIF, ex. "3840x2160") plutôt que de passer
-    width=0/height=0 : le thread lecteur de frame_source.py suppose une
-    taille de buffer fixe (1280×720 par défaut) quand width/height=0, donc
-    un vrai "0 = natif" désynchroniserait la lecture au lieu de fonctionner
-    (voir frame_source.py::_reader_loop, commentaire "Simplification").
-    """
-    preset = (cam.get("ai_resolution") or "720p").lower()
-    if preset in AI_RESOLUTION_PRESETS:
-        return AI_RESOLUTION_PRESETS[preset]
-    if preset == "native":
-        res = (cam.get("resolution") or "").lower().replace(" ", "")
-        m = re.match(r"^(\d{2,5})x(\d{2,5})$", res)
-        if m:
-            return int(m.group(1)), int(m.group(2))
-        logger.warning(
-            "ai_resolution=native mais cam.resolution absent/invalide (%s) pour %s — fallback 720p",
-            res or "vide", cam.get("id"),
-        )
-    return AI_RESOLUTION_PRESETS["720p"]
+# v3.1.2 · RÉVISION du réglage ``ai_resolution`` introduit en v3.1.1 :
+# le faire piloter la résolution de DÉCODAGE CONTINU de frame_source.py
+# (jusqu'à "native" = 3840x2160) s'est avéré casser le live — chaque frame
+# brute doit être copiée du GPU vers le CPU (~25 Mo en 4K contre ~2,8 Mo en
+# 720p, à ~20 fps en continu), ce qui a saturé le CPU du backend (629% CPU
+# mesuré en prod) et affamé le relais MJPEG du live. Le scan continu
+# (YOLO/motion) tourne donc maintenant TOUJOURS à résolution fixe et légère
+# (_CONTINUOUS_SCAN_RES ci-dessous, indépendante de la caméra) — la qualité
+# de scan ne change pas selon ``ai_resolution``.
+# ``ai_resolution`` pilote maintenant autre chose : quand != "720p", une
+# frame HD est récupérée À LA DEMANDE via go2rtc (frame.jpeg, flux natif)
+# UNIQUEMENT au moment où un véhicule est détecté, pour construire des crops
+# (véhicule/plaque/vignette) en pleine qualité SANS faire circuler du 4K en
+# continu — voir pipeline_v2.camera_worker.CameraWorker._stage_roi.
+_CONTINUOUS_SCAN_RES = (1280, 720)
 
 
 async def _sync_frame_source_workers(cams: list[dict], *,
@@ -591,17 +573,14 @@ async def _sync_frame_source_workers(cams: list[dict], *,
         if codec == "hevc":
             codec = "h265"
         try:
-            ai_w, ai_h = _resolve_ai_resolution(cam)
+            ai_w, ai_h = _CONTINUOUS_SCAN_RES
             # v3.1.2 · frame_source.start() appelle stop() en interne si la
-            # config (résolution notamment) a changé — stop() fait un
-            # `reader_thread.join(timeout=5)` BLOQUANT. Avant le réglage de
-            # résolution par caméra, start() était toujours appelé avec les
-            # mêmes valeurs figées (1280x720) → ce chemin bloquant n'était
-            # quasiment jamais emprunté. Dès qu'une résolution change pour de
-            # vrai, ce join bloquait toute la boucle asyncio (donc /health,
-            # /auth/me, tout le backend) — confirmé en prod (curl /health en
-            # timeout après un changement de résolution). asyncio.to_thread
-            # déporte le blocage hors de la boucle principale.
+            # config a changé — stop() fait un `reader_thread.join(timeout=5)`
+            # BLOQUANT, déporté sur un thread via asyncio.to_thread pour ne
+            # jamais geler la boucle asyncio principale (/health, /auth/me...)
+            # même si un redémarrage de worker se produit (RTSP URL/codec
+            # changé). La résolution ici est désormais FIXE (voir
+            # _CONTINUOUS_SCAN_RES) — ne dépend plus de cam.ai_resolution.
             await asyncio.to_thread(frame_source.start, cam_id, rtsp_url,
                                      codec=codec, width=ai_w, height=ai_h)
             _hot_reload_metrics["frame_source_starts"] += 1

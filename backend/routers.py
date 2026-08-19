@@ -115,12 +115,14 @@ class CameraInput(BaseModel):
     ptz_enabled: bool = False
     record_enabled: bool = True
     detect_enabled: bool = False
-    # v3.1.1 · Résolution de la frame envoyée à YOLO/ANPR (frame_source.py).
-    # N'affecte PAS l'enregistrement (recorder.py fait toujours `-c copy`,
-    # déjà natif/max qualité, aucun downscale). "720p" = comportement
-    # historique (léger, beaucoup de caméras supportables par GPU) ;
-    # "native" = qualité de lecture de plaque max, coût GPU le plus élevé
-    # par caméra — voir AI_RESOLUTION_PRESETS dans ai_engine.py.
+    # v3.1.2 · "720p" (défaut) : scan continu léger uniquement, comme
+    # toujours. "1080p"/"native" : EN PLUS, un grab HD à la demande via
+    # go2rtc alimente les crops véhicule/plaque quand un véhicule est
+    # détecté — le scan continu (YOLO/motion) reste toujours à résolution
+    # fixe et légère quel que soit ce réglage (voir
+    # ai_engine._CONTINUOUS_SCAN_RES et
+    # pipeline_v2.camera_worker._fetch_hd_crop_source). N'affecte PAS
+    # l'enregistrement (recorder.py fait toujours `-c copy`, déjà natif).
     ai_resolution: str = "720p"  # "720p" | "1080p" | "native"
     # v0.3 · Config caméra modulaire : liste des plugins IA activés sur cette
     # caméra. Vide → comportement legacy (piloté par detect_enabled). Chaque

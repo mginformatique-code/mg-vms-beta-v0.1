@@ -578,14 +578,16 @@ export default function Cameras() {
                   className="inp"
                   data-testid="ai-resolution-select"
                 >
-                  <option value="720p">720p — léger (recommandé à grande échelle)</option>
-                  <option value="1080p">1080p — équilibré</option>
-                  <option value="native">Native — qualité max (coût GPU le plus élevé)</option>
+                  <option value="720p">720p — crops en résolution de scan (défaut)</option>
+                  <option value="1080p">1080p — crops en haute qualité</option>
+                  <option value="native">Native — crops en qualité maximale</option>
                 </select>
                 <p className="text-[10px] text-muted-foreground mt-0.5">
-                  Résolution de l&apos;image analysée par YOLO/ANPR — n&apos;affecte PAS l&apos;enregistrement
-                  (toujours natif). Plus haut = meilleure lecture de plaque à distance, mais plus lent
-                  par caméra. &laquo; Native &raquo; nécessite que la résolution ait déjà été détectée
+                  Le scan continu (détection véhicule) tourne toujours en résolution légère, quel que
+                  soit ce réglage — pas d&apos;impact sur la fluidité du live. Au-dessus de 720p, une image
+                  haute résolution est récupérée UNIQUEMENT au moment où un véhicule est détecté, pour
+                  générer des crops (véhicule/plaque) nets. N&apos;affecte pas l&apos;enregistrement (toujours
+                  natif). &laquo; Native &raquo; nécessite que la résolution ait déjà été détectée
                   ci-dessus (bouton Tester la connexion).
                 </p>
               </div>
