@@ -14,6 +14,34 @@ const TYPE_COLORS = {
   "Moto": "#0044FF", "Vélo": "#00E676", "Animal": "#FFB800", "Mouvement": "#FFB800",
 };
 
+// Types d'événements générés par les plugins (identifiants techniques "namespace.action") :
+// libellé FR + couleur, distincts des types du pipeline principal ci-dessus (déjà en FR).
+const PLUGIN_TYPE_LABELS = {
+  "occupancy.zone": "Occupation zone",
+  "occupancy.alert": "Capacité dépassée",
+  "counting.vehicle": "Comptage véhicules",
+  "counting.person": "Comptage personnes",
+  "alert.critical": "Alerte critique",
+  "alert.warning": "Alerte",
+};
+const PLUGIN_TYPE_COLORS = {
+  "occupancy.zone": "#0044FF",
+  "occupancy.alert": "#FF3333",
+  "counting.vehicle": "#0044FF",
+  "counting.person": "#FF3333",
+  "alert.critical": "#FF3333",
+  "alert.warning": "#FFB800",
+};
+// Repli générique pour un type de plugin pas encore mappé ci-dessus (ex. nouveau plugin installé)
+// plutôt que d'afficher l'identifiant technique brut ("some.new_type").
+function eventTypeLabel(type) {
+  if (TYPE_COLORS[type] || PLUGIN_TYPE_LABELS[type]) return PLUGIN_TYPE_LABELS[type] || type;
+  return String(type || "").replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+function eventTypeColor(type) {
+  return TYPE_COLORS[type] || PLUGIN_TYPE_COLORS[type] || "#0044FF";
+}
+
 // v1.0-rc4 · Fusion Événements/Véhicules : UNE seule vue avec chips de filtre.
 // Le chip « Plaques » affiche l'intégralité de l'ancien module Véhicules
 // (recherche IA, identités, anomalies, fiche complète). Zéro perte de feature.
@@ -212,7 +240,7 @@ export default function Events() {
                 ) : (
                   <div className="w-full h-full flex items-center justify-center"><CamIcon size={20} className="text-white/30" /></div>
                 )}
-                <span className="absolute top-1.5 left-1.5 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 text-white" style={{ backgroundColor: TYPE_COLORS[e.type] || "#0044FF" }}>{e.type}</span>
+                <span className="absolute top-1.5 left-1.5 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 text-white" style={{ backgroundColor: eventTypeColor(e.type) }}>{eventTypeLabel(e.type)}</span>
                 {e.confidence != null && <span className="absolute top-1.5 right-1.5 text-[10px] mono px-1.5 py-0.5 bg-black/70 text-white">{Math.round(e.confidence * 100)}%</span>}
                 {e.plate && (
                   <span className="absolute bottom-1.5 left-1.5 text-[10px] mono font-bold px-1.5 py-0.5 bg-white text-black border border-black/40" data-testid="event-plate-badge">{e.plate}</span>
