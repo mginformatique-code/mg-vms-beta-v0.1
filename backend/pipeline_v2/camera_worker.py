@@ -361,9 +361,15 @@ class CameraWorker:
                     ctx.plates.append({
                         "plate": plate_text,
                         "confidence": round(float(r.confidence), 2),
-                        "plate_crop": encode_jpeg_data_uri(plate_crop, 240),
+                        # v3.1.2 · 240→480 (plate_crop) et défaut→1920
+                        # (vehicle_crop) : voir commentaire
+                        # ai_engine.py::_ensure_frame_thumb, même fix —
+                        # 240px était bien trop serré pour zoomer sur une
+                        # plaque, surtout maintenant que la source peut être
+                        # captée en natif (ai_resolution="native").
+                        "plate_crop": encode_jpeg_data_uri(plate_crop, max_width=480),
                         # Crop véhicule PARTAGÉ (memoizé) — encodé une seule fois
-                        "vehicle_crop": roi.jpeg_data_uri(),
+                        "vehicle_crop": roi.jpeg_data_uri(max_width=1920),
                         "vehicle_type": roi.owner["label"],
                         "vehicle_color": roi.owner["vehicle_color"],
                         "engine": _ocr_name,  # v0.5.6 : nom depuis le registry

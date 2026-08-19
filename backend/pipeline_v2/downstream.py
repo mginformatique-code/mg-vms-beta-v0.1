@@ -149,7 +149,8 @@ def _det_thumb(det: dict):
     if crop is None:
         return None
     from .frame_context import encode_jpeg_data_uri
-    det["thumbnail"] = encode_jpeg_data_uri(crop)
+    # v3.1.2 · voir commentaire ai_engine.py::_ensure_frame_thumb (même fix)
+    det["thumbnail"] = encode_jpeg_data_uri(crop, max_width=1920)
     return det["thumbnail"]
 
 
@@ -217,7 +218,8 @@ async def _prerun_multi_anpr(cam: dict, ctx, result: dict, now_iso: str) -> None
                         "plate": (pr.text or "").upper().strip(),
                         "confidence": round(float(getattr(pr, "confidence", 0.0)), 2),
                         "plate_crop": None,
-                        "vehicle_crop": _roi.jpeg_data_uri(),
+                        # v3.1.2 · voir commentaire ai_engine.py::_ensure_frame_thumb
+                        "vehicle_crop": _roi.jpeg_data_uri(max_width=1920),
                         "vehicle_type": _roi.owner.get("label"),
                         "vehicle_color": _roi.owner.get("vehicle_color"),
                         "track_id": _roi.track_id,

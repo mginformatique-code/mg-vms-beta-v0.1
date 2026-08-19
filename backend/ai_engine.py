@@ -372,11 +372,18 @@ def _ensure_frame_thumb(result: dict):
     if "frame_thumb" in result:
         return result["frame_thumb"]
     ctx = result.get("_ctx")
+    # v3.1.2 · 1920 au lieu du défaut 1280 : la source peut désormais être
+    # capturée en natif (ai_resolution="native", ex. 3840x2160) mais la
+    # vignette restait bridée à 1280px quel que soit le réglage — la montée
+    # en résolution ne se voyait jamais dans les captures/miniatures UI.
+    # 1920 plutôt que le natif complet : ces images sont stockées en base64
+    # DANS les documents Mongo (pas des fichiers), pousser au 4K partout
+    # multiplierait leur poids par ~9 au lieu de ~2.
     if ctx is not None:
-        thumb = ctx.jpeg_data_uri()
+        thumb = ctx.jpeg_data_uri(max_width=1920)
     else:
         img = result.get("_img_bgr")
-        thumb = _jpeg_data_uri(img) if img is not None else None
+        thumb = _jpeg_data_uri(img, max_width=1920) if img is not None else None
     result["frame_thumb"] = thumb
     return thumb
 
