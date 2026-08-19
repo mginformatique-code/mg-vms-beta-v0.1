@@ -76,11 +76,17 @@ RUN python3 -m pip --version && python3 -m pip --version | grep -q "python 3.11"
 # corrigés puis re-qualifiés — le résolveur pip standard passe SANS --no-deps.
 # litellm est installé depuis l'asset Emergent (URL directe dans le fichier) ;
 # l'extra-index-url est requis pour `emergentintegrations`.
+#
+# v3.1.1 · 2e --extra-index-url pour torch/torchvision==...+cu124 : sans lui,
+# pip résout torch depuis l'index par défaut (build CUDA la plus récente,
+# incompatible avec le driver hôte figé sur CUDA 12.4) et YOLO tourne
+# silencieusement en CPU (torch.cuda.is_available() == False, aucune erreur).
 # ------------------------------------------------------------------------------
 COPY backend/requirements.txt ./requirements.txt
 RUN python3.11 -m pip install --upgrade pip && \
     python3.11 -m pip install --no-cache-dir -r requirements.txt \
-        --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/
+        --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ \
+        --extra-index-url https://download.pytorch.org/whl/cu124
 
 # ─── Normalisation opencv (déterminisme) ───────────────────────────────
 # Les 4 variantes opencv (python/headless/contrib/contrib-headless) écrivent
@@ -93,6 +99,10 @@ RUN python3.11 -m pip install --no-cache-dir --force-reinstall --no-deps \
 # ─── TEST DE BUILD : contourpy==1.3.3 réellement installé + imports clés ──
 RUN python3.11 -c "import contourpy, sys; assert contourpy.__version__=='1.3.3', contourpy.__version__; print('contourpy', contourpy.__version__, 'OK sur', sys.version)"
 RUN python3.11 -c "import cv2; assert hasattr(cv2,'text'), 'module contrib cv2.text absent'; print('cv2', cv2.__version__, '+ contrib OK')"
+# v3.1.1 · Échec immédiat si pip a silencieusement pris une build CPU/mauvais
+# CUDA au lieu de +cu124 (le pod de build n'a pas de GPU — on ne peut pas
+# tester torch.cuda.is_available() ici, seulement la build installée).
+RUN python3.11 -c "import torch; assert '+cu124' in torch.__version__, f'build torch inattendue: {torch.__version__} (attendu +cu124)'; print('torch', torch.__version__, 'OK')"
 RUN python3.11 -c "import fastapi, motor, cv2, litellm; print('imports critiques OK')"
 
 # ------------------------------------------------------------------------------
