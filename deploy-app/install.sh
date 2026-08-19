@@ -233,16 +233,55 @@ fi
 # 5. Stockage /mnt/storage + .env
 # ══════════════════════════════════════════════════════════════════════
 titre "5/7 · Stockage & configuration"
-for d in \
-  /mnt/storage/mongodb \
-  /mnt/storage/video-datastore/recordings \
-  /mnt/storage/models /mnt/storage/crops \
-  /mnt/storage/logs /mnt/storage/certs /mnt/storage/backups
-do
-  mkdir -p "$d" && ok "dossier : $d"
-done
-
 cd "$SCRIPT_DIR"
+
+# v3.1.3 · Choix des disques UNIQUEMENT à la toute première installation
+# (.env pas encore créé) et en interactif — une mise à jour garde toujours
+# les chemins déjà configurés, comme le reste de .env.
+FRESH_INSTALL=0
+[ -f .env ] || FRESH_INSTALL=1
+MONGO_PATH_CHOSEN=""
+RECORDINGS_PATH_CHOSEN=""
+
+if [ "$FRESH_INSTALL" = 1 ] && [ -t 0 ]; then
+  echo
+  echo -e "${BLEU}  Disques disponibles :${NC}"
+  MOUNTS=(); MOUNT_KINDS=()
+  if command -v lsblk >/dev/null 2>&1; then
+    while IFS= read -r mp rota; do
+      [ -z "$mp" ] && continue
+      case "$mp" in /boot|/boot/efi) continue ;; esac
+      MOUNTS+=("$mp")
+      if [ "$rota" = "1" ]; then MOUNT_KINDS+=("HDD"); else MOUNT_KINDS+=("SSD/NVMe"); fi
+    done < <(lsblk -rno MOUNTPOINT,ROTA 2>/dev/null | awk '$1!=""')
+  fi
+  if [ "${#MOUNTS[@]}" -gt 0 ]; then
+    for i in "${!MOUNTS[@]}"; do
+      AVAIL=$(df -h --output=avail "${MOUNTS[$i]}" 2>/dev/null | tail -1 | tr -d ' ')
+      echo "    $((i+1))) ${MOUNTS[$i]}  [${MOUNT_KINDS[$i]}, ${AVAIL:-?} libre]"
+    done
+  else
+    warn "Aucun disque détecté automatiquement (lsblk indisponible/vide) — saisie manuelle des chemins ci-dessous."
+  fi
+
+  echo
+  echo -ne "${JAUNE}  Base de données MongoDB — idéalement un SSD. Numéro ci-dessus, chemin complet, ou Entrée pour garder /mnt/storage/mongodb : ${NC}"
+  read -r MONGO_CHOICE || MONGO_CHOICE=""
+  if [[ "$MONGO_CHOICE" =~ ^[0-9]+$ ]] && [ "$MONGO_CHOICE" -ge 1 ] && [ "$MONGO_CHOICE" -le "${#MOUNTS[@]}" ] 2>/dev/null; then
+    MONGO_PATH_CHOSEN="${MOUNTS[$((MONGO_CHOICE-1))]%/}/mgvms-mongodb"
+  elif [ -n "$MONGO_CHOICE" ]; then
+    MONGO_PATH_CHOSEN="$MONGO_CHOICE"
+  fi
+
+  echo -ne "${JAUNE}  Enregistrements vidéo — idéalement un HDD (gros volumes). Numéro ci-dessus, chemin complet, ou Entrée pour garder /mnt/storage/video-datastore/recordings : ${NC}"
+  read -r REC_CHOICE || REC_CHOICE=""
+  if [[ "$REC_CHOICE" =~ ^[0-9]+$ ]] && [ "$REC_CHOICE" -ge 1 ] && [ "$REC_CHOICE" -le "${#MOUNTS[@]}" ] 2>/dev/null; then
+    RECORDINGS_PATH_CHOSEN="${MOUNTS[$((REC_CHOICE-1))]%/}/mgvms-recordings"
+  elif [ -n "$REC_CHOICE" ]; then
+    RECORDINGS_PATH_CHOSEN="$REC_CHOICE"
+  fi
+fi
+
 if [ -f .env ]; then
   ok ".env existant conservé (jamais écrasé)"
   # v1.0-rc4.5 · Blindage anti-régression Mixed Content : détecter tôt une
@@ -264,11 +303,34 @@ if [ -f .env ]; then
   fi
 else
   cp .env.example .env
+  if [ -n "$MONGO_PATH_CHOSEN" ]; then
+    sed -i "s#^MONGO_DATA_PATH=.*#MONGO_DATA_PATH=$MONGO_PATH_CHOSEN#" .env
+    ok "MongoDB → $MONGO_PATH_CHOSEN"
+  fi
+  if [ -n "$RECORDINGS_PATH_CHOSEN" ]; then
+    sed -i "s#^RECORDINGS_PATH=.*#RECORDINGS_PATH=$RECORDINGS_PATH_CHOSEN#" .env
+    ok "Enregistrements vidéo → $RECORDINGS_PATH_CHOSEN"
+  fi
   warn ".env créé depuis .env.example — ADAPTEZ IP LAN + secrets :"
   warn "   nano $SCRIPT_DIR/.env  (CORS_ORIGINS, JWT_SECRET, ADMIN_PASSWORD)"
   warn "   ⚠ v1.0-rc4.5 · NE PAS remplir REACT_APP_BACKEND_URL (URLs relatives"
   warn "     obligatoires en prod — la Garde 1 du Dockerfile la refuse)"
 fi
+
+# v3.1.3 · Les dossiers créés doivent suivre les chemins RÉELLEMENT
+# configurés dans .env (choisis ci-dessus ou déjà présents d'une install
+# précédente) — avant ce fix, cette boucle créait toujours /mnt/storage/...
+# en dur, indépendamment de MONGO_DATA_PATH/RECORDINGS_PATH dans .env.
+MONGO_DIR=$(grep -E '^MONGO_DATA_PATH=' .env 2>/dev/null | tail -1 | cut -d= -f2- || true)
+RECORDINGS_DIR=$(grep -E '^RECORDINGS_PATH=' .env 2>/dev/null | tail -1 | cut -d= -f2- || true)
+for d in \
+  "${MONGO_DIR:-/mnt/storage/mongodb}" \
+  "${RECORDINGS_DIR:-/mnt/storage/video-datastore/recordings}" \
+  /mnt/storage/models /mnt/storage/crops \
+  /mnt/storage/logs /mnt/storage/certs /mnt/storage/backups
+do
+  mkdir -p "$d" && ok "dossier : $d"
+done
 
 # ══════════════════════════════════════════════════════════════════════
 # 6. Build & démarrage
