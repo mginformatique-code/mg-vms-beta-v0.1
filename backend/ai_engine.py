@@ -585,7 +585,18 @@ async def _sync_frame_source_workers(cams: list[dict], *,
             codec = "h265"
         try:
             ai_w, ai_h = _resolve_ai_resolution(cam)
-            frame_source.start(cam_id, rtsp_url, codec=codec, width=ai_w, height=ai_h)
+            # v3.1.2 · frame_source.start() appelle stop() en interne si la
+            # config (résolution notamment) a changé — stop() fait un
+            # `reader_thread.join(timeout=5)` BLOQUANT. Avant le réglage de
+            # résolution par caméra, start() était toujours appelé avec les
+            # mêmes valeurs figées (1280x720) → ce chemin bloquant n'était
+            # quasiment jamais emprunté. Dès qu'une résolution change pour de
+            # vrai, ce join bloquait toute la boucle asyncio (donc /health,
+            # /auth/me, tout le backend) — confirmé en prod (curl /health en
+            # timeout après un changement de résolution). asyncio.to_thread
+            # déporte le blocage hors de la boucle principale.
+            await asyncio.to_thread(frame_source.start, cam_id, rtsp_url,
+                                     codec=codec, width=ai_w, height=ai_h)
             _hot_reload_metrics["frame_source_starts"] += 1
             logger.info("frame_source.start %s src=%s codec=%s %dx%d (%s)",
                         cam_id, source_type, codec, ai_w, ai_h,
@@ -604,7 +615,7 @@ async def _sync_frame_source_workers(cams: list[dict], *,
     for cid in stale:
         if cid in current:
             try:
-                frame_source.stop(cid)
+                await asyncio.to_thread(frame_source.stop, cid)  # v3.1.2 · voir commentaire start() ci-dessus
                 _hot_reload_metrics["frame_source_stops"] += 1
             except Exception:
                 pass
