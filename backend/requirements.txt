@@ -125,7 +125,16 @@ numpy==1.26.4
 nvidia-ml-py==13.610.43
 oauthlib==3.3.1
 onnx==1.22.0
-onnxruntime==1.27.0
+# v3.1.2 · onnxruntime-gpu remplace onnxruntime (CPU) — l'ANPR/OCR
+# (fast-alpr, open-image-models) tournait entièrement en CPU malgré le GPU
+# actif pour YOLO. Version alignée sur le combo déjà validé dans
+# deploy-app/DEPENDENCIES.md (CUDA 12.x + cuDNN 9.x, torch>=2.4 — cohérent
+# avec torch==2.4.1+cu124 ci-dessous). Risque à valider au build : onnxruntime
+# n'embarque pas ses libs CUDA/cuDNN comme les wheels torch cu124 — si le
+# runtime ne trouve pas cuDNN, backend/gpu.py le détectera (déjà en place,
+# panneau "Runtimes d'accélération" du Pipeline Center) et retombera CPU
+# proprement sans crash, mais sans le gain attendu — à vérifier après build.
+onnxruntime-gpu==1.19.2
 onvif_zeep==0.2.12
 open-image-models==0.2.2
 openai==1.99.9
