@@ -316,7 +316,10 @@ function FocusTimeline({ cameraId, onSelect }) {
   for (const e of events) kindCounts[e._kind] = (kindCounts[e._kind] || 0) + 1;
 
   return (
-    <div className="absolute bottom-6 inset-x-2 pointer-events-auto" data-testid="focus-timeline">
+    {/* v3.1.4 · bottom-14 (au lieu de bottom-6) : CameraControlOverlay occupe
+        déjà bottom-2 sur ~32px (5 boutons projecteur/IR/sirène/TTS/reboot) —
+        la timeline chevauchait cette barre et rendait ses icônes injoignables. */}
+    <div className="absolute bottom-14 inset-x-2 pointer-events-auto" data-testid="focus-timeline">
       <div className="bg-black/85 border border-white/10 px-2 py-2 space-y-1.5">
         <div className="flex items-center justify-between">
           <span className="text-[9px] uppercase tracking-wider text-white/60 mono">
