@@ -466,37 +466,44 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
                 # bien alertées toutes les deux, pas seulement la première.
                 # Générique à tous les PipelineConsumer (occupancy.alert compris)
                 # — voir plan "Plugin IA anti-vol", Phase 1.
-                for be in _pr.business_events:
-                    severity = be.get("severity", "info")
-                    if severity not in ("warning", "critical"):
-                        continue
-                    track_id = (be.get("data") or {}).get("track_id", "")
-                    alert_key = f"{cam['id']}:{be.get('type')}:{track_id}"
-                    if not cooldown_ok(alert_key, _ae.EVENT_COOLDOWN, now):
-                        continue
-                    alert = {
-                        "id": str(uuid.uuid4()), "type": be.get("type", "plugin.event"),
-                        "severity": severity,
-                        "message": be.get("message"),
-                        "camera_id": cam["id"], "camera_name": cam["name"],
-                        "site_id": cam.get("site_id", ""), "site_name": cam.get("site_name", ""),
-                        "plugin": be.get("source"),
-                        "thumbnail": _ae._ensure_frame_thumb(result),
-                        "acknowledged": False, "timestamp": now_iso,
-                        "data": be.get("data"),
-                    }
-                    await db.alerts.insert_one(dict(alert))
-                    alert.pop("_id", None)
-                    await broadcast_alert(alert)
-                    if severity == "critical":
-                        try:
-                            from notifications import send_notification
-                            await send_notification(
-                                f"ALERTE IA — {be.get('message', be.get('type'))}",
-                                f"Caméra {cam['name']} ({cam.get('site_name', '')})",
-                            )
-                        except Exception:
-                            logger.exception("send_notification error (plugin alert)")
+                # Isolé dans son propre try/except (comme le bloc Smart Zones
+                # ci-dessous) : une erreur sur une alerte ne doit ni bloquer
+                # les autres business_events de ce cycle, ni empêcher
+                # l'évaluation Smart Zones qui suit.
+                try:
+                    for be in _pr.business_events:
+                        severity = be.get("severity", "info")
+                        if severity not in ("warning", "critical"):
+                            continue
+                        track_id = (be.get("data") or {}).get("track_id", "")
+                        alert_key = f"{cam['id']}:{be.get('type')}:{track_id}"
+                        if not cooldown_ok(alert_key, _ae.EVENT_COOLDOWN, now):
+                            continue
+                        alert = {
+                            "id": str(uuid.uuid4()), "type": be.get("type", "plugin.event"),
+                            "severity": severity,
+                            "message": be.get("message"),
+                            "camera_id": cam["id"], "camera_name": cam["name"],
+                            "site_id": cam.get("site_id", ""), "site_name": cam.get("site_name", ""),
+                            "plugin": be.get("source"),
+                            "thumbnail": _ae._ensure_frame_thumb(result),
+                            "acknowledged": False, "timestamp": now_iso,
+                            "data": be.get("data"),
+                        }
+                        await db.alerts.insert_one(dict(alert))
+                        alert.pop("_id", None)
+                        await broadcast_alert(alert)
+                        if severity == "critical":
+                            try:
+                                from notifications import send_notification
+                                await send_notification(
+                                    f"ALERTE IA — {be.get('message', be.get('type'))}",
+                                    f"Caméra {cam['name']} ({cam.get('site_name', '')})",
+                                )
+                            except Exception:
+                                logger.exception("send_notification error (plugin alert)")
+                except Exception:
+                    logger.exception("plugin alert promotion error")
 
                 # Smart Zones + Workflow Engine
                 try:
