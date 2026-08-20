@@ -39,10 +39,17 @@ ultralytics-thop==2.0.9
 supervision==0.23.0
 py-cpuinfo==9.0.0
 
-# ─── ANPR (fast-alpr est le seul appelé en prod, v0.4.3) ─────────────────
+# ─── ANPR (fast-alpr = moteur core, paddle-ocr = 2e moteur pour la fusion
+# multi-ANPR — v3.1.4, voir pipeline_v2/downstream.py::_apply_hierarchical_anpr_fusion) ─
 fast-alpr==0.1.1
 fast-plate-ocr==0.2.0
 open-image-models==0.2.2
+# CPU only (pas paddlepaddle-gpu) : évite l'index PyPI dédié CUDA de Paddle et
+# la matrice de compatibilité GPU spécifique — c'est un moteur SECONDAIRE de
+# vérification, dispatché seulement sur détection véhicule (pas le chemin
+# critique continu), le coût CPU par lecture est acceptable ici.
+paddlepaddle==2.6.1
+paddleocr==2.7.3
 
 # ─── Face recognition (InsightFace) ───────────────────────────────────────
 insightface==0.7.3
