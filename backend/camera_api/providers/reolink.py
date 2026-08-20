@@ -255,3 +255,87 @@ class ReolinkProvider(CameraApiProvider):
                 "admin" if lvl == 0 else ("user" if lvl == 1 else "viewer"))
             out.append(UserInfo(username=str(u.get("userName") or ""), role=role, level=lvl))
         return out
+
+    # ── Contrôle (v3.1.4) ────────────────────────────────────────────────
+    # get_capabilities() détectait déjà supportWhiteDark/floodLight/whiteLed,
+    # supportAudioAlarm/alarmAudio, ptzCtrl/ptzType, supportIrMode/ircut —
+    # mais aucune des méthodes de contrôle correspondantes n'était codée,
+    # elles retombaient toutes sur UnsupportedCapability (base.py). Commandes
+    # CGI Reolink documentées (protocole stable, utilisé par ex. par
+    # l'intégration Home Assistant reolink_aio) :
+    #   - IrLights   : illuminateur IR (LEDs infrarouge physiques, PAS le
+    #                  filtre IR-cut mécanique — celui-là reste géré côté
+    #                  ONVIF dans routes/camera_control.py::_onvif_ir_cut).
+    #   - WhiteLed   : projecteur blanc (spotlight).
+    #   - AudioAlarmPlay : déclenchement manuel de la sirène ("manul" est
+    #                  bien la faute d'orthographe du fabricant dans son
+    #                  API, pas une erreur ici — vérifié sur plusieurs
+    #                  générations de firmware).
+    #   - PtzCtrl    : mouvement PTZ continu (pas de rappel Stop auto côté
+    #                  caméra — c'est à l'appelant d'envoyer Stop).
+    # Non vérifié sur matériel réel dans cet environnement (pas d'accès
+    # caméra ici) — à confirmer sur le premier essai terrain, notamment le
+    # champ `mode` de WhiteLed dont la numérotation varie parfois selon le
+    # firmware (3 = manuel sur la majorité des modèles testés ailleurs).
+
+    async def get_ir(self) -> dict:
+        results = await self.batch([{"cmd": "GetIrLights", "action": 0, "param": {}}])
+        v = self._value(self._entry_by_cmd(results, "GetIrLights"))
+        state = str((v.get("IrLights") or {}).get("state") or "Auto")
+        return {"mode": state.lower()}
+
+    async def set_ir(self, mode: str) -> None:
+        reolink_state = {"auto": "Auto", "on": "On", "off": "Off"}.get((mode or "").lower())
+        if reolink_state is None:
+            raise CameraApiError(f"mode IR invalide : {mode!r} (attendu auto|on|off)")
+        await self.batch([{
+            "cmd": "SetIrLights", "action": 0,
+            "param": {"IrLights": {"channel": 0, "state": reolink_state}},
+        }])
+
+    async def get_light(self) -> dict:
+        results = await self.batch([{"cmd": "GetWhiteLed", "action": 0, "param": {}}])
+        v = self._value(self._entry_by_cmd(results, "GetWhiteLed"))
+        wl = v.get("WhiteLed") or {}
+        return {"enabled": bool(wl.get("state")), "brightness": wl.get("bright")}
+
+    async def set_light(self, enabled: bool, brightness: Optional[int] = None) -> None:
+        payload = {"channel": 0, "mode": 3, "state": 1 if enabled else 0}
+        if brightness is not None:
+            payload["bright"] = max(0, min(100, int(brightness)))
+        await self.batch([{"cmd": "SetWhiteLed", "action": 0, "param": {"WhiteLed": payload}}])
+
+    async def get_siren(self) -> dict:
+        # Reolink n'expose pas d'état "sirène en cours" propre — GetAudioAlarmV20
+        # ne renvoie que la config des règles automatiques, pas l'état d'un
+        # déclenchement manuel via AudioAlarmPlay.
+        raise UnsupportedCapability(f"{self.name}: get_siren non supporté (pas d'état lisible côté API)")
+
+    async def set_siren(self, enabled: bool, duration: Optional[int] = None) -> None:
+        param: dict = {"alarm_mode": "manul", "manual_switch": 1 if enabled else 0}
+        if enabled:
+            param["times"] = max(1, int(duration)) if duration else 1
+        await self.batch([{"cmd": "AudioAlarmPlay", "action": 0, "param": param}])
+
+    _PTZ_OPS = {
+        "up": "Up", "down": "Down", "left": "Left", "right": "Right",
+        "upleft": "LeftUp", "upright": "RightUp",
+        "downleft": "LeftDown", "downright": "RightDown",
+        "stop": "Stop",
+    }
+
+    async def ptz_move(self, direction: str, speed: float = 0.5) -> None:
+        op = self._PTZ_OPS.get((direction or "").lower())
+        if op is None:
+            raise CameraApiError(f"direction PTZ invalide : {direction!r}")
+        reolink_speed = max(1, min(64, round(float(speed) * 64)))
+        await self.batch([{
+            "cmd": "PtzCtrl", "action": 0,
+            "param": {"channel": 0, "op": op, "speed": reolink_speed},
+        }])
+
+    async def ptz_stop(self) -> None:
+        await self.batch([{
+            "cmd": "PtzCtrl", "action": 0,
+            "param": {"channel": 0, "op": "Stop"},
+        }])
