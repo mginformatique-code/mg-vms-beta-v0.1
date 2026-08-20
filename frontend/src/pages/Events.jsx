@@ -64,6 +64,8 @@ export default function Events() {
   const [cameraId, setCameraId] = useState("");
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [viewerIdx, setViewerIdx] = useState(null);
   const [historyPlate, setHistoryPlate] = useState(null); // fiche véhicule depuis le viewer
   // v1.0-rc4 · Recherche IA disponible sur TOUTE la vue Événements
@@ -102,26 +104,60 @@ export default function Events() {
     setSearchParams(next, { replace: true });
   };
 
+  // v1.0-rc5 · Chargement progressif : 15 événements à la fois (au lieu de
+  // 60 systématiquement) — chaque événement embarque 2-3 images en base64
+  // (vignette + crops), retélécharger/redessiner tout ça en une fois pèse
+  // lourd. Le bouton "Charger plus" ajoute une page ; le poll périodique ne
+  // récupère plus qu'un petit lot pour repérer les nouveautés (fusion par id,
+  // les cartes déjà affichées ne sont jamais retéléchargées/redessinées).
+  const PAGE_SIZE = 15;
+  const buildParams = (extra) => {
+    const params = { limit: PAGE_SIZE, ...extra };
+    if (activeFilter.types) params.types = activeFilter.types.join(",");
+    if (cameraId) params.camera_id = cameraId;
+    return params;
+  };
+
   const load = useCallback(async () => {
     if (isPlaques) return;
     setLoading(true);
     try {
-      const params = { limit: 60 };
-      if (activeFilter.types) params.types = activeFilter.types.join(",");
-      if (cameraId) params.camera_id = cameraId;
-      const r = await api.get("/events", { params });
+      const r = await api.get("/events", { params: buildParams({ offset: 0 }) });
       setEvents(r.data);
+      setHasMore(r.data.length === PAGE_SIZE);
       setTotal(parseInt(r.headers["x-total-count"] || r.data.length, 10));
     } catch (e) {} finally { setLoading(false); }
   }, [isPlaques, activeFilter, cameraId]);
+
+  const poll = useCallback(async () => {
+    if (isPlaques) return;
+    try {
+      const r = await api.get("/events", { params: buildParams({ offset: 0 }) });
+      setEvents((prev) => {
+        const known = new Set(prev.map((e) => e.id));
+        const fresh = r.data.filter((e) => !known.has(e.id));
+        return fresh.length ? [...fresh, ...prev] : prev;
+      });
+      setTotal(parseInt(r.headers["x-total-count"] || 0, 10));
+    } catch (e) {}
+  }, [isPlaques, activeFilter, cameraId]);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const r = await api.get("/events", { params: buildParams({ offset: events.length }) });
+      setEvents((prev) => [...prev, ...r.data]);
+      setHasMore(r.data.length === PAGE_SIZE);
+    } catch (e) {} finally { setLoadingMore(false); }
+  };
 
   useEffect(() => { api.get("/cameras").then((r) => setCams(r.data)).catch(() => {}); }, []);
   useEffect(() => {
     if (isPlaques) return;
     load();
-    const iv = setInterval(load, 15000);
+    const iv = setInterval(poll, 15000);
     return () => clearInterval(iv);
-  }, [load, isPlaques]);
+  }, [load, poll, isPlaques]);
 
   return (
     <div className="p-4 md:p-6 space-y-4" data-testid="events-page">
@@ -256,6 +292,16 @@ export default function Events() {
               </div>
             </button>
           ))}
+        </div>
+      )}
+
+      {!isPlaques && !smartResult && hasMore && shown.length > 0 && (
+        <div className="flex justify-center pt-2">
+          <button onClick={loadMore} disabled={loadingMore} data-testid="events-load-more"
+                  className="flex items-center gap-2 px-4 py-2 border border-border text-xs uppercase tracking-wider text-muted-foreground hover:text-foreground hover:border-[#0044FF]/60 disabled:opacity-50">
+            {loadingMore ? <Loader2 size={13} className="animate-spin" /> : null}
+            {loadingMore ? "Chargement…" : `Charger plus (${shown.length} / ${total})`}
+          </button>
         </div>
       )}
 
