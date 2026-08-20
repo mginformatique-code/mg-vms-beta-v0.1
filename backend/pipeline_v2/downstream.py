@@ -158,9 +158,14 @@ def _det_thumb(det: dict):
 # v0.5.1.c · Multi-plugin tracking (events + plates)
 # ═══════════════════════════════════════════════════════════════════
 # Plugins CORE toujours actifs quand le pipeline tourne (ne dépendent pas de
-# la whitelist caméra). yolov11 = détection, bytetrack = tracking, fast-alpr =
-# OCR embarqué toujours dispatché sur les véhicules.
-_CORE_PLUGINS_ALWAYS_ON = ["yolov11", "bytetrack", "fast-alpr"]
+# la whitelist caméra). yolov11 = détection, bytetrack = tracking.
+# v3.1.4 · fast-alpr RETIRÉ d'ici : contrairement à yolov11/bytetrack, l'ANPR
+# N'est PAS inconditionnel — camera_worker.py::_stage_anpr applique une
+# fermeture stricte (enabled_plugins vide/absent ⇒ jamais dispatché). Le
+# lister ici affichait "fast-alpr actif" même sur des caméras où l'ANPR était
+# désactivé, alors qu'aucune plaque n'était réellement lue. Il redescend
+# maintenant par la whitelist ci-dessous, comme n'importe quel autre plugin.
+_CORE_PLUGINS_ALWAYS_ON = ["yolov11", "bytetrack"]
 
 
 def _compute_plugins_used(cam: dict) -> list[str]:
