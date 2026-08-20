@@ -19,6 +19,10 @@
 #   5. Création des dossiers de stockage /mnt/storage/... + .env
 #   6. docker compose config → build → up -d
 #   7. Attente des healthchecks (mongo → go2rtc → backend → frontend)
+#   8. Purge des données (optionnelle, interactive)          [--no-cleanup]
+#      → palier A : enregistrements aux métadonnées corrompues (Entrée = oui)
+#      → palier B : TOUS les enregistrements vidéo (Entrée = non)
+#      → palier C : réinitialisation totale de la base (taper RESET)
 #
 # Le résumé final affiche la montée de version (commit avant → après pull).
 #
@@ -67,7 +71,7 @@ AVANT_VERSION=$(grep -m1 -oE '\[v[^]]+\]' "$REPO/CHANGELOG.md" 2>/dev/null | tr 
 # ══════════════════════════════════════════════════════════════════════
 # 1. Dernier build GitHub
 # ══════════════════════════════════════════════════════════════════════
-titre "1/7 · Mise à jour du dépôt (GitHub)"
+titre "1/8 · Mise à jour du dépôt (GitHub)"
 if [ "$NO_PULL" = 1 ]; then
   warn "--no-pull : dépôt utilisé tel quel ($(git -C "$REPO" log --oneline -1 2>/dev/null || echo 'pas de git'))"
 elif [ -d "$REPO/.git" ] && git -C "$REPO" remote get-url origin >/dev/null 2>&1; then
@@ -89,7 +93,7 @@ fi
 # ══════════════════════════════════════════════════════════════════════
 # 2. Validation des fichiers de build
 # ══════════════════════════════════════════════════════════════════════
-titre "2/7 · Validation des fichiers de build"
+titre "2/8 · Validation des fichiers de build"
 
 # ── 2a. Présence des fichiers critiques ──
 for f in \
@@ -174,7 +178,7 @@ fi
 # ══════════════════════════════════════════════════════════════════════
 # 3. Prérequis Docker
 # ══════════════════════════════════════════════════════════════════════
-titre "3/7 · Prérequis Docker"
+titre "3/8 · Prérequis Docker"
 command -v docker >/dev/null || { err "docker introuvable — installez Docker Engine"; exit 1; }
 docker compose version >/dev/null 2>&1 || { err "Docker Compose v2 requis (docker compose version)"; exit 1; }
 ok "docker $(docker --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) · $(docker compose version --short 2>/dev/null | head -1)"
@@ -195,7 +199,7 @@ fi
 # Seuls des volumes Docker *nommés* orphelins (reliquats d'anciennes
 # configs, comme observé une fois en prod avec un volume mongo abandonné
 # après le passage aux bind mounts) peuvent disparaître au palier 3.
-titre "4/7 · Nettoyage pré-installation"
+titre "4/8 · Nettoyage pré-installation"
 cd "$SCRIPT_DIR"
 if [ "$NO_CLEANUP" = 1 ]; then
   warn "--no-cleanup : down + prune ignorés"
@@ -268,7 +272,7 @@ fi
 # ══════════════════════════════════════════════════════════════════════
 # 5. Stockage /mnt/storage + .env
 # ══════════════════════════════════════════════════════════════════════
-titre "5/7 · Stockage & configuration"
+titre "5/8 · Stockage & configuration"
 cd "$SCRIPT_DIR"
 
 # v3.1.3 · Choix des disques UNIQUEMENT à la toute première installation
@@ -371,7 +375,7 @@ done
 # ══════════════════════════════════════════════════════════════════════
 # 6. Build & démarrage
 # ══════════════════════════════════════════════════════════════════════
-titre "6/7 · docker compose config → build → up"
+titre "6/8 · docker compose config → build → up"
 docker compose config --quiet && ok "docker compose config : OK"
 docker compose build $NO_CACHE
 ok "build terminé"
@@ -381,7 +385,7 @@ ok "stack démarrée"
 # ══════════════════════════════════════════════════════════════════════
 # 7. Attente des healthchecks
 # ══════════════════════════════════════════════════════════════════════
-titre "7/7 · Attente des healthchecks (mongo → go2rtc → backend → frontend)"
+titre "7/8 · Attente des healthchecks (mongo → go2rtc → backend → frontend)"
 DELAI=420   # 7 min (start_period backend 90 s + téléchargement modèles au 1er boot)
 DEBUT=$(date +%s)
 while :; do
@@ -405,6 +409,84 @@ if curl -fsS http://127.0.0.1:8001/health >/dev/null; then
   ok "GET /health → 200"
 else
   ko "GET /health en échec"; docker compose ps; exit 1
+fi
+
+# ══════════════════════════════════════════════════════════════════════
+# 8. Purge des données (optionnelle) — nécessite mongo démarré, donc APRÈS
+#    le build/up, contrairement au nettoyage Docker de l'étape 4 (qui lui
+#    tourne AVANT, sur un système arrêté).
+# ══════════════════════════════════════════════════════════════════════
+titre "8/8 · Purge des données (optionnelle)"
+cd "$SCRIPT_DIR"
+mongo_eval() { docker compose exec -T mongo mongosh mgvms --quiet --eval "$1"; }
+
+if [ "$NO_CLEANUP" = 1 ]; then
+  warn "--no-cleanup : purge données ignorée"
+elif [ ! -t 0 ]; then
+  warn "non-interactif : purge données ignorée (relancer en interactif pour y accéder)"
+else
+  # Palier A · Enregistrements aux métadonnées corrompues — durée aberrante
+  # (bug ffprobe/segment corrigé dans recorder.py, voir commentaire dans le
+  # code : un flux source avec coupures peut produire un MP4 dont ffprobe
+  # rapporte une durée délirante). Ne perd aucune vraie donnée : seuls des
+  # index cassés (fichier déjà introuvable ou durée absurde) disparaissent.
+  N_CASSES=$(mongo_eval 'db.recordings.countDocuments({duration_sec: {$gt: 600}})' 2>/dev/null || echo "?")
+  if [ "$N_CASSES" != "0" ] && [ "$N_CASSES" != "?" ]; then
+    echo -ne "${JAUNE}  Palier A · $N_CASSES enregistrement(s) à la durée aberrante détecté(s) (métadonnées corrompues) — les purger ? [Y/n] ${NC}"
+    read -r REPA || REPA=""
+    case "$REPA" in
+      [nN]|[nN][oO]) warn "palier A ignoré" ;;
+      *) if mongo_eval 'db.recordings.deleteMany({duration_sec: {$gt: 600}})' >/dev/null 2>&1; then
+           ok "palier A : $N_CASSES enregistrement(s) corrompu(s) purgé(s) de l'index"
+         else
+           ko "palier A : échec de la purge Mongo"
+         fi ;;
+    esac
+  elif [ "$N_CASSES" = "?" ]; then
+    warn "palier A : impossible d'interroger mongo — ignoré"
+  else
+    ok "palier A : aucun enregistrement corrompu détecté"
+  fi
+
+  # Palier B · TOUS les enregistrements vidéo — fichiers + index Mongo.
+  # Caméras/utilisateurs/config/événements/plaques conservés : repart juste
+  # sans historique vidéo (utile pour repartir propre après une migration
+  # de disque, un test, ou une corruption étendue).
+  echo -ne "${JAUNE}  Palier B · Supprimer TOUS les enregistrements vidéo (fichiers + index — caméras/événements/utilisateurs conservés) ? [y/N] ${NC}"
+  read -r REPB || REPB=""
+  case "$REPB" in
+    [oOyY]|[oOyY][uUeE][iIsS])
+      warn "Suppression de tous les enregistrements vidéo..."
+      docker compose exec -T backend sh -c 'find /app/recordings -type f -name "*.mp4" -delete' 2>/dev/null || true
+      if mongo_eval 'db.recordings.deleteMany({})' >/dev/null 2>&1; then
+        ok "palier B : tous les enregistrements vidéo supprimés (fichiers + index)"
+      else
+        ko "palier B : échec de la purge Mongo (fichiers déjà supprimés)"
+      fi
+      ;;
+    *) ;;
+  esac
+
+  # Palier C · Réinitialisation TOTALE de la base — caméras, sites, événements,
+  # plaques, enregistrements, utilisateurs additionnels : TOUT disparaît.
+  # Le compte admin est recréé automatiquement au redémarrage du backend
+  # (backend/seed.py, depuis ADMIN_EMAIL/ADMIN_PASSWORD dans .env) — pas de
+  # perte d'accès, mais TOUTE la donnée métier saute. Confirmation par mot
+  # de passe (pas un simple y/N) vu la gravité.
+  echo -ne "${ROUGE}  Palier C · RÉINITIALISATION TOTALE de la base (caméras/événements/plaques/utilisateurs — TOUT supprime, irréversible) — tapez RESET pour confirmer, n'importe quoi d'autre pour annuler : ${NC}"
+  read -r REPC || REPC=""
+  if [ "$REPC" = "RESET" ]; then
+    warn "Réinitialisation totale de la base MongoDB..."
+    docker compose exec -T backend sh -c 'find /app/recordings -type f -name "*.mp4" -delete' 2>/dev/null || true
+    if mongo_eval 'db.dropDatabase()' >/dev/null 2>&1; then
+      docker compose restart backend >/dev/null 2>&1 || true
+      ok "palier C : base réinitialisée — compte admin recréé au redémarrage (ADMIN_EMAIL/ADMIN_PASSWORD dans .env)"
+    else
+      ko "palier C : échec de la réinitialisation Mongo"
+    fi
+  else
+    ok "palier C ignoré"
+  fi
 fi
 
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
