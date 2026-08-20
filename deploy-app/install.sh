@@ -98,7 +98,7 @@ titre "2/8 · Validation des fichiers de build"
 # ── 2a. Présence des fichiers critiques ──
 for f in \
   backend/Dockerfile frontend/Dockerfile .dockerignore \
-  deploy-app/docker-compose.yml deploy-app/go2rtc.yaml deploy-app/.env.example \
+  deploy-app/docker-compose.yml deploy-app/go2rtc.yaml.example deploy-app/.env.example \
   backend/requirements.txt backend/requirements-dev.txt backend/requirements-ai.txt \
   frontend/package.json frontend/yarn.lock frontend/nginx.conf frontend/docker-entrypoint.sh
 do
@@ -355,6 +355,21 @@ else
   warn "   nano $SCRIPT_DIR/.env  (CORS_ORIGINS, JWT_SECRET, ADMIN_PASSWORD)"
   warn "   ⚠ v1.0-rc4.5 · NE PAS remplir REACT_APP_BACKEND_URL (URLs relatives"
   warn "     obligatoires en prod — la Garde 1 du Dockerfile la refuse)"
+fi
+
+# v3.1.4 · go2rtc.yaml : même logique que .env — copié depuis le template UNE
+# SEULE FOIS puis jamais réécrasé. Le vrai fichier n'est plus suivi par git
+# (voir .gitignore) car go2rtc le réécrit en continu (flux caméra réels via
+# PUT /api/streams) ; un fichier tracké + muté au runtime bloquait tout pull
+# futur ("modifications locales détectées"). Après une migration vers ce
+# fonctionnement sur une install existante, si go2rtc.yaml a été régénéré
+# depuis le template (donc vidé des caméras réelles), resynchroniser via le
+# bouton "Resynchroniser go2rtc" de l'UI (ou POST /api/diagnostics/streams-sync/repair).
+if [ ! -f go2rtc.yaml ]; then
+  cp go2rtc.yaml.example go2rtc.yaml
+  ok "go2rtc.yaml créé depuis go2rtc.yaml.example"
+else
+  ok "go2rtc.yaml existant conservé (jamais écrasé)"
 fi
 
 # v3.1.3 · Les dossiers créés doivent suivre les chemins RÉELLEMENT
