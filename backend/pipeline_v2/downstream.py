@@ -19,6 +19,8 @@ from datetime import datetime, timedelta, timezone
 from database import db
 from pipeline_metrics import pipeline_metrics
 
+from realtime import broadcast_alert
+
 from .inspector import inspector
 from .scenarios import _evaluate_scenarios, _raise_blacklist_alert, cooldown_ok
 
@@ -454,6 +456,47 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
                         "thumbnail_sm": _ae._ensure_frame_thumb_sm(result),
                         "data": be.get("data"),
                     })
+
+                # Promotion en alerte temps réel (db.alerts + websocket) pour
+                # tout business_event de sévérité warning/critical. Contrairement
+                # au cooldown ci-dessus (générique "camera_id:type", partagé par
+                # toutes les personnes/tracks sur cette caméra), le cooldown ici
+                # inclut le track_id : deux personnes distinctes déclenchant le
+                # même type d'event à quelques secondes d'intervalle sont donc
+                # bien alertées toutes les deux, pas seulement la première.
+                # Générique à tous les PipelineConsumer (occupancy.alert compris)
+                # — voir plan "Plugin IA anti-vol", Phase 1.
+                for be in _pr.business_events:
+                    severity = be.get("severity", "info")
+                    if severity not in ("warning", "critical"):
+                        continue
+                    track_id = (be.get("data") or {}).get("track_id", "")
+                    alert_key = f"{cam['id']}:{be.get('type')}:{track_id}"
+                    if not cooldown_ok(alert_key, _ae.EVENT_COOLDOWN, now):
+                        continue
+                    alert = {
+                        "id": str(uuid.uuid4()), "type": be.get("type", "plugin.event"),
+                        "severity": severity,
+                        "message": be.get("message"),
+                        "camera_id": cam["id"], "camera_name": cam["name"],
+                        "site_id": cam.get("site_id", ""), "site_name": cam.get("site_name", ""),
+                        "plugin": be.get("source"),
+                        "thumbnail": _ae._ensure_frame_thumb(result),
+                        "acknowledged": False, "timestamp": now_iso,
+                        "data": be.get("data"),
+                    }
+                    await db.alerts.insert_one(dict(alert))
+                    alert.pop("_id", None)
+                    await broadcast_alert(alert)
+                    if severity == "critical":
+                        try:
+                            from notifications import send_notification
+                            await send_notification(
+                                f"ALERTE IA — {be.get('message', be.get('type'))}",
+                                f"Caméra {cam['name']} ({cam.get('site_name', '')})",
+                            )
+                        except Exception:
+                            logger.exception("send_notification error (plugin alert)")
 
                 # Smart Zones + Workflow Engine
                 try:

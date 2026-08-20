@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Comportement suspect (rayon)",
+  "type": "object",
+  "properties": {
+    "zones": {
+      "type": "object",
+      "title": "Zones par caméra",
+      "description": "Clé = camera_id. Caméra absente de cette liste → zone = frame entière avec les seuils par défaut.",
+      "default": {},
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "polygon": {
+            "type": "array",
+            "title": "Polygone (coordonnées relatives 0..1)",
+            "description": "Format [[x,y],...]. Absent ou vide = frame entière."
+          },
+          "dwell_warning_s": {"type": "integer", "default": 60, "minimum": 5, "title": "Seuil alerte (s)"},
+          "dwell_critical_s": {"type": "integer", "default": 180, "minimum": 5, "title": "Seuil critique (s)"},
+          "visits_threshold": {"type": "integer", "default": 3, "minimum": 2, "title": "Nb de passages avant alerte"},
+          "visits_window_s": {"type": "integer", "default": 300, "minimum": 30, "title": "Fenêtre de passages (s)"},
+          "erratic_path_enabled": {"type": "boolean", "default": false, "title": "Détection trajectoire erratique (bêta)"}
+        }
+      }
+    }
+  }
+}
