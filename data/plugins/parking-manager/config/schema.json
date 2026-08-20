@@ -3,23 +3,11 @@
   "title": "Parking Manager",
   "type": "object",
   "properties": {
-    "enabled_for_demo": {
-      "type": "boolean",
-      "default": false,
-      "title": "Activer la démo"
+    "spots": {
+      "type": "array",
+      "title": "Places (id + polygone)",
+      "default": [{"id": "P1", "zone": [[100,100],[300,100],[300,300],[100,300]]}]
     },
-    "sensitivity": {
-      "type": "number",
-      "default": 0.5,
-      "minimum": 0.0,
-      "maximum": 1.0,
-      "title": "Sensibilité de détection"
-    },
-    "min_confidence": {
-      "type": "number",
-      "default": 0.6,
-      "minimum": 0.0,
-      "maximum": 1.0
-    }
+    "target_labels": {"type": "array", "items": {"type": "string"}, "default": ["car","truck","motorcycle","bus"], "title": "Labels véhicule comptés"}
   }
 }

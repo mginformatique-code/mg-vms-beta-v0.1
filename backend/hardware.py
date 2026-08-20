@@ -2,7 +2,7 @@
 
 Détection RÉELLE : CPU/RAM via `psutil`, GPU via `nvidia-smi` (CUDA), `rocm-smi` (AMD) et OpenVINO.
 Si aucun accélérateur n'est physiquement présent, l'inventaire GPU est vide (aucun placeholder).
-Persiste la configuration (assignations plugin→appareil, profil, priorités, pools).
+Persiste la configuration (assignations plugin→appareil, pools).
 """
 import os
 import shutil
@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, List
 
 import psutil
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from database import db
@@ -38,29 +38,9 @@ FUNCTION_LABELS = {
     "thumbnails": "Miniatures", "export": "Export vidéo", "pdf": "Génération PDF",
     "transcode": "Reconversion vidéo",
 }
-PRIORITY_LEVELS = ["realtime", "normal", "low"]
-PRIORITY_ENGINES = ["live", "playback", "ai", "anpr", "encode", "decode", "export", "thumbnails"]
-PROFILES = ["economy", "balanced", "performance", "ultra", "custom"]
-
-PROFILE_ASSIGNMENTS = {
-    "economy":     {"decode": "cpu", "encode": "cpu", "live": "cpu", "playback": "cpu", "ai": "cpu",
-                    "anpr": "cpu", "thumbnails": "cpu", "export": "cpu", "pdf": "cpu", "transcode": "cpu"},
-    "balanced":    {"decode": "auto", "encode": "auto", "live": "auto", "playback": "auto", "ai": "auto",
-                    "anpr": "auto", "thumbnails": "cpu", "export": "cpu", "pdf": "cpu", "transcode": "cpu"},
-    "performance": {"decode": "nvdec", "encode": "nvenc", "live": "gpu", "playback": "gpu", "ai": "gpu0",
-                    "anpr": "gpu", "thumbnails": "gpu", "export": "gpu", "pdf": "cpu", "transcode": "gpu"},
-    "ultra":       {"decode": "nvdec", "encode": "nvenc", "live": "gpu_priority", "playback": "gpu", "ai": "gpu0",
-                    "anpr": "gpu", "thumbnails": "gpu", "export": "gpu", "pdf": "gpu", "transcode": "gpu"},
-}
-PROFILE_PRIORITIES = {
-    "economy":     {"live": "normal", "playback": "low", "ai": "low", "anpr": "low", "encode": "low",
-                    "decode": "normal", "export": "low", "thumbnails": "low"},
-    "balanced":    {"live": "realtime", "playback": "normal", "ai": "normal", "anpr": "normal", "encode": "normal",
-                    "decode": "normal", "export": "low", "thumbnails": "low"},
-    "performance": {"live": "realtime", "playback": "normal", "ai": "realtime", "anpr": "realtime", "encode": "normal",
-                    "decode": "normal", "export": "normal", "thumbnails": "normal"},
-    "ultra":       {"live": "realtime", "playback": "realtime", "ai": "realtime", "anpr": "realtime", "encode": "realtime",
-                    "decode": "realtime", "export": "normal", "thumbnails": "normal"},
+DEFAULT_ASSIGNMENTS = {
+    "decode": "auto", "encode": "auto", "live": "auto", "playback": "auto", "ai": "auto",
+    "anpr": "auto", "thumbnails": "cpu", "export": "cpu", "pdf": "cpu", "transcode": "cpu",
 }
 
 
@@ -125,10 +105,7 @@ def _accelerators(gpus: list) -> list:
 
 def _default_config() -> dict:
     return {
-        "profile": "balanced",
-        "assignments": dict(PROFILE_ASSIGNMENTS["balanced"]),
-        "priorities": dict(PROFILE_PRIORITIES["balanced"]),
-        "auto_optimize": True,
+        "assignments": dict(DEFAULT_ASSIGNMENTS),
         "pools": [],
     }
 
@@ -147,6 +124,11 @@ async def seed_hardware():
     else:
         # rafraîchit la détection matérielle, conserve la config existante
         await db.hardware.update_one({"id": "global"}, {"$set": info})
+        # nettoie les champs de l'ex-panneau "Profils & priorités" (supprimé, jamais réellement branché)
+        await db.hardware.update_one(
+            {"id": "global"},
+            {"$unset": {"config.profile": "", "config.priorities": "", "config.auto_optimize": ""}},
+        )
 
 
 async def _load() -> dict:
@@ -214,8 +196,6 @@ async def _monitor_snapshot() -> dict:
 # ---------- Schemas ----------
 class ConfigUpdate(BaseModel):
     assignments: Optional[Dict[str, str]] = None
-    priorities: Optional[Dict[str, str]] = None
-    auto_optimize: Optional[bool] = None
 
 
 # ---------- Endpoints ----------
@@ -236,8 +216,6 @@ async def get_config(user: dict = Depends(get_current_user)):
     return {
         **cfg,
         "options": FUNCTION_OPTIONS, "labels": FUNCTION_LABELS,
-        "priority_levels": PRIORITY_LEVELS, "priority_engines": PRIORITY_ENGINES,
-        "profiles": PROFILES,
     }
 
 
@@ -249,31 +227,8 @@ async def update_config(data: ConfigUpdate, user: dict = Depends(require_role("a
         for k, v in data.assignments.items():
             if k in FUNCTION_OPTIONS and v in FUNCTION_OPTIONS[k]:
                 cfg["assignments"][k] = v
-        cfg["profile"] = "custom"   # toute modification manuelle -> profil personnalisé
-    if data.priorities is not None:
-        for k, v in data.priorities.items():
-            if k in PRIORITY_ENGINES and v in PRIORITY_LEVELS:
-                cfg["priorities"][k] = v
-        cfg["profile"] = "custom"
-    if data.auto_optimize is not None:
-        cfg["auto_optimize"] = data.auto_optimize
     await db.hardware.update_one({"id": "global"}, {"$set": {"config": cfg}})
-    await log_audit(user, "hardware_config_updated", cfg["profile"])
-    return cfg
-
-
-@hardware_router.post("/profile/{profile}")
-async def apply_profile(profile: str, user: dict = Depends(require_role("admin"))):
-    if profile not in PROFILES:
-        raise HTTPException(400, "Profil inconnu")
-    doc = await _load()
-    cfg = doc.get("config") or _default_config()
-    cfg["profile"] = profile
-    if profile != "custom":
-        cfg["assignments"] = dict(PROFILE_ASSIGNMENTS[profile])
-        cfg["priorities"] = dict(PROFILE_PRIORITIES[profile])
-    await db.hardware.update_one({"id": "global"}, {"$set": {"config": cfg}})
-    await log_audit(user, "hardware_profile_applied", profile)
+    await log_audit(user, "hardware_config_updated", "assignments")
     return cfg
 
 

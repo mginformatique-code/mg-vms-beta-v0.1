@@ -23,8 +23,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import useDeviceCapabilities from "@/hooks/useDeviceCapabilities";
-import WebRTCPlayer from "@/components/WebRTCPlayer";
-import VideoPlayer from "@/components/video/VideoPlayer";
+import LivePlayer from "@/components/video/LivePlayer";
 import {
   Camera, Wifi, Video, Layers, Cpu, Volume2, Sun, Bell, Move3d, Wrench,
   ScanLine, RefreshCw, AlertCircle, CircleCheck, ChevronLeft, ChevronRight,
@@ -334,7 +333,7 @@ function LiveTab({ cameraId }) {
       <div className="flex items-center justify-between">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Moteur vidéo</div>
         <div className="text-[10px] mono uppercase tracking-wider px-2.5 py-1 border border-[#00E5FF]/60 bg-[#00E5FF]/15 text-[#00E5FF]"
-              data-testid="video-engine-badge">RTSP-NATIVE · WHEP</div>
+              data-testid="video-engine-badge">WEBRTC → MJPEG (auto)</div>
       </div>
       <div className="flex items-center gap-3 text-[10px] mono border border-border px-2 py-1" data-testid="pipeline-status-band">
         <span className={stateColor} data-testid="pipeline-status-state">
@@ -347,7 +346,10 @@ function LiveTab({ cameraId }) {
         {vs?.last_error && <span className="text-[#FF3333] truncate max-w-[280px]" title={vs.last_error} data-testid="pipeline-status-error">{vs.last_error}</span>}
       </div>
       <div className="aspect-video bg-black">
-        {cam && <VideoPlayer key={`${cameraId}-${reloadKey}`} camera={cam} className="w-full h-full" dataTestId="center-player" />}
+        {cam && (
+          <LivePlayer key={`${cameraId}-${reloadKey}`} camera={cam} hd={true}
+                      className="w-full h-full" dataTestId="center-player" />
+        )}
       </div>
     </Card>
   );

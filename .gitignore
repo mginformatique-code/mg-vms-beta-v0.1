@@ -87,6 +87,15 @@ android-sdk/
 # (install.sh les exige — le vrai .env reste ignoré par les règles ci-dessus)
 !.env.example
 !deploy-app/.env.example
+
+# go2rtc.yaml : réécrit en continu par le container go2rtc lui-même à chaque
+# PUT /api/streams (persistance des flux caméra réels) — un fichier suivi par
+# git ET muté en permanence au runtime bloque tout `git pull` futur (diff
+# local permanent). Seul le template (streams démo) est versionné ; le vrai
+# fichier est généré une fois par install.sh à partir du template puis laissé
+# intact (voir deploy-app/install.sh).
+deploy-app/go2rtc.yaml
+!deploy-app/go2rtc.yaml.example
 credentials.json
 *.key
 .credentials

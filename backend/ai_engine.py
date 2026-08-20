@@ -15,6 +15,7 @@ sont conservées comme wrappers/re-exports de compatibilité.
 import asyncio
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -371,12 +372,41 @@ def _ensure_frame_thumb(result: dict):
     if "frame_thumb" in result:
         return result["frame_thumb"]
     ctx = result.get("_ctx")
+    # v3.1.2 · 1920 au lieu du défaut 1280 : la source peut désormais être
+    # capturée en natif (ai_resolution="native", ex. 3840x2160) mais la
+    # vignette restait bridée à 1280px quel que soit le réglage — la montée
+    # en résolution ne se voyait jamais dans les captures/miniatures UI.
+    # 1920 plutôt que le natif complet : ces images sont stockées en base64
+    # DANS les documents Mongo (pas des fichiers), pousser au 4K partout
+    # multiplierait leur poids par ~9 au lieu de ~2.
     if ctx is not None:
-        thumb = ctx.jpeg_data_uri()
+        thumb = ctx.jpeg_data_uri(max_width=1920)
     else:
         img = result.get("_img_bgr")
-        thumb = _jpeg_data_uri(img) if img is not None else None
+        thumb = _jpeg_data_uri(img, max_width=1920) if img is not None else None
     result["frame_thumb"] = thumb
+    return thumb
+
+
+def _ensure_frame_thumb_sm(result: dict):
+    """Miniature légère pour la grille de la page Événements (galerie).
+
+    v3.1.4 · La galerie affiche des cartes d'à peine ~200px de large mais
+    transportait la même image que la vue détaillée (1920px) — chaque
+    chargement de la page Événements retéléchargeait des centaines de Ko
+    d'images pour un rendu minuscule. Variante dédiée, même source (même
+    ctx, un seul décodage), juste redimensionnée plus petit. La vue
+    détaillée (EventViewer) continue d'utiliser `frame_thumb` (1920px).
+    """
+    if "frame_thumb_sm" in result:
+        return result["frame_thumb_sm"]
+    ctx = result.get("_ctx")
+    if ctx is not None:
+        thumb = ctx.jpeg_data_uri(max_width=384, quality=70)
+    else:
+        img = result.get("_img_bgr")
+        thumb = _jpeg_data_uri(img, max_width=384, quality=70) if img is not None else None
+    result["frame_thumb_sm"] = thumb
     return thumb
 
 
@@ -487,6 +517,47 @@ async def _fetch_frame(camera_id: str):
     return None
 
 
+# v3.1.3 · Étape 0 de la refonte GPU (voir plan "cœur vidéo") : remettre
+# ``ai_resolution`` au pilotage de la résolution de DÉCODAGE CONTINU,
+# maintenant que frame_source.py limite le débit de sortie AVANT
+# hwdownload (voir _OUTPUT_FPS dans frame_source.py) — le problème mesuré
+# n'était pas "natif = trop lourd", c'était "décoder/télécharger à ~20-25 fps
+# alors que la boucle IA ne consomme qu'à ~6,7 fps" (>70% des frames jetées
+# sans jamais être lues). Avec le débit limité, natif redevient jouable en
+# continu. La récupération HD à la demande (_stage_roi) reste en place comme
+# filet de sécurité pour les caméras encore en 1080p/native si ce test ne
+# suffisait pas — sans effet si ctx.image est déjà natif.
+AI_RESOLUTION_PRESETS = {
+    "720p": (1280, 720),
+    "1080p": (1920, 1080),
+}
+
+
+def _resolve_ai_resolution(cam: dict) -> tuple[int, int]:
+    """(width, height) pour frame_source.start() selon ``cam.ai_resolution``.
+
+    "native" résout la résolution réelle depuis ``cam.resolution`` (déjà
+    sondée à la création/ONVIF, ex. "3840x2160") plutôt que de passer
+    width=0/height=0 : le thread lecteur de frame_source.py suppose une
+    taille de buffer fixe (1280×720 par défaut) quand width/height=0, donc
+    un vrai "0 = natif" désynchroniserait la lecture au lieu de fonctionner
+    (voir frame_source.py::_reader_loop, commentaire "Simplification").
+    """
+    preset = (cam.get("ai_resolution") or "720p").lower()
+    if preset in AI_RESOLUTION_PRESETS:
+        return AI_RESOLUTION_PRESETS[preset]
+    if preset == "native":
+        res = (cam.get("resolution") or "").lower().replace(" ", "")
+        m = re.match(r"^(\d{2,5})x(\d{2,5})$", res)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+        logger.warning(
+            "ai_resolution=native mais cam.resolution absent/invalide (%s) pour %s — fallback 720p",
+            res or "vide", cam.get("id"),
+        )
+    return AI_RESOLUTION_PRESETS["720p"]
+
+
 async def _sync_frame_source_workers(cams: list[dict], *,
                                        only: Optional[set[str]] = None) -> None:
     """Synchronise les workers ffmpeg persistants avec les caméras actives.
@@ -499,6 +570,7 @@ async def _sync_frame_source_workers(cams: list[dict], *,
           intact. Marque ``topology_syncs_partial``.
     """
     import frame_source
+    from streaming import _is_direct_rtsp, _stream_name
     go2rtc_rtsp = os.environ.get("GO2RTC_RTSP", "rtsp://go2rtc:8554")
 
     partial = only is not None
@@ -517,12 +589,22 @@ async def _sync_frame_source_workers(cams: list[dict], *,
             continue
         ai_url = (cam.get("ai_rtsp_url") or "").strip()
         native_url = (cam.get("rtsp_url") or "").strip()
-        # video-engine-v3 · Source IA RTSP-native directe caméra (plus jamais
-        # de proxy go2rtc/MediaMTX). `ai_rtsp_url` reste prioritaire si l'admin
-        # a configuré un flux dédié IA (typiquement le sub H264 low-res).
+        # `ai_rtsp_url` reste prioritaire si l'admin a configuré un flux DÉDIÉ IA
+        # (profil caméra distinct, ex. sub H264 low-res) — ce flux n'est pas
+        # enregistré dans Go2RTC, donc reste une connexion directe assumée.
+        #
+        # P0-fix · Connexion RTSP mutualisée : sinon (flux natif), on partage la
+        # connexion Go2RTC déjà ouverte pour le recorder/preview/statut au lieu
+        # d'ouvrir une 2e connexion directe vers la caméra — certaines caméras
+        # (Reolink notamment) refusent plusieurs connexions RTSP concurrentes,
+        # ce qui faisait échouer frame_source en boucle (0 FPS, reconnects).
+        # stream_mode=direct_rtsp reste la seule exception (Go2RTC non utilisé).
         if ai_url:
             rtsp_url = ai_url
             source_type = "direct-ai"
+        elif native_url and not _is_direct_rtsp(cam):
+            rtsp_url = f"{go2rtc_rtsp}/{_stream_name(cam_id)}"
+            source_type = "go2rtc-shared"
         elif native_url:
             rtsp_url = native_url
             source_type = "direct-native"
@@ -537,10 +619,19 @@ async def _sync_frame_source_workers(cams: list[dict], *,
         if codec == "hevc":
             codec = "h265"
         try:
-            frame_source.start(cam_id, rtsp_url, codec=codec, width=1280, height=720)
+            ai_w, ai_h = _resolve_ai_resolution(cam)
+            # v3.1.2 · frame_source.start() appelle stop() en interne si la
+            # config a changé — stop() fait un `reader_thread.join(timeout=5)`
+            # BLOQUANT, déporté sur un thread via asyncio.to_thread pour ne
+            # jamais geler la boucle asyncio principale (/health, /auth/me...)
+            # même si un redémarrage de worker se produit (résolution/RTSP
+            # URL/codec changés).
+            await asyncio.to_thread(frame_source.start, cam_id, rtsp_url,
+                                     codec=codec, width=ai_w, height=ai_h)
             _hot_reload_metrics["frame_source_starts"] += 1
-            logger.info("frame_source.start %s src=%s codec=%s (%s)",
-                        cam_id, source_type, codec, rtsp_url[:60] + ("…" if len(rtsp_url) > 60 else ""))
+            logger.info("frame_source.start %s src=%s codec=%s %dx%d (%s)",
+                        cam_id, source_type, codec, ai_w, ai_h,
+                        rtsp_url[:60] + ("…" if len(rtsp_url) > 60 else ""))
         except Exception as e:
             logger.warning("frame_source.start(%s) échec: %s", cam_id, e)
 
@@ -555,7 +646,7 @@ async def _sync_frame_source_workers(cams: list[dict], *,
     for cid in stale:
         if cid in current:
             try:
-                frame_source.stop(cid)
+                await asyncio.to_thread(frame_source.stop, cid)  # v3.1.2 · voir commentaire start() ci-dessus
                 _hot_reload_metrics["frame_source_stops"] += 1
             except Exception:
                 pass

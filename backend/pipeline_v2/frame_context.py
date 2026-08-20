@@ -40,7 +40,23 @@ def dominant_color_fr(bgr_crop):
         if mean_v > 170:
             return "Blanc"
         return "Gris"
-    hist = cv2.calcHist([hsv], [0], None, [180], [0, 180]).flatten()
+    # v3.1.2 · Fix : ne voter sur la teinte QUE parmi les pixels réellement
+    # saturés (carrosserie colorée), pas tout le crop. Sinon un feu arrière
+    # rouge très saturé mais minoritaire en surface (quelques % du crop)
+    # suffit à faire remonter mean_s au-dessus de 45 ET à dominer
+    # l'histogramme de teinte non masqué — une voiture BLANCHE vue de
+    # l'arrière ressort alors classée "Rouge". Repéré via un cas réel
+    # (Twingo blanche classée Rouge, feux arrière visibles sur le crop).
+    colored_mask = ((s > 45) & (v > 60)).astype(np.uint8)
+    total_px = bgr_crop.shape[0] * bgr_crop.shape[1]
+    n_colored = int(colored_mask.sum())
+    if total_px == 0 or n_colored / total_px < 0.20:
+        # Pas assez de carrosserie réellement colorée pour faire confiance à
+        # une teinte dominante (ex : blanche/grise avec juste des feux/reflets
+        # colorés) — retomber sur la classification neutre déjà écartée trop
+        # tôt par le test mean_s ci-dessus.
+        return "Blanc" if mean_v > 170 else "Gris"
+    hist = cv2.calcHist([hsv], [0], colored_mask, [180], [0, 180]).flatten()
     hue = int(hist.argmax())
     if hue < 8 or hue >= 168:
         return "Rouge"

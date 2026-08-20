@@ -3,23 +3,11 @@
   "title": "Intrusion agricole",
   "type": "object",
   "properties": {
-    "enabled_for_demo": {
-      "type": "boolean",
-      "default": false,
-      "title": "Activer la démo"
-    },
-    "sensitivity": {
-      "type": "number",
-      "default": 0.5,
-      "minimum": 0.0,
-      "maximum": 1.0,
-      "title": "Sensibilité de détection"
-    },
-    "min_confidence": {
-      "type": "number",
-      "default": 0.6,
-      "minimum": 0.0,
-      "maximum": 1.0
-    }
+    "zone": {"type": "array", "title": "Polygone de la zone protégée", "default": [[100,100],[700,100],[700,500],[100,500]]},
+    "target_labels": {"type": "array", "items": {"type": "string"}, "default": ["person","car","truck","motorcycle"], "title": "Labels surveillés"},
+    "night_only": {"type": "boolean", "default": false, "title": "Alerte uniquement de nuit"},
+    "night_hour_start": {"type": "integer", "default": 22, "minimum": 0, "maximum": 23, "title": "Début nuit (heure)"},
+    "night_hour_end": {"type": "integer", "default": 6, "minimum": 0, "maximum": 23, "title": "Fin nuit (heure)"},
+    "cooldown_s": {"type": "number", "default": 60, "minimum": 1, "title": "Anti-répétition par track (secondes)"}
   }
 }

@@ -44,7 +44,17 @@ def test_compute_plugins_used_none_whitelist():
     from pipeline_v2.downstream import _compute_plugins_used
     result = _compute_plugins_used({"id": "cam1"})  # pas de enabled_plugins
     assert "yolov11" in result
-    assert "fast-alpr" in result
+    # v3.1.4 · fast-alpr n'est plus CORE : fermeture stricte comme dans
+    # camera_worker.py::_stage_anpr — pas de whitelist ⇒ jamais listé.
+    assert "fast-alpr" not in result
+
+
+def test_compute_plugins_used_fast_alpr_requires_whitelist():
+    from pipeline_v2.downstream import _compute_plugins_used
+    without = _compute_plugins_used({"id": "cam1", "enabled_plugins": []})
+    assert "fast-alpr" not in without
+    withit = _compute_plugins_used({"id": "cam1", "enabled_plugins": ["fast-alpr"]})
+    assert "fast-alpr" in withit
 
 
 def test_downstream_annotates_events_with_plugins_used():

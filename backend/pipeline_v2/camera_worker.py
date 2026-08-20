@@ -35,6 +35,44 @@ def get_debug_snapshot(camera_id: str) -> dict:
     return _last_debug.get(camera_id, {})
 
 
+# v3.1.3 · Grab HD à la demande pour les crops (voir _stage_roi ci-dessous).
+# Filet de sécurité : le scan continu (YOLO/motion) suit désormais
+# ``cam.ai_resolution`` (ai_engine._resolve_ai_resolution), rendu tenable
+# même en "native" par la limitation de débit de frame_source.py
+# (MGVMS_AI_OUTPUT_FPS — ne matérialise/télécharge plus qu'à la cadence de
+# consommation IA, pas à la cadence caméra). Si jamais ctx.image n'était pas
+# déjà en pleine résolution pour une caméra donnée, ce grab HD via go2rtc
+# (frame.jpeg, même mécanisme que /api/stream/{id}/frame.jpeg) reste
+# disponible comme repli, déclenché uniquement au moment d'une détection.
+def _fetch_hd_crop_source(camera_id: str):
+    """Frame BGR (numpy) en résolution native via go2rtc, ou None si échec.
+
+    Synchrone : CameraWorker.analyze() tourne déjà hors boucle asyncio
+    (ai_engine.py l'appelle via asyncio.to_thread), donc un appel HTTP
+    bloquant ici ne gèle rien d'autre.
+    """
+    try:
+        import cv2
+        import numpy as np
+        import httpx
+        from streaming import GO2RTC_URL, _stream_name
+    except Exception:
+        return None
+    name = _stream_name(camera_id)
+    for src in (name, f"{name}_hd"):
+        try:
+            with httpx.Client(timeout=4.0) as client:
+                r = client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": src})
+            if r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff":
+                arr = np.frombuffer(r.content, dtype=np.uint8)
+                img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                if img is not None and img.size > 0:
+                    return img
+        except Exception:
+            continue
+    return None
+
+
 class CameraWorker:
     """Pipeline d'analyse d'UNE caméra — état strictement isolé."""
 
@@ -174,15 +212,36 @@ class CameraWorker:
         inspector.record(self.camera_id, "tracking", ms)
         inspector.set_meta(self.camera_id, tracker=meta.get("algo_effective"))
 
-    def _stage_roi(self, ctx: FrameContext) -> None:
+    def _stage_roi(self, ctx: FrameContext, camera: Optional[dict] = None) -> None:
         """Extraction ROI véhicules — UN SEUL crop par véhicule, partagé
-        ensuite par fast-alpr ET tous les moteurs ANPR cloud."""
+        ensuite par fast-alpr ET tous les moteurs ANPR cloud.
+
+        v3.1.2 · Si la caméra demande mieux que 720p (``ai_resolution``) ET
+        qu'au moins un véhicule est détecté, une frame HD est récupérée à la
+        demande (voir _fetch_hd_crop_source) et les crops sont découpés
+        dedans (bbox mise à l'échelle) au lieu de la frame basse résolution
+        du scan continu. Échec du grab HD → repli silencieux sur le crop
+        basse résolution, jamais bloquant pour le pipeline.
+        """
         import ai_engine as _ae
         t0 = time.monotonic()
         h, w = ctx.height, ctx.width
-        for d in ctx.detections:
-            if d["class"] not in _ae.VEHICLE_CLASSES:
-                continue
+        vehicle_dets = [d for d in ctx.detections if d["class"] in _ae.VEHICLE_CLASSES]
+        if not vehicle_dets:
+            ctx.timings["roi_ms"] = round((time.monotonic() - t0) * 1000, 1)
+            return
+
+        hd_img, hd_scale = None, None
+        ai_res = ((camera or {}).get("ai_resolution") or "720p").lower()
+        if ai_res != "720p":
+            hd_img = _fetch_hd_crop_source(self.camera_id)
+            if hd_img is not None and w > 0 and h > 0:
+                hd_h, hd_w = hd_img.shape[:2]
+                hd_scale = (hd_w / w, hd_h / h)
+            else:
+                hd_img = None
+
+        for d in vehicle_dets:
             vx1, vy1, vx2, vy2 = d["_bbox"]
             pad_x = int((vx2 - vx1) * 0.08)
             pad_y = int((vy2 - vy1) * 0.08)
@@ -190,9 +249,17 @@ class CameraWorker:
             cx2, cy2 = min(w, vx2 + pad_x), min(h, vy2 + pad_y)
             if cx2 - cx1 < 40 or cy2 - cy1 < 40:
                 continue
+            crop_source, rx1, ry1, rx2, ry2 = ctx.image, cx1, cy1, cx2, cy2
+            if hd_img is not None:
+                sx, sy = hd_scale
+                rx1, ry1 = int(cx1 * sx), int(cy1 * sy)
+                rx2, ry2 = int(cx2 * sx), int(cy2 * sy)
+                rx2 = max(rx1 + 1, min(hd_img.shape[1], rx2))
+                ry2 = max(ry1 + 1, min(hd_img.shape[0], ry2))
+                crop_source = hd_img
             ctx.vehicle_rois.append(VehicleROI(
                 owner=d, bbox=(cx1, cy1, cx2, cy2),
-                crop=ctx.image[cy1:cy2, cx1:cx2],
+                crop=crop_source[ry1:ry2, rx1:rx2],
                 track_id=d.get("track_id"),
             ))
         ms = (time.monotonic() - t0) * 1000
@@ -361,9 +428,15 @@ class CameraWorker:
                     ctx.plates.append({
                         "plate": plate_text,
                         "confidence": round(float(r.confidence), 2),
-                        "plate_crop": encode_jpeg_data_uri(plate_crop, 240),
+                        # v3.1.2 · 240→480 (plate_crop) et défaut→1920
+                        # (vehicle_crop) : voir commentaire
+                        # ai_engine.py::_ensure_frame_thumb, même fix —
+                        # 240px était bien trop serré pour zoomer sur une
+                        # plaque, surtout maintenant que la source peut être
+                        # captée en natif (ai_resolution="native").
+                        "plate_crop": encode_jpeg_data_uri(plate_crop, max_width=480),
                         # Crop véhicule PARTAGÉ (memoizé) — encodé une seule fois
-                        "vehicle_crop": roi.jpeg_data_uri(),
+                        "vehicle_crop": roi.jpeg_data_uri(max_width=1920),
                         "vehicle_type": roi.owner["label"],
                         "vehicle_color": roi.owner["vehicle_color"],
                         "engine": _ocr_name,  # v0.5.6 : nom depuis le registry
@@ -458,7 +531,7 @@ class CameraWorker:
         with _trace_stage(_trc, "tracking"):
             self._stage_tracking(ctx, enabled_plugins, camera)
         with _trace_stage(_trc, "roi"):
-            self._stage_roi(ctx)
+            self._stage_roi(ctx, camera)
         with _trace_stage(_trc, "anpr"):
             self._stage_anpr(ctx, enabled_plugins, camera)
 

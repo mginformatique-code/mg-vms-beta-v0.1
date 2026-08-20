@@ -26,6 +26,7 @@ MIN_FREE_GB = float(os.environ.get("RECORD_MIN_FREE_GB", "2"))
 
 _processes: dict[str, asyncio.subprocess.Process] = {}
 _pools_cache: dict = {}  # id -> {path, max_size_gb, enabled, ...}
+_stderr_logs: dict[str, Path] = {}  # camera_id -> chemin du log stderr ffmpeg (dernier restart)
 
 
 async def _load_pools() -> None:
@@ -70,10 +71,19 @@ async def _start_ffmpeg(cam: dict) -> None:
     camera_id = cam["id"]
     out_dir = _cam_target_dir(cam)
     out = out_dir / "%Y%m%d_%H%M%S.mp4"
-    # video-engine-v3 · recorder RTSP-native : lecture DIRECTE de la caméra
-    # (plus de proxy go2rtc/mediamtx), copie sans transcodage.
-    from streaming import _build_rtsp_url
-    src = _build_rtsp_url(cam)
+    # P0-fix · Connexion RTSP mutualisée : certaines caméras (Reolink
+    # notamment) refusent une 2e connexion RTSP concurrente — le recorder
+    # ouvrait sa propre connexion en plus de celle de l'IA (frame_source),
+    # provoquant des timeouts/déconnexions en boucle. Sauf stream_mode=
+    # direct_rtsp (contournement explicite de Go2RTC), le recorder lit
+    # maintenant depuis le relais Go2RTC déjà ouvert (1 seule connexion
+    # réelle vers la caméra, partagée avec l'IA/preview/statut) — copie
+    # brute, zéro transcodage, même qualité qu'une lecture directe.
+    from streaming import _build_rtsp_url, _is_direct_rtsp, _stream_name
+    if _is_direct_rtsp(cam):
+        src = _build_rtsp_url(cam)
+    else:
+        src = f"{GO2RTC_RTSP}/{_stream_name(camera_id)}"
     cmd = [
         "ffmpeg", "-nostdin", "-loglevel", "error",
         "-rtsp_transport", "tcp", "-i", src,
@@ -82,10 +92,21 @@ async def _start_ffmpeg(cam: dict) -> None:
         "-reset_timestamps", "1", "-strftime", "1",
         str(out),
     ]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        close_fds=True, start_new_session=True)
+    # v3.1.4 · stderr n'était jamais capturé (DEVNULL) — quand ffmpeg crashait
+    # (observé : caméra plantée peu après démarrage, flux go2rtc corrompu),
+    # le watchdog du recorder_loop savait QUE le process était mort mais
+    # jamais POURQUOI. Tronqué à chaque (re)démarrage : on ne garde que la
+    # dernière tentative, pas un historique qui grossirait indéfiniment.
+    stderr_log = out_dir / ".ffmpeg-stderr.log"
+    stderr_f = open(stderr_log, "wb")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=stderr_f,
+            close_fds=True, start_new_session=True)
+    finally:
+        stderr_f.close()  # le enfant a déjà son propre descripteur dupliqué
     _processes[camera_id] = proc
+    _stderr_logs[camera_id] = stderr_log
     logger.info("Enregistrement démarré : caméra %s (pid %s) → %s", camera_id, proc.pid, out_dir)
 
 
@@ -138,6 +159,22 @@ async def _index_segments(cam: dict) -> None:
         duration = await asyncio.to_thread(_probe_duration, f)
         if duration <= 0:
             continue
+        # v3.1.4 · Un segment `-c copy` nourri par un flux go2rtc avec des
+        # discontinuités de timestamps peut produire un MP4 dont les
+        # métadonnées de durée sont délirantes (observé : 28h pour 13 Mo,
+        # sur un segment cible de SEGMENT_SECONDS=120s) — ffprobe rapporte
+        # fidèlement cette valeur corrompue, donc on ne peut pas s'y fier
+        # aveuglément : un `end` erroné empoisonne l'index (ce segment se
+        # met alors à "couvrir" n'importe quel événement pendant des heures
+        # via la requête de plage dans _lookup_recording_for). On clamp à
+        # une marge large mais finie autour de la durée cible du segment.
+        MAX_PLAUSIBLE = SEGMENT_SECONDS * 3
+        if duration > MAX_PLAUSIBLE:
+            logger.warning(
+                "Durée aberrante ignorée : %s → ffprobe=%.0fs (clampé à %ds) — "
+                "probable métadonnée MP4 corrompue (flux source discontinu)",
+                f, duration, MAX_PLAUSIBLE)
+            duration = MAX_PLAUSIBLE
         end = start + timedelta(seconds=duration)
         flags = await _event_flags(cam["id"], start.isoformat(), end.isoformat())
         # Filtrage par mode d'enregistrement (motion/ai) : purge immédiate si aucun événement
@@ -477,13 +514,25 @@ async def recorder_loop() -> None:
                 if proc is None or proc.returncode is not None:
                     # Watchdog FFmpeg (P1) — trace la reprise dans diagnostics_events
                     if proc is not None and proc.returncode is not None:
+                        stderr_tail = ""
+                        log_path = _stderr_logs.get(cam["id"])
+                        if log_path is not None:
+                            try:
+                                stderr_tail = log_path.read_text(errors="replace")[-2000:].strip()
+                            except OSError:
+                                pass
+                        logger.warning(
+                            "recorder.watchdog : ffmpeg mort pour %s (rc=%s) — relance auto%s",
+                            cam["id"], proc.returncode,
+                            f" — stderr: {stderr_tail}" if stderr_tail else " (stderr vide)",
+                        )
                         try:
                             from diagnostics import record_disconnect
                             await record_disconnect(
                                 cam,
                                 f"ffmpeg process died (rc={proc.returncode}) — restart auto",
                                 {"pid": getattr(proc, "pid", None), "returncode": proc.returncode,
-                                 "source": "recorder.watchdog"},
+                                 "source": "recorder.watchdog", "stderr_tail": stderr_tail},
                             )
                         except Exception:
                             logger.exception("recorder.watchdog record_disconnect failed")

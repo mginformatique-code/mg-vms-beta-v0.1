@@ -261,20 +261,21 @@ def test_register_camera_stream_still_skips_direct_rtsp():
 
 
 def test_sync_all_streams_purges_direct_residues_in_source():
-    """sync_all_streams doit purger les résidus Go2RTC de TOUTES les caméras
-    réelles (video-pipeline-v2 : Go2RTC = legacy isolé, démos uniquement)."""
+    """sync_all_streams doit purger les résidus Go2RTC des caméras
+    stream_mode=direct_rtsp (Solution B : Go2RTC + MJPEG, direct_rtsp = seule
+    exception)."""
     with open("/app/backend/streaming.py") as f:
         src = f.read()
-    assert "video_v2_purge" in src
+    assert "direct_rtsp_purge" in src
     assert "_is_direct_rtsp" in src
 
 
 def test_direct_branch_precedes_ensure_variants_in_source():
-    """Dans live_mjpeg ET frame_jpeg, le dispatch video-pipeline-v2 (caméras
-    réelles) doit précéder l'appel _ensure_variants_cached (réservé démos)."""
+    """Dans live_mjpeg ET frame_jpeg, le dispatch stream_mode=direct_rtsp doit
+    précéder l'appel _ensure_variants_cached (réservé aux caméras go2rtc)."""
     with open("/app/backend/streaming.py") as f:
         src = f.read()
-    for fn, marker in (("async def live_mjpeg", "_video_v2_mjpeg_response"),
+    for fn, marker in (("async def live_mjpeg", "_direct_live_mjpeg_response"),
                         ("async def frame_jpeg(", "_direct_frame_jpeg")):
         body = src.split(fn, 1)[1]
         i_direct = body.find(marker)

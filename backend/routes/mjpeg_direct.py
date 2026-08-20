@@ -36,25 +36,48 @@ _EOI = b"\xff\xd9"       # End Of Image JPEG
 
 
 def _build_ffmpeg_cmd(rtsp_url: str, transport: str, target_fps: int, quality: int,
-                       max_width: int = 0) -> list:
+                       max_width: int = 0, codec: str = "") -> list:
     """Construit la commande ffmpeg : RTSP → JPEGs consécutifs sur stdout.
 
     -q:v 2..8 (JPEG quality, plus petit = meilleur). Défaut 5 = équilibre.
     -r fps limite le débit de sortie pour ne pas saturer le réseau/navigateur.
     -an drop audio (économie CPU).
     max_width > 0 → scale à cette largeur (variante SD faible bande passante).
+
+    `codec` ("h264"/"h265"/"hevc") : si un GPU NVDEC est disponible (même détection
+    que frame_source.py — pas de 2e sonde), décode via hwaccel cuda au lieu du
+    logiciel. Seul le DÉCODAGE passe sur GPU (`hwdownload` immédiat) ; le scale et
+    l'encodage JPEG restent inchangés (logiciel, comme avant) — changement minimal,
+    cible uniquement le goulot d'étranglement CPU du décodage 4K/HEVC.
     """
     quality = max(2, min(int(quality or 5), 15))
     fps = max(1, min(int(target_fps or 8), 15))  # 1-15 fps pour preview navigateur
-    cmd = [
-        "ffmpeg", "-hide_banner", "-loglevel", "error",
-        "-rtsp_transport", transport,
-        "-i", rtsp_url,
-        "-an",
-        "-r", str(fps),
-    ]
+
+    use_gpu = False
+    codec = (codec or "").lower()
+    if codec in ("h264", "h265", "hevc"):
+        try:
+            from frame_source import _use_gpu as _fs_use_gpu
+            use_gpu = _fs_use_gpu()
+        except Exception:
+            use_gpu = False
+
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-rtsp_transport", transport]
+    if use_gpu:
+        # Même pattern que frame_source.py : décode NVDEC, frame rapatriée en CPU
+        # immédiatement après (hwdownload) — le reste du pipeline ne change pas.
+        cmd += ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
+        cmd += ["-c:v", "hevc_cuvid" if codec in ("h265", "hevc") else "h264_cuvid"]
+    cmd += ["-i", rtsp_url, "-an", "-r", str(fps)]
+
+    vf_parts = []
+    if use_gpu:
+        vf_parts += ["hwdownload", "format=nv12"]
     if max_width and int(max_width) > 0:
-        cmd += ["-vf", f"scale={int(max_width)}:-2"]
+        vf_parts.append(f"scale={int(max_width)}:-2")
+    if vf_parts:
+        cmd += ["-vf", ",".join(vf_parts)]
+
     cmd += [
         "-q:v", str(quality),
         "-f", "image2pipe",
@@ -144,7 +167,7 @@ async def mjpeg_direct(
     if transport not in ("tcp", "udp"):
         transport = "tcp"
 
-    cmd = _build_ffmpeg_cmd(rtsp_url, transport, fps, q)
+    cmd = _build_ffmpeg_cmd(rtsp_url, transport, fps, q, codec=cam.get("codec") or "")
     return StreamingResponse(
         _mjpeg_stream_generator(cmd),
         media_type=f"multipart/x-mixed-replace; boundary={_BOUNDARY}",

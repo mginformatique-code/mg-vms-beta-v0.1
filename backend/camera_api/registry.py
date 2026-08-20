@@ -60,5 +60,6 @@ def _ensure_loaded() -> None:
     `@register_provider` ont bien été évalués."""
     if _REGISTRY:
         return
-    # Chargement explicite (un seul provider en Vague 1)
-    from .providers import reolink  # noqa: F401
+    # Chargement explicite — Reolink (Vague 1), Dahua + Hikvision (Vague 2,
+    # v3.1.5 : matériel réel disponible pour test côté utilisateur).
+    from .providers import dahua, hikvision, reolink  # noqa: F401

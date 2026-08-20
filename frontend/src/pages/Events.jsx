@@ -14,6 +14,34 @@ const TYPE_COLORS = {
   "Moto": "#0044FF", "Vélo": "#00E676", "Animal": "#FFB800", "Mouvement": "#FFB800",
 };
 
+// Types d'événements générés par les plugins (identifiants techniques "namespace.action") :
+// libellé FR + couleur, distincts des types du pipeline principal ci-dessus (déjà en FR).
+const PLUGIN_TYPE_LABELS = {
+  "occupancy.zone": "Occupation zone",
+  "occupancy.alert": "Capacité dépassée",
+  "counting.vehicle": "Comptage véhicules",
+  "counting.person": "Comptage personnes",
+  "alert.critical": "Alerte critique",
+  "alert.warning": "Alerte",
+};
+const PLUGIN_TYPE_COLORS = {
+  "occupancy.zone": "#0044FF",
+  "occupancy.alert": "#FF3333",
+  "counting.vehicle": "#0044FF",
+  "counting.person": "#FF3333",
+  "alert.critical": "#FF3333",
+  "alert.warning": "#FFB800",
+};
+// Repli générique pour un type de plugin pas encore mappé ci-dessus (ex. nouveau plugin installé)
+// plutôt que d'afficher l'identifiant technique brut ("some.new_type").
+function eventTypeLabel(type) {
+  if (TYPE_COLORS[type] || PLUGIN_TYPE_LABELS[type]) return PLUGIN_TYPE_LABELS[type] || type;
+  return String(type || "").replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+function eventTypeColor(type) {
+  return TYPE_COLORS[type] || PLUGIN_TYPE_COLORS[type] || "#0044FF";
+}
+
 // v1.0-rc4 · Fusion Événements/Véhicules : UNE seule vue avec chips de filtre.
 // Le chip « Plaques » affiche l'intégralité de l'ancien module Véhicules
 // (recherche IA, identités, anomalies, fiche complète). Zéro perte de feature.
@@ -36,6 +64,8 @@ export default function Events() {
   const [cameraId, setCameraId] = useState("");
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [viewerIdx, setViewerIdx] = useState(null);
   const [historyPlate, setHistoryPlate] = useState(null); // fiche véhicule depuis le viewer
   // v1.0-rc4 · Recherche IA disponible sur TOUTE la vue Événements
@@ -74,26 +104,60 @@ export default function Events() {
     setSearchParams(next, { replace: true });
   };
 
+  // v1.0-rc5 · Chargement progressif : 15 événements à la fois (au lieu de
+  // 60 systématiquement) — chaque événement embarque 2-3 images en base64
+  // (vignette + crops), retélécharger/redessiner tout ça en une fois pèse
+  // lourd. Le bouton "Charger plus" ajoute une page ; le poll périodique ne
+  // récupère plus qu'un petit lot pour repérer les nouveautés (fusion par id,
+  // les cartes déjà affichées ne sont jamais retéléchargées/redessinées).
+  const PAGE_SIZE = 15;
+  const buildParams = (extra) => {
+    const params = { limit: PAGE_SIZE, ...extra };
+    if (activeFilter.types) params.types = activeFilter.types.join(",");
+    if (cameraId) params.camera_id = cameraId;
+    return params;
+  };
+
   const load = useCallback(async () => {
     if (isPlaques) return;
     setLoading(true);
     try {
-      const params = { limit: 60 };
-      if (activeFilter.types) params.types = activeFilter.types.join(",");
-      if (cameraId) params.camera_id = cameraId;
-      const r = await api.get("/events", { params });
+      const r = await api.get("/events", { params: buildParams({ offset: 0 }) });
       setEvents(r.data);
+      setHasMore(r.data.length === PAGE_SIZE);
       setTotal(parseInt(r.headers["x-total-count"] || r.data.length, 10));
     } catch (e) {} finally { setLoading(false); }
   }, [isPlaques, activeFilter, cameraId]);
+
+  const poll = useCallback(async () => {
+    if (isPlaques) return;
+    try {
+      const r = await api.get("/events", { params: buildParams({ offset: 0 }) });
+      setEvents((prev) => {
+        const known = new Set(prev.map((e) => e.id));
+        const fresh = r.data.filter((e) => !known.has(e.id));
+        return fresh.length ? [...fresh, ...prev] : prev;
+      });
+      setTotal(parseInt(r.headers["x-total-count"] || 0, 10));
+    } catch (e) {}
+  }, [isPlaques, activeFilter, cameraId]);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const r = await api.get("/events", { params: buildParams({ offset: events.length }) });
+      setEvents((prev) => [...prev, ...r.data]);
+      setHasMore(r.data.length === PAGE_SIZE);
+    } catch (e) {} finally { setLoadingMore(false); }
+  };
 
   useEffect(() => { api.get("/cameras").then((r) => setCams(r.data)).catch(() => {}); }, []);
   useEffect(() => {
     if (isPlaques) return;
     load();
-    const iv = setInterval(load, 15000);
+    const iv = setInterval(poll, 15000);
     return () => clearInterval(iv);
-  }, [load, isPlaques]);
+  }, [load, poll, isPlaques]);
 
   return (
     <div className="p-4 md:p-6 space-y-4" data-testid="events-page">
@@ -208,11 +272,12 @@ export default function Events() {
             <button key={e.id} onClick={() => setViewerIdx(i)} className="border border-border bg-card overflow-hidden text-left hover:border-[#0044FF] transition-colors" data-testid="event-card">
               <div className="relative bg-black aspect-video cursor-zoom-in">
                 {e.thumbnail ? (
-                  <img src={e.thumbnail} alt={e.type} className="w-full h-full object-cover" />
+                  <img src={e.thumbnail_sm || e.thumbnail} alt={e.type} className="w-full h-full object-cover"
+                       loading="lazy" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center"><CamIcon size={20} className="text-white/30" /></div>
                 )}
-                <span className="absolute top-1.5 left-1.5 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 text-white" style={{ backgroundColor: TYPE_COLORS[e.type] || "#0044FF" }}>{e.type}</span>
+                <span className="absolute top-1.5 left-1.5 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 text-white" style={{ backgroundColor: eventTypeColor(e.type) }}>{eventTypeLabel(e.type)}</span>
                 {e.confidence != null && <span className="absolute top-1.5 right-1.5 text-[10px] mono px-1.5 py-0.5 bg-black/70 text-white">{Math.round(e.confidence * 100)}%</span>}
                 {e.plate && (
                   <span className="absolute bottom-1.5 left-1.5 text-[10px] mono font-bold px-1.5 py-0.5 bg-white text-black border border-black/40" data-testid="event-plate-badge">{e.plate}</span>
@@ -228,6 +293,16 @@ export default function Events() {
               </div>
             </button>
           ))}
+        </div>
+      )}
+
+      {!isPlaques && !smartResult && hasMore && shown.length > 0 && (
+        <div className="flex justify-center pt-2">
+          <button onClick={loadMore} disabled={loadingMore} data-testid="events-load-more"
+                  className="flex items-center gap-2 px-4 py-2 border border-border text-xs uppercase tracking-wider text-muted-foreground hover:text-foreground hover:border-[#0044FF]/60 disabled:opacity-50">
+            {loadingMore ? <Loader2 size={13} className="animate-spin" /> : null}
+            {loadingMore ? "Chargement…" : `Charger plus (${shown.length} / ${total})`}
+          </button>
         </div>
       )}
 

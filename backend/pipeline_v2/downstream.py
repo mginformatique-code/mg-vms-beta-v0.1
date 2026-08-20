@@ -149,7 +149,8 @@ def _det_thumb(det: dict):
     if crop is None:
         return None
     from .frame_context import encode_jpeg_data_uri
-    det["thumbnail"] = encode_jpeg_data_uri(crop)
+    # v3.1.2 · voir commentaire ai_engine.py::_ensure_frame_thumb (même fix)
+    det["thumbnail"] = encode_jpeg_data_uri(crop, max_width=1920)
     return det["thumbnail"]
 
 
@@ -157,9 +158,14 @@ def _det_thumb(det: dict):
 # v0.5.1.c · Multi-plugin tracking (events + plates)
 # ═══════════════════════════════════════════════════════════════════
 # Plugins CORE toujours actifs quand le pipeline tourne (ne dépendent pas de
-# la whitelist caméra). yolov11 = détection, bytetrack = tracking, fast-alpr =
-# OCR embarqué toujours dispatché sur les véhicules.
-_CORE_PLUGINS_ALWAYS_ON = ["yolov11", "bytetrack", "fast-alpr"]
+# la whitelist caméra). yolov11 = détection, bytetrack = tracking.
+# v3.1.4 · fast-alpr RETIRÉ d'ici : contrairement à yolov11/bytetrack, l'ANPR
+# N'est PAS inconditionnel — camera_worker.py::_stage_anpr applique une
+# fermeture stricte (enabled_plugins vide/absent ⇒ jamais dispatché). Le
+# lister ici affichait "fast-alpr actif" même sur des caméras où l'ANPR était
+# désactivé, alors qu'aucune plaque n'était réellement lue. Il redescend
+# maintenant par la whitelist ci-dessous, comme n'importe quel autre plugin.
+_CORE_PLUGINS_ALWAYS_ON = ["yolov11", "bytetrack"]
 
 
 def _compute_plugins_used(cam: dict) -> list[str]:
@@ -217,7 +223,8 @@ async def _prerun_multi_anpr(cam: dict, ctx, result: dict, now_iso: str) -> None
                         "plate": (pr.text or "").upper().strip(),
                         "confidence": round(float(getattr(pr, "confidence", 0.0)), 2),
                         "plate_crop": None,
-                        "vehicle_crop": _roi.jpeg_data_uri(),
+                        # v3.1.2 · voir commentaire ai_engine.py::_ensure_frame_thumb
+                        "vehicle_crop": _roi.jpeg_data_uri(max_width=1920),
                         "vehicle_type": _roi.owner.get("label"),
                         "vehicle_color": _roi.owner.get("vehicle_color"),
                         "track_id": _roi.track_id,
@@ -255,7 +262,8 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
         await db.events.insert_one({
             "id": str(uuid.uuid4()), "type": "Mouvement", **base,
             "confidence": None, "motion_pct": result["motion_pct"],
-            "thumbnail": _ae._ensure_frame_thumb(result), "vehicle_color": None,
+            "thumbnail": _ae._ensure_frame_thumb(result),
+            "thumbnail_sm": _ae._ensure_frame_thumb_sm(result), "vehicle_color": None,
             "plugins_used": plugins_used,
         })
 
@@ -289,6 +297,7 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
                         **base,
                         "confidence": m.get("similarity"),
                         "thumbnail": _ae._ensure_frame_thumb(result),
+                        "thumbnail_sm": _ae._ensure_frame_thumb_sm(result),
                         "vehicle_color": None,
                         "face_id": m.get("face_id"),
                         "face_name": m.get("name"),
@@ -302,6 +311,7 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
                             "severity": "critical",
                             "message": f"Visage sur liste de surveillance : {m.get('name')}",
                             "thumbnail": _ae._ensure_frame_thumb(result),
+                            "thumbnail_sm": _ae._ensure_frame_thumb_sm(result),
                             "acknowledged": False,
                             "plugin": "face_recognition",
                         })
@@ -340,6 +350,7 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
             "id": str(uuid.uuid4()), "type": det["label"], **base,
             "confidence": det["confidence"],
             "thumbnail": _ae._ensure_frame_thumb(result) or _det_thumb(det),
+            "thumbnail_sm": _ae._ensure_frame_thumb_sm(result) or _det_thumb(det),
             "crop_thumbnail": _det_thumb(det),
             "vehicle_color": det.get("vehicle_color"),
             "track_id": tid,
@@ -440,6 +451,7 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
                         "trackers": (_pr.plugins_used or {}).get("trackers", []),
                         "segmenters": (_pr.plugins_used or {}).get("segmenters", []),
                         "thumbnail": _ae._ensure_frame_thumb(result),
+                        "thumbnail_sm": _ae._ensure_frame_thumb_sm(result),
                         "data": be.get("data"),
                     })
 

@@ -1,4 +1,12 @@
-"""Tests d'intégration : 11 plugins ANPR découverts par le loader dynamique."""
+"""Tests d'intégration : 7 plugins ANPR découverts par le loader dynamique.
+
+v3.1.4 · openalpr, google-vision, azure-vision (APIs cloud jamais configurées
+en pratique) et custom-plugin-template (template dev, pas un vrai moteur)
+retirés du catalogue — ils s'activaient sans jamais rien produire, source de
+confusion (caméra affichée "ANPR actif" sans qu'aucun de ces moteurs ne
+sorte de résultat). Voir data/plugins/openalpr/plugin.py (avant suppression) :
+`_evaluate_state()` bloquait en "not_configured" sans `secret_key`.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -13,16 +21,15 @@ from plugin_manager.loader import PluginLoader
 from plugin_manager.bus import PluginBus
 from plugin_manager.config_store import PluginConfigStore
 
-# Les 11 plugins ANPR + 1 FrameAnalyzer YOLO attendus
+# Les 7 plugins ANPR + 1 FrameAnalyzer YOLO attendus
 EXPECTED_ANPR = {
-    "fast-alpr", "plate-recognizer", "openalpr", "codeproject-ai",
-    "paddle-ocr", "easyocr", "tesseract", "google-vision", "azure-vision",
-    "opencv-ocr", "custom-plugin-template",
+    "fast-alpr", "plate-recognizer", "codeproject-ai",
+    "paddle-ocr", "easyocr", "tesseract", "opencv-ocr",
 }
 EXPECTED_ALL = EXPECTED_ANPR | {"yolo-detection"}
 
 
-def test_all_11_anpr_plugins_are_discovered():
+def test_all_anpr_plugins_are_discovered():
     loader = PluginLoader(Path("/app/data/plugins"))
     manifests = loader.discover()
     names = {m.parent.name for m in manifests}
@@ -65,16 +72,13 @@ def test_unconfigured_plugins_are_not_dispatchable():
         # Compte les plugins ANPR dispatchables (state=ready)
         anpr_entries = [e for e in global_bus.list_entries() if e.interface == "PlateRecognizer"]
         # Sans credentials, la plupart des cloud/local doivent être non-dispatchables
-        assert len(anpr_entries) >= 10, f"Moins de 10 ANPR enregistrés: {len(anpr_entries)}"
+        assert len(anpr_entries) >= 6, f"Moins de 6 ANPR enregistrés: {len(anpr_entries)}"
         # Vérifie que active() filtre bien
         active_anpr = global_bus.active("PlateRecognizer")
         # Aucun plugin cloud ne devrait être actif sans clés
         active_names = {e.name for e in active_anpr}
         assert "plate-recognizer" not in active_names, \
             "plate-recognizer ne devrait pas être active sans api_token"
-        assert "openalpr" not in active_names
-        assert "azure-vision" not in active_names
-        assert "google-vision" not in active_names
     asyncio.run(_run())
 
 
@@ -88,28 +92,3 @@ def test_config_store_persists_across_instances(tmp_path):
     assert got["regions"] == ["fr"]
 
 
-def test_custom_plugin_becomes_ready_when_enabled():
-    """Test bout-en-bout : plugin custom passe not_configured → ready via config."""
-    async def _run():
-        loader = PluginLoader(Path("/app/data/plugins"))
-        await loader.discover_and_load_all()
-        from plugin_manager.bus import bus as global_bus
-
-        entry = next((e for e in global_bus.list_entries()
-                      if e.name == "custom-plugin-template"), None)
-        assert entry is not None
-        assert entry.state == "not_configured"
-
-        # Active la démo via l'API loader.reload_config
-        err = await loader.reload_config(
-            "custom-plugin-template",
-            {"enabled_for_demo": True, "demo_plate": "TEST-999", "demo_confidence": 0.75},
-        )
-        assert err is None
-        assert entry.state == "ready", f"state après reload: {entry.state}"
-        assert entry.is_dispatchable()
-
-        # Nettoyage
-        await loader.reload_config("custom-plugin-template", {"enabled_for_demo": False})
-        assert entry.state == "not_configured"
-    asyncio.run(_run())

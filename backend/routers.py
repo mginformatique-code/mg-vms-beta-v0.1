@@ -115,6 +115,17 @@ class CameraInput(BaseModel):
     ptz_enabled: bool = False
     record_enabled: bool = True
     detect_enabled: bool = False
+    # v3.1.3 · Pilote la résolution de décodage continu envoyée à YOLO/ANPR
+    # (ai_engine._resolve_ai_resolution → frame_source.start()). "native"
+    # résout la résolution réelle sondée sur la caméra (cam.resolution).
+    # Rendu à nouveau tenable en continu (y compris "native") par la
+    # limitation du débit de sortie AVANT hwdownload dans frame_source.py
+    # (MGVMS_AI_OUTPUT_FPS) — la boucle IA ne consomme qu'à ~6,7 fps, décoder/
+    # télécharger plus vite ne fait que gaspiller du transfert GPU→CPU.
+    # pipeline_v2.camera_worker._fetch_hd_crop_source reste un filet de
+    # sécurité (grab HD à la demande via go2rtc) si jamais la résolution
+    # continue ne suffit pas. N'affecte PAS l'enregistrement (`-c copy`).
+    ai_resolution: str = "720p"  # "720p" | "1080p" | "native"
     # v0.3 · Config caméra modulaire : liste des plugins IA activés sur cette
     # caméra. Vide → comportement legacy (piloté par detect_enabled). Chaque
     # entrée est un ``name`` de plugin enregistré sur le Plugin Bus (ex :
@@ -281,17 +292,17 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
     }
     await db.cameras.insert_one(dict(doc))
     await log_audit(user, "camera_created", data.name, f"Site: {site['name']} · Mode: {data.mode}")
-    # video-engine-v3 · déclenche le Video Core sur cette nouvelle caméra
+    # P0-fix · Solution B (Go2RTC + MJPEG) : enregistre la caméra dans Go2RTC
+    # dès la création (respecte stream_mode=direct_rtsp, idempotent, no-op
+    # pour les démos). Remplace l'ancien câblage systématique vers VideoCoreManager
+    # (WHEP), qui laissait Go2RTC orphelin pour toute caméra créée normalement.
     try:
-        payload["stream_pipeline"] = "rtsp_native"
+        from streaming import register_camera_stream
+        registered = await register_camera_stream(doc, caller="create_camera")
         await db.cameras.update_one({"id": doc["id"]},
-                                     {"$set": {"stream_pipeline": "rtsp_native",
-                                               "pipeline_status": "rtsp_native"}})
-        doc["stream_pipeline"] = "rtsp_native"
-        from video_core import VideoCoreManager
-        await VideoCoreManager.instance().ensure_camera(doc)
+                                     {"$set": {"pipeline_status": "go2rtc" if registered else "register_failed"}})
     except Exception:
-        logger.warning("create_camera %s : Video Core init a échoué (non bloquant)",
+        logger.warning("create_camera %s : enregistrement Go2RTC a échoué (non bloquant)",
                         doc.get("id"))
     # v0.7.e · Wave A · Hot Reload chirurgical : signale l'ajout au moteur IA
     # pour qu'il ne resynchronise QUE cette caméra au prochain cycle
@@ -462,13 +473,15 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
     await db.cameras.update_one({"id": camera_id}, {"$set": payload})
     await log_audit(user, "camera_updated", data.name, f"Mode: {data.mode}")
     updated = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
-    # video-engine-v3 · Video Core recycle automatiquement la source RTSP
+    # P0-fix · Solution B (Go2RTC + MJPEG) : re-déclare la caméra dans Go2RTC
+    # (force=True car l'URL/les identifiants ont pu changer).
     try:
-        from video_core import VideoCoreManager
-        await VideoCoreManager.instance().ensure_camera(updated)
-        await db.cameras.update_one({"id": camera_id}, {"$set": {"pipeline_status": "rtsp_native"}})
+        from streaming import register_camera_stream
+        registered = await register_camera_stream(updated, caller="update_camera", force=True)
+        await db.cameras.update_one({"id": camera_id},
+                                     {"$set": {"pipeline_status": "go2rtc" if registered else "register_failed"}})
     except Exception:
-        logger.warning("update_camera %s : Video Core refresh a échoué (non bloquant)",
+        logger.warning("update_camera %s : enregistrement Go2RTC a échoué (non bloquant)",
                         camera_id)
     # v0.7.e · Wave A · Hot Reload chirurgical : signale la modification au
     # moteur IA — seule CETTE caméra sera re-synchronisée (worker ffmpeg
@@ -487,10 +500,10 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
 async def delete_camera(camera_id: str, user: dict = Depends(require_role("technician"))):
     cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
     await db.cameras.delete_one({"id": camera_id})
-    # video-engine-v3 · stop la source RTSP dédiée à cette caméra
+    # P0-fix · Solution B (Go2RTC + MJPEG) : retire la caméra de Go2RTC.
     try:
-        from video_core import VideoCoreManager
-        await VideoCoreManager.instance().stop_camera(camera_id)
+        from streaming import unregister_camera_stream
+        await unregister_camera_stream(camera_id, caller="delete_camera")
     except Exception:
         pass
     # v0.7.e · Wave A · Hot Reload chirurgical : signale la suppression au
@@ -1855,10 +1868,25 @@ async def recordings_playback(recording_id: str, user: dict = Depends(require_pe
 
 
 @api_router.get("/recordings/{recording_id}/media")
-async def recordings_media(recording_id: str, request: Request):
-    """Fichier MP4 réel (lecture <video> — token accepté en query)."""
-    from streaming import stream_user
+async def recordings_media(recording_id: str, request: Request, t: float = 0):
+    """Fichier MP4 (lecture <video> — token accepté en query).
+
+    v3.1.1 · `t` (secondes, optionnel) : position de départ — utilisé par
+    EventViewer.jsx pour caler la lecture sur l'instant d'un événement. Sans
+    effet sur le chemin FileResponse direct (le navigateur seek nativement
+    via `video.currentTime` grâce au support HTTP Range) ; utilisé côté
+    serveur (ffmpeg -ss) sur le chemin transcodé.
+
+    v3.1.3 · Le chemin transcodé (HEVC→H264) génère désormais un fichier
+    temporaire COMPLET avant de répondre, au lieu de streamer un MP4
+    fragmenté en direct — un `<video>` HTML5 standard ne gérait pas la
+    durée/le seek de façon fiable dessus (lecture qui semblait s'arrêter
+    après ~2s au lieu de la durée réelle du segment). Voir
+    streaming.py::transcode_to_temp_mp4 pour le détail.
+    """
+    from streaming import stream_user, needs_transcode_for_browser, transcode_to_temp_mp4
     from fastapi.responses import FileResponse
+    from starlette.background import BackgroundTask
     user = await stream_user(request, request.query_params.get("token"))
     if not has_permission(user, "view_recordings"):
         raise HTTPException(403, "Permission requise : view_recordings")
@@ -1871,6 +1899,13 @@ async def recordings_media(recording_id: str, request: Request):
     path = rec.get("file_path")
     if not path or not os.path.exists(path):
         raise HTTPException(404, "Fichier vidéo introuvable")
+    if await asyncio.to_thread(needs_transcode_for_browser, path):
+        try:
+            temp_path = await transcode_to_temp_mp4(path, start_sec=t)
+        except Exception:
+            raise HTTPException(502, "Transcodage HEVC→H264 échoué")
+        return FileResponse(temp_path, media_type="video/mp4",
+                             background=BackgroundTask(os.unlink, temp_path))
     return FileResponse(path, media_type="video/mp4", filename=os.path.basename(path))
 
 

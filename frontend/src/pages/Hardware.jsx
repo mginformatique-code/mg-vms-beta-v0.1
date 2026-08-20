@@ -3,7 +3,7 @@ import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import {
   Server, Cpu, MemoryStick, HardDrive, Gauge, Zap, Activity, Thermometer,
-  Save, Loader2, Sparkles, Cctv, Brain, Film,
+  Save, Loader2, Cctv, Brain, Film,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -56,23 +56,17 @@ export default function Hardware() {
     return () => { cancelled = true; clearInterval(monRef.current); };
   }, [tab]);
 
-  const setAssign = (fn, val) => setCfg((c) => ({ ...c, assignments: { ...c.assignments, [fn]: val }, profile: "custom" }));
-  const setPrio = (eng, val) => setCfg((c) => ({ ...c, priorities: { ...c.priorities, [eng]: val }, profile: "custom" }));
+  const setAssign = (fn, val) => setCfg((c) => ({ ...c, assignments: { ...c.assignments, [fn]: val } }));
 
   const saveConfig = async () => {
     setSaving(true);
     try {
-      await api.put("/hardware/config", { assignments: cfg.assignments, priorities: cfg.priorities, auto_optimize: cfg.auto_optimize });
+      await api.put("/hardware/config", { assignments: cfg.assignments });
       toast.success(t("hw.saved")); loadCfg();
     } catch (e) { toast.error("Échec"); } finally { setSaving(false); }
   };
 
-  const applyProfile = async (p) => {
-    try { const { data } = await api.post(`/hardware/profile/${p}`); setCfg((c) => ({ ...c, ...data })); toast.success(`${t("hw.opt." + p)}`); }
-    catch (e) { toast.error("Échec"); }
-  };
-
-  const TABS = [["hardware", t("hw.tab.hardware")], ["resources", t("hw.tab.resources")], ["profiles", t("hw.tab.profiles")], ["monitor", t("hw.tab.monitor")]];
+  const TABS = [["hardware", t("hw.tab.hardware")], ["resources", t("hw.tab.resources")], ["monitor", t("hw.tab.monitor")]];
 
   return (
     <div className="p-4 md:p-6 space-y-4" data-testid="hardware-page">
@@ -151,50 +145,6 @@ export default function Hardware() {
           </div>
           {can("admin") && (
             <button onClick={saveConfig} disabled={saving} data-testid="hw-save-btn" className="flex items-center gap-2 px-4 py-2 bg-[#0044FF] text-white text-sm hover:bg-[#0033cc]">
-              {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} {t("hw.apply")}
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* PROFILS & PRIORITÉS */}
-      {tab === "profiles" && cfg && (
-        <div className="space-y-4" data-testid="hw-profiles">
-          <div>
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">{t("hw.profile")}</div>
-            <div className="flex flex-wrap gap-2">
-              {cfg.profiles.map((p) => (
-                <button key={p} onClick={() => can("admin") && applyProfile(p)} disabled={!can("admin")} data-testid={`hw-profile-${p}`}
-                  className={`flex items-center gap-2 px-4 py-2.5 border text-sm transition-colors disabled:opacity-60 ${cfg.profile === p ? "border-[#0044FF] bg-secondary font-medium" : "border-border hover:bg-secondary"}`}>
-                  <Sparkles size={15} className={cfg.profile === p ? "text-[#0044FF]" : "text-muted-foreground"} /> {t("hw.opt." + p)}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">{t("hw.priorities")}</div>
-            <div className="border border-border bg-card divide-y divide-border">
-              {cfg.priority_engines.map((eng) => (
-                <div key={eng} className="flex items-center justify-between px-4 py-2.5 gap-4" data-testid={`hw-prio-row-${eng}`}>
-                  <span className="text-sm font-medium">{cfg.labels[eng] || eng}</span>
-                  <select value={cfg.priorities[eng] || "normal"} onChange={(e) => setPrio(eng, e.target.value)} disabled={!can("admin")}
-                    data-testid={`hw-prio-${eng}`} className="px-3 py-1.5 bg-background border border-input text-sm outline-none min-w-[160px] disabled:opacity-60">
-                    {cfg.priority_levels.map((l) => <option key={l} value={l}>{t("hw.prio." + l)}</option>)}
-                  </select>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <label className="flex items-center gap-2 text-sm" data-testid="hw-auto-optimize">
-            <input type="checkbox" checked={!!cfg.auto_optimize} disabled={!can("admin")} onChange={(e) => setCfg((c) => ({ ...c, auto_optimize: e.target.checked }))} />
-            <span className="font-medium">{t("hw.auto_optimize")}</span>
-            <span className="text-xs text-muted-foreground">— {t("hw.auto_optimize_hint")}</span>
-          </label>
-
-          {can("admin") && (
-            <button onClick={saveConfig} disabled={saving} data-testid="hw-save-profiles-btn" className="flex items-center gap-2 px-4 py-2 bg-[#0044FF] text-white text-sm hover:bg-[#0033cc]">
               {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} {t("hw.apply")}
             </button>
           )}

@@ -44,6 +44,15 @@ _HWACCEL_MODE = os.environ.get("MGVMS_AI_HW_ACCEL", "auto").lower()
 _FRAME_WIDTH = int(os.environ.get("MGVMS_AI_FRAME_WIDTH", "0") or 0)
 _FRAME_HEIGHT = int(os.environ.get("MGVMS_AI_FRAME_HEIGHT", "0") or 0)
 _FFMPEG_PATH = os.environ.get("MGVMS_FFMPEG_PATH", shutil.which("ffmpeg") or "ffmpeg")
+# v3.1.3 · Étape 0 refonte GPU · La boucle IA ne consomme qu'à AI_INTERVAL
+# (~6.7 fps, voir ai_engine.py) alors que ffmpeg décodait/téléchargeait CHAQUE
+# frame captée (~20-25 fps caméra) — >70% des copies GPU→CPU étaient jetées
+# sans jamais être lues (frames_dropped_backpressure). En natif 4K, ce
+# gaspillage à lui seul saturait le CPU du backend (629% mesuré, GPU à 0%).
+# Ce filtre `fps=` réduit le débit de sortie AVANT scale_cuda/hwdownload —
+# on continue de décoder au NVDEC natif (gratuit), mais on ne matérialise/
+# télécharge plus qu'à cette cadence, résolution INCHANGÉE (natif reste natif).
+_OUTPUT_FPS = float(os.environ.get("MGVMS_AI_OUTPUT_FPS", "10"))
 _RESTART_BACKOFF_SEC = 1.0     # attente initiale entre 2 tentatives de restart
 _RESTART_MAX_BACKOFF_SEC = 5.0 # v0.4.5.a — de 30s à 5s (moins d'accumulation de latence)
 _READ_TIMEOUT_SEC = 20.0       # si aucune frame lue en 20s → considérer mort et redémarrer
@@ -163,6 +172,11 @@ def _build_ffmpeg_cmd(w: _Worker) -> list[str]:
     cmd += ["-i", w.rtsp_url]
     # Filtre GPU si scale demandé, sinon download brut
     vf_parts = []
+    # v3.1.3 · fps= AVANT scale_cuda/hwdownload : ne matérialise/télécharge
+    # qu'à la cadence de consommation réelle (voir _OUTPUT_FPS ci-dessus),
+    # décodage NVDEC natif inchangé — pas de perte de résolution.
+    if _OUTPUT_FPS > 0:
+        vf_parts.append(f"fps={_OUTPUT_FPS}")
     if use_gpu:
         # download vers CPU en fin de chaîne (nécessaire car on pipe vers numpy)
         if w.width > 0 and w.height > 0:

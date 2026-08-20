@@ -10,6 +10,22 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+// v3.1.3 · Injecte user:pass dans une URL RTSP nue (profils ONVIF renvoyés
+// sans identifiants) — webrtc_rtsp_url est utilisée telle quelle côté
+// backend (video_core/manager.py::_webrtc_rtsp_url_of), pas de fusion
+// automatique avec cam.username/password comme pour rtsp_url.
+function withRtspCredentials(bareUrl, username, password) {
+  if (!bareUrl) return "";
+  const m = /^(rtsps?:\/\/)(.*)$/i.exec(bareUrl.trim());
+  if (!m) return bareUrl;
+  const [, scheme, rest] = m;
+  if (!username) return bareUrl;
+  const auth = password
+    ? `${encodeURIComponent(username)}:${encodeURIComponent(password)}@`
+    : `${encodeURIComponent(username)}@`;
+  return `${scheme}${auth}${rest}`;
+}
+
 const EMPTY_FORM = {
   name: "", site_id: "", mode: "onvif",
   ip: "", rtsp_port: 554, onvif_port: 80,
@@ -20,8 +36,9 @@ const EMPTY_FORM = {
   ptz_enabled: false, record_enabled: true, detect_enabled: false,
   enabled_plugins: [],
   record_mode: "continuous", storage_pool_id: "", storage_max_size_gb: 0,
-  rtsp_transport: "tcp", preferred_codec: "auto", stream_mode: "direct_rtsp",
-  stream_pipeline: "rtsp_native", webrtc_rtsp_url: "",
+  rtsp_transport: "tcp", preferred_codec: "auto", stream_mode: "auto",
+  stream_pipeline: "rtsp_native", webrtc_rtsp_url: "", ai_rtsp_url: "",
+  ai_resolution: "720p",
   // camera-api-v2.2 · Couche API HTTP/HTTPS (indépendante du pipeline vidéo)
   api_host: "", api_port: null, api_scheme: "https", api_verify_ssl: false,
   api_username: "", api_password: "", api_provider: "",
@@ -84,6 +101,8 @@ export default function Cameras() {
       stream_mode: c.stream_mode || "auto",
       stream_pipeline: "rtsp_native",
       webrtc_rtsp_url: c.webrtc_rtsp_url || "",
+      ai_rtsp_url: c.ai_rtsp_url || "",
+      ai_resolution: c.ai_resolution || "720p",
       // camera-api-v2.2 · API caméra (HTTP/HTTPS)
       api_host: c.api_host || "",
       api_port: c.api_port || null,
@@ -337,8 +356,12 @@ export default function Cameras() {
           <thead><tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted-foreground">
             <th className="px-3 py-2">{t("common.status")}</th>
             <th className="px-3 py-2">{t("common.name")}</th>
+            <th className="px-3 py-2">Site</th>
+            <th className="px-3 py-2">Adresse IP</th>
+            <th className="px-3 py-2">Mode</th>
             <th className="px-3 py-2">Mode vidéo</th>
             <th className="px-3 py-2">Résolution</th>
+            <th className="px-3 py-2">PTZ</th>
             <th className="px-3 py-2 text-right">{t("common.actions")}</th>
           </tr></thead>
           <tbody>
@@ -347,18 +370,20 @@ export default function Cameras() {
                 <td className="px-3 py-2"><span className={`inline-flex items-center gap-1.5 text-xs ${c.status === "online" ? "mg-online" : "mg-offline"}`}>
                   {c.status === "online" ? <Wifi size={13} /> : <WifiOff size={13} />}{t(c.status === "online" ? "common.online" : "common.offline")}</span></td>
                 <td className="px-3 py-2 font-medium">{c.name}<div className="text-[10px] text-muted-foreground truncate max-w-xs">{c.manufacturer} {c.model}</div></td>
+                <td className="px-3 py-2 text-muted-foreground">{c.site_name || "—"}</td>
+                <td className="px-3 py-2 mono text-[11px]">{c.ip || "—"}</td>
+                <td className="px-3 py-2">
+                  <span className="text-[10px] px-1.5 py-0.5 border border-[#0044FF]/50 text-[#0044FF] font-semibold">
+                    {(c.protocol || c.mode || "—").toUpperCase()}
+                  </span>
+                </td>
                 <td className="px-3 py-2">
                   {(() => {
-                    // video-pipeline-v2 · Badge = pipeline vidéo de la caméra
-                    const p = (c.stream_pipeline || "").toLowerCase()
-                      || ((c.stream_mode || "auto").toLowerCase() === "direct_rtsp" ? "direct_rtsp" : "mediamtx");
-                    const META = {
-                      mediamtx:    ["MEDIAMTX", "#00E5FF"],
-                      mjpeg:       ["MJPEG", "#00E676"],
-                      direct_rtsp: ["DIRECT RTSP", "#FFB800"],
-                      go2rtc:      ["GO2RTC", "#FFAA00"],
-                    };
-                    const [label, color] = META[p] || ["—", "#888"];
+                    // P0-fix · Solution B (Go2RTC + MJPEG) : badge dérivé de stream_mode
+                    // uniquement — stream_pipeline est un champ vestige (compat DB, plus
+                    // de sens fonctionnel depuis le retour à Go2RTC).
+                    const isDirect = (c.stream_mode || "auto").toLowerCase() === "direct_rtsp";
+                    const [label, color] = isDirect ? ["DIRECT RTSP", "#FFB800"] : ["GO2RTC", "#FFAA00"];
                     return (
                       <span
                         className="text-[10px] px-1.5 py-0.5 border font-semibold"
@@ -373,7 +398,14 @@ export default function Cameras() {
                 <td className="px-3 py-2 mono text-[11px]">
                   {c.resolution || "—"}{c.fps ? ` @ ${c.fps}` : ""} <span className="text-muted-foreground">{c.codec}</span>
                 </td>
+                <td className="px-3 py-2 text-center">{c.ptz_enabled ? <CheckCircle2 size={14} className="text-[#00E676] inline" /> : "—"}</td>
                 <td className="px-3 py-2"><div className="flex items-center justify-end gap-1">
+                  <button onClick={() => test(c)} disabled={testing === c.id} data-testid="test-camera-btn" title="Tester la connexion" className="p-1.5 hover:bg-secondary">
+                    {testing === c.id ? <Loader2 size={15} className="animate-spin" /> : <Activity size={15} />}
+                  </button>
+                  <button onClick={() => openDiagnostic(c)} data-testid="diagnostic-camera-btn" title="Diagnostic complet" className="p-1.5 hover:bg-secondary text-[#00E676]"><Radar size={15} /></button>
+                  <button onClick={() => snapshot(c)} data-testid="snapshot-camera-btn" title="Snapshot" className="p-1.5 hover:bg-secondary"><CamIcon size={15} /></button>
+                  <button onClick={() => openDebug(c)} data-testid="debug-ia-camera-btn" title="Debug IA (plugins chargés)" className="p-1.5 hover:bg-secondary text-[#0044FF]"><BrainCircuit size={15} /></button>
                   {can("technician") && <button onClick={() => openEdit(c)} data-testid="edit-camera-btn" title="Modifier" className="p-1.5 hover:bg-secondary"><Pencil size={15} /></button>}
                   {can("technician") && <button onClick={() => del(c)} data-testid="delete-camera-btn" title="Supprimer" className="p-1.5 hover:bg-secondary text-[#FF3333]"><Trash2 size={15} /></button>}
                 </div></td>
@@ -550,12 +582,90 @@ export default function Cameras() {
                 </select>
                 <p className="text-[10px] text-muted-foreground mt-0.5">Live/IA préfèrent H.264, l&apos;enregistrement peut utiliser H.265</p>
               </div>
+              <div>
+                {/* v3.1.1 · Résolution envoyée à YOLO/ANPR uniquement — l'enregistrement
+                    est toujours natif (recorder.py fait `-c copy`, jamais concerné). */}
+                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                  Résolution IA / ANPR
+                </label>
+                <select
+                  value={form.ai_resolution}
+                  onChange={(e) => setForm({ ...form, ai_resolution: e.target.value })}
+                  className="inp"
+                  data-testid="ai-resolution-select"
+                >
+                  <option value="720p">720p — crops en résolution de scan (défaut)</option>
+                  <option value="1080p">1080p — crops en haute qualité</option>
+                  <option value="native">Native — crops en qualité maximale</option>
+                </select>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  Le scan continu (détection véhicule) tourne toujours en résolution légère, quel que
+                  soit ce réglage — pas d&apos;impact sur la fluidité du live. Au-dessus de 720p, une image
+                  haute résolution est récupérée UNIQUEMENT au moment où un véhicule est détecté, pour
+                  générer des crops (véhicule/plaque) nets. N&apos;affecte pas l&apos;enregistrement (toujours
+                  natif). &laquo; Native &raquo; nécessite que la résolution ait déjà été détectée
+                  ci-dessus (bouton Tester la connexion).
+                </p>
+              </div>
               <div className="col-span-2">
-                {/* video-engine-v3 · Un SEUL moteur vidéo (RTSP-native + WebRTC WHEP aiortc).
-                    Plus de sélecteur de pipeline. Seul un sub H264 optionnel pour WebRTC. */}
+                {/* P0-fix · Solution B (Go2RTC + MJPEG) : un seul vrai choix,
+                    stream_mode. "auto" = Go2RTC (par défaut, recommandé) ;
+                    "direct_rtsp" = pont ffmpeg local, sans Go2RTC (dépannage). */}
+                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                  Mode vidéo
+                </label>
+                <select
+                  value={form.stream_mode}
+                  onChange={(e) => setForm({ ...form, stream_mode: e.target.value })}
+                  className="inp"
+                  data-testid="stream-mode-select"
+                >
+                  <option value="auto">Auto — Go2RTC (recommandé)</option>
+                  <option value="direct_rtsp">Direct RTSP — sans Go2RTC (dépannage)</option>
+                </select>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  Go2RTC centralise le flux (1 seule connexion caméra, aperçu fluide). Direct RTSP
+                  ouvre une connexion ffmpeg par visionnage — à réserver au dépannage si Go2RTC échoue
+                  sur cette caméra.
+                </p>
+              </div>
+              <div className="col-span-2">
                 <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
                   URL RTSP WebRTC (H264) — optionnel
                 </label>
+                {profiles.length > 0 && (
+                  <select
+                    className="inp mb-1.5"
+                    data-testid="webrtc-profile-select"
+                    value=""
+                    onChange={(e) => {
+                      const p = profiles.find((pp) => (pp.token || pp.rtsp_url) === e.target.value);
+                      if (!p) return;
+                      // v3.1.3 · En édition, le mot de passe n'est jamais renvoyé par le
+                      // backend (vide tant qu'il n'est pas retapé) — prévenir plutôt que
+                      // générer silencieusement une URL sans identifiants.
+                      if (editingId && !form.password) {
+                        toast.warning("Retapez le mot de passe caméra ci-dessus avant de choisir un profil — sinon l'URL générée sera incomplète.");
+                      }
+                      setForm({
+                        ...form,
+                        webrtc_rtsp_url: withRtspCredentials(p.rtsp_url, form.username, form.password),
+                      });
+                    }}
+                  >
+                    <option value="">— Choisir un profil détecté sur la caméra —</option>
+                    {profiles.map((p, i) => {
+                      const codec = (p.codec || "").toUpperCase().replace("VIDEO", "").trim();
+                      const compatible = codec === "H264" || codec === "";
+                      return (
+                        <option key={p.token || i} value={p.token || p.rtsp_url}>
+                          {p.name || `Profil ${i + 1}`} — {p.resolution || "?"} {codec || "codec inconnu"}
+                          {compatible ? " ✓ compatible WebRTC" : " ✗ incompatible (pas H264)"}
+                        </option>
+                      );
+                    })}
+                  </select>
+                )}
                 <input
                   value={form.webrtc_rtsp_url}
                   onChange={(e) => setForm({ ...form, webrtc_rtsp_url: e.target.value })}
@@ -565,19 +675,58 @@ export default function Cameras() {
                 />
                 <p className="text-[10px] text-muted-foreground mt-1">
                   Les navigateurs ne lisent pas le H265 en WebRTC. Si votre flux principal est H265
-                  (ex. Reolink 4K), indiquez ici le sub-stream H264 : il sera utilisé UNIQUEMENT pour
-                  la lecture navigateur — enregistrement et IA restent sur le flux natif.
+                  (ex. Reolink 4K), choisissez ci-dessus le sous-flux H264 détecté automatiquement
+                  (ou saisissez l&apos;URL manuellement) : il sera utilisé UNIQUEMENT pour la lecture
+                  navigateur — enregistrement et IA restent sur le flux natif.
+                </p>
+              </div>
+              <div className="col-span-2">
+                {/* v3.1.1 · Champ existant côté backend (ai_rtsp_url) mais jamais
+                    exposé en UI jusqu'ici. */}
+                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                  URL RTSP dédiée IA / ANPR — optionnel
+                </label>
+                <input
+                  value={form.ai_rtsp_url}
+                  onChange={(e) => setForm({ ...form, ai_rtsp_url: e.target.value })}
+                  placeholder="rtsp://…/h264Preview_01_sub (laisser vide = flux principal utilisé)"
+                  className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
+                  data-testid="ai-rtsp-url-input"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Vide = l&apos;IA/ANPR analyse le flux principal (`rtsp_url`), quel que soit son codec.
+                  Renseignez un flux différent ici seulement si votre caméra expose un second profil
+                  utile pour l&apos;analyse — attention : un sub-stream est souvent aussi en résolution
+                  réduite, ce qui peut nuire à la lecture de plaque à distance malgré le gain en
+                  légèreté. À réserver aux caméras où le profil alternatif reste en bonne résolution.
                 </p>
               </div>
             </div>
 
             {/* camera-api-v2.2 · Section API HTTP/HTTPS caméra (couche INDÉPENDANTE du pipeline vidéo) */}
             <div className="col-span-2 border border-border p-3 space-y-3 bg-secondary/20" data-testid="camera-api-block">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                API caméra (HTTP/HTTPS)
-                <span className="text-[9px] text-muted-foreground/70 normal-case">
-                  · contrôle physique + capacités + metadata SD — indépendant du flux vidéo
-                </span>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                  API caméra (HTTP/HTTPS)
+                  <span className="text-[9px] text-muted-foreground/70 normal-case">
+                    · contrôle physique + capacités + metadata SD — indépendant du flux vidéo
+                  </span>
+                </div>
+                <button type="button"
+                        onClick={() => setForm((f) => ({
+                          ...f,
+                          api_host: f.ip,
+                          api_username: f.username,
+                          // Le mot de passe ONVIF n'est jamais pré-rempli en édition
+                          // ("inchangé si vide") — ne l'écrase que s'il a été retapé.
+                          api_password: f.password ? f.password : f.api_password,
+                        }))}
+                        disabled={!form.ip}
+                        title="Réutilise l'adresse IP + identifiant (+ mot de passe si retapé) ONVIF saisis plus haut"
+                        className="text-[10px] mono uppercase px-2.5 py-1 border border-border hover:bg-secondary disabled:opacity-40"
+                        data-testid="api-copy-onvif-creds-btn">
+                  Copier les identifiants ONVIF
+                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <div>

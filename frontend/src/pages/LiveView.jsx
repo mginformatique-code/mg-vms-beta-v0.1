@@ -1,13 +1,12 @@
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
-import VideoPlayer, { pipelineOf } from "@/components/video/VideoPlayer";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
+import LivePlayer from "@/components/video/LivePlayer";
 import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, User, Car, Truck, Bike, PawPrint, ScanLine, Flame, AlertOctagon, HardHat, MapPin, Activity, Lightbulb, Moon, Siren, Volume2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 const LAYOUTS = [1, 4, 9, 16, 25, 36, 49, 64];
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // Palette IA — une couleur distincte par classe
 const CLASS_COLORS = {
@@ -22,11 +21,6 @@ const CLASS_COLORS = {
   "Chat":       "#B47CFF",
 };
 const colorFor = (label) => CLASS_COLORS[label] || "#FF3333";
-
-function streamUrl(camId, hd = false) {
-  const token = localStorage.getItem("mg_token");
-  return `${API}/stream/${camId}/live.mjpeg?token=${encodeURIComponent(token || "")}&hd=${hd ? 1 : 0}`;
-}
 
 function OverlayCanvas({ cam, boxes, showOverlay }) {
   const ref = useRef(null);
@@ -67,10 +61,6 @@ function OverlayCanvas({ cam, boxes, showOverlay }) {
 function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onToggleFocus }) {
   const [hover, setHover] = useState(false);
   const online = cam?.status === "online";
-  // video-pipeline-v2 · Le mur vidéo utilise EXACTEMENT le pipeline choisi
-  // pour la caméra (camera.stream_pipeline) via le dispatcher VideoPlayer.
-  // Aucune logique parallèle, aucun fallback caché, zéro Go2RTC.
-  const pipeline = pipelineOf(cam);
   const ptz = async (command) => { try { await api.post(`/cameras/${cam.id}/ptz?command=${command}`); } catch (e) { /* ignore */ } };
 
   const boxes = aiState?.boxes || [];
@@ -79,9 +69,6 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
   // Détection sous-flux (résolution < 1280x720) — le user a probablement gardé un sub-stream
   const [subW, subH] = (cam?.resolution || "").split(/x/i).map((n) => parseInt(n, 10) || 0);
   const isSubStream = online && subW > 0 && subH > 0 && (subW < 1280 || subH < 720);
-  const PIPELINE_BADGE = { mediamtx: ["MEDIAMTX", "#00E5FF"], mjpeg: ["MJPEG", "#00E676"], direct_rtsp: ["RTSP", "#FFB800"], go2rtc: ["GO2RTC", "#FFAA00"] };
-  const [pipelineLabel, pipelineColor] = PIPELINE_BADGE[pipeline] || ["—", "#888"];
-
   return (
     <div
       className={`relative bg-black overflow-hidden group aspect-video cursor-pointer transition-shadow ${focused ? "ring-2 ring-[#00E5FF]" : "hover:ring-1 hover:ring-[#0044FF]/60"}`}
@@ -92,9 +79,7 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
     >
       {cam?.id ? (
         <>
-          {/* Player TOUJOURS monté (même si offline) — évite le remount destructeur.
-             video-pipeline-v2 : dispatch strict par stream_pipeline. */}
-          <VideoPlayer camera={cam} hd={hd} className="w-full h-full" dataTestId="wall-player" />
+          <LivePlayer camera={cam} hd={hd} className="w-full h-full" dataTestId="wall-player" />
           {cam?.detect_enabled && <OverlayCanvas cam={cam} boxes={boxes} showOverlay={showOverlay} />}
           {/* Overlay No Signal superposé — le player reste monté en dessous */}
           {!online && (
@@ -122,10 +107,6 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
           {online && cam?.resolution && (
             <span className="text-[9px] mono px-1 text-white/80 bg-black/50" data-testid="feed-resolution">{cam.resolution}</span>
           )}
-          {online && <span data-testid="feed-quality" className="text-[8px] mono px-1 font-bold"
-                              style={{ color: pipelineColor }}>
-            {pipelineLabel}
-          </span>}
           {online && <span className="flex items-center gap-1 text-[9px] mono text-[#00E676]"><Circle size={6} className="fill-[#00E676] rec-dot" /> LIVE</span>}
           {focused && <X size={13} className="text-white/80" />}
         </div>
@@ -334,8 +315,11 @@ function FocusTimeline({ cameraId, onSelect }) {
   const kindCounts = {};
   for (const e of events) kindCounts[e._kind] = (kindCounts[e._kind] || 0) + 1;
 
+  // v3.1.4 · bottom-14 (au lieu de bottom-6) : CameraControlOverlay occupe déjà
+  // bottom-2 sur ~32px (5 boutons projecteur/IR/sirène/TTS/reboot) — la
+  // timeline chevauchait cette barre et rendait ses icônes injoignables.
   return (
-    <div className="absolute bottom-6 inset-x-2 pointer-events-auto" data-testid="focus-timeline">
+    <div className="absolute bottom-14 inset-x-2 pointer-events-auto" data-testid="focus-timeline">
       <div className="bg-black/85 border border-white/10 px-2 py-2 space-y-1.5">
         <div className="flex items-center justify-between">
           <span className="text-[9px] uppercase tracking-wider text-white/60 mono">
@@ -551,7 +535,7 @@ export default function LiveView() {
           </>
         ) : (
           Array.from({ length: layout }).map((_, i) => (
-            <Feed key={i} cam={cams[i]} idx={i} canPtz={canPtz} hd={hd}
+            <Feed key={cams[i]?.id || `slot-${i}`} cam={cams[i]} idx={i} canPtz={canPtz} hd={hd}
                   showOverlay={showOverlay} focused={false}
                   aiState={cams[i] ? aiDetections[cams[i].id] : null}
                   onToggleFocus={toggleFocus} />
