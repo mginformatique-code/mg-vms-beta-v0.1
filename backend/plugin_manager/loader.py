@@ -151,6 +151,14 @@ class PluginLoader:
         for entry in sorted(self.plugins_dir.iterdir()):
             if not entry.is_dir():
                 continue
+            # v3.1.4 · Un dossier "retiré" en le renommant (préfixe `.` ou
+            # suffixe `.backup`/`.disabled`) au lieu d'être supprimé restait
+            # silencieusement découvert et chargé comme n'importe quel autre
+            # plugin — observé en prod avec .marketplace-test.backup/, un
+            # plugin qu'on croyait retiré et qui tournait toujours. On ignore
+            # désormais explicitement ces dossiers.
+            if entry.name.startswith(".") or entry.name.endswith((".backup", ".disabled", ".bak")):
+                continue
             m = entry / "manifest.yaml"
             if m.exists():
                 manifests.append(m)
