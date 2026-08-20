@@ -172,16 +172,25 @@ def _compute_plugins_used(cam: dict) -> list[str]:
     """Retourne la liste UNIQUE et ordonnée des plugins actifs pour cette caméra.
 
     - Plugins CORE (`yolov11`, `bytetrack`, `fast-alpr`) toujours listés.
-    - Plugins additionnels : la whitelist `enabled_plugins` de la caméra.
+    - Plugins additionnels : la whitelist `enabled_plugins` de la caméra,
+      filtrée contre les plugins RÉELLEMENT chargés (``loader._loaded``,
+      ``entry`` non None) — sans ce filtre, ``enabled_plugins`` (jamais
+      nettoyé côté caméra) continue de citer des plugins supprimés du
+      catalogue (ex. marketplace-test, retiré du disque mais toujours
+      présent dans la whitelist Mongo de vieilles caméras de test) ou dont le
+      chargement a échoué (dépendance manquante) comme s'ils tournaient
+      réellement.
 
     Cette liste est stockée dans chaque événement et chaque plaque, permettant
     au frontend d'afficher des badges "multi-plugins" au lieu d'un seul champ
     ``engine`` hardcodé sur ``fast-alpr``.
     """
+    from plugin_manager.loader import loader as _plugin_loader
     wl = cam.get("enabled_plugins") or []
+    loaded_names = {p["name"] for p in _plugin_loader.loaded() if p["loaded"]}
     out = list(_CORE_PLUGINS_ALWAYS_ON)
     for name in wl:
-        if name and name not in out:
+        if name and name in loaded_names and name not in out:
             out.append(name)
     return out
 

@@ -9,9 +9,18 @@ Vérifie :
    - Attache `anpr_readings` (multi-moteurs) aux events YOLO par track_id
    - Attache `plate` et `plate_confidence` aux events YOLO
 """
+import asyncio
 import inspect
 
 import pytest
+
+
+def _load_plugins_sync():
+    """`_compute_plugins_used` filtre désormais contre les plugins RÉELLEMENT
+    chargés (loader._loaded) — il faut donc peupler le loader avant chaque
+    test qui vérifie qu'un plugin apparaît dans le résultat."""
+    from plugin_manager.loader import loader
+    asyncio.run(loader.discover_and_load_all())
 
 
 def test_compute_plugins_used_core_always_present():
@@ -23,21 +32,42 @@ def test_compute_plugins_used_core_always_present():
 
 
 def test_compute_plugins_used_appends_whitelist():
+    _load_plugins_sync()
     from pipeline_v2.downstream import _compute_plugins_used
-    cam = {"id": "cam1", "enabled_plugins": ["google-vision", "openalpr"]}
+    # occupancy/queue-detection : plugins réels, zéro dépendance externe,
+    # toujours chargeables quel que soit l'environnement de test.
+    cam = {"id": "cam1", "enabled_plugins": ["occupancy", "queue-detection"]}
     result = _compute_plugins_used(cam)
-    assert "google-vision" in result
-    assert "openalpr" in result
+    assert "occupancy" in result
+    assert "queue-detection" in result
+
+
+def test_compute_plugins_used_ignores_deleted_or_unknown_plugin():
+    """v3.1.6 · un nom dans enabled_plugins (whitelist Mongo jamais nettoyée
+    côté caméra) qui ne correspond à AUCUN plugin réellement chargé —
+    supprimé du catalogue (marketplace-test, openalpr — retirés du disque
+    cette session) ou jamais existé — ne doit plus apparaître comme moteur
+    actif. Root cause du bug observé en prod : une caméra de test avait ces
+    noms dans sa whitelist depuis avant leur suppression, et continuait de
+    les afficher comme "moteurs" actifs sur chaque événement."""
+    _load_plugins_sync()
+    from pipeline_v2.downstream import _compute_plugins_used
+    cam = {"id": "cam1", "enabled_plugins": ["marketplace-test", "openalpr", "un-plugin-qui-n-existe-pas"]}
+    result = _compute_plugins_used(cam)
+    assert "marketplace-test" not in result
+    assert "openalpr" not in result
+    assert "un-plugin-qui-n-existe-pas" not in result
 
 
 def test_compute_plugins_used_no_duplicates():
+    _load_plugins_sync()
     from pipeline_v2.downstream import _compute_plugins_used
-    cam = {"id": "cam1", "enabled_plugins": ["yolov11", "bytetrack", "google-vision"]}
+    cam = {"id": "cam1", "enabled_plugins": ["yolov11", "bytetrack", "occupancy"]}
     result = _compute_plugins_used(cam)
     # yolov11 et bytetrack sont dans CORE ; whitelist ne doit pas les dupliquer
     assert result.count("yolov11") == 1
     assert result.count("bytetrack") == 1
-    assert "google-vision" in result
+    assert "occupancy" in result
 
 
 def test_compute_plugins_used_none_whitelist():
@@ -50,6 +80,7 @@ def test_compute_plugins_used_none_whitelist():
 
 
 def test_compute_plugins_used_fast_alpr_requires_whitelist():
+    _load_plugins_sync()
     from pipeline_v2.downstream import _compute_plugins_used
     without = _compute_plugins_used({"id": "cam1", "enabled_plugins": []})
     assert "fast-alpr" not in without
