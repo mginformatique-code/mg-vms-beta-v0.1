@@ -50,6 +50,9 @@ open-image-models==0.2.2
 # critique continu), le coût CPU par lecture est acceptable ici.
 paddlepaddle==2.6.1
 paddleocr==2.7.3
+# tesseract-ocr (binaire) déjà présent dans l'image (backend/Dockerfile) —
+# ne manquait que ce wrapper Python.
+pytesseract==0.3.13
 
 # ─── Face recognition (InsightFace) ───────────────────────────────────────
 insightface==0.7.3
