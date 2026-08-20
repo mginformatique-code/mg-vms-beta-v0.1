@@ -26,6 +26,7 @@ MIN_FREE_GB = float(os.environ.get("RECORD_MIN_FREE_GB", "2"))
 
 _processes: dict[str, asyncio.subprocess.Process] = {}
 _pools_cache: dict = {}  # id -> {path, max_size_gb, enabled, ...}
+_stderr_logs: dict[str, Path] = {}  # camera_id -> chemin du log stderr ffmpeg (dernier restart)
 
 
 async def _load_pools() -> None:
@@ -91,10 +92,21 @@ async def _start_ffmpeg(cam: dict) -> None:
         "-reset_timestamps", "1", "-strftime", "1",
         str(out),
     ]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        close_fds=True, start_new_session=True)
+    # v3.1.4 · stderr n'était jamais capturé (DEVNULL) — quand ffmpeg crashait
+    # (observé : caméra plantée peu après démarrage, flux go2rtc corrompu),
+    # le watchdog du recorder_loop savait QUE le process était mort mais
+    # jamais POURQUOI. Tronqué à chaque (re)démarrage : on ne garde que la
+    # dernière tentative, pas un historique qui grossirait indéfiniment.
+    stderr_log = out_dir / ".ffmpeg-stderr.log"
+    stderr_f = open(stderr_log, "wb")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=stderr_f,
+            close_fds=True, start_new_session=True)
+    finally:
+        stderr_f.close()  # le enfant a déjà son propre descripteur dupliqué
     _processes[camera_id] = proc
+    _stderr_logs[camera_id] = stderr_log
     logger.info("Enregistrement démarré : caméra %s (pid %s) → %s", camera_id, proc.pid, out_dir)
 
 
@@ -502,13 +514,25 @@ async def recorder_loop() -> None:
                 if proc is None or proc.returncode is not None:
                     # Watchdog FFmpeg (P1) — trace la reprise dans diagnostics_events
                     if proc is not None and proc.returncode is not None:
+                        stderr_tail = ""
+                        log_path = _stderr_logs.get(cam["id"])
+                        if log_path is not None:
+                            try:
+                                stderr_tail = log_path.read_text(errors="replace")[-2000:].strip()
+                            except OSError:
+                                pass
+                        logger.warning(
+                            "recorder.watchdog : ffmpeg mort pour %s (rc=%s) — relance auto%s",
+                            cam["id"], proc.returncode,
+                            f" — stderr: {stderr_tail}" if stderr_tail else " (stderr vide)",
+                        )
                         try:
                             from diagnostics import record_disconnect
                             await record_disconnect(
                                 cam,
                                 f"ffmpeg process died (rc={proc.returncode}) — restart auto",
                                 {"pid": getattr(proc, "pid", None), "returncode": proc.returncode,
-                                 "source": "recorder.watchdog"},
+                                 "source": "recorder.watchdog", "stderr_tail": stderr_tail},
                             )
                         except Exception:
                             logger.exception("recorder.watchdog record_disconnect failed")
