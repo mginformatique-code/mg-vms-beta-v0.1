@@ -42,6 +42,33 @@ function eventTypeColor(type) {
   return TYPE_COLORS[type] || PLUGIN_TYPE_COLORS[type] || "#0044FF";
 }
 
+// v1.0-rc5 · Empilement : plusieurs plugins (occupancy, queue-detection, le
+// pipeline principal...) peuvent chacun émettre leur propre événement sur le
+// MÊME cycle de détection (même caméra, même image) — ça se traduisait par
+// N cartes quasi-identiques côte à côte dans la galerie. On regroupe les
+// événements consécutifs d'une même caméra dont l'horodatage est à ≤3s
+// d'écart en une seule carte, avec les actions empilées en badges.
+const GROUP_WINDOW_MS = 3000;
+function groupEvents(list) {
+  const groups = [];
+  let current = null;
+  list.forEach((e, i) => {
+    const t = new Date(e.timestamp).getTime();
+    if (current && e.camera_id === current.camera_id && Math.abs(t - current.anchorTime) <= GROUP_WINDOW_MS) {
+      current.members.push({ e, i });
+    } else {
+      current = { camera_id: e.camera_id, anchorTime: t, members: [{ e, i }] };
+      groups.push(current);
+    }
+  });
+  return groups;
+}
+// Carte affichée = l'événement le plus "parlant" du groupe : une plaque lue,
+// sinon un type du pipeline principal (Voiture/Personne/...), sinon le 1er.
+function pickPrimary(members) {
+  return members.find((m) => m.e.plate) || members.find((m) => TYPE_COLORS[m.e.type]) || members[0];
+}
+
 // v1.0-rc4 · Fusion Événements/Véhicules : UNE seule vue avec chips de filtre.
 // Le chip « Plaques » affiche l'intégralité de l'ancien module Véhicules
 // (recherche IA, identités, anomalies, fiche complète). Zéro perte de feature.
@@ -268,31 +295,43 @@ export default function Events() {
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
-          {shown.map((e, i) => (
-            <button key={e.id} onClick={() => setViewerIdx(i)} className="border border-border bg-card overflow-hidden text-left hover:border-[#0044FF] transition-colors" data-testid="event-card">
-              <div className="relative bg-black aspect-video cursor-zoom-in">
-                {e.thumbnail ? (
-                  <img src={e.thumbnail_sm || e.thumbnail} alt={e.type} className="w-full h-full object-cover"
-                       loading="lazy" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center"><CamIcon size={20} className="text-white/30" /></div>
-                )}
-                <span className="absolute top-1.5 left-1.5 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 text-white" style={{ backgroundColor: eventTypeColor(e.type) }}>{eventTypeLabel(e.type)}</span>
-                {e.confidence != null && <span className="absolute top-1.5 right-1.5 text-[10px] mono px-1.5 py-0.5 bg-black/70 text-white">{Math.round(e.confidence * 100)}%</span>}
-                {e.plate && (
-                  <span className="absolute bottom-1.5 left-1.5 text-[10px] mono font-bold px-1.5 py-0.5 bg-white text-black border border-black/40" data-testid="event-plate-badge">{e.plate}</span>
-                )}
-              </div>
-              <div className="px-2.5 py-2 space-y-0.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs truncate">{e.camera_name}</span>
-                  {e.vehicle_color && <span className="text-[10px] px-1.5 border border-border text-muted-foreground shrink-0">{e.vehicle_color}</span>}
-                  {e.motion_pct != null && <span className="text-[10px] mono text-muted-foreground shrink-0">{e.motion_pct}%</span>}
+          {groupEvents(shown).map((g) => {
+            const { e, i } = pickPrimary(g.members);
+            const otherTypes = [...new Set(g.members.map((m) => m.e.type).filter((t) => t !== e.type))];
+            return (
+              <button key={e.id} onClick={() => setViewerIdx(i)} className="border border-border bg-card overflow-hidden text-left hover:border-[#0044FF] transition-colors" data-testid="event-card">
+                <div className="relative bg-black aspect-video cursor-zoom-in">
+                  {e.thumbnail ? (
+                    <img src={e.thumbnail_sm || e.thumbnail} alt={e.type} className="w-full h-full object-cover"
+                         loading="lazy" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center"><CamIcon size={20} className="text-white/30" /></div>
+                  )}
+                  <div className="absolute top-1.5 left-1.5 flex flex-col items-start gap-0.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 text-white" style={{ backgroundColor: eventTypeColor(e.type) }}>{eventTypeLabel(e.type)}</span>
+                    {otherTypes.length > 0 && (
+                      <span className="text-[9px] px-1.5 py-0.5 bg-black/70 text-white/80" data-testid="event-stack-badge"
+                            title={otherTypes.map(eventTypeLabel).join(", ")}>
+                        +{otherTypes.length} action{otherTypes.length > 1 ? "s" : ""}
+                      </span>
+                    )}
+                  </div>
+                  {e.confidence != null && <span className="absolute top-1.5 right-1.5 text-[10px] mono px-1.5 py-0.5 bg-black/70 text-white">{Math.round(e.confidence * 100)}%</span>}
+                  {e.plate && (
+                    <span className="absolute bottom-1.5 left-1.5 text-[10px] mono font-bold px-1.5 py-0.5 bg-white text-black border border-black/40" data-testid="event-plate-badge">{e.plate}</span>
+                  )}
                 </div>
-                <div className="text-[10px] mono text-muted-foreground" data-testid="event-timestamp">{new Date(e.timestamp).toLocaleString("fr-FR")}</div>
-              </div>
-            </button>
-          ))}
+                <div className="px-2.5 py-2 space-y-0.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs truncate">{e.camera_name}</span>
+                    {e.vehicle_color && <span className="text-[10px] px-1.5 border border-border text-muted-foreground shrink-0">{e.vehicle_color}</span>}
+                    {e.motion_pct != null && <span className="text-[10px] mono text-muted-foreground shrink-0">{e.motion_pct}%</span>}
+                  </div>
+                  <div className="text-[10px] mono text-muted-foreground" data-testid="event-timestamp">{new Date(e.timestamp).toLocaleString("fr-FR")}</div>
+                </div>
+              </button>
+            );
+          })}
         </div>
       )}
 

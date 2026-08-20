@@ -29,6 +29,7 @@ class OccupancyPlugin(PipelineConsumer):
         self._zone = cfg.get("zone") or [[100, 100], [500, 100], [500, 400], [100, 400]]
         self._labels = set(cfg.get("target_labels") or ["person"])
         self._max_capacity = int(cfg.get("max_capacity", 999))
+        self._last_count = -1   # -1 = jamais rapporté, force le 1er événement
         ctx.set_state("ready")
 
     async def on_config_change(self, new_config: dict) -> None:
@@ -36,6 +37,7 @@ class OccupancyPlugin(PipelineConsumer):
         self._zone = cfg.get("zone") or [[100, 100], [500, 100], [500, 400], [100, 400]]
         self._labels = set(cfg.get("target_labels") or ["person"])
         self._max_capacity = int(cfg.get("max_capacity", 999))
+        self._last_count = -1
         self._ctx.set_state("ready")
 
     async def consume(self, frame: Frame, pipeline: PipelineResult) -> list:
@@ -51,17 +53,25 @@ class OccupancyPlugin(PipelineConsumer):
             if _point_in_polygon((cx, cy), self._zone):
                 occupants.append(label)
 
-        events = [{
-            "type": "occupancy.zone",
-            "severity": "info",
-            "message": f"Occupation zone : {len(occupants)}/{self._max_capacity}",
-            "data": {
-                "count": len(occupants),
-                "capacity": self._max_capacity,
-                "over_capacity": len(occupants) > self._max_capacity,
-                "labels_count": {lbl: occupants.count(lbl) for lbl in set(occupants)},
-            },
-        }]
+        events = []
+        count = len(occupants)
+        # Émet uniquement sur CHANGEMENT de compte (0→1, 1→2, 2→1, ...) — avant
+        # ce fix, un objet immobile dans la zone générait un "occupancy.zone"
+        # à chaque cycle, noyant la galerie Événements sous des cartes
+        # identiques ne portant aucune information nouvelle.
+        if count != self._last_count:
+            self._last_count = count
+            events.append({
+                "type": "occupancy.zone",
+                "severity": "info",
+                "message": f"Occupation zone : {count}/{self._max_capacity}",
+                "data": {
+                    "count": count,
+                    "capacity": self._max_capacity,
+                    "over_capacity": count > self._max_capacity,
+                    "labels_count": {lbl: occupants.count(lbl) for lbl in set(occupants)},
+                },
+            })
         if len(occupants) > self._max_capacity:
             events.append({
                 "type": "occupancy.alert",

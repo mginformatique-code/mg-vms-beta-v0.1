@@ -36,6 +36,7 @@ class QueueDetectionPlugin(PipelineConsumer):
         self._report_interval_s = float(cfg.get("report_interval_s", 30))
         self._entered_at: dict[int, float] = {}
         self._last_report = time.time()
+        self._last_reported_length = -1   # -1 = jamais rapporté, force le 1er événement
         self._was_over = False
         ctx.set_state("ready")
 
@@ -46,6 +47,7 @@ class QueueDetectionPlugin(PipelineConsumer):
         self._report_interval_s = float(cfg.get("report_interval_s", 30))
         self._entered_at = {}
         self._last_report = time.time()
+        self._last_reported_length = -1
         self._was_over = False
         self._ctx.set_state("ready")
 
@@ -80,8 +82,15 @@ class QueueDetectionPlugin(PipelineConsumer):
             })
         self._was_over = is_over
 
-        if now - self._last_report >= self._report_interval_s:
+        # Émet uniquement si la longueur a CHANGÉ depuis le dernier rapport
+        # (avant ce fix : un heartbeat toutes les report_interval_s peu importe
+        # l'état — sur une caméra où personne ne traverse jamais la zone,
+        # "File d'attente : 0 personne(s)" en boucle, pure pollution de la
+        # galerie Événements). report_interval_s plafonne maintenant la
+        # fréquence max en cas de changement fréquent, plus un heartbeat fixe.
+        if queue_length != self._last_reported_length and now - self._last_report >= min(self._report_interval_s, 5.0):
             self._last_report = now
+            self._last_reported_length = queue_length
             events.append({
                 "type": "queue.status",
                 "severity": "info",
