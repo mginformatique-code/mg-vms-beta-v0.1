@@ -2,6 +2,270 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.1.5-camera-api-multibrand] — 2026-08 — Contrôle caméra multi-marques (Dahua, Hikvision)
+
+Suite de `v3.1.4` : l'abstraction `camera_api` (contrat `CameraApiProvider`,
+routes `/api/camera-devices/*`) ne comptait qu'un seul provider (Reolink,
+"Vague 1" assumée dans `registry.py`). L'utilisateur confirme disposer de
+matériel Dahua **et** Hikvision réel pour tester — Vague 2. PR :
+[#1](https://github.com/mginformatique-code/mg-vms-beta-v0.1/pull/1).
+
+### Ajouté
+- **Provider Dahua** (`camera_api/providers/dahua.py`) — CGI classique
+  (`/cgi-bin/*.cgi`), auth HTTP Digest par requête (pas de session token
+  comme Reolink), réponses texte `clé=valeur` (pas de JSON). PTZ (`ptz.cgi`)
+  et IR jour/nuit (table `VideoInDayNight`) confiance élevée ; projecteur
+  (table `Lighting` classique, pas `Lighting_V2`) confiance moyenne ;
+  **sirène volontairement non implémentée** — pas de commande CGI fiable
+  identifiée sans connaître le modèle exact (classique vs gamme
+  WizSense/active deterrence), préféré à une commande devinée qui
+  échouerait silencieusement sur le terrain.
+- **Provider Hikvision** (`camera_api/providers/hikvision.py`) — ISAPI
+  (XML), même auth Digest. Pattern **GET → modifie 1 balise par regex →
+  PUT le document complet**, pour ne jamais écraser des champs inconnus
+  selon la génération de firmware. PTZ (`PTZCtrl/.../continuous`) et IR
+  (`ircutFilter`) confiance élevée ; projecteur (`supplementLight`, modèles
+  ColorVu) absent proprement en HTTP 404 sur les caméras IR-only ; sirène
+  non implémentée, même raison que Dahua.
+- `get_capabilities()` des deux providers : ni Dahua ni Hikvision n'exposent
+  d'endpoint d'ability unique comme le `GetAbility` de Reolink — chaque
+  fonction est sondée individuellement par lecture (erreur/404 = non
+  supporté sur ce modèle).
+- `camera_api/http_client.py` : `make_client()` accepte désormais `auth=`
+  (Digest), `request_with_retry()` accepte `content=`/`headers=` (corps XML
+  brut Hikvision — `data=` seul ne pose pas le bon Content-Type).
+- Tests unitaires mockés (`test_camera_api_dahua.py`,
+  `test_camera_api_hikvision.py`) — protocole, erreurs (401/404/injoignable),
+  parsing, PTZ, IR, sirène non-supportée.
+
+### Fixed
+- `frontend/src/pages/LiveView.jsx` : build frontend cassé —
+  `{/* commentaire */}` placé juste après `return (` (introduit par le fix
+  de chevauchement timeline de `v3.1.4`). Un `return (...)` ne peut
+  envelopper qu'UNE expression ; le commentaire JSX flottant suivi du
+  `<div>` en faisaient deux → `SyntaxError` à la compilation. Converti en
+  commentaire JS classique avant le `return`. Repéré au premier `docker
+  compose build` tenté après le commit fautif — jamais testé en build avant.
+
+### ⚠️ Non validé en conditions réelles
+- Providers Dahua et Hikvision entièrement codés à partir de la
+  documentation protocolaire publique (CGI Dahua, ISAPI Hikvision), **aucun
+  test sur matériel réel dans cet environnement** (pas d'accès caméra ici).
+  À valider caméra par caméra ; `routes/camera_api.py` remonte le detail
+  brut de l'erreur en cas d'échec pour ajuster rapidement la table/le champ
+  en cause plutôt que de deviner à nouveau.
+
+## [v3.1.4-plugins-anpr-camera-control] — 2026-08 — Audit + nettoyage plugins, multi-moteur ANPR local, perf page Événements, contrôle caméra Reolink
+
+Suite de `v3.1.3` : usage réel prolongé (caméras allumées en continu,
+plusieurs jours) a fait remonter un lot de problèmes indépendants — lag de
+la galerie Événements, plaques ANPR manquées sur véhicules en mouvement,
+boutons de contrôle caméra (projecteur/IR/sirène) sans effet, timeline
+d'enregistrement chevauchant l'UI, crashs d'enregistrement silencieux. Audit
+complet du catalogue de plugins demandé explicitly ("ca doit etre le meme
+soucis pour quasiement tout, des boites vides") avant de corriger au cas par
+cas. PR : [#1](https://github.com/mginformatique-code/mg-vms-beta-v0.1/pull/1).
+
+### Audit + nettoyage plugins
+- Audit complet des ~47 plugins du catalogue (agent d'exploration dédié) :
+  catégorisés en fonctionnels / bloqués par clé API externe / bloqués par
+  dépendance manquante / templates démo (bbox fictive fixe) / façades vides
+  (dépendance satisfaite mais logique jamais implémentée) / statut peu clair.
+- **Retiré** : `openalpr`, `google-vision`, `azure-vision` (APIs cloud
+  nécessitant une clé jamais configurée — s'activaient sans jamais produire
+  de résultat) et `custom-plugin-template` (template dev, pas un moteur réel).
+- **`marketplace-test` tournait encore malgré son "retrait" précédent** — en
+  réalité seulement renommé en `.marketplace-test.backup/`, jamais supprimé ;
+  `plugin_manager/loader.py::discover()` ne filtrait aucun nom caché/backup et
+  le chargeait silencieusement comme avant. Dossier réellement supprimé +
+  `discover()` durci pour ignorer désormais tout dossier `.`-préfixé ou
+  suffixé `.backup`/`.disabled`/`.bak` (empêche cette classe de bug de se
+  reproduire silencieusement).
+- **7 des 12 plugins template-démo réellement implémentés**, sans nouveau
+  modèle ni dépendance externe : `dwell-time`, `queue-detection`,
+  `farm-intrusion` (zone polygonale + tracks, ray-casting point-in-polygon,
+  passés de l'interface `FrameAnalyzer` — inadaptée, une caméra n'est pas un
+  détecteur — à `PipelineConsumer`), `heatmap` (accumulation de densité en
+  grille), `parking-manager` (occupation de place par zone + durée),
+  `animal-detection`/`bird-detection` (filtrent les classes animales déjà
+  présentes dans le jeu COCO du modèle YOLO principal, pas besoin d'un 2ᵉ
+  modèle). Les 5 restants (fight-detection + 4× PPE) ont besoin d'un modèle
+  spécialisé absent — laissés en l'état, pas d'action possible sans le
+  fournir.
+
+### Multi-moteur ANPR local (fusion hiérarchique)
+- **`fast-alpr` n'est plus affiché comme moteur "toujours actif"** —
+  `_compute_plugins_used()` le codait en dur dans
+  `_CORE_PLUGINS_ALWAYS_ON`, contredisant le vrai gate de dispatch
+  (`camera_worker.py::_stage_anpr`, fermeture stricte sur `enabled_plugins`).
+  Une caméra sans ANPR activé affichait quand même "fast-alpr" comme moteur
+  actif alors qu'aucune plaque n'était réellement lue.
+- `fast-alpr` était en réalité le **seul** moteur ANPR réellement installé —
+  la fusion hiérarchique multi-OCR (`_apply_hierarchical_anpr_fusion`, déjà
+  codée et branchée dans `downstream.py`) n'avait donc jamais rien à
+  fusionner. Ajout de **`paddle-ocr`** (2ᵉ moteur, CPU uniquement — moteur
+  secondaire dispatché seulement sur détection véhicule, coût négligeable)
+  et **`tesseract`** (3ᵉ moteur, le binaire était déjà dans l'image Docker,
+  seul le wrapper `pytesseract` manquait) — 100% local, aucune dépendance
+  externe/clé API, conformément au mandat explicite. `opencv-ocr` (4ᵉ
+  candidat local) volontairement **pas** ajouté cette fois : nécessite
+  `cv2.text`, mais 4 variantes `opencv` conflictuelles coexistent déjà dans
+  `requirements.txt` — risque jugé trop élevé de casser le pipeline
+  YOLO/détection sans vérification empirique préalable.
+
+### Perf — page Événements
+- **Chargement progressif au lieu de tout recharger toutes les 15s** : deux
+  problèmes cumulés causaient le lag signalé — (1) 60 événements chargés
+  d'un coup, chacun embarquant plusieurs images base64 dans le JSON ; (2) un
+  `setInterval(load, 15000)` **rechargeait ces 60 événements en entier** en
+  continu, même sans rien de nouveau. Fix : page initiale à 15 événements +
+  bouton "Charger plus" (pagination `offset`, déjà supportée côté backend),
+  poll périodique réduit à un seul petit lot fusionné par id (seuls les
+  événements réellement nouveaux sont ajoutés, pas de re-fetch/re-render de
+  ce qui est déjà affiché).
+- **Miniature légère dédiée (384px)** pour la grille, séparée du thumbnail
+  1920px (qualité HD des crops ANPR, `v3.1.2`) — la galerie affichait des
+  cartes d'~200px de large avec la même image que la vue détaillée. Nouveau
+  champ `thumbnail_sm` généré au même decode/même passage que le thumbnail
+  HD (pas de coût frame supplémentaire), avec repli sur `thumbnail` pour les
+  événements déjà en base. `loading="lazy"` ajouté en bonus.
+- **Libellés FR pour les badges d'événements plugins** — `occupancy.zone`,
+  `counting.person`, `alert.critical`... s'affichaient en identifiant
+  technique brut ("OCCUPANCY.ZONE") au lieu d'un libellé lisible comme le
+  reste du pipeline. Table de libellés/couleurs FR ajoutée + repli générique
+  (dots/underscores → espaces + capitalisation) pour tout futur plugin non
+  mappé.
+
+### Fixed — Contrôle caméra (Reolink) + Live
+- **Boutons projecteur/IR/sirène sans effet réel** — root-causé en lisant le
+  backend : le bouton IR appelait l'endpoint générique de relais ONVIF avec
+  le token littéral `"ir"` (les tokens ONVIF sont des identifiants opaques
+  propres à chaque caméra, ex. `RelayOutputToken_0` — `"ir"` ne correspond à
+  rien de réel), au lieu de l'endpoint dédié déjà existant et correct
+  (`POST /cameras/{id}/ir/{state}`, `SetImagingSettings`). Projecteur/Sirène
+  envoyaient de même les tokens fictifs `"spotlight"`/`"siren"` — corrigé en
+  découvrant les VRAIS relais via `GET /cameras/{id}/relays` (endpoint déjà
+  fonctionnel, jamais appelé avant) ; boutons désactivés avec tooltip
+  explicite si la caméra n'expose pas assez de relais, au lieu d'envoyer
+  silencieusement une requête vouée à l'échec.
+- **`camera_api` provider Reolink : méthodes de contrôle implémentées**
+  (`get_ir`/`set_ir`, `get_light`/`set_light`, `set_siren`, `ptz_move`/
+  `ptz_stop`) — le contrat (`base.py`) et le routing
+  (`/api/camera-devices/{id}/ir|light|siren|ptz/*`) existaient déjà et
+  n'attendaient que ça ; `get_capabilities()` détectait déjà les flags
+  correspondants mais toutes les méthodes retombaient sur
+  `UnsupportedCapability`. Commandes CGI Reolink réelles (`IrLights`,
+  `WhiteLed`, `AudioAlarmPlay`, `PtzCtrl`) — non vérifiées sur matériel réel
+  dans cet environnement, notamment la numérotation du champ `mode` de
+  `WhiteLed` qui varie parfois selon le firmware.
+- **Timeline superposée à la barre de contrôles caméra** — `FocusTimeline`
+  (`bottom-6`) chevauchait `CameraControlOverlay` (`bottom-2`, ~32px, 5
+  boutons), rendant certaines icônes partiellement injoignables. Timeline
+  remontée à `bottom-14`.
+- **Bouton manuel de repli MJPEG** — constaté via un HAR réel : sur une
+  caméra sans `webrtc_rtsp_url`, WHEP échoue en boucle (415 "Aucune source
+  H264 disponible") sans que le repli MJPEG automatique se déclenche
+  visiblement — lecteur vide, sans explication. Remplacé par un état
+  d'erreur explicite (message backend affiché) + bouton "Basculer en MJPEG"
+  déclenché par l'utilisateur. Corrigé au passage : `LiveView.jsx` utilisait
+  l'index du tableau comme clé React sur la grille de caméras au lieu de
+  l'ID caméra — un changement d'ordre pouvait réattribuer le mauvais flux à
+  un lecteur déjà connecté.
+
+### Fixed — Vidéo / GPU
+- **Étape 0 de la refonte du cœur vidéo (voir `memory/ROADMAP.md`)** : root
+  cause précisée par exploration — la boucle IA ne consomme qu'à ~6,7 fps
+  (`AI_INTERVAL=0.15s`) alors que `frame_source.py` décodait/téléchargeait
+  CHAQUE frame captée (~20-25 fps caméra) ; plus de 70% des copies GPU→CPU
+  concernaient des frames jamais lues. Nouveau filtre `fps=` placé AVANT
+  `scale_cuda`/`hwdownload` dans la chaîne ffmpeg — décodage NVDEC natif
+  inchangé (gratuit), mais matérialisation/téléchargement limités à
+  `MGVMS_AI_OUTPUT_FPS` (défaut 10). Résolution du scan continu restaurée à
+  `cam.ai_resolution` (natif possible) au lieu d'être figée à 1280×720.
+- **Clips HEVC transcodés tronqués à ~2s** au lieu de la durée réelle du
+  segment — régression du fix HEVC→H264 précédent (`v3.1.2`) : le
+  transcodage streamait un MP4 fragmenté en direct sans jamais écrire de
+  fichier complet, qu'un `<video>` HTML5 standard ne sait pas durée/seek de
+  façon fiable. Transcode maintenant vers un fichier temporaire complet
+  (`+faststart`) avant de répondre, servi ensuite via `FileResponse`
+  classique (Range HTTP natif) ; fichier temp supprimé après envoi.
+
+### Ajouté — Installation / exploitation (`install.sh`)
+- **Dé-tracker `go2rtc.yaml`** — root cause du pull qui restait
+  silencieusement bloqué : ce fichier était suivi par git ET réécrit en
+  continu par le container go2rtc à chaque `PUT /api/streams` (persistance
+  des flux caméra réels), donc en diff local permanent dès qu'une caméra
+  réelle était configurée — la garde anti-écrasement d'`install.sh`
+  ignorait alors TOUT pull futur, empêchant tout fix ultérieur d'atteindre
+  le serveur. Même schéma que `.env`/`.env.example` : `go2rtc.yaml` →
+  `go2rtc.yaml.example` (template versionné), fichier réel gitignored,
+  `install.sh` copie le template uniquement s'il n'existe pas déjà.
+- **3 paliers de nettoyage Docker interactifs** (dangling+cache scopé
+  MG-VMS / `system prune -af` complet / + `--volumes`) — l'ancien choix
+  binaire ne couvrait pas `--volumes`, alors qu'un volume Docker nommé
+  orphelin (reliquat d'avant le passage aux bind mounts) a été trouvé en
+  prod. Les données réelles restent sur bind mounts host, jamais supprimées
+  par aucun palier.
+- **3 paliers de purge des données** (segments aux métadonnées corrompues
+  uniquement / tous les enregistrements / reset total confirmé par le mot
+  "RESET") — palier A cible directement le symptôme du bug ffprobe
+  ci-dessous. Le compte admin est recréé automatiquement au redémarrage
+  après un reset total.
+- **Choix interactif des disques** (MongoDB / enregistrements) à la première
+  installation — scan `lsblk` (SSD/NVMe vs HDD), espace libre affiché,
+  repli silencieux sur saisie manuelle si `lsblk` absent. Fix au passage :
+  la création des dossiers de stockage était figée en dur sur
+  `/mnt/storage/...` peu importe ce que `.env` configurait déjà.
+- **Sélecteur de profil pour l'URL RTSP WebRTC** — le champ exigeait de
+  connaître/taper l'URL exacte du sous-flux à la main. Réutilise la liste de
+  profils déjà découverte via ONVIF, avec indicateur de compatibilité WebRTC
+  (H264 ✓ / autre codec ✗) ; sélectionner un profil construit l'URL
+  automatiquement (identifiants injectés), champ texte modifiable en dessous.
+
+### Fixed — Enregistrement
+- **Ne plus faire confiance à ffprobe pour la durée des segments** — un
+  segment `-c copy` nourri par un flux go2rtc avec discontinuités de
+  timestamps peut produire un MP4 dont ffprobe rapporte une durée délirante
+  (observé : 28h pour un fichier de 13 Mo, cible 120s). Ce end erroné
+  empoisonnait l'index `recordings` (mauvais matching événement↔segment via
+  `_lookup_recording_for`) — root cause unique des 404 "Fichier vidéo
+  introuvable" ET des durées aberrantes (11h/15h/28h) vues dans
+  `EventViewer`, pas trois bugs séparés. Clampé à 3× `SEGMENT_SECONDS` avec
+  log d'avertissement.
+- **stderr ffmpeg capturé** pour diagnostiquer les crashs d'enregistrement
+  silencieux — un process meurt peu après son démarrage (log "Enregistrement
+  démarré" puis plus rien) juste après un warning de durée aberrante ignorée,
+  cohérent avec la discontinuité de flux go2rtc déjà identifiée ; `stderr`
+  était en `DEVNULL`, le watchdog savait QUE ffmpeg était mort, jamais
+  POURQUOI. Redirigé vers un fichier par caméra, inclus dans le log du
+  watchdog et dans les diagnostics de déconnexion.
+
+### Ajouté — Recordings
+- **Zoom molette sur la timeline 24h** — figée sur 24h fixes auparavant,
+  impossible d'examiner une plage courte sans scroller la liste de segments.
+  Zoom centré sur le curseur (fenêtre 1min → 24h), graduations dynamiques,
+  bouton de réinitialisation.
+
+### Chore
+- **Panneau "Profils & priorités" (module Ressources matérielles) retiré** —
+  confirmé 100% cosmétique : persisté en base mais jamais lu par
+  `frame_source.py`/`ai_engine.py`/`recorder.py`/`streaming.py`, aucun effet
+  réel. L'onglet Ressources (assignation CPU/GPU) et le Monitoring temps
+  réel sont conservés, non concernés.
+
+### ⚠️ Non validé en conditions réelles
+- Méthodes de contrôle Reolink (light/siren/ir/ptz) : codées à partir du
+  protocole CGI documenté, jamais testées sur matériel réel dans cet
+  environnement.
+- Étape 0 refonte cœur vidéo (`fps=` avant `hwdownload`) : codée et poussée
+  suite à un rapport de latence, mesure `nvidia-smi`/`docker stats` en
+  conditions réelles (caméra native, cycle IA actif) pas encore reconfirmée
+  après ce changement précis.
+- Multi-moteur ANPR (paddle-ocr, tesseract) : dispatch et fusion vérifiés
+  par lecture de code, pas encore observés en train de produire une
+  correction réelle sur un événement (plaque manquée par fast-alpr,
+  rattrapée par un des deux autres) en conditions réelles.
+
 ## [v3.1.2-gpu-quality] — 2026-08 — GPU IA réactivé + qualité/résolution par caméra + lecture HEVC
 
 Suite de `v3.1.1` : une fois le live stabilisé, tests en conditions réelles
