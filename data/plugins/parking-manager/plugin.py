@@ -1,46 +1,85 @@
-"""Plugin métier — Parking Manager.
+"""Parking Manager — occupation de place par zone + durée.
 
-Consomme les frames + détections upstream (via bus) et retourne des
-événements/analyses métier. En v2.30 : squelette. Enable la démo dans
-la config pour tester le pipeline.
+Chaque place est une zone polygonale dédiée : occupée si le centre d'un
+véhicule détecté y tombe. Émet un événement à chaque changement d'état
+(libre → occupée / occupée → libre) avec la durée de l'état précédent.
+Pas de reconnaissance PMR/VIP pour cette v2 réelle (nécessiterait une
+signalétique dédiée) — occupation + durée, sans modèle supplémentaire,
+s'appuie sur les détections véhicule déjà produites par le pipeline.
 """
 from __future__ import annotations
 import time
-from plugin_manager.interfaces import FrameAnalyzer, Frame, AnalysisResult, Detection
+from plugin_manager.interfaces import PipelineConsumer, Frame, PipelineResult
+
+VEHICLE_LABELS = {"car", "truck", "motorcycle", "bus"}
 
 
-class ParkingManagerPlugin(FrameAnalyzer):
+def _point_in_polygon(pt, poly):
+    """Ray-casting algorithm."""
+    x, y = pt
+    n = len(poly)
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = poly[i]
+        xj, yj = poly[j]
+        if ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) / (yj - yi + 1e-9) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
+class ParkingManagerPlugin(PipelineConsumer):
     name = "parking-manager"
-    version = "1.0.0"
+    version = "2.0.0"
 
     async def on_load(self, ctx) -> None:
         self._ctx = ctx
         cfg = ctx.config or {}
-        if not cfg.get("enabled_for_demo"):
-            ctx.set_state("not_configured", "Activer la démo dans la config ou brancher un modèle propriétaire")
-        else:
-            ctx.set_state("ready")
+        # spots : [{"id": "P1", "zone": [[x,y], ...]}, ...]
+        self._spots = cfg.get("spots") or [
+            {"id": "P1", "zone": [[100, 100], [300, 100], [300, 300], [100, 300]]},
+        ]
+        self._labels = set(cfg.get("target_labels") or VEHICLE_LABELS)
+        self._state = {s["id"]: {"occupied": False, "since": time.time()} for s in self._spots}
+        ctx.set_state("ready")
 
     async def on_config_change(self, new_config: dict) -> None:
-        if not (new_config or {}).get("enabled_for_demo"):
-            self._ctx.set_state("not_configured", "Démo désactivée")
-        else:
-            self._ctx.set_state("ready")
+        cfg = new_config or {}
+        self._spots = cfg.get("spots") or [
+            {"id": "P1", "zone": [[100, 100], [300, 100], [300, 300], [100, 300]]},
+        ]
+        self._labels = set(cfg.get("target_labels") or VEHICLE_LABELS)
+        self._state = {s["id"]: {"occupied": False, "since": time.time()} for s in self._spots}
+        self._ctx.set_state("ready")
 
-    async def analyze(self, frame: Frame, camera_config: dict) -> AnalysisResult:
-        cfg = self._ctx.config or {}
-        if not cfg.get("enabled_for_demo"):
-            return AnalysisResult(detections=[], timing_ms=0)
-        # Démo : retourne une détection fictive pour valider le pipeline
-        return AnalysisResult(
-            detections=[Detection(
-                label="parking_spot",
-                label_fr="Place de parking",
-                confidence=0.75,
-                bbox=(100, 100, 300, 300),
-            )],
-            timing_ms=1,
-        )
+    async def consume(self, frame: Frame, pipeline: PipelineResult) -> list:
+        items = pipeline.tracks or pipeline.detections
+        centers = []
+        for it in items:
+            label = getattr(it, "label", "?")
+            if label not in self._labels:
+                continue
+            x1, y1, x2, y2 = it.bbox
+            centers.append(((x1 + x2) / 2, (y1 + y2) / 2))
+
+        events = []
+        now = time.time()
+        for spot in self._spots:
+            sid = spot["id"]
+            occupied = any(_point_in_polygon(c, spot["zone"]) for c in centers)
+            st = self._state.setdefault(sid, {"occupied": False, "since": now})
+            if occupied != st["occupied"]:
+                duration = now - st["since"]
+                events.append({
+                    "type": "parking.occupied" if occupied else "parking.freed",
+                    "severity": "info",
+                    "message": f"Place {sid} : {'occupée' if occupied else 'libérée'} (état précédent {int(duration)}s)",
+                    "data": {"spot_id": sid, "occupied": occupied, "previous_state_sec": int(duration)},
+                })
+                st["occupied"] = occupied
+                st["since"] = now
+        return events
 
     async def on_unload(self) -> None:
         pass

@@ -3,23 +3,9 @@
   "title": "Heatmap (zones chaudes)",
   "type": "object",
   "properties": {
-    "enabled_for_demo": {
-      "type": "boolean",
-      "default": false,
-      "title": "Activer la démo"
-    },
-    "sensitivity": {
-      "type": "number",
-      "default": 0.5,
-      "minimum": 0.0,
-      "maximum": 1.0,
-      "title": "Sensibilité de détection"
-    },
-    "min_confidence": {
-      "type": "number",
-      "default": 0.6,
-      "minimum": 0.0,
-      "maximum": 1.0
-    }
+    "target_labels": {"type": "array", "items": {"type": "string"}, "default": ["person"], "title": "Labels comptés"},
+    "grid_cols": {"type": "integer", "default": 20, "minimum": 2, "title": "Colonnes de la grille"},
+    "grid_rows": {"type": "integer", "default": 12, "minimum": 2, "title": "Lignes de la grille"},
+    "snapshot_interval_s": {"type": "number", "default": 60, "minimum": 5, "title": "Intervalle d'instantané (secondes)"}
   }
 }
