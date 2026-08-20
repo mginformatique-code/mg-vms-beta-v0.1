@@ -9,31 +9,36 @@ function mjpegUrl(cameraId, hd) {
 }
 
 /**
- * LivePlayer — WebRTC (WHEP/aiortc) en priorité pour la qualité/latence,
- * avec repli AUTOMATIQUE sur MJPEG (Go2RTC ou pont direct_rtsp selon
- * stream_mode côté backend) si WHEP échoue ou n'aboutit pas sous
- * WHEP_TIMEOUT_MS. Le badge reflète TOUJOURS la source réellement active
- * — jamais un mensonge.
+ * LivePlayer — WebRTC (WHEP/aiortc) en priorité pour la qualité/latence.
+ * Si WHEP échoue ou n'aboutit pas sous WHEP_TIMEOUT_MS, PAS de bascule
+ * automatique et silencieuse vers MJPEG (ça masquait un vrai problème de
+ * configuration — ex. pas de sous-flux H264 — derrière un mode dégradé
+ * que l'utilisateur ne comprenait pas) : on affiche le message d'erreur
+ * renvoyé par le backend + un bouton explicite pour basculer sur MJPEG.
+ * Le badge reflète TOUJOURS la source réellement active — jamais un mensonge.
  */
 export default function LivePlayer({ camera, hd = false, className = "", dataTestId = "live-player" }) {
   const videoRef = useRef(null);
   const pcRef = useRef(null);
-  const [mode, setMode] = useState("connecting"); // "connecting" | "webrtc" | "mjpeg"
+  const [mode, setMode] = useState("connecting"); // "connecting" | "webrtc" | "mjpeg" | "error"
+  const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
     if (!camera?.id) return;
     let cancelled = false;
     let watchdog = null;
     setMode("connecting");
+    setErrorMsg("");
 
-    const fallbackToMjpeg = () => {
+    const showError = (msg) => {
       if (cancelled) return;
       if (watchdog) { clearTimeout(watchdog); watchdog = null; }
       if (pcRef.current) {
         try { pcRef.current.close(); } catch { /* ignore */ }
         pcRef.current = null;
       }
-      setMode("mjpeg");
+      setErrorMsg(msg || "Connexion WebRTC impossible");
+      setMode("error");
     };
 
     (async () => {
@@ -56,10 +61,10 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
           if (watchdog) { clearTimeout(watchdog); watchdog = null; }
           setMode("webrtc");
         } else if (s === "failed" || s === "disconnected") {
-          fallbackToMjpeg();
+          showError("Connexion WebRTC perdue (ICE)");
         }
       };
-      watchdog = setTimeout(fallbackToMjpeg, WHEP_TIMEOUT_MS);
+      watchdog = setTimeout(() => showError("Délai de connexion WebRTC dépassé"), WHEP_TIMEOUT_MS);
 
       try {
         const token = localStorage.getItem("mg_token") || "";
@@ -76,12 +81,17 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
           headers: { "Content-Type": "application/sdp", Authorization: `Bearer ${token}` },
           body: offer.sdp,
         });
-        if (!r.ok) { fallbackToMjpeg(); return; }
+        if (!r.ok) {
+          let detail = "";
+          try { detail = (await r.json())?.detail || ""; } catch { /* corps non-JSON */ }
+          showError(detail || `WebRTC indisponible (HTTP ${r.status})`);
+          return;
+        }
         const answerSdp = await r.text();
         if (cancelled) return;
         await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
       } catch {
-        fallbackToMjpeg();
+        showError("Connexion WebRTC impossible");
       }
     })();
 
@@ -100,7 +110,9 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
     ? { txt: "WEBRTC", color: "#00E5FF" }
     : mode === "mjpeg"
       ? { txt: "MJPEG", color: "#FFAA00" }
-      : { txt: "…", color: "#888" };
+      : mode === "error"
+        ? { txt: "ERREUR", color: "#FF3333" }
+        : { txt: "…", color: "#888" };
 
   return (
     <div className={`relative bg-black overflow-hidden ${className}`} data-testid={dataTestId}>
@@ -115,6 +127,19 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
         <div className="absolute inset-0 flex items-center justify-center text-white/70 text-xs mono pointer-events-none"
              data-testid={`${dataTestId}-state`}>
           Connexion…
+        </div>
+      )}
+      {mode === "error" && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/80 px-3 text-center"
+             data-testid={`${dataTestId}-error`}>
+          <span className="text-[11px] text-[#FF3333] max-w-full">{errorMsg}</span>
+          <button
+            onClick={(e) => { e.stopPropagation(); setMode("mjpeg"); }}
+            className="px-2.5 py-1 text-[10px] uppercase tracking-wider border border-[#FFAA00] text-[#FFAA00] hover:bg-[#FFAA00]/10"
+            data-testid={`${dataTestId}-switch-mjpeg-btn`}
+          >
+            Basculer en MJPEG
+          </button>
         </div>
       )}
       <span

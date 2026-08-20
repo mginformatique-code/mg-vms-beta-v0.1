@@ -532,7 +532,7 @@ export default function LiveView() {
           </>
         ) : (
           Array.from({ length: layout }).map((_, i) => (
-            <Feed key={i} cam={cams[i]} idx={i} canPtz={canPtz} hd={hd}
+            <Feed key={cams[i]?.id || `slot-${i}`} cam={cams[i]} idx={i} canPtz={canPtz} hd={hd}
                   showOverlay={showOverlay} focused={false}
                   aiState={cams[i] ? aiDetections[cams[i].id] : null}
                   onToggleFocus={toggleFocus} />
