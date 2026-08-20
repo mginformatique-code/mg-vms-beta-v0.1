@@ -147,6 +147,22 @@ async def _index_segments(cam: dict) -> None:
         duration = await asyncio.to_thread(_probe_duration, f)
         if duration <= 0:
             continue
+        # v3.1.4 · Un segment `-c copy` nourri par un flux go2rtc avec des
+        # discontinuités de timestamps peut produire un MP4 dont les
+        # métadonnées de durée sont délirantes (observé : 28h pour 13 Mo,
+        # sur un segment cible de SEGMENT_SECONDS=120s) — ffprobe rapporte
+        # fidèlement cette valeur corrompue, donc on ne peut pas s'y fier
+        # aveuglément : un `end` erroné empoisonne l'index (ce segment se
+        # met alors à "couvrir" n'importe quel événement pendant des heures
+        # via la requête de plage dans _lookup_recording_for). On clamp à
+        # une marge large mais finie autour de la durée cible du segment.
+        MAX_PLAUSIBLE = SEGMENT_SECONDS * 3
+        if duration > MAX_PLAUSIBLE:
+            logger.warning(
+                "Durée aberrante ignorée : %s → ffprobe=%.0fs (clampé à %ds) — "
+                "probable métadonnée MP4 corrompue (flux source discontinu)",
+                f, duration, MAX_PLAUSIBLE)
+            duration = MAX_PLAUSIBLE
         end = start + timedelta(seconds=duration)
         flags = await _event_flags(cam["id"], start.isoformat(), end.isoformat())
         # Filtrage par mode d'enregistrement (motion/ai) : purge immédiate si aucun événement
