@@ -2,24 +2,34 @@
  * CameraControlOverlay — Contrôles terrain en overlay sur le lecteur live.
  *
  * 5 actions rapides :
- *   - Projecteur (relais spotlight)  · POST /api/cameras/{id}/relay/spotlight/{on|off}
- *   - IR (illuminateur infrarouge)    · POST /api/cameras/{id}/relay/ir/{on|off}
- *   - Sirène (alarme sonore)          · POST /api/cameras/{id}/relay/siren/{on|off}
- *   - TTS (parler)                    · POST /api/cameras/{id}/audio/tts { text }
- *   - Reboot                          · POST /api/cameras/{id}/reboot (confirm requis)
+ *   - Projecteur (relais ONVIF réel, token découvert)  · POST /api/cameras/{id}/relay/{token}/{on|off}
+ *   - IR (filtre IR jour/nuit, endpoint dédié)          · POST /api/cameras/{id}/ir/{on|off}
+ *   - Sirène (relais ONVIF réel, token découvert)       · POST /api/cameras/{id}/relay/{token}/{on|off}
+ *   - TTS (parler)                                       · POST /api/cameras/{id}/audio/tts { text }
+ *   - Reboot                                             · POST /api/cameras/{id}/reboot (confirm requis)
+ *
+ * v3.1.4 · Les tokens ONVIF de relais sont des identifiants propres à
+ * chaque caméra (ex. "RelayOutputToken_0"), jamais des noms génériques
+ * comme "spotlight"/"siren" — l'appel échouait systématiquement en
+ * envoyant ces libellés comme token. On découvre maintenant les VRAIS
+ * relais via GET /cameras/{id}/relays et on associe les 2 premiers
+ * trouvés aux boutons projecteur/sirène (heuristique : ONVIF ne dit pas
+ * à quoi sert un relais, juste qu'il existe). Boutons désactivés si la
+ * caméra n'expose aucun relais. L'IR bascule maintenant le vrai endpoint
+ * dédié (filtre IR-cut) au lieu d'un relais fictif.
  *
  * S'affiche en overlay bottom-left du player, discret par défaut, apparaît au hover.
  */
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Lightbulb, Moon, Siren, Volume2, RefreshCw, X } from "lucide-react";
 import api from "@/lib/api";
 import { toast } from "sonner";
 
-const BTN_CLS = "w-8 h-8 bg-black/70 hover:bg-[#00E5FF] hover:text-black flex items-center justify-center text-white transition-colors relative";
+const BTN_CLS = "w-8 h-8 bg-black/70 hover:bg-[#00E5FF] hover:text-black flex items-center justify-center text-white transition-colors relative disabled:opacity-30 disabled:hover:bg-black/70 disabled:hover:text-white disabled:cursor-not-allowed";
 
-function ActionBtn({ children, onClick, testid, title, active }) {
+function ActionBtn({ children, onClick, testid, title, active, disabled }) {
   return (
-    <button data-ptz-btn onClick={(e) => { e.stopPropagation(); onClick(e); }}
+    <button data-ptz-btn disabled={disabled} onClick={(e) => { e.stopPropagation(); onClick(e); }}
       className={`${BTN_CLS} ${active ? "!bg-[#00E676] text-black" : ""}`}
       data-testid={testid} title={title}>
       {children}
@@ -31,21 +41,52 @@ export default function CameraControlOverlay({ cam }) {
   const [busy, setBusy] = useState(null);
   const [ttsOpen, setTtsOpen] = useState(false);
   const [ttsText, setTtsText] = useState("");
-  // States locaux (optimistic) — on ne persiste pas, chaque toggle relance le POST
-  const [relays, setRelays] = useState({ spotlight: false, ir: false, siren: false });
+  const [irOn, setIrOn] = useState(false);
+  // Relais réellement présents sur la caméra (tokens ONVIF opaques) — [] tant
+  // qu'on n'a pas encore interrogé/si la caméra n'en expose aucun.
+  const [availableRelays, setAvailableRelays] = useState(null); // null = pas encore chargé
+  const [relayState, setRelayState] = useState({}); // token -> bool (optimistic)
 
   const camId = cam?.id;
+
+  useEffect(() => {
+    if (!camId) return;
+    let alive = true;
+    api.get(`/cameras/${camId}/relays`)
+      .then((r) => { if (alive) setAvailableRelays(r.data?.relays || []); })
+      .catch(() => { if (alive) setAvailableRelays([]); });
+    return () => { alive = false; };
+  }, [camId]);
+
   if (!camId) return null;
 
-  const toggleRelay = async (token) => {
-    const next = !relays[token];
+  const spotlightToken = availableRelays?.[0]?.token;
+  const sirenToken = availableRelays?.[1]?.token;
+
+  const toggleRelay = async (token, label) => {
+    if (!token) return;
+    const next = !relayState[token];
     setBusy(token);
     try {
-      await api.post(`/cameras/${camId}/relay/${token}/${next ? "on" : "off"}`);
-      setRelays((r) => ({ ...r, [token]: next }));
-      toast.success(`${token.charAt(0).toUpperCase() + token.slice(1)} ${next ? "activé" : "désactivé"}`);
+      await api.post(`/cameras/${camId}/relay/${encodeURIComponent(token)}/${next ? "on" : "off"}`);
+      setRelayState((r) => ({ ...r, [token]: next }));
+      toast.success(`${label} ${next ? "activé" : "désactivé"}`);
     } catch (e) {
-      toast.error(`Échec ${token} : ${e?.response?.data?.detail || "erreur"}`);
+      toast.error(`Échec ${label} : ${e?.response?.data?.detail || "erreur"}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const toggleIr = async () => {
+    const next = !irOn;
+    setBusy("ir");
+    try {
+      await api.post(`/cameras/${camId}/ir/${next ? "on" : "off"}`);
+      setIrOn(next);
+      toast.success(`IR ${next ? "activé" : "désactivé"}`);
+    } catch (e) {
+      toast.error(`Échec IR : ${e?.response?.data?.detail || "erreur"}`);
     } finally {
       setBusy(null);
     }
@@ -83,16 +124,20 @@ export default function CameraControlOverlay({ cam }) {
     <div className="absolute bottom-2 left-2 opacity-70 hover:opacity-100 transition-opacity"
          data-testid={`camera-controls-${camId}`}>
       <div className="flex gap-0.5 bg-black/50 p-0.5 backdrop-blur-sm">
-        <ActionBtn onClick={() => toggleRelay("spotlight")} testid="ctrl-spotlight"
-          title={`Projecteur ${relays.spotlight ? "ON" : "OFF"}`} active={relays.spotlight}>
+        <ActionBtn onClick={() => toggleRelay(spotlightToken, "Projecteur")} testid="ctrl-spotlight"
+          disabled={!spotlightToken}
+          title={spotlightToken ? `Projecteur (relais ${spotlightToken}) ${relayState[spotlightToken] ? "ON" : "OFF"}` : "Aucun relais détecté sur cette caméra"}
+          active={relayState[spotlightToken]}>
           <Lightbulb size={14} />
         </ActionBtn>
-        <ActionBtn onClick={() => toggleRelay("ir")} testid="ctrl-ir"
-          title={`IR ${relays.ir ? "ON" : "OFF"}`} active={relays.ir}>
+        <ActionBtn onClick={toggleIr} testid="ctrl-ir"
+          title={`IR (filtre jour/nuit) ${irOn ? "ON" : "OFF"}`} active={irOn}>
           <Moon size={14} />
         </ActionBtn>
-        <ActionBtn onClick={() => toggleRelay("siren")} testid="ctrl-siren"
-          title={`Sirène ${relays.siren ? "ON" : "OFF"}`} active={relays.siren}>
+        <ActionBtn onClick={() => toggleRelay(sirenToken, "Sirène")} testid="ctrl-siren"
+          disabled={!sirenToken}
+          title={sirenToken ? `Sirène (relais ${sirenToken}) ${relayState[sirenToken] ? "ON" : "OFF"}` : "Un seul relais détecté sur cette caméra (déjà utilisé pour le projecteur)"}
+          active={relayState[sirenToken]}>
           <Siren size={14} />
         </ActionBtn>
         <ActionBtn onClick={() => setTtsOpen(true)} testid="ctrl-tts" title="TTS (parler)">
