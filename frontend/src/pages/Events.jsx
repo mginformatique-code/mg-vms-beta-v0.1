@@ -272,7 +272,8 @@ export default function Events() {
             <button key={e.id} onClick={() => setViewerIdx(i)} className="border border-border bg-card overflow-hidden text-left hover:border-[#0044FF] transition-colors" data-testid="event-card">
               <div className="relative bg-black aspect-video cursor-zoom-in">
                 {e.thumbnail ? (
-                  <img src={e.thumbnail} alt={e.type} className="w-full h-full object-cover" />
+                  <img src={e.thumbnail_sm || e.thumbnail} alt={e.type} className="w-full h-full object-cover"
+                       loading="lazy" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center"><CamIcon size={20} className="text-white/30" /></div>
                 )}

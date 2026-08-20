@@ -388,6 +388,28 @@ def _ensure_frame_thumb(result: dict):
     return thumb
 
 
+def _ensure_frame_thumb_sm(result: dict):
+    """Miniature légère pour la grille de la page Événements (galerie).
+
+    v3.1.4 · La galerie affiche des cartes d'à peine ~200px de large mais
+    transportait la même image que la vue détaillée (1920px) — chaque
+    chargement de la page Événements retéléchargeait des centaines de Ko
+    d'images pour un rendu minuscule. Variante dédiée, même source (même
+    ctx, un seul décodage), juste redimensionnée plus petit. La vue
+    détaillée (EventViewer) continue d'utiliser `frame_thumb` (1920px).
+    """
+    if "frame_thumb_sm" in result:
+        return result["frame_thumb_sm"]
+    ctx = result.get("_ctx")
+    if ctx is not None:
+        thumb = ctx.jpeg_data_uri(max_width=384, quality=70)
+    else:
+        img = result.get("_img_bgr")
+        thumb = _jpeg_data_uri(img, max_width=384, quality=70) if img is not None else None
+    result["frame_thumb_sm"] = thumb
+    return thumb
+
+
 def get_debug_snapshot(camera_id: str) -> dict:
     from pipeline_v2.camera_worker import get_debug_snapshot as _snap
     return _snap(camera_id)

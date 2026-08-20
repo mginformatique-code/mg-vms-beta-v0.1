@@ -262,7 +262,8 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
         await db.events.insert_one({
             "id": str(uuid.uuid4()), "type": "Mouvement", **base,
             "confidence": None, "motion_pct": result["motion_pct"],
-            "thumbnail": _ae._ensure_frame_thumb(result), "vehicle_color": None,
+            "thumbnail": _ae._ensure_frame_thumb(result),
+            "thumbnail_sm": _ae._ensure_frame_thumb_sm(result), "vehicle_color": None,
             "plugins_used": plugins_used,
         })
 
@@ -296,6 +297,7 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
                         **base,
                         "confidence": m.get("similarity"),
                         "thumbnail": _ae._ensure_frame_thumb(result),
+                        "thumbnail_sm": _ae._ensure_frame_thumb_sm(result),
                         "vehicle_color": None,
                         "face_id": m.get("face_id"),
                         "face_name": m.get("name"),
@@ -309,6 +311,7 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
                             "severity": "critical",
                             "message": f"Visage sur liste de surveillance : {m.get('name')}",
                             "thumbnail": _ae._ensure_frame_thumb(result),
+                            "thumbnail_sm": _ae._ensure_frame_thumb_sm(result),
                             "acknowledged": False,
                             "plugin": "face_recognition",
                         })
@@ -347,6 +350,7 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
             "id": str(uuid.uuid4()), "type": det["label"], **base,
             "confidence": det["confidence"],
             "thumbnail": _ae._ensure_frame_thumb(result) or _det_thumb(det),
+            "thumbnail_sm": _ae._ensure_frame_thumb_sm(result) or _det_thumb(det),
             "crop_thumbnail": _det_thumb(det),
             "vehicle_color": det.get("vehicle_color"),
             "track_id": tid,
@@ -447,6 +451,7 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
                         "trackers": (_pr.plugins_used or {}).get("trackers", []),
                         "segmenters": (_pr.plugins_used or {}).get("segmenters", []),
                         "thumbnail": _ae._ensure_frame_thumb(result),
+                        "thumbnail_sm": _ae._ensure_frame_thumb_sm(result),
                         "data": be.get("data"),
                     })
 
