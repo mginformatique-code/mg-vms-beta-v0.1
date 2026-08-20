@@ -11,8 +11,11 @@
 #   2. Validation des fichiers de build (Dockerfiles, compose, go2rtc.yaml,
 #      requirements ×3, yarn.lock synchronisé avec package.json)
 #   3. Prérequis Docker
-#   4. Nettoyage pré-installation (down + prune images/cache)    [--no-cleanup]
-#      → question interactive : nettoyage Docker complet en plus (au choix)  [--big-cleanup]
+#   4. Nettoyage pré-installation (down + 3 paliers de prune)    [--no-cleanup]
+#      → palier 1 (simple, scopé MG-VMS) : question, Entrée = oui
+#      → palier 2 (important, tout l'hôte) : question, Entrée = non
+#      → palier 3 (PRO MAX++, + volumes orphelins) : question, Entrée = non
+#      → --big-cleanup saute les 3 questions et applique directement le palier 3
 #   5. Création des dossiers de stockage /mnt/storage/... + .env
 #   6. docker compose config → build → up -d
 #   7. Attente des healthchecks (mongo → go2rtc → backend → frontend)
@@ -24,8 +27,9 @@
 #   --check-only   valider les fichiers puis s'arrêter (aucun docker requis)
 #   --no-cache     build avec --no-cache
 #   --no-cleanup   ne pas faire down + prune avant le build
-#   --big-cleanup  nettoyage Docker COMPLET (system+builder -a, tout l'hôte,
-#                  pas juste MG-VMS) sans passer par la question interactive
+#   --big-cleanup  nettoyage Docker PRO MAX++ (palier 3 : system+builder -a
+#                  --volumes, tout l'hôte, pas juste MG-VMS) sans passer par
+#                  les questions interactives — jamais les bind mounts/données
 # ==============================================================================
 set -euo pipefail
 
@@ -183,15 +187,14 @@ fi
 # ══════════════════════════════════════════════════════════════════════
 # 4. Nettoyage pré-installation
 # ══════════════════════════════════════════════════════════════════════
-# Par défaut : nettoyage SCOPÉ à ce projet + orphelins Docker (conteneurs
-# arrêtés, images dangling, cache de build) — jamais de `docker volume prune`
-# ni `system prune -a` automatiques : ce compose n'utilise que des bind
-# mounts host (/mnt/storage/...), aucun volume Docker nommé (rien à perdre
-# côté volumes), mais un `-a`/`system prune` global supprimerait aussi des
-# images sans rapport avec MG-VMS si l'hôte en héberge d'autres — jamais fait
-# sans confirmation explicite. Le nettoyage complet reste disponible EN PLUS,
-# sur choix interactif (ou --big-cleanup) : repartir d'un système Docker
-# totalement vide (images/cache/system), au choix de l'opérateur.
+# v3.1.4 · Trois paliers, chacun sa question, du plus prudent au plus
+# radical — pour ne jamais forcer un choix entre "rien" et "tout supprime".
+# Important : ce compose n'utilise QUE des bind mounts host pour les
+# données réelles (mongo/enregistrements/modèles/...) — AUCUN palier, même
+# --volumes, ne peut donc perdre de données MG-VMS, quoi qu'il arrive.
+# Seuls des volumes Docker *nommés* orphelins (reliquats d'anciennes
+# configs, comme observé une fois en prod avec un volume mongo abandonné
+# après le passage aux bind mounts) peuvent disparaître au palier 3.
 titre "4/7 · Nettoyage pré-installation"
 cd "$SCRIPT_DIR"
 if [ "$NO_CLEANUP" = 1 ]; then
@@ -204,28 +207,61 @@ else
     ok "aucun conteneur MG-VMS en cours — rien à arrêter"
   fi
 
-  FAIRE_BIG_CLEANUP=0
-  if [ "$BIG_CLEANUP" = 1 ]; then
-    FAIRE_BIG_CLEANUP=1
-  elif [ -t 0 ]; then
-    echo -ne "${JAUNE}  Nettoyage Docker COMPLET (system + builder + TOUTES les images inutilisées de l'hôte, pas seulement MG-VMS) ? [y/N] ${NC}"
-    read -r REPONSE_CLEANUP || REPONSE_CLEANUP=""
-    case "$REPONSE_CLEANUP" in
-      [oOyY]|[oOyY][uUeE][iIsS]) FAIRE_BIG_CLEANUP=1 ;;
-    esac
+  # Palier 1 · Simple — scopé MG-VMS (images dangling + cache de build),
+  # rapide et sans impact sur d'autres projets Docker de l'hôte. Coché par
+  # défaut (Entrée = oui) : c'est le nettoyage qui était déjà automatique
+  # avant l'ajout des paliers 2/3.
+  FAIRE_P1=1
+  if [ "$BIG_CLEANUP" != 1 ] && [ -t 0 ]; then
+    echo -ne "${JAUNE}  Palier 1 · Nettoyage simple (images orphelines + cache de build MG-VMS) ? [Y/n] ${NC}"
+    read -r REP1 || REP1=""
+    case "$REP1" in [nN]|[nN][oO]) FAIRE_P1=0 ;; esac
   fi
-
-  if [ "$FAIRE_BIG_CLEANUP" = 1 ]; then
-    warn "Nettoyage complet : supprime TOUTES les images/cache Docker inutilisés de l'hôte (pas seulement MG-VMS)."
-    docker system prune -af
-    docker builder prune -af
-    ok "nettoyage complet effectué (system + builder, -a) — Docker reparti à vide côté images/cache"
-  else
+  if [ "$FAIRE_P1" = 1 ]; then
     N_DANGLING=$(docker images -f "dangling=true" -q | wc -l | tr -d ' ')
     docker image prune -f >/dev/null
-    ok "images orphelines supprimées ($N_DANGLING image(s) dangling nettoyée(s))"
     docker builder prune -f >/dev/null
-    ok "cache de build Docker purgé"
+    ok "palier 1 : $N_DANGLING image(s) dangling + cache de build purgés"
+  else
+    warn "palier 1 ignoré"
+  fi
+
+  # Palier 2 · Important — TOUTES les images Docker inutilisées de l'hôte
+  # (pas seulement MG-VMS) + réseaux orphelins. Implique un rebuild complet
+  # (sans cache d'images) au prochain build.
+  FAIRE_P2=0
+  if [ "$BIG_CLEANUP" = 1 ]; then
+    FAIRE_P2=1
+  elif [ -t 0 ]; then
+    echo -ne "${JAUNE}  Palier 2 · Nettoyage important (TOUTES les images Docker inutilisées de l'hôte, pas juste MG-VMS) ? [y/N] ${NC}"
+    read -r REP2 || REP2=""
+    case "$REP2" in [oOyY]|[oOyY][uUeE][iIsS]) FAIRE_P2=1 ;; esac
+  fi
+
+  # Palier 3 · PRO MAX++ — palier 2 + volumes Docker orphelins (--volumes).
+  # Table rase totale côté Docker. Uniquement proposé si le palier 2 est
+  # accepté (le 3 est un sur-ensemble du 2, pas une alternative séparée).
+  FAIRE_P3=0
+  if [ "$FAIRE_P2" = 1 ]; then
+    if [ "$BIG_CLEANUP" = 1 ]; then
+      FAIRE_P3=1
+    elif [ -t 0 ]; then
+      echo -ne "${JAUNE}  Palier 3 · Nettoyage PRO MAX++ (palier 2 + volumes Docker orphelins — repart totalement à vide) ? [y/N] ${NC}"
+      read -r REP3 || REP3=""
+      case "$REP3" in [oOyY]|[oOyY][uUeE][iIsS]) FAIRE_P3=1 ;; esac
+    fi
+  fi
+
+  if [ "$FAIRE_P3" = 1 ]; then
+    warn "PRO MAX++ : supprime TOUTES les images/cache/volumes Docker orphelins de l'hôte (pas seulement MG-VMS). Vos données (bind mounts) ne sont jamais concernées."
+    docker system prune -af --volumes
+    docker builder prune -af
+    ok "palier 3 effectué — Docker reparti à vide (images, cache, volumes orphelins)"
+  elif [ "$FAIRE_P2" = 1 ]; then
+    warn "Nettoyage important : supprime TOUTES les images/cache Docker inutilisés de l'hôte (pas seulement MG-VMS)."
+    docker system prune -af
+    docker builder prune -af
+    ok "palier 2 effectué — Docker reparti à vide côté images/cache (volumes orphelins conservés)"
   fi
 fi
 
