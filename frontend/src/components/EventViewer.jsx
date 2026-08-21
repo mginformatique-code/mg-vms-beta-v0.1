@@ -29,14 +29,11 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
   const [recInfo, setRecInfo] = useState(null); // { stream_url, offset_sec }
   const [showVideo, setShowVideo] = useState(false);
   const [recLoading, setRecLoading] = useState(false);
-  // v1.0-rc3 · Bouton "Analyser OCR" pour events sans plaque détectée
-  const [ocrLoading, setOcrLoading] = useState(false);
+  // v1.0-rc3/v3.1.8 · "Analyser OCR" = sélection manuelle d'une zone (voir
+  // plus bas) — plus d'analyse automatique pleine image en aveugle, qui
+  // produisait des faux positifs silencieux avec les moteurs OCR sans
+  // localisation de plaque dédiée.
   const [ocrResult, setOcrResult] = useState(null);
-  // v3.1.7 · Sélection manuelle d'une zone à analyser — contourne les cas où
-  // YOLO ne détecte pas de véhicule sur la miniature figée, ou où la plaque
-  // est trop petite dans le crop véhicule automatique pour les moteurs OCR
-  // génériques (easyocr/tesseract/opencv-ocr n'ont pas de localisation de
-  // plaque dédiée, contrairement à fast-alpr).
   const [selectMode, setSelectMode] = useState(false);
   const [selectRect, setSelectRect] = useState(null); // {x, y, w, h} en px, relatif au container
   const [selectStart, setSelectStart] = useState(null);
@@ -380,39 +377,19 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
         </div>
 
         <div className="p-4 border-t border-white/10 space-y-2">
-          {/* v1.0-rc3 · Bouton "Analyser OCR" — visible SEULEMENT quand
-              aucune plaque n'a été détectée à l'origine et pas encore
-              ré-analysée dans cette session */}
-          {kind === "event" && !item.plate && !ocrResult?.plate && item.thumbnail && (
-            <button
-              onClick={async () => {
-                if (!item.id) return toast.error("Événement sans identifiant");
-                setOcrLoading(true);
-                try {
-                  const { data } = await api.post(`/events/${item.id}/reanalyze`);
-                  setOcrResult(data);
-                  if (data.plate) {
-                    toast.success(`Plaque détectée : ${data.plate} (${Math.round((data.confidence || 0) * 100)}%)`);
-                  } else {
-                    toast.info(data.message || "Aucune plaque détectée");
-                  }
-                } catch (e) {
-                  toast.error(e.response?.data?.detail || "Analyse impossible");
-                } finally { setOcrLoading(false); }
-              }}
-              disabled={ocrLoading}
-              data-testid="viewer-reanalyze-btn"
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-[#7C3AED] text-white hover:bg-[#6D28D9] disabled:opacity-50"
-            >
-              {ocrLoading ? <Loader2 size={16} className="animate-spin" /> : <ScanSearch size={16} />}
-              {ocrLoading ? "Analyse en cours…" : "Analyser OCR sur cette image"}
-            </button>
-          )}
-          {/* v3.1.7 · Escape hatch : sélection manuelle d'une zone quand l'auto
-              (YOLO véhicule → OCR) ne trouve rien — la plaque est souvent
-              visible à l'œil mais trop petite/mal cadrée pour les moteurs OCR
-              génériques sans localisation dédiée. */}
-          {kind === "event" && !item.plate && !ocrResult?.plate && item.thumbnail && (
+          {/* v3.1.8 · "Analyser OCR" = sélection de zone directe, plus d'analyse
+              automatique pleine image en aveugle. Raison : les moteurs OCR sans
+              localisation de plaque dédiée (easyocr/tesseract/opencv-ocr/
+              paddle-ocr — tout sauf fast-alpr) lisaient parfois un texte
+              quelconque dans tout le crop véhicule et le retournaient comme
+              "plaque" à confiance moyenne (ex. observé en prod : "G57695" à 55%
+              sur une plaque réelle "ED-241-LZ") — un faux positif silencieux,
+              pire qu'aucune lecture. Tracer soi-même le rectangle sur la
+              plaque élimine ce risque. Visible même si une plaque est déjà
+              connue (`item.plate`) : permet de corriger/reconfirmer une
+              lecture automatique douteuse — le résultat écrase `event.plate`
+              en base (voir routers.py::reanalyze_event). */}
+          {kind === "event" && item.thumbnail && (
             <button
               onClick={() => { setSelectMode((v) => !v); setSelectRect(null); setSelectStart(null); }}
               data-testid="viewer-select-zone-btn"
@@ -420,7 +397,7 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
                 selectMode ? "border-[#00E5FF] text-[#00E5FF] bg-[#00E5FF]/10" : "border-white/20 text-white/80 hover:bg-white/10"
               }`}
             >
-              <ScanSearch size={14} /> {selectMode ? "Annuler la sélection" : "Sélectionner une zone à analyser"}
+              <ScanSearch size={14} /> {selectMode ? "Annuler la sélection" : "Analyser OCR (sélectionner une zone)"}
             </button>
           )}
           {ocrResult?.plate && (

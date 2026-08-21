@@ -47,7 +47,14 @@ class TestEventsExcludeQosAlert:
 
 
 class TestReanalyzeEndpoint:
-    """L'endpoint POST /events/{id}/reanalyze est enregistré et retourne un JSON structuré."""
+    """L'endpoint POST /events/{id}/reanalyze est enregistré et retourne un JSON structuré.
+
+    v3.1.8 · `bbox` (zone tracée par l'utilisateur) est désormais REQUIS —
+    voir ReanalyzeRequest et la raison dans routers.py. Le mode "pleine
+    image" (mock d'`ai_engine.analyze_image_local`) a été retiré ; ces tests
+    monkeypatchent `_dispatch_all_plate_engines` à la place (même rôle que
+    l'ancien mock : simuler la sortie des moteurs OCR sans dépendre du vrai
+    pipeline plugin bus)."""
 
     def test_endpoint_registered(self):
         from server import app
@@ -61,8 +68,18 @@ class TestReanalyzeEndpoint:
                     break
         assert found, "POST /api/events/{event_id}/reanalyze non enregistré"
 
+    def test_400_if_no_bbox(self, monkeypatch):
+        """Pas de body / pas de bbox → 400 (avant même la recherche de l'event)."""
+        from fastapi import HTTPException
+        import routers as R
+
+        with pytest.raises(HTTPException) as exc:
+            _run(R.reanalyze_event("e1", {"role": "admin"}, None))
+        assert exc.value.status_code == 400
+        assert "bbox" in str(exc.value.detail).lower()
+
     def test_404_on_unknown_event(self, monkeypatch):
-        """Event inconnu → 404 propre."""
+        """Event inconnu → 404 propre (bbox valide fourni)."""
         from fastapi import HTTPException
         import routers as R
 
@@ -75,7 +92,7 @@ class TestReanalyzeEndpoint:
 
         monkeypatch.setattr(R, "db", FakeDB())
         with pytest.raises(HTTPException) as exc:
-            _run(R.reanalyze_event("nope-id", {"role": "admin"}))
+            _run(R.reanalyze_event("nope-id", {"role": "admin"}, R.ReanalyzeRequest(bbox=[0.1, 0.1, 0.9, 0.9])))
         assert exc.value.status_code == 404
 
     def test_400_if_no_thumbnail(self, monkeypatch):
@@ -92,12 +109,12 @@ class TestReanalyzeEndpoint:
 
         monkeypatch.setattr(R, "db", FakeDB())
         with pytest.raises(HTTPException) as exc:
-            _run(R.reanalyze_event("e1", {"role": "admin"}))
+            _run(R.reanalyze_event("e1", {"role": "admin"}, R.ReanalyzeRequest(bbox=[0.1, 0.1, 0.9, 0.9])))
         assert exc.value.status_code == 400
         assert "miniature" in str(exc.value.detail).lower()
 
     def test_reanalyze_flow_when_no_plate_found(self, monkeypatch):
-        """Cas nominal : image lisible mais aucune plaque détectée."""
+        """Cas nominal : image lisible mais aucune plaque détectée dans la zone."""
         import routers as R
 
         # Fake image bytes : 1×1 JPEG minimal
@@ -115,16 +132,15 @@ class TestReanalyzeEndpoint:
 
         class FakeDB:
             events = FakeCollection()
+            cameras = FakeCollection()
 
-        # Mock ai_engine.analyze_image_local
-        import ai_engine as ae
-        monkeypatch.setattr(ae, "analyze_image_local",
-                             lambda b: {"plate": "", "confidence": 0.0,
-                                        "vehicle_type": "Inconnu",
-                                        "vehicle_color": ""})
+        async def fake_dispatch(*a, **k):
+            return []
+
+        monkeypatch.setattr(R, "_dispatch_all_plate_engines", fake_dispatch)
         monkeypatch.setattr(R, "db", FakeDB())
 
-        result = _run(R.reanalyze_event("e1", {"role": "admin"}))
+        result = _run(R.reanalyze_event("e1", {"role": "admin"}, R.ReanalyzeRequest(bbox=[0.1, 0.1, 0.9, 0.9])))
         assert result["ok"] is True
         assert result["plate"] is None
         assert "Aucune plaque" in result["message"]
@@ -148,17 +164,19 @@ class TestReanalyzeEndpoint:
 
         class FakeDB:
             events = FakeCollection()
+            cameras = FakeCollection()
 
-        import ai_engine as ae
-        monkeypatch.setattr(ae, "analyze_image_local",
-                             lambda b: {"plate": "AB-123-CD", "confidence": 0.87,
-                                        "vehicle_type": "Voiture", "vehicle_color": "Bleu"})
+        async def fake_dispatch(*a, **k):
+            return [{"plate": "AB-123-CD", "confidence": 0.87, "engine": "easyocr"}]
+
+        monkeypatch.setattr(R, "_dispatch_all_plate_engines", fake_dispatch)
         monkeypatch.setattr(R, "db", FakeDB())
 
-        result = _run(R.reanalyze_event("e1", {"role": "admin"}))
+        result = _run(R.reanalyze_event("e1", {"role": "admin"}, R.ReanalyzeRequest(bbox=[0.1, 0.1, 0.9, 0.9])))
         assert result["ok"] is True
         assert result["plate"] == "AB-123-CD"
         assert result["confidence"] == 0.87
+        assert result["engine"] == "easyocr"
         # Doit persister avec les 4 champs reanalyzed_* + `plate` + `confidence`
         assert len(writes) == 1
         _, upd = writes[0]
@@ -170,22 +188,24 @@ class TestReanalyzeEndpoint:
 
 
 class TestFrontendReanalyzeButton:
-    """Le bouton "Analyser OCR" est présent dans EventViewer.jsx."""
+    """Le bouton "Analyser OCR" (sélection de zone) est présent dans EventViewer.jsx."""
 
     @pytest.fixture(scope="class")
     def content(self):
         return open("/app/frontend/src/components/EventViewer.jsx",
                      encoding="utf-8").read()
 
-    def test_button_only_shown_without_plate(self, content):
-        """Condition d'affichage : kind=event ET !plate ET thumbnail présent."""
-        assert 'kind === "event" && !item.plate && !ocrResult?.plate && item.thumbnail' in content
+    def test_button_shown_for_events_with_thumbnail(self, content):
+        """v3.1.8 · Condition d'affichage : kind=event ET thumbnail présent —
+        visible même si une plaque est déjà connue (permet de corriger une
+        lecture automatique douteuse)."""
+        assert 'kind === "event" && item.thumbnail' in content
 
-    def test_calls_reanalyze_endpoint(self, content):
-        assert "api.post(`/events/${item.id}/reanalyze`)" in content
+    def test_calls_reanalyze_endpoint_with_bbox(self, content):
+        assert "api.post(`/events/${item.id}/reanalyze`, { bbox })" in content
 
     def test_button_uses_testid(self, content):
-        assert 'data-testid="viewer-reanalyze-btn"' in content
+        assert 'data-testid="viewer-select-zone-btn"' in content
 
 
 class TestNoRegression:

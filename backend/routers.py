@@ -701,13 +701,15 @@ async def recording_context(camera_id: str, at: str, user: dict = Depends(get_cu
 
 
 class ReanalyzeRequest(BaseModel):
-    # v3.1.7 · Zone manuelle optionnelle — coordonnées normalisées (0..1)
-    # relatives à l'image entière : [x1, y1, x2, y2]. Quand fournie, on
-    # saute la détection véhicule YOLO et on lit l'OCR directement dans ce
-    # crop (utile quand YOLO ne détecte pas de véhicule sur la miniature
-    # figée, ou quand la plaque est trop petite dans le crop véhicule
-    # automatique pour les moteurs OCR génériques).
-    bbox: Optional[List[float]] = None
+    # v3.1.8 · Zone OBLIGATOIRE — coordonnées normalisées (0..1) relatives à
+    # l'image entière : [x1, y1, x2, y2], tracée par l'utilisateur autour de
+    # la plaque. v3.1.7 avait d'abord un mode "pleine image" (YOLO véhicule →
+    # OCR) sans zone : retiré (v3.1.8) après un faux positif observé en prod
+    # — un moteur OCR sans localisation de plaque dédiée (tout sauf fast-alpr)
+    # a lu un texte quelconque dans le crop véhicule entier et l'a retourné
+    # comme plaque à confiance moyenne (55%) alors que la vraie plaque était
+    # tout autre chose. Une zone tracée à la main élimine ce risque.
+    bbox: List[float]
 
 
 async def _dispatch_all_plate_engines(numpy_bgr, camera_id: str, cam: Optional[dict]) -> list:
@@ -745,20 +747,21 @@ async def _dispatch_all_plate_engines(numpy_bgr, camera_id: str, cam: Optional[d
 
 
 @api_router.post("/events/{event_id}/reanalyze")
-async def reanalyze_event(event_id: str, body: ReanalyzeRequest = ReanalyzeRequest(),
-                           user: dict = Depends(require_permission("read_plates"))):
-    """v3.1.7 · Relance l'OCR sur l'image thumbnail d'un événement.
+async def reanalyze_event(event_id: str, user: dict = Depends(require_permission("read_plates")),
+                           body: Optional[ReanalyzeRequest] = None):
+    """v3.1.8 · Relance l'OCR sur une zone (tracée par l'utilisateur) de
+    l'image thumbnail d'un événement — TOUS les moteurs PlateRecognizer
+    activés et opérationnels pour la caméra sont interrogés sur ce crop
+    (voir `_dispatch_all_plate_engines`), pas seulement fast-alpr.
 
-    Deux modes :
-      - Sans `bbox` : pipeline complet (YOLO véhicule → ROI → TOUS les
-        moteurs PlateRecognizer activés pour la caméra, pas seulement
-        fast-alpr — voir `_dispatch_all_plate_engines`).
-      - Avec `bbox` (sélection manuelle d'une zone dans l'image par
-        l'utilisateur) : lecture OCR directe sur ce crop, sans détection
-        véhicule — contourne les cas où YOLO ne détecte rien sur la
-        miniature figée, ou où la plaque est trop petite dans le crop
-        véhicule automatique.
+    Contrairement au comportement précédent (v3.1.7 avant ce fix), il n'y a
+    plus de mode "pleine image" automatique : nécessite `bbox` (l'utilisateur
+    doit tracer un rectangle autour de la plaque dans l'UI). Voir le
+    commentaire sur `ReanalyzeRequest.bbox` pour la raison.
     """
+    if body is None or not body.bbox or len(body.bbox) != 4:
+        raise HTTPException(400, "bbox requis — sélectionnez une zone autour de la plaque")
+
     ev = await db.events.find_one({"id": event_id}, {"_id": 0})
     if not ev:
         raise HTTPException(404, "Événement introuvable")
@@ -778,39 +781,19 @@ async def reanalyze_event(event_id: str, body: ReanalyzeRequest = ReanalyzeReque
 
     cam = await db.cameras.find_one({"id": ev.get("camera_id")}, {"_id": 0}) if ev.get("camera_id") else None
 
-    vehicle_type = None
-    vehicle_color = None
-    candidates: list = []
-
     try:
         import cv2
         import numpy as np
         img = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
         if img is None:
             raise ValueError("décodage image échoué")
-
-        if body.bbox and len(body.bbox) == 4:
-            h, w = img.shape[:2]
-            x1 = max(0, min(w - 1, int(body.bbox[0] * w)))
-            y1 = max(0, min(h - 1, int(body.bbox[1] * h)))
-            x2 = max(x1 + 1, min(w, int(body.bbox[2] * w)))
-            y2 = max(y1 + 1, min(h, int(body.bbox[3] * h)))
-            crop = img[y1:y2, x1:x2]
-            candidates = await _dispatch_all_plate_engines(crop, ev.get("camera_id") or "__upload__", cam)
-        else:
-            import ai_engine
-            legacy = await asyncio.to_thread(
-                ai_engine.analyze_image_local, image_bytes, cam)
-            vehicle_type = (legacy or {}).get("vehicle_type")
-            vehicle_color = (legacy or {}).get("vehicle_color")
-            if (legacy or {}).get("plate"):
-                candidates.append({"plate": legacy["plate"], "confidence": float(legacy.get("confidence") or 0.0),
-                                    "engine": "fast-alpr"})
-            # Multi-moteurs sur les mêmes crops véhicule que la détection live
-            # (voir _prerun_multi_anpr) — pas seulement fast-alpr.
-            ctx = (legacy or {}).get("_ctx")
-            for roi in (getattr(ctx, "vehicle_rois", None) or []):
-                candidates.extend(await _dispatch_all_plate_engines(roi.crop, ev.get("camera_id") or "__upload__", cam))
+        h, w = img.shape[:2]
+        x1 = max(0, min(w - 1, int(body.bbox[0] * w)))
+        y1 = max(0, min(h - 1, int(body.bbox[1] * h)))
+        x2 = max(x1 + 1, min(w, int(body.bbox[2] * w)))
+        y2 = max(y1 + 1, min(h, int(body.bbox[3] * h)))
+        crop = img[y1:y2, x1:x2]
+        candidates = await _dispatch_all_plate_engines(crop, ev.get("camera_id") or "__upload__", cam)
     except Exception as e:
         raise HTTPException(500, f"OCR indisponible: {e}")
 
@@ -837,9 +820,7 @@ async def reanalyze_event(event_id: str, body: ReanalyzeRequest = ReanalyzeReque
         "plate": plate or None,
         "confidence": conf,
         "engine": engine,
-        "vehicle_type": vehicle_type,
-        "vehicle_color": vehicle_color,
-        "message": "Aucune plaque détectée sur cette image" if not plate else None,
+        "message": "Aucune plaque détectée dans cette zone" if not plate else None,
     }
 
 
