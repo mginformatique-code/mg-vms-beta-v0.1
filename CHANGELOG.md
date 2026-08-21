@@ -2,6 +2,62 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.1.6-go2rtc-tcp-transport] — 2026-08 — Root cause packet loss RTSP (frames vertes/trous d'enregistrement) + bruit galerie Événements
+
+Suite d'un signalement en conditions réelles (capture d'événement avec frame
+verte corrompue + "Aucun enregistrement ne couvre cet événement"). Root
+cause confirmée par log réel (capture stderr ajoutée en `v3.1.4`, jamais
+déclenchée avant ce soir) plutôt que supposée. PR :
+[#1](https://github.com/mginformatique-code/mg-vms-beta-v0.1/pull/1).
+
+### Fixed — Root cause go2rtc (perte de paquets RTP)
+- **Log capturé sur la caméra test2** : `[rtsp] RTP: PT=60/61: bad cseq ...
+  expected=...` — perte/désordre de paquets RTP, cause directe des
+  artefacts "neige"/frames corrompues et trous d'enregistrement chroniques
+  signalés depuis le début de cette session.
+- Un fix pour EXACTEMENT ce symptôme avait déjà été tenté (`v1.0-rc4.5`,
+  suffixe `#transport=tcp#timeout=15` sur la source go2rtc) puis retiré
+  (`v2.1`) suite à `Get "tcp": unsupported protocol scheme ""`. Vérifié
+  cette fois contre la documentation source de go2rtc avant de retoucher
+  ce chemin : le fragment `#transport=` du client RTSP **natif** de go2rtc
+  sert UNIQUEMENT à tunneliser RTSP-sur-WebSocket (`#transport=ws://...`)
+  — `"tcp"` n'est pas une valeur reconnue, d'où l'erreur de parsing exacte
+  observée à l'époque. Ce client natif n'a **aucun moyen** de forcer TCP.
+- **Fix** : `register_camera_stream` (`streaming.py`) préfixe désormais la
+  source RTSP primaire par `ffmpeg:` avant l'inscription go2rtc — son
+  template d'entrée par défaut force déjà `-rtsp_transport tcp` (doc
+  go2rtc : seul `#input=rtsp/udp` en repasse en UDP+TCP, donc le défaut
+  sans override est TCP), sans charge CPU additionnelle tant qu'aucune
+  transcodage n'est demandé (stream copy). Mécanisme déjà utilisé sans
+  problème dans ce même fichier pour les variantes `_hd`/`_sd` — pas une
+  capacité non éprouvée sur ce déploiement. Ne touche ni `_build_rtsp_url`
+  ni la façon dont recorder/IA/WebRTC consomment le flux RE-SERVI par
+  go2rtc (RTSP natif, inchangé) — seule la connexion go2rtc→caméra change
+  de mécanisme de transport.
+- ⚠️ **2ᵉ tentative sur cette exacte root cause** — à vérifier en priorité
+  sur test2 (source du log `bad cseq`) après redeploy : confirmer que le
+  flux décode toujours normalement (pas de régression du type `Get "tcp"`
+  de la 1ʳᵉ tentative) ET que `bad cseq` disparaît du stderr.
+
+### Fixed — Bruit galerie Événements (plugins periodiques + whitelist jamais nettoyée)
+- **`occupancy.zone` et `queue.status` n'émettaient aucun changement d'état**
+  — un objet immobile dans la zone générait un événement "info" à CHAQUE
+  cycle (occupancy) ou toutes les `report_interval_s` (queue), noyant la
+  galerie sous des cartes quasi identiques (repéré sur capture réelle :
+  ~15 cartes pour 1 seule voiture garée). Les deux plugins n'émettent
+  désormais que sur changement réel du compte/de la longueur.
+- **`plugins_used` ("MOTEURS") listait tel quel le champ `enabled_plugins`**
+  de la caméra en base, jamais nettoyé quand un plugin est supprimé du
+  catalogue — un événement affichait encore `marketplace-test` (supprimé
+  du disque en `v3.1.4`) comme "moteur actif". Filtré maintenant contre les
+  plugins RÉELLEMENT chargés (`plugin_manager.loader`) : un nom supprimé,
+  renommé, ou en échec de chargement ne peut plus apparaître comme moteur
+  actif.
+- **Empilement des actions simultanées** (`Events.jsx`) : plusieurs plugins
+  peuvent émettre leur propre événement sur le MÊME cycle de détection
+  (même caméra, même image) — regroupées désormais en une seule carte
+  (fenêtre ≤3s) avec un badge "+N actions" au lieu de N cartes côte à côte.
+
 ## [v3.1.5-camera-api-multibrand] — 2026-08 — Contrôle caméra multi-marques (Dahua, Hikvision)
 
 Suite de `v3.1.4` : l'abstraction `camera_api` (contrat `CameraApiProvider`,
