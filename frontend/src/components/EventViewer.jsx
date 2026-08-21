@@ -200,12 +200,13 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
       const url = `${process.env.REACT_APP_BACKEND_URL}/api${data.stream_url}?token=${encodeURIComponent(token || "")}&t=${offset}`;
       setRecInfo({ ...data, url });
       setShowVideo(true);
-      setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.currentTime = Math.max(0, data.offset_sec || 0);
-          videoRef.current.play().catch(() => {});
-        }
-      }, 200);
+      // v3.1.9 · Le seek partait avant que le <video> ait chargé ses
+      // métadonnées (délai fixe de 200ms) — sur un fichier de quelques Mo,
+      // souvent pas encore prêt à ce moment-là, donc `currentTime` était
+      // silencieusement ignoré et la lecture repartait de 0 au lieu de
+      // l'instant de l'événement. Le seek se fait maintenant dans
+      // `onLoadedMetadata` (voir l'élément <video>), déclenché quand le
+      // navigateur a réellement les métadonnées, jamais avant.
     } catch (e) {
       const msg = e.response?.status === 404 ? "Aucun enregistrement ne couvre cet événement" : "Erreur";
       toast.error(msg);
@@ -263,7 +264,11 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
            onWheel={onWheel} onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
            style={{ cursor: selectMode ? "crosshair" : (scale > 1 ? (dragging ? "grabbing" : "grab") : "default") }}>
         {showVideo && recInfo ? (
-          <video ref={videoRef} src={recInfo.url} controls autoPlay className="w-full h-full bg-black" data-testid="viewer-video" />
+          <video ref={videoRef} src={recInfo.url} controls autoPlay className="w-full h-full bg-black" data-testid="viewer-video"
+                 onLoadedMetadata={(e) => {
+                   e.currentTarget.currentTime = Math.max(0, recInfo.offset_sec || 0);
+                   e.currentTarget.play().catch(() => {});
+                 }} />
         ) : item.thumbnail ? (
           <>
             <img ref={imgRef} src={item.thumbnail} alt=""
