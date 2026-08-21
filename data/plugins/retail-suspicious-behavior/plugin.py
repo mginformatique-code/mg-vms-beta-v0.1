@@ -34,6 +34,12 @@ DEFAULT_ZONE_CFG = {
 
 RE_ALERT_COOLDOWN_S = 60  # ré-émission d'un même type d'event pour un même track
 POSITIONS_WINDOW_S = 60   # fenêtre d'historique de position (pour 1c)
+# Grâce avant de purger un track absent de `pipeline.tracks` sur UNE frame —
+# ByteTrack peut perdre puis retrouver le même track_id sur 1-2 frames (occlusion,
+# mouvement rapide) ; sans ce délai, `total_dwell_s`/`visit_ends` étaient remis à
+# zéro à la moindre absence d'une frame, empêchant en pratique le dwell-time et
+# les passages répétés de jamais s'accumuler sur un flux réel.
+TRACK_PURGE_GRACE_S = 5
 
 
 def _point_in_polygon(pt, poly):
@@ -181,10 +187,12 @@ class RetailSuspiciousBehaviorPlugin(PipelineConsumer):
                     })
 
         # Purge des tracks disparus (même caméra uniquement — ne touche pas
-        # l'état des autres caméras partageant ce même singleton).
+        # l'état des autres caméras partageant ce même singleton). Grâce de
+        # TRACK_PURGE_GRACE_S avant purge réelle (voir constante ci-dessus).
         for key in list(self._tracks.keys()):
             if key[0] == frame.camera_id and key not in seen:
-                self._tracks.pop(key, None)
+                if now - self._tracks[key]["last_seen"] > TRACK_PURGE_GRACE_S:
+                    self._tracks.pop(key, None)
 
         return events
 
