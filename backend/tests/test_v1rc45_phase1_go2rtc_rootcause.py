@@ -1,49 +1,59 @@
 """Tests v1.0-rc4.5 · Phase 1 · Root cause Go2RTC (flux lents/neige).
 
 Vérifications par inspection statique du code source (pas de Go2RTC live requis) :
-- streaming.py force `#transport=tcp#timeout=15` sur toute source RTSP nouvelle
+- streaming.py préfixe la source RTSP par `ffmpeg:` (transport TCP forcé)
 - video_engine.py DEFAULT_CONFIG utilise hd_preview_width=1280 (pas 0=native)
 - deploy-app/go2rtc.yaml expose la section ffmpeg.rtsp avec -rtsp_transport tcp
+
+v3.1.6 · Les 2 premiers tests testaient l'ANCIEN mécanisme
+(`#transport=tcp#timeout=15` suffixé à l'URL) qui a dû être retiré (v2.1,
+`Get "tcp": unsupported protocol scheme ""` — go2rtc n'accepte `#transport=`
+QUE pour tunneliser RTSP-sur-WebSocket, jamais documenté pour choisir
+TCP/UDP, cf. internal/rtsp/README.md du dépôt go2rtc). Root cause confirmée
+depuis par un vrai log `bad cseq` (perte de paquets RTP) capturé en prod
+— fix correct cette fois : préfixer la source par `ffmpeg:`, dont le
+template d'entrée par défaut de go2rtc force déjà TCP (doc go2rtc :
+`#input=rtsp/udp` "will change RTSP transport from TCP to UDP+TCP" — donc
+le défaut sans override est TCP), sans toucher `_build_rtsp_url` ni risquer
+la même erreur de parsing de fragment.
 """
 import re
 
 
-def test_streaming_appends_transport_tcp_to_rtsp_source():
-    """register_camera_stream doit suffixer #transport=tcp#timeout=15 sur les
-    URLs RTSP qui n'ont pas déjà un fragment #transport=."""
+def test_streaming_prefixes_rtsp_source_with_ffmpeg():
+    """register_camera_stream doit préfixer la source RTSP par `ffmpeg:` —
+    seul mécanisme qui force réellement le transport TCP côté go2rtc pour
+    la connexion caméra (le client RTSP natif de go2rtc n'a pas cette
+    option, cf. docstring du module)."""
     with open("/app/backend/streaming.py") as f:
         src = f.read()
-    # La chaîne doit apparaître dans le code
-    assert "#transport=tcp#timeout=15" in src, (
-        "streaming.py ne suffixe pas la source RTSP avec #transport=tcp — "
-        "risque d'artefacts UDP sur LAN imparfait"
+    assert 'rtsp_source = f"ffmpeg:{rtsp_url}"' in src, (
+        "streaming.py ne préfixe plus la source RTSP par ffmpeg: — "
+        "risque de repasser par le client RTSP natif go2rtc (transport non garanti)"
     )
-    # Doit être conditionné sur rtsp:// (pas rtmp/http)
-    assert 'startswith("rtsp://")' in src or 'startswith(\'rtsp://\')' in src, (
-        "L'ajout doit être conditionné sur les URLs rtsp://"
-    )
-    # Doit éviter le double-suffixe si l'URL contient déjà #transport=
-    assert '"#transport=" not in rtsp_url' in src, (
-        "Le code doit éviter d'ajouter #transport=tcp si déjà présent"
+    # L'ANCIEN mécanisme (prouvé cassé, cf. docstring) ne doit plus réapparaître
+    assert "#transport=tcp#timeout=15" not in src, (
+        "Le fragment #transport=tcp#timeout=15 est réapparu — cette syntaxe casse "
+        "le client RTSP natif go2rtc (Get \"tcp\": unsupported protocol scheme \"\")"
     )
 
 
 def test_streaming_uses_rtsp_source_variable_in_desired_and_put():
-    """La variable rtsp_source (avec fragment) doit être utilisée dans le dict
-    `desired` ET dans le PUT vers Go2RTC — sinon on continue à envoyer l'URL
-    brute."""
+    """La variable rtsp_source (préfixée ffmpeg:) doit être utilisée dans le
+    dict `desired` ET dans le PUT vers Go2RTC — sinon on continue à envoyer
+    l'URL brute (client natif, transport non garanti)."""
     with open("/app/backend/streaming.py") as f:
         src = f.read()
-    # Recherche le bloc `desired = {` et confirme name: rtsp_source
     m = re.search(r"desired\s*=\s*\{[^}]+\}", src, re.DOTALL)
     assert m, "Le bloc `desired = { ... }` doit exister dans register_camera_stream"
     block = m.group(0)
     assert "name: rtsp_source" in block, (
-        "Le dict `desired` doit référencer rtsp_source (avec fragment), pas rtsp_url brute"
+        "Le dict `desired` doit référencer rtsp_source (ffmpeg:...), pas rtsp_url brute"
     )
-    # Le PUT doit également utiliser rtsp_source
-    assert '"src", rtsp_source' in src, (
-        "Le PUT vers Go2RTC doit envoyer rtsp_source (avec fragment)"
+    # Le PUT doit également utiliser rtsp_source (construit manuellement, cf. commentaire
+    # anti-double-encodage — pas de tuple ("src", rtsp_source) mais interpolé dans l'URL)
+    assert "&src={rtsp_source}" in src, (
+        "Le PUT vers Go2RTC doit envoyer rtsp_source (ffmpeg:...)"
     )
 
 

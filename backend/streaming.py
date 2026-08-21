@@ -73,9 +73,13 @@ def _build_rtsp_url(cam: dict) -> str:
       Exemple : `Rlwt29#+jpf` → `Rlwt29%23%2Bjpf` (jamais `%2523%252B…`).
 
     NOTE : le fragment `#transport=tcp|udp` a été retiré (retour utilisateur : go2rtc échoue à
-    décoder les flux avec ce suffixe). Le transport est désormais géré :
+    décoder les flux avec ce suffixe — cause identifiée depuis, voir docstring de
+    `register_camera_stream` : `#transport=` n'existe côté go2rtc QUE pour tunneliser
+    RTSP-sur-WebSocket, pas pour choisir TCP/UDP). Le transport est désormais géré :
     - côté ffprobe : via l'option CLI `-rtsp_transport tcp|udp` dans `_ffprobe`
-    - côté go2rtc : négociation automatique (TCP par défaut pour la plupart des caméras IP)
+    - côté go2rtc : `register_camera_stream` préfixe la source par `ffmpeg:` (TCP forcé
+      par le template d'entrée par défaut de go2rtc) — PAS de négociation automatique
+      fiable côté client RTSP natif, contrairement à ce que ce commentaire affirmait avant.
     """
     url = (cam.get("rtsp_url") or "").strip()
     if not url:
@@ -228,21 +232,31 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
     name = _stream_name(cam["id"])
     cam_id = cam["id"]
 
-    # v1.0-rc4.5 · Phase 1 · Root cause Go2RTC (flux lents/neige/artefacts) :
-    # Doc officielle Go2RTC recommande de forcer le transport TCP explicitement
-    # pour éviter les paquets perdus (UDP) qui produisent des artefacts "neige"
-    # sur des LAN imparfaits ou en présence de switches non-QoS. Le timeout de
-    # 15s aligne le comportement de reconnexion sur des flux industriels lents
-    # (init RTSP + première keyframe).
-    # Syntaxe Go2RTC : `rtsp://user:pass@host:port/path#transport=tcp#timeout=15`
-    # Le fragment `#...` est parsé par Go2RTC comme paramètres de source, JAMAIS
-    # transmis à la caméra elle-même. Aucun impact ONVIF/RTSP protocol level.
-    # v2.1 · Fix critique : go2rtc n'accepte PAS les fragments `#transport=tcp#timeout=15`.
-    # Il parse chaque `#xxx` comme un média à extraire → erreur
-    # `streams: Get "tcp": unsupported protocol scheme ""`. Le transport TCP est
-    # négocié automatiquement par go2rtc (TCP puis UDP fallback), donc on passe
-    # l'URL RTSP brute sans suffixe magique.
-    rtsp_source = rtsp_url
+    # v3.1.6 · Root cause RÉELLE des artefacts "neige"/paquets perdus (confirmée
+    # par log réel : `[rtsp] RTP: PT=60: bad cseq ... expected=...` capturé côté
+    # recorder sur un flux relayé par ce chemin) — vérifiée contre la doc source
+    # de go2rtc (internal/rtsp/README.md, internal/ffmpeg/README.md) :
+    #   - Le client RTSP NATIF de go2rtc (utilisé quand la source est une URL
+    #     `rtsp://` brute) n'a AUCUN moyen de forcer le transport RTP en TCP.
+    #     Son seul fragment `#transport=...` sert à tunneliser RTSP sur
+    #     WebSocket (`#transport=ws://...`), concept sans rapport — d'où
+    #     l'échec `Get "tcp": unsupported protocol scheme ""` du fix v1.0-rc4.5
+    #     ci-dessous : "tcp" était interprété comme un schéma d'URL à ouvrir,
+    #     pas comme un mode de transport RTP. Le comportement par défaut du
+    #     client natif n'est donc PAS garanti TCP, contrairement à ce que le
+    #     commentaire précédent supposait.
+    #   - go2rtc recommande lui-même la source `ffmpeg:` pour un flux caméra
+    #     "glitchy" ("It will not add CPU load if you don't use transcoding").
+    #     Son template ffmpeg PAR DÉFAUT force déjà `-rtsp_transport tcp`
+    #     (doc : `#input=rtsp/udp` "will change RTSP transport from TCP to
+    #     UDP+TCP" — donc le défaut, sans override, est bien TCP). Cette source
+    #     `ffmpeg:` est déjà utilisée sans problème dans CE MÊME fichier pour
+    #     les variantes `_hd`/`_sd` (voir plus bas) — pas une nouvelle capacité
+    #     non éprouvée sur ce déploiement.
+    # Préfixer la source RTSP par `ffmpeg:` fait donc pull la caméra en TCP
+    # forcé, sans toucher au reste de la chaîne (recorder/IA/WebRTC continuent
+    # de consommer le flux RE-SERVI par go2rtc en RTSP natif, inchangé).
+    rtsp_source = f"ffmpeg:{rtsp_url}"
 
     # Résolution du pipeline effectif (auto/GPU/CPU) — construit les filtres ffmpeg optimisés
     try:
@@ -304,7 +318,7 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
             for src in (name, f"{name}_hd", f"{name}_sd"):
                 await client.delete(f"{GO2RTC_URL}/api/streams", params={"src": src})
             # 1) Source unique RTSP (un seul décodage) — utilisée par le recorder et l'IA
-            # v1.0-rc4.5 · rtsp_source inclut #transport=tcp#timeout=15 (voir plus haut)
+            # v3.1.6 · rtsp_source = `ffmpeg:rtsp://...` (transport TCP forcé, voir plus haut)
             # P0-fix · `rtsp_source` contient déjà des identifiants percent-encodés
             # (via _build_rtsp_url). Passer cette chaîne DÉJÀ encodée dans `params=`
             # la fait ré-encoder une 2e fois par httpx (`%23` → `%2523`) → go2rtc
