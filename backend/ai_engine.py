@@ -331,11 +331,34 @@ def _load_models():
         _ai_health["alpr_last_attempt_ts"] = now
         try:
             from fast_alpr import ALPR
-            _alpr = ALPR(detector_model="yolo-v9-t-384-license-plate-end2end",
-                         ocr_model="european-plates-mobile-vit-v2-model")
+            # v3.1.9 · Root cause d'une latence API généralisée (TOUS les
+            # endpoints touchés, pas seulement ANPR) : ce process tourne en
+            # un seul worker Uvicorn (--workers 1), donc tout travail CPU
+            # lourd exécuté via asyncio.to_thread() sature quand même le GIL
+            # et affame la boucle asyncio (et les autres threads) pendant sa
+            # durée. `ALPR(...)` était instancié SANS jamais préciser de
+            # provider ONNX Runtime — confirmé en prod : GPU à 3% d'utilisation
+            # pendant que le conteneur backend tournait à 461% CPU (sur 6
+            # coeurs). `CUDAExecutionProvider` est bien disponible
+            # (confirmé via onnxruntime.get_available_providers()) mais
+            # jamais demandé — chaque inférence fast-alpr (détection +
+            # OCR plaque) tournait donc entièrement sur CPU. Passage explicite
+            # sur CUDA (avec repli CPU si l'appel échoue, ex. environnement
+            # sans GPU) — décharge ce travail sur le GPU qui était
+            # quasiment inactif, libère le CPU pour le reste de l'API.
+            try:
+                _alpr = ALPR(detector_model="yolo-v9-t-384-license-plate-end2end",
+                             detector_providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+                             ocr_model="european-plates-mobile-vit-v2-model",
+                             ocr_device="cuda")
+                logger.info("LAPI locale chargée (fast-alpr, GPU-ONNX/CUDA)")
+            except Exception as gpu_err:
+                logger.warning("fast-alpr GPU indisponible (%s) — repli CPU", gpu_err)
+                _alpr = ALPR(detector_model="yolo-v9-t-384-license-plate-end2end",
+                             ocr_model="european-plates-mobile-vit-v2-model")
+                logger.info("LAPI locale chargée (fast-alpr, CPU-ONNX)")
             _ai_health["alpr_loaded"] = True
             _ai_health["alpr_error"] = None
-            logger.info("LAPI locale chargée (fast-alpr, CPU-ONNX)")
         except Exception as e:
             _alpr = False
             _ai_health["alpr_loaded"] = False
