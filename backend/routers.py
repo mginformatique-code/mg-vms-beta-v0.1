@@ -721,6 +721,17 @@ async def _dispatch_all_plate_engines(numpy_bgr, camera_id: str, cam: Optional[d
     """
     from plugin_manager.bus import bus as _bus
     from plugin_manager.interfaces import Frame as _Frame
+    # v3.1.9 · fast-alpr évalue son état UNE FOIS au boot, avant que son
+    # modèle (chargement lazy, async) ait fini de charger — observé en prod :
+    # `ai_engine._ai_health.alpr_loaded=True` (le modèle tourne très bien)
+    # alors que l'entrée du bus reste bloquée `state=error` indéfiniment,
+    # l'excluant de `active()` pour toujours. Le plugin expose
+    # `refresh_state_lazy()` justement pour ce cas (voir bus.refresh_lazy_states)
+    # mais rien ne l'appelle jamais en pratique — on le fait nous-mêmes ici,
+    # juste avant de sélectionner les moteurs dispatchables, pour que fast-alpr
+    # (le seul moteur avec une vraie localisation de plaque dédiée) redevienne
+    # utilisable dès que son modèle est réellement prêt.
+    _bus.refresh_lazy_states()
     whitelist = set((cam or {}).get("enabled_plugins") or [])
     # Fail-open MINIMAL pour cette action manuelle explicite : si la caméra
     # n'a aucun moteur ANPR configuré, on tente quand même les moteurs OCR

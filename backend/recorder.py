@@ -86,7 +86,15 @@ async def _start_ffmpeg(cam: dict) -> None:
         src = f"{GO2RTC_RTSP}/{_stream_name(camera_id)}"
     cmd = [
         "ffmpeg", "-nostdin", "-loglevel", "error",
-        "-rtsp_transport", "tcp", "-i", src,
+        "-rtsp_transport", "tcp",
+        # v3.1.9 · `+genpts` régénère des PTS propres côté démuxeur — mitigation
+        # ffmpeg standard face à un flux source avec des discontinuités de
+        # timestamps (caméra/go2rtc instable), qui sinon peut faire dérailler
+        # le muxer `segment` en aval (durée de segment délirante ou rollover
+        # prématuré — voir _probe_duration). N'affecte pas la copie des
+        # données vidéo/audio elles-mêmes (`-c copy` reste sans réencodage).
+        "-fflags", "+genpts",
+        "-i", src,
         "-c", "copy", "-f", "segment",
         "-segment_time", str(SEGMENT_SECONDS),
         "-reset_timestamps", "1", "-strftime", "1",
@@ -111,11 +119,41 @@ async def _start_ffmpeg(cam: dict) -> None:
 
 
 def _probe_duration(path: Path) -> float:
+    """Durée fiable d'un segment enregistré.
+
+    v3.1.9 · `format.duration` seul peut être délirant sur un flux source
+    avec des discontinuités de timestamps (voir commentaire `_index_segments`
+    plus bas) — confirmé en prod : un segment de 1.6 Mo dont le stream VIDÉO
+    ne fait que 0.05s de contenu réel rapportait `format.duration=65678s`
+    (18h). Le clamp `MAX_PLAUSIBLE` (3× la durée cible) empêchait déjà les
+    cas les plus extrêmes de polluer l'index indéfiniment, mais retombait
+    quand même sur une valeur (le plafond lui-même) bien plus grande que le
+    contenu réel de CES segments-là — assez pour que des dizaines de
+    segments quasi-vides (ffmpeg qui redémarre en boucle sur un flux caméra
+    instable) se chevauchent tous sur la même fenêtre de plusieurs minutes
+    dans l'index Mongo. On priorise donc la durée du STREAM VIDÉO lui-même
+    quand ffprobe sait la lire — c'est le signal le plus fiable de ce qui
+    est réellement décodable, contrairement à la métadonnée `format`
+    globale qui peut être écrite n'importe comment par le muxer segment
+    face à des PTS discontinus."""
     try:
         out = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", str(path)],
+            ["ffprobe", "-v", "error",
+             "-show_entries", "format=duration",
+             "-show_entries", "stream=codec_type,duration",
+             "-of", "json", str(path)],
             capture_output=True, timeout=10)
-        return float(json.loads(out.stdout or "{}").get("format", {}).get("duration", 0))
+        data = json.loads(out.stdout or "{}")
+        fmt_duration = float((data.get("format") or {}).get("duration", 0) or 0)
+        video_durations = [
+            float(s["duration"]) for s in (data.get("streams") or [])
+            if s.get("codec_type") == "video" and s.get("duration") not in (None, "N/A")
+        ]
+        if video_durations:
+            vd = max(video_durations)
+            if vd > 0:
+                return vd
+        return fmt_duration
     except Exception:
         return 0.0
 
