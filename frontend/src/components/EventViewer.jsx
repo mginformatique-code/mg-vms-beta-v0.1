@@ -311,7 +311,8 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
             )}
             {selectRect && !selectStart && (
               <div className="absolute z-20 flex items-center gap-1.5 bg-black/85 p-1"
-                   style={{ left: selectRect.x, top: selectRect.y + selectRect.h + 6 }}>
+                   style={{ left: selectRect.x, top: selectRect.y + selectRect.h + 6 }}
+                   onMouseDown={(e) => e.stopPropagation()} onMouseUp={(e) => e.stopPropagation()}>
                 <button onClick={runZoneAnalysis} disabled={zoneLoading}
                         data-testid="viewer-analyze-zone-btn"
                         className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#7C3AED] text-white hover:bg-[#6D28D9] disabled:opacity-50 text-xs">
