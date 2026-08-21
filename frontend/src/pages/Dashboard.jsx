@@ -41,13 +41,18 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [ts, setTs] = useState({ hourly: [], breakdown: [] });
   const [alerts, setAlerts] = useState([]);
-  const [viewerIdx, setViewerIdx] = useState(null);
+  // v3.1.8 · Suivi par id, pas par index — `alertPing` refait un `loadAll()`
+  // complet sur chaque alerte temps réel, qui remplace `alerts` : un index
+  // de position pointerait alors sur une alerte différente sans action de
+  // l'utilisateur (même bug que Alerts.jsx/Events.jsx).
+  const [viewerId, setViewerId] = useState(null);
   const viewerItems = alerts.map((a) => ({
     id: a.id, thumbnail: a.thumbnail || a.plate_crop,
     camera_id: a.camera_id, camera_name: a.camera_name, site_name: a.site_name,
     timestamp: a.timestamp, plugin: a.plugin || (a.scenario ? `IA · ${a.scenario}` : "Alerte"),
     type: a.type || a.scenario || "alert", label: a.message, plate: a.plate,
   }));
+  const viewerIdx = viewerId !== null ? viewerItems.findIndex((x) => x.id === viewerId) : -1;
 
   const loadAll = () => {
     api.get("/dashboard/stats").then((r) => setStats(r.data)).catch(() => {});
@@ -126,8 +131,8 @@ export default function Dashboard() {
         <div className="xl:col-span-2 bg-card border border-border p-4">
           <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground mb-3">{t("dash.recent_alerts")}</div>
           <div className="divide-y divide-border">
-            {alerts.map((a, idx) => (
-              <button key={a.id} onClick={() => setViewerIdx(idx)} className="w-full text-left flex items-center gap-3 py-2.5 hover:bg-secondary/50 px-1 transition" data-testid="dash-alert-row">
+            {alerts.map((a) => (
+              <button key={a.id} onClick={() => setViewerId(a.id)} className="w-full text-left flex items-center gap-3 py-2.5 hover:bg-secondary/50 px-1 transition" data-testid="dash-alert-row">
                 <span className="w-2 h-2 rounded-full shrink-0 rec-dot" style={{ background: sev[a.severity] }} />
                 <span className="text-sm flex-1 truncate">{a.message}</span>
                 <span className="text-xs text-muted-foreground hidden sm:inline">{a.camera_name}</span>
@@ -137,9 +142,9 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
-      {viewerIdx !== null && (
-        <EventViewer items={viewerItems} index={viewerIdx} onIndex={setViewerIdx}
-                      onClose={() => setViewerIdx(null)} kind="event" />
+      {viewerIdx >= 0 && (
+        <EventViewer items={viewerItems} index={viewerIdx} onIndex={(i) => setViewerId(viewerItems[i]?.id ?? null)}
+                      onClose={() => setViewerId(null)} kind="event" />
       )}
     </div>
   );

@@ -28,7 +28,11 @@ export default function Anpr() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState(null);
   const [file, setFile] = useState(null);
-  const [viewerIdx, setViewerIdx] = useState(null);
+  // v3.1.8 · Suivi par id, pas par index — même précaution que
+  // Events.jsx/Alerts.jsx/Dashboard.jsx contre un décalage de position si
+  // `plates` est reconstruit (pagination/recherche) pendant que la
+  // visionneuse est ouverte.
+  const [viewerId, setViewerId] = useState(null);
 
   // Hybridation ANPR : scène HD complète (frame_thumb) en visuel principal
   // + plate_crop + vehicle_crop en insets nets dans EventViewer.
@@ -43,6 +47,7 @@ export default function Anpr() {
     plugin: `ANPR (${p.engine || "fast-alpr"})`,
     engine: p.engine || "fast-alpr",
   }));
+  const viewerIdx = viewerId !== null ? viewerItems.findIndex((x) => x.id === viewerId) : -1;
 
   const load = async (reset = true) => {
     const offset = reset ? 0 : plates.length;
@@ -109,8 +114,8 @@ export default function Anpr() {
                 <th className="px-3 py-2">Moteur</th>
               </tr></thead>
               <tbody>
-                {plates.map((p, i) => (
-                  <tr key={p.id} onClick={() => setViewerIdx(i)} className="border-b border-border hover:bg-secondary/50 cursor-pointer" data-testid="plate-row">
+                {plates.map((p) => (
+                  <tr key={p.id} onClick={() => setViewerId(p.id)} className="border-b border-border hover:bg-secondary/50 cursor-pointer" data-testid="plate-row">
                     <td className="px-3 py-2"><Plate value={p.plate} status={p.list_status} /></td>
                     <td className="px-3 py-2 mono text-xs text-muted-foreground">{new Date(p.timestamp).toLocaleString()}</td>
                     <td className="px-3 py-2">{p.vehicle_make} {p.vehicle_model}</td>
@@ -191,8 +196,8 @@ export default function Anpr() {
         </DialogContent>
       </Dialog>
 
-      {viewerIdx !== null && (
-        <EventViewer items={viewerItems} index={viewerIdx} onIndex={setViewerIdx} onClose={() => setViewerIdx(null)} kind="plate" />
+      {viewerIdx >= 0 && (
+        <EventViewer items={viewerItems} index={viewerIdx} onIndex={(i) => setViewerId(viewerItems[i]?.id ?? null)} onClose={() => setViewerId(null)} kind="plate" />
       )}
     </div>
   );

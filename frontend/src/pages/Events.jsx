@@ -93,7 +93,13 @@ export default function Events() {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  const [viewerIdx, setViewerIdx] = useState(null);
+  // v3.1.8 · Suivi par id (stable), pas par index de tableau — `poll()`
+  // ci-dessous PRÉPEND les nouveaux événements à `events` toutes les 15s ;
+  // un simple index de position pointerait alors sur un événement différent
+  // sans que l'utilisateur n'ait rien touché (voir EventViewer.jsx pour le
+  // détail du symptôme : vidéo/métadonnées d'un événement qui changent tout
+  // seuls sous les yeux de l'utilisateur).
+  const [viewerId, setViewerId] = useState(null);
   const [historyPlate, setHistoryPlate] = useState(null); // fiche véhicule depuis le viewer
   // v1.0-rc4 · Recherche IA disponible sur TOUTE la vue Événements
   const [smart, setSmart] = useState("");
@@ -124,6 +130,10 @@ export default function Events() {
 
   // Source affichée : résultats IA si une recherche est active, sinon flux normal
   const shown = smartResult ? (smartResult.events || []) : events;
+  // Position courante de l'id suivi dans `shown` — recalculée à chaque
+  // render, donc toujours correcte même si `shown`/`events` a été reconstruit
+  // entre-temps (poll, recherche IA qui change la source, etc.).
+  const viewerIdx = viewerId !== null ? shown.findIndex((x) => x.id === viewerId) : -1;
 
   const setFiltre = (id) => {
     const next = new URLSearchParams(searchParams);
@@ -296,10 +306,10 @@ export default function Events() {
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
           {groupEvents(shown).map((g) => {
-            const { e, i } = pickPrimary(g.members);
+            const { e } = pickPrimary(g.members);
             const otherTypes = [...new Set(g.members.map((m) => m.e.type).filter((t) => t !== e.type))];
             return (
-              <button key={e.id} onClick={() => setViewerIdx(i)} className="border border-border bg-card overflow-hidden text-left hover:border-[#0044FF] transition-colors" data-testid="event-card">
+              <button key={e.id} onClick={() => setViewerId(e.id)} className="border border-border bg-card overflow-hidden text-left hover:border-[#0044FF] transition-colors" data-testid="event-card">
                 <div className="relative bg-black aspect-video cursor-zoom-in">
                   {e.thumbnail ? (
                     <img src={e.thumbnail_sm || e.thumbnail} alt={e.type} className="w-full h-full object-cover"
@@ -345,12 +355,12 @@ export default function Events() {
         </div>
       )}
 
-      {viewerIdx !== null && (
+      {viewerIdx >= 0 && (
         <EventViewer
           items={shown}
           index={viewerIdx}
-          onIndex={setViewerIdx}
-          onClose={() => setViewerIdx(null)}
+          onIndex={(i) => setViewerId(shown[i]?.id ?? null)}
+          onClose={() => setViewerId(null)}
           onOpenPlate={(p) => { setHistoryPlate(p); }}
           kind="event"
         />

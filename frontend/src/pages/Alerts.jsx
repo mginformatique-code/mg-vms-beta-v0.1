@@ -115,7 +115,11 @@ export default function Alerts() {
   const [alerts, setAlerts] = useState([]);
   const [filter, setFilter] = useState("all");
   const [rulesOpen, setRulesOpen] = useState(false);
-  const [viewerIdx, setViewerIdx] = useState(null);
+  // v3.1.8 · Suivi par id, pas par index — `alertPing` (websocket temps réel,
+  // voir AppContext) déclenche `load()` sur CHAQUE nouvelle alerte, qui
+  // remplace entièrement `alerts` : un index de position pointerait alors
+  // sur une alerte différente sans que l'utilisateur n'ait rien touché.
+  const [viewerId, setViewerId] = useState(null);
 
   // Adapte les alertes pour EventViewer (mêmes clés que event/plate)
   // Hybridation ANPR : préserve `plate_crop` + `vehicle_crop` pour l'affichage
@@ -128,6 +132,8 @@ export default function Alerts() {
     type: a.type || a.scenario || "alert", label: a.message,
     plate: a.plate, list_status: a.list_status,
   }));
+
+  const viewerIdx = viewerId !== null ? viewerItems.findIndex((x) => x.id === viewerId) : -1;
 
   const load = () => {
     const q = filter === "all" ? "" : `?acknowledged=${filter === "acked"}`;
@@ -154,14 +160,14 @@ export default function Alerts() {
       </div>
 
       <div className="space-y-1.5">
-        {alerts.map((a, idx) => {
+        {alerts.map((a) => {
           const s = SEV[a.severity] || SEV.info; const Icon = s.icon;
           const img = a.thumbnail || a.plate_crop;
           return (
             <div key={a.id} className={`bg-card border-l-2 border border-border flex items-center gap-3 px-4 py-3 fade-up ${a.acknowledged ? "opacity-55" : ""}`} style={{ borderLeftColor: s.color }} data-testid="alert-item">
               <Icon size={18} style={{ color: s.color }} className={a.acknowledged ? "" : "rec-dot"} />
               {img && (
-                <button onClick={() => setViewerIdx(idx)} className="w-20 h-12 shrink-0 border border-border overflow-hidden hover:ring-2 hover:ring-[#0044FF] transition" data-testid="alert-thumb-btn" title="Voir en HD">
+                <button onClick={() => setViewerId(a.id)} className="w-20 h-12 shrink-0 border border-border overflow-hidden hover:ring-2 hover:ring-[#0044FF] transition" data-testid="alert-thumb-btn" title="Voir en HD">
                   <img src={img} alt="" className="w-full h-full object-cover bg-black" data-testid="alert-thumbnail" />
                 </button>
               )}
@@ -170,7 +176,7 @@ export default function Alerts() {
                 <div className="text-xs text-muted-foreground mono">{a.camera_name} · {a.site_name} · {new Date(a.timestamp).toLocaleString()}</div>
               </div>
               <span className="text-[9px] uppercase tracking-wider px-2 py-0.5 border" style={{ borderColor: s.color, color: s.color }}>{a.severity}</span>
-              <button onClick={() => setViewerIdx(idx)} className="flex items-center gap-1 px-2 py-1.5 text-xs border border-border hover:bg-secondary" data-testid="alert-view-btn" title="Ouvrir la visionneuse"><Eye size={13} /></button>
+              <button onClick={() => setViewerId(a.id)} className="flex items-center gap-1 px-2 py-1.5 text-xs border border-border hover:bg-secondary" data-testid="alert-view-btn" title="Ouvrir la visionneuse"><Eye size={13} /></button>
               {!a.acknowledged && can("client") && (
                 <button onClick={() => ack(a.id)} data-testid="alert-ack-btn" className="flex items-center gap-1 px-3 py-1.5 text-xs border border-border hover:bg-secondary"><Check size={13} /> {t("alerts.ack")}</button>
               )}
@@ -181,9 +187,9 @@ export default function Alerts() {
       </div>
 
       <AiRulesDialog open={rulesOpen} onClose={() => setRulesOpen(false)} />
-      {viewerIdx !== null && (
-        <EventViewer items={viewerItems} index={viewerIdx} onIndex={setViewerIdx}
-                      onClose={() => setViewerIdx(null)} kind="event" />
+      {viewerIdx >= 0 && (
+        <EventViewer items={viewerItems} index={viewerIdx} onIndex={(i) => setViewerId(viewerItems[i]?.id ?? null)}
+                      onClose={() => setViewerId(null)} kind="event" />
       )}
     </div>
   );

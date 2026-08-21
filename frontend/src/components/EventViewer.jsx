@@ -45,12 +45,20 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
   const containerRef = useRef(null);
   const videoRef = useRef(null);
 
-  // Reset zoom on item change / close
-  useEffect(() => { setScale(1); setPan({ x: 0, y: 0 }); setRecInfo(null); setShowVideo(false); setOcrResult(null); setFeedbackSent(item?.feedback || null); setSelectMode(false); setSelectRect(null); setSelectStart(null); }, [index]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Reset zoom/vidéo/OCR quand l'ITEM AFFICHÉ change (identité, pas position).
+  // v3.1.8 · Dépendait de `index` (un simple numéro) — mais le parent (Events/
+  // Alerts/Dashboard) peut recevoir un nouvel événement en temps réel (poll ou
+  // websocket) et PRÉPENDRE/reconstruire son tableau `items` pendant que la
+  // visionneuse est ouverte : `index` ne bouge pas, mais `items[index]` pointe
+  // alors soudain sur un événement différent (celui qui a glissé à cette
+  // position) — l'effet ne se redéclenchait donc jamais, laissant la vidéo/le
+  // zoom/l'OCR de l'ANCIEN item affichés à côté des métadonnées du NOUVEAU.
+  // Dépendre de `item?.id` (l'identité réelle affichée) au lieu de `index`
+  // corrige ce désync, quel que soit le comportement du parent.
+  useEffect(() => { setScale(1); setPan({ x: 0, y: 0 }); setRecInfo(null); setShowVideo(false); setOcrResult(null); setFeedbackSent(item?.feedback || null); setSelectMode(false); setSelectRect(null); setSelectStart(null); }, [item?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sécurité : dès qu'une plaque est trouvée (par n'importe quel chemin),
-  // on sort du mode sélection pour ne pas rester bloqué en crosshair sans
-  // bouton pour en sortir (le bouton toggle disparaît avec !ocrResult?.plate).
+  // Sécurité : dès qu'une plaque est trouvée (par n'importe quel chemin), on
+  // sort du mode sélection pour fermer proprement l'overlay de dessin.
   useEffect(() => { if (ocrResult?.plate) { setSelectMode(false); setSelectRect(null); setSelectStart(null); } }, [ocrResult]);
 
   // Escape + arrows
