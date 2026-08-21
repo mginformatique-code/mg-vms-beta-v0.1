@@ -32,6 +32,15 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
   // v1.0-rc3 · Bouton "Analyser OCR" pour events sans plaque détectée
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrResult, setOcrResult] = useState(null);
+  // v3.1.7 · Sélection manuelle d'une zone à analyser — contourne les cas où
+  // YOLO ne détecte pas de véhicule sur la miniature figée, ou où la plaque
+  // est trop petite dans le crop véhicule automatique pour les moteurs OCR
+  // génériques (easyocr/tesseract/opencv-ocr n'ont pas de localisation de
+  // plaque dédiée, contrairement à fast-alpr).
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectRect, setSelectRect] = useState(null); // {x, y, w, h} en px, relatif au container
+  const [selectStart, setSelectStart] = useState(null);
+  const [zoneLoading, setZoneLoading] = useState(false);
   // Boucle de feedback vrai/faux positif — events "retail.*" (plan anti-vol Phase 1)
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedbackSent, setFeedbackSent] = useState(item?.feedback || null);
@@ -40,20 +49,29 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
   const videoRef = useRef(null);
 
   // Reset zoom on item change / close
-  useEffect(() => { setScale(1); setPan({ x: 0, y: 0 }); setRecInfo(null); setShowVideo(false); setOcrResult(null); setFeedbackSent(item?.feedback || null); }, [index]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setScale(1); setPan({ x: 0, y: 0 }); setRecInfo(null); setShowVideo(false); setOcrResult(null); setFeedbackSent(item?.feedback || null); setSelectMode(false); setSelectRect(null); setSelectStart(null); }, [index]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sécurité : dès qu'une plaque est trouvée (par n'importe quel chemin),
+  // on sort du mode sélection pour ne pas rester bloqué en crosshair sans
+  // bouton pour en sortir (le bouton toggle disparaît avec !ocrResult?.plate).
+  useEffect(() => { if (ocrResult?.plate) { setSelectMode(false); setSelectRect(null); setSelectStart(null); } }, [ocrResult]);
 
   // Escape + arrows
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === "Escape") { showVideo ? setShowVideo(false) : onClose(); }
-      if (!showVideo) {
+      if (e.key === "Escape") {
+        if (selectMode) { setSelectMode(false); setSelectRect(null); setSelectStart(null); }
+        else if (showVideo) { setShowVideo(false); }
+        else { onClose(); }
+      }
+      if (!showVideo && !selectMode) {
         if (e.key === "ArrowLeft" && index > 0) onIndex(index - 1);
         if (e.key === "ArrowRight" && index < items.length - 1) onIndex(index + 1);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [index, items.length, onIndex, onClose, showVideo]);
+  }, [index, items.length, onIndex, onClose, showVideo, selectMode]);
 
   const zoomAt = useCallback((delta, cx, cy) => {
     setScale((s) => {
@@ -72,12 +90,73 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
   }, [pan]);
 
   const onWheel = (e) => {
+    if (selectMode) return;
     e.preventDefault();
     zoomAt(e.deltaY < 0 ? 0.3 : -0.3, e.nativeEvent.offsetX, e.nativeEvent.offsetY);
   };
-  const onMouseDown = (e) => { if (scale > 1) setDragging({ x: e.clientX - pan.x, y: e.clientY - pan.y }); };
-  const onMouseMove = (e) => { if (dragging) setPan({ x: e.clientX - dragging.x, y: e.clientY - dragging.y }); };
-  const onMouseUp = () => setDragging(null);
+  const onMouseDown = (e) => {
+    if (selectMode) {
+      const rect = containerRef.current.getBoundingClientRect();
+      setSelectStart({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      setSelectRect(null);
+      return;
+    }
+    if (scale > 1) setDragging({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+  };
+  const onMouseMove = (e) => {
+    if (selectMode && selectStart) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+      setSelectRect({
+        x: Math.min(cx, selectStart.x), y: Math.min(cy, selectStart.y),
+        w: Math.abs(cx - selectStart.x), h: Math.abs(cy - selectStart.y),
+      });
+      return;
+    }
+    if (dragging) setPan({ x: e.clientX - dragging.x, y: e.clientY - dragging.y });
+  };
+  const onMouseUp = () => {
+    if (selectMode) { setSelectStart(null); return; }
+    setDragging(null);
+  };
+
+  const runZoneAnalysis = async () => {
+    if (!item?.id || !selectRect || !imgRef.current) return;
+    const MIN_PX = 8;
+    if (selectRect.w < MIN_PX || selectRect.h < MIN_PX) {
+      toast.error("Zone trop petite — dessinez un rectangle autour de la plaque");
+      return;
+    }
+    const imgRect = imgRef.current.getBoundingClientRect();
+    const containerRect = containerRef.current.getBoundingClientRect();
+    // Coordonnées de la sélection (relatives au container) → relatives à l'image affichée
+    const selLeft = containerRect.left + selectRect.x;
+    const selTop = containerRect.top + selectRect.y;
+    const nx1 = (selLeft - imgRect.left) / imgRect.width;
+    const ny1 = (selTop - imgRect.top) / imgRect.height;
+    const nx2 = (selLeft + selectRect.w - imgRect.left) / imgRect.width;
+    const ny2 = (selTop + selectRect.h - imgRect.top) / imgRect.height;
+    const clamp = (v) => Math.max(0, Math.min(1, v));
+    const bbox = [clamp(nx1), clamp(ny1), clamp(nx2), clamp(ny2)];
+    if (bbox[2] <= bbox[0] || bbox[3] <= bbox[1]) {
+      toast.error("Zone hors de l'image — recommencez la sélection");
+      return;
+    }
+    setZoneLoading(true);
+    try {
+      const { data } = await api.post(`/events/${item.id}/reanalyze`, { bbox });
+      setOcrResult(data);
+      if (data.plate) {
+        toast.success(`Plaque détectée : ${data.plate} (${Math.round((data.confidence || 0) * 100)}%)${data.engine ? ` · ${data.engine}` : ""}`);
+        setSelectMode(false);
+        setSelectRect(null);
+      } else {
+        toast.info(data.message || "Aucune plaque détectée dans cette zone");
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Analyse impossible");
+    } finally { setZoneLoading(false); }
+  };
 
   const download = () => {
     if (!item?.thumbnail) return;
@@ -177,7 +256,7 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
       {/* Zone image / vidéo */}
       <div ref={containerRef} className="flex-1 relative overflow-hidden select-none"
            onWheel={onWheel} onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
-           style={{ cursor: scale > 1 ? (dragging ? "grabbing" : "grab") : "default" }}>
+           style={{ cursor: selectMode ? "crosshair" : (scale > 1 ? (dragging ? "grabbing" : "grab") : "default") }}>
         {showVideo && recInfo ? (
           <video ref={videoRef} src={recInfo.url} controls autoPlay className="w-full h-full bg-black" data-testid="viewer-video" />
         ) : item.thumbnail ? (
@@ -212,8 +291,38 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
         ) : (
           <div className="w-full h-full flex items-center justify-center text-white/40">Aucune image disponible</div>
         )}
+        {/* v3.1.7 · Overlay de sélection manuelle de zone (OCR) */}
+        {selectMode && (
+          <>
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 bg-black/80 text-white text-xs px-3 py-1.5 flex items-center gap-2" data-testid="viewer-select-hint">
+              <ScanSearch size={14} /> Dessinez un rectangle autour de la plaque
+            </div>
+            {selectRect && (
+              <div
+                className="absolute border-2 border-[#00E5FF] bg-[#00E5FF]/10 z-20 pointer-events-none"
+                style={{ left: selectRect.x, top: selectRect.y, width: selectRect.w, height: selectRect.h }}
+                data-testid="viewer-select-rect"
+              />
+            )}
+            {selectRect && !selectStart && (
+              <div className="absolute z-20 flex items-center gap-1.5 bg-black/85 p-1"
+                   style={{ left: selectRect.x, top: selectRect.y + selectRect.h + 6 }}>
+                <button onClick={runZoneAnalysis} disabled={zoneLoading}
+                        data-testid="viewer-analyze-zone-btn"
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#7C3AED] text-white hover:bg-[#6D28D9] disabled:opacity-50 text-xs">
+                  {zoneLoading ? <Loader2 size={14} className="animate-spin" /> : <ScanSearch size={14} />}
+                  {zoneLoading ? "Analyse…" : "Analyser cette zone"}
+                </button>
+                <button onClick={() => setSelectRect(null)} disabled={zoneLoading}
+                        className="px-2.5 py-1.5 border border-white/30 text-white/80 hover:bg-white/10 text-xs">
+                  Effacer
+                </button>
+              </div>
+            )}
+          </>
+        )}
         {/* Barre outils zoom */}
-        {!showVideo && item.thumbnail && (
+        {!showVideo && item.thumbnail && !selectMode && (
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-black/70 p-1" data-testid="viewer-tools">
             <button onClick={() => zoomAt(-0.3)} className="p-2 text-white hover:bg-white/10" title="Zoom -"><ZoomOut size={16} /></button>
             <span className="text-white text-xs mono w-12 text-center">{Math.round(scale * 100)}%</span>
@@ -299,11 +408,28 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
               {ocrLoading ? "Analyse en cours…" : "Analyser OCR sur cette image"}
             </button>
           )}
+          {/* v3.1.7 · Escape hatch : sélection manuelle d'une zone quand l'auto
+              (YOLO véhicule → OCR) ne trouve rien — la plaque est souvent
+              visible à l'œil mais trop petite/mal cadrée pour les moteurs OCR
+              génériques sans localisation dédiée. */}
+          {kind === "event" && !item.plate && !ocrResult?.plate && item.thumbnail && (
+            <button
+              onClick={() => { setSelectMode((v) => !v); setSelectRect(null); setSelectStart(null); }}
+              data-testid="viewer-select-zone-btn"
+              className={`w-full flex items-center justify-center gap-2 px-3 py-2 border text-xs ${
+                selectMode ? "border-[#00E5FF] text-[#00E5FF] bg-[#00E5FF]/10" : "border-white/20 text-white/80 hover:bg-white/10"
+              }`}
+            >
+              <ScanSearch size={14} /> {selectMode ? "Annuler la sélection" : "Sélectionner une zone à analyser"}
+            </button>
+          )}
           {ocrResult?.plate && (
             <div className="p-2 border border-[#00E676]/30 bg-[#00E676]/5 text-xs">
               <div className="text-[10px] uppercase tracking-wider text-[#00E676] mb-1">Nouvelle lecture OCR</div>
               <div className="mono text-white font-bold text-base">{ocrResult.plate}</div>
-              <div className="text-[10px] text-white/60 mono">Confiance {Math.round((ocrResult.confidence || 0) * 100)}%</div>
+              <div className="text-[10px] text-white/60 mono">
+                Confiance {Math.round((ocrResult.confidence || 0) * 100)}%{ocrResult.engine ? ` · ${ocrResult.engine}` : ""}
+              </div>
             </div>
           )}
 

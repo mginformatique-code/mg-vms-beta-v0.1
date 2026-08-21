@@ -700,15 +700,64 @@ async def recording_context(camera_id: str, at: str, user: dict = Depends(get_cu
     return await _lookup_recording_for({"camera_id": camera_id, "timestamp": at, "site_id": None}, user)
 
 
-@api_router.post("/events/{event_id}/reanalyze")
-async def reanalyze_event(event_id: str, user: dict = Depends(require_permission("read_plates"))):
-    """v1.0-rc3 · Relance l'OCR sur l'image thumbnail d'un événement.
+class ReanalyzeRequest(BaseModel):
+    # v3.1.7 · Zone manuelle optionnelle — coordonnées normalisées (0..1)
+    # relatives à l'image entière : [x1, y1, x2, y2]. Quand fournie, on
+    # saute la détection véhicule YOLO et on lit l'OCR directement dans ce
+    # crop (utile quand YOLO ne détecte pas de véhicule sur la miniature
+    # figée, ou quand la plaque est trop petite dans le crop véhicule
+    # automatique pour les moteurs OCR génériques).
+    bbox: Optional[List[float]] = None
 
-    Correction MINIMALE (pas de refeeding vidéo) : on prend le `thumbnail`
-    déjà stocké sur l'event et on le repasse dans le pipeline ANPR complet
-    via `ai_engine.analyze_image_local` (fast-alpr + Crop Premium v2 si le
-    score du crop est < 60). Utile pour les events où YOLO a détecté un
-    véhicule mais aucune plaque n'a été extraite au moment T.
+
+async def _dispatch_all_plate_engines(numpy_bgr, camera_id: str, cam: Optional[dict]) -> list:
+    """Lit une plaque sur un crop en interrogeant TOUS les moteurs PlateRecognizer
+    activés et opérationnels pour cette caméra (même mécanisme que la détection
+    live — voir pipeline_v2/downstream.py::_prerun_multi_anpr), pas seulement
+    fast-alpr. Retourne une liste de dicts {plate, confidence, engine} triée
+    par confiance décroissante.
+    """
+    from plugin_manager.bus import bus as _bus
+    from plugin_manager.interfaces import Frame as _Frame
+    whitelist = set((cam or {}).get("enabled_plugins") or [])
+    # Fail-open MINIMAL pour cette action manuelle explicite : si la caméra
+    # n'a aucun moteur ANPR configuré, on tente quand même les moteurs OCR
+    # locaux "de base" — l'utilisateur vient de demander explicitement une
+    # lecture, ce n'est pas un déclenchement automatique silencieux.
+    if not whitelist:
+        whitelist = {"fast-alpr", "easyocr", "opencv-ocr", "paddle-ocr", "tesseract"}
+    entries = [e for e in _bus.active("PlateRecognizer") if e.name in whitelist]
+    if not entries or numpy_bgr is None or getattr(numpy_bgr, "size", 0) == 0:
+        return []
+    frame = _Frame(camera_id=camera_id, timestamp=datetime.now(timezone.utc).isoformat(),
+                    numpy_bgr=numpy_bgr, width=int(numpy_bgr.shape[1]), height=int(numpy_bgr.shape[0]))
+    results = await _bus.dispatch_plate(frame, only={e.name for e in entries}, timeout_s=8.0)
+    out = []
+    for engine_name, plates in results:
+        for p in (plates or []):
+            text = (getattr(p, "text", "") or "").upper().strip()
+            if not text:
+                continue
+            out.append({"plate": text, "confidence": float(getattr(p, "confidence", 0.0)),
+                        "engine": engine_name})
+    out.sort(key=lambda r: r["confidence"], reverse=True)
+    return out
+
+
+@api_router.post("/events/{event_id}/reanalyze")
+async def reanalyze_event(event_id: str, body: ReanalyzeRequest = ReanalyzeRequest(),
+                           user: dict = Depends(require_permission("read_plates"))):
+    """v3.1.7 · Relance l'OCR sur l'image thumbnail d'un événement.
+
+    Deux modes :
+      - Sans `bbox` : pipeline complet (YOLO véhicule → ROI → TOUS les
+        moteurs PlateRecognizer activés pour la caméra, pas seulement
+        fast-alpr — voir `_dispatch_all_plate_engines`).
+      - Avec `bbox` (sélection manuelle d'une zone dans l'image par
+        l'utilisateur) : lecture OCR directe sur ce crop, sans détection
+        véhicule — contourne les cas où YOLO ne détecte rien sur la
+        miniature figée, ou où la plaque est trop petite dans le crop
+        véhicule automatique.
     """
     ev = await db.events.find_one({"id": event_id}, {"_id": 0})
     if not ev:
@@ -720,7 +769,6 @@ async def reanalyze_event(event_id: str, user: dict = Depends(require_permission
 
     # Décode la data URL base64 en bytes JPEG
     try:
-        import base64
         b64 = thumb.split(",", 1)[1] if "," in thumb else thumb
         image_bytes = base64.b64decode(b64)
         if not image_bytes:
@@ -728,22 +776,56 @@ async def reanalyze_event(event_id: str, user: dict = Depends(require_permission
     except Exception as e:
         raise HTTPException(500, f"Miniature illisible: {e}")
 
-    # Passe via le pipeline unique (même que /api/analyze upload)
+    cam = await db.cameras.find_one({"id": ev.get("camera_id")}, {"_id": 0}) if ev.get("camera_id") else None
+
+    vehicle_type = None
+    vehicle_color = None
+    candidates: list = []
+
     try:
-        import ai_engine
-        result = await asyncio.to_thread(ai_engine.analyze_image_local, image_bytes)
+        import cv2
+        import numpy as np
+        img = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            raise ValueError("décodage image échoué")
+
+        if body.bbox and len(body.bbox) == 4:
+            h, w = img.shape[:2]
+            x1 = max(0, min(w - 1, int(body.bbox[0] * w)))
+            y1 = max(0, min(h - 1, int(body.bbox[1] * h)))
+            x2 = max(x1 + 1, min(w, int(body.bbox[2] * w)))
+            y2 = max(y1 + 1, min(h, int(body.bbox[3] * h)))
+            crop = img[y1:y2, x1:x2]
+            candidates = await _dispatch_all_plate_engines(crop, ev.get("camera_id") or "__upload__", cam)
+        else:
+            import ai_engine
+            legacy = await asyncio.to_thread(
+                ai_engine.analyze_image_local, image_bytes, cam)
+            vehicle_type = (legacy or {}).get("vehicle_type")
+            vehicle_color = (legacy or {}).get("vehicle_color")
+            if (legacy or {}).get("plate"):
+                candidates.append({"plate": legacy["plate"], "confidence": float(legacy.get("confidence") or 0.0),
+                                    "engine": "fast-alpr"})
+            # Multi-moteurs sur les mêmes crops véhicule que la détection live
+            # (voir _prerun_multi_anpr) — pas seulement fast-alpr.
+            ctx = (legacy or {}).get("_ctx")
+            for roi in (getattr(ctx, "vehicle_rois", None) or []):
+                candidates.extend(await _dispatch_all_plate_engines(roi.crop, ev.get("camera_id") or "__upload__", cam))
     except Exception as e:
         raise HTTPException(500, f"OCR indisponible: {e}")
 
-    plate = (result or {}).get("plate", "")
-    conf = float((result or {}).get("confidence", 0.0))
+    candidates.sort(key=lambda r: r["confidence"], reverse=True)
+    best = candidates[0] if candidates else None
+    plate = best["plate"] if best else ""
+    conf = best["confidence"] if best else 0.0
+    engine = best["engine"] if best else None
 
     # Persiste le résultat sur l'event (audit + re-affichage sans re-run)
     update = {
         "reanalyzed_at": datetime.now(timezone.utc).isoformat(),
         "reanalyzed_plate": plate,
         "reanalyzed_confidence": conf,
-        "reanalyzed_engine": "fast-alpr",
+        "reanalyzed_engine": engine,
     }
     if plate:
         update["plate"] = plate  # exposer côté frontend directement
@@ -754,8 +836,9 @@ async def reanalyze_event(event_id: str, user: dict = Depends(require_permission
         "ok": True,
         "plate": plate or None,
         "confidence": conf,
-        "vehicle_type": (result or {}).get("vehicle_type"),
-        "vehicle_color": (result or {}).get("vehicle_color"),
+        "engine": engine,
+        "vehicle_type": vehicle_type,
+        "vehicle_color": vehicle_color,
         "message": "Aucune plaque détectée sur cette image" if not plate else None,
     }
 

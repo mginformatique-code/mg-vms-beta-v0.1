@@ -444,14 +444,19 @@ from pipeline_v2.scenarios import (DEFAULT_ARMING, DEFAULT_SCENARIOS,  # noqa: E
                                     cooldown_ok as _cooldown_ok, get_arming_config)
 
 
-def analyze_image_local(image_bytes: bytes) -> dict:
+def analyze_image_local(image_bytes: bytes, camera: dict | None = None) -> dict:
     """Analyse LOCALE d'une image (upload manuel) via le CameraWorker unique.
 
     v0.4.3 · P7 · L'analyse d'une image uploadée passe EXACTEMENT par le
     même pipeline (decode → motion → yolo → tracking → roi → anpr) que
     les frames RTSP. Zéro duplication : `analyze_image_local` = wrapper
-    thin autour de `CameraWorker("__upload__").analyze(bytes,
-    enabled_plugins=["fast-alpr"])`.
+    thin autour de `CameraWorker("__upload__").analyze(...)`.
+
+    v3.1.7 · Accepte désormais un `camera` optionnel (doc Mongo) : quand
+    fourni, sa vraie liste `enabled_plugins` et son `ai_resolution` sont
+    utilisés (au lieu du fast-alpr hardcodé) — l'appelant (endpoint
+    reanalyze) tente ensuite les autres moteurs OCR sur
+    `result["_ctx"].vehicle_rois` (voir routers.py::_dispatch_all_plate_engines).
     """
     # P0-2 (v0.7.c) : garde lazy — l'analyse d'upload doit fonctionner même si
     # aucune caméra detect_enabled n'a déclenché le chargement des modèles.
@@ -459,9 +464,13 @@ def analyze_image_local(image_bytes: bytes) -> dict:
         _load_models()
     from pipeline_v2.camera_worker import CameraWorker
     worker = CameraWorker("__upload__")
-    # Enable fast-alpr explicitement : le CameraWorker est fail-safe strict —
-    # sans whitelist, aucun plugin ANPR ne tournerait.
-    res = worker.analyze(image_bytes, enabled_plugins=["fast-alpr"], camera=None)
+    # Fail-safe strict du CameraWorker : sans whitelist, aucun plugin ANPR ne
+    # tournerait — fast-alpr reste le plancher minimal si la caméra n'a rien
+    # activé (ex. upload sans caméra associée).
+    enabled_plugins = (camera or {}).get("enabled_plugins") or ["fast-alpr"]
+    if "fast-alpr" not in enabled_plugins:
+        enabled_plugins = list(enabled_plugins) + ["fast-alpr"]
+    res = worker.analyze(image_bytes, enabled_plugins=enabled_plugins, camera=camera)
     out = {"plate": "", "country": "", "vehicle_color": "", "vehicle_make": "",
            "vehicle_model": "", "vehicle_type": "Inconnu", "confidence": 0.0,
            "plate_crop": ""}
@@ -476,6 +485,7 @@ def analyze_image_local(image_bytes: bytes) -> dict:
         out["plate"] = (p.get("plate") or "").upper()
         out["confidence"] = float(p.get("confidence", 0.0))
         out["plate_crop"] = p.get("plate_crop") or ""
+    out["_ctx"] = res.get("_ctx")
     return out
 
 
