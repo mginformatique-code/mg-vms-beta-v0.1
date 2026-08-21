@@ -97,6 +97,15 @@ services:
       NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
       NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility,video}
       MGVMS_AI_HW_ACCEL: ${MGVMS_AI_HW_ACCEL:-auto}
+      # v3.1.9 · Cadence de la boucle IA (secondes entre 2 cycles par caméra) —
+      # 0.15s par défaut (~6-7 fps/caméra) sature le GIL du seul process
+      # Python (--workers 1) qui sert aussi l'API HTTP, causant des latences
+      # aléatoires de plusieurs secondes sur N'IMPORTE quel endpoint pendant
+      # les cycles IA (confirmé : /dashboard/stats, /security/timeout,
+      # /events touchés, pas seulement ANPR/recordings). Relevé ici pour
+      # réduire la fréquence sans toucher au code — au prix d'une détection
+      # légèrement moins réactive.
+      AI_INTERVAL_SECONDS: ${AI_INTERVAL_SECONDS:-0.15}
       # ── Recherche IA / Smart Search (v1.0-rc4) ──────────────
       # Clé LLM (Emergent Universal Key). Absente = /api/smart-search
       # retourne 503 SMART_SEARCH_LLM_NOT_CONFIGURED, la vue Events
