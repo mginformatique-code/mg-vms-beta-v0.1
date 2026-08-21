@@ -191,7 +191,23 @@ async def _index_segments(cam: dict) -> None:
         if await db.recordings.find_one({"file_path": str(f)}):
             continue
         try:
-            start = datetime.strptime(f.stem, "%Y%m%d_%H%M%S").replace(tzinfo=timezone.utc)
+            # v3.1.9 · Bug de fuseau horaire confirmé en direct sur le serveur
+            # de prod : ffmpeg (`-strftime 1`) nomme le segment avec l'heure
+            # LOCALE du conteneur (TZ=Europe/Paris ici, UTC+2), mais
+            # `.replace(tzinfo=timezone.utc)` étiquette cette valeur comme si
+            # c'était déjà de l'UTC — sans convertir. Chaque segment se
+            # retrouvait indexé avec un `start`/`end` décalé de 2h dans le
+            # futur par rapport à l'UTC réel, alors que `db.events.timestamp`
+            # est en UTC correct (`datetime.now(timezone.utc)`) — un décalage
+            # permanent qui faisait échouer quasi systématiquement la requête
+            # de plage dans `_lookup_recording_for` ("aucun enregistrement ne
+            # couvre cet événement"), y compris pour des events tout frais.
+            # `.astimezone(timezone.utc)` sur un datetime naïf le traite
+            # correctement comme heure LOCALE du système et le convertit en
+            # UTC — reste correct quel que soit le fuseau configuré (pas de
+            # décalage codé en dur), tant que ffmpeg et Python voient le même
+            # fuseau système (c'est le cas : tous deux dans le même conteneur).
+            start = datetime.strptime(f.stem, "%Y%m%d_%H%M%S").astimezone(timezone.utc)
         except ValueError:
             continue
         duration = await asyncio.to_thread(_probe_duration, f)
