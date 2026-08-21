@@ -197,13 +197,31 @@ def _compute_plugins_used(cam: dict) -> list[str]:
     return out
 
 
+
+# v3.1.9 · Moteurs OCR locaux génériques (pas de localisation de plaque
+# dédiée, contrairement à fast-alpr) confirmés CPU-only et lents en prod :
+# ~3.07s par appel (identique à la milliseconde près pour les 4 — signature
+# de contention GIL/CPU, pas un temps de calcul propre à chacun), dispatchés
+# via asyncio.gather donc en pratique sérialisés par le GIL. Sur un cycle
+# avec plusieurs véhicules détectés, ce dispatch se répète par ROI et pouvait
+# ajouter 10+ secondes à un seul cycle IA — root cause confirmée d'une
+# latence API généralisée (TOUS les endpoints touchés, pas seulement ANPR :
+# /dashboard/stats, /security/timeout, /events), le process tournant en
+# --workers 1 (un seul worker Uvicorn). Exclus du dispatch LIVE continu ;
+# restent utilisables via la sélection manuelle de zone dans EventViewer.jsx
+# (action ponctuelle et tolérante à la latence, pas un chemin exécuté à
+# chaque frame).
+_LIVE_ANPR_EXCLUDE = {"easyocr", "opencv-ocr", "paddle-ocr", "tesseract"}
+
+
 async def _prerun_multi_anpr(cam: dict, ctx, result: dict, now_iso: str) -> None:
     """Dispatch multi-moteurs ANPR AVANT l'écriture des events YOLO.
 
     Alimente ``result["plates"]`` avec les lectures de tous les moteurs
     additionnels de la whitelist (openalpr, google-vision, azure, plate-
-    recognizer, codeproject…). Chaque moteur reçoit le MÊME objet Frame par
-    ROI véhicule (mêmes pixels, un seul encodage JPEG memoizé).
+    recognizer, codeproject…) — hors moteurs OCR locaux lents exclus du live
+    (voir ``_LIVE_ANPR_EXCLUDE``). Chaque moteur reçoit le MÊME objet Frame
+    par ROI véhicule (mêmes pixels, un seul encodage JPEG memoizé).
 
     Fermeture stricte : whitelist vide/absente ⇒ aucun moteur dispatché.
     """
@@ -214,7 +232,8 @@ async def _prerun_multi_anpr(cam: dict, ctx, result: dict, now_iso: str) -> None
         if not _cam_whitelist:
             return
         _anpr_entries = [e for e in _plugin_bus_multi.active("PlateRecognizer")
-                         if e.name != "fast-alpr" and e.name in _cam_whitelist]
+                         if e.name != "fast-alpr" and e.name in _cam_whitelist
+                         and e.name not in _LIVE_ANPR_EXCLUDE]
         _rois = (ctx.vehicle_rois if ctx else []) or []
         if not _anpr_entries or not _rois:
             return
