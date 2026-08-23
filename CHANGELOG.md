@@ -2,6 +2,60 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.3.0-licence-stockage] — 2026-08 — Licence Gold, refonte stockage, menu "À propos"
+
+### Added
+- **Système de licence Gold Support** : activation d'une clé de licence
+  signée Ed25519 depuis le popup "À propos" (menu utilisateur) —
+  vérification hors-ligne côté app via une clé publique embarquée
+  (`routes/license.py`, `GET/POST /api/license/status|activate`, `DELETE
+  /api/license/deactivate`), état persisté en base (client, type,
+  expiration). La génération des clés se fait sur un service séparé
+  (`mg-license-server`, conteneur local non exposé sur le LAN, non
+  versionné dans ce dépôt — la clé privée n'y vit jamais) qui expose aussi
+  une API Bearer prévue pour une intégration PrestaShop future
+  (achat → émission automatique de licence, pas encore branché).
+- **Menu utilisateur "À propos"** : le bloc statique nom/rôle de la
+  sidebar devient un menu déroulant (À propos, Déconnexion) — infos
+  MG Informatique, support, mentions légales, sans dupliquer la version
+  déjà affichée sur le Centre de bienvenue.
+- **Détection du type de disque (NVMe/SSD/HDD)** côté stockage, via
+  `/sys/block/<device>/queue/rotational` (fiable même en conteneur, le
+  noyau étant partagé avec l'hôte) — badges affichés partout où un disque
+  est listé, avec avertissements : NVMe/SSD recommandé pour MongoDB
+  (écritures aléatoires), HDD largement suffisant pour la vidéo (volumes
+  séquentiels, moins cher au Go).
+
+### Fixed
+- **Détection des disques totalement faussée** (`storage.py`) : chaque
+  bind-mount Docker — y compris un fichier isolé comme `/etc/hosts` ou une
+  lib NVIDIA individuelle — apparaissait comme une "partition" séparée
+  dans `/proc/mounts`, produisant des dizaines d'entrées sans rapport avec
+  un vrai disque physique dès qu'on listait le stockage. `_detect_partitions()`
+  filtre désormais les montages de fichiers isolés et déduplique par
+  device réel.
+- **Carte "Disque VMS" affichant un disque aléatoire** : `partitionFor()`
+  cherchait un point de montage `/app`, qui n'existe jamais tel quel en
+  conteneur (racine = overlay, filtrée) — sans correspondance, un fallback
+  silencieux renvoyait `partitions[0]`, un chemin arbitraire (ex. une lib
+  NVIDIA) affiché avec confiance comme "le disque de l'app". Fallback
+  supprimé (retourne "non détecté" plutôt qu'une fausse info), matching
+  fait sur `/logs` (chemin garanti présent, même disque que le reste des
+  données applicatives).
+- **Popup "À propos" qui se fermait immédiatement après ouverture** : le
+  `Dialog` était rendu comme enfant du menu déroulant — à la sélection de
+  l'item, Radix démonte le menu (et donc le Dialog avec lui) avant qu'il
+  ait pu s'afficher. État et Dialog déplacés dans `Layout`, en dehors de
+  l'arbre du menu.
+
+### Changed
+- Interface Stockage réorganisée : sélection de disque pour la vidéo
+  directement depuis la liste des disques détectés (bouton "Utiliser pour
+  vidéo", masqué quand un disque est déjà le dossier principal ou a déjà
+  un pool dessus), avertissement renforcé sur le risque de perte de
+  données si le chemin MongoDB est changé sans migration manuelle des
+  fichiers au préalable.
+
 ## [v3.2.0-video-ocr-recording-latence] — 2026-08 — Enregistrements, OCR, viewer, latence API généralisée
 
 Session de debug en direct sur le serveur (accès SSH root), diagnostics

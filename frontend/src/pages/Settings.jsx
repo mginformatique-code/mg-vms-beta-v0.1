@@ -270,6 +270,8 @@ function DatabaseCard() {
           latence de toute l&apos;API — un HDD la ralentit fortement. Emplacement disque local :
           variable <code className="mono">MONGO_DATA_PATH</code> dans <code className="mono">deploy-app/.env</code>, appliquée
           via <code className="mono">./install.sh</code> (le conteneur MongoDB étant séparé, ce n&apos;est pas modifiable ici en un clic).
+          {" "}<b className="text-[#FF3333]">⚠ Changer ce chemin sur une install existante ne déplace PAS les données</b> :
+          copiez d&apos;abord le contenu de l&apos;ancien dossier vers le nouveau, sinon MongoDB redémarre avec une base vide.
         </div>
       </div>
       {c && (
@@ -520,6 +522,11 @@ function VideoPoolsCard() {
         {state.partitions.map((p, i) => {
           const isRecordingsDisk = state.recordings_disk?.device === p.device;
           const isAppDisk = state.app_disk?.device === p.device;
+          // Ce mountpoint EST déjà le dossier principal d'enregistrement (ou
+          // un pool existant pointe déjà dessus) — créer un pool identique
+          // serait redondant, on masque le bouton plutôt que de le proposer.
+          const alreadyUsed = p.mountpoint === state.primary_recordings_dir
+            || state.pools.some((pool) => pool.path === p.mountpoint);
           return (
             <div key={i} className="border border-border p-2 text-xs" data-testid={`partition-${i}`}>
               <div className="flex items-center justify-between gap-2 mb-1">
@@ -529,11 +536,15 @@ function VideoPoolsCard() {
                   {isRecordingsDisk && <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-border text-muted-foreground">Enregistrements</span>}
                   {isAppDisk && <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-border text-muted-foreground">Application</span>}
                 </div>
-                <button onClick={() => setNewPool({ ...newPool, path: p.mountpoint, name: newPool.name || p.mountpoint })}
-                        className="text-[10px] px-2 py-0.5 border border-[#0044FF] text-[#0044FF] hover:bg-[#0044FF]/10 shrink-0"
-                        data-testid={`use-partition-${i}`}>
-                  Utiliser pour vidéo
-                </button>
+                {alreadyUsed ? (
+                  <span className="text-[10px] text-muted-foreground shrink-0">Déjà utilisé</span>
+                ) : (
+                  <button onClick={() => setNewPool({ ...newPool, path: p.mountpoint, name: newPool.name || p.mountpoint })}
+                          className="text-[10px] px-2 py-0.5 border border-[#0044FF] text-[#0044FF] hover:bg-[#0044FF]/10 shrink-0"
+                          data-testid={`use-partition-${i}`}>
+                    Utiliser pour vidéo
+                  </button>
+                )}
               </div>
               <div className="mono text-[10px] text-muted-foreground">{p.device} ({p.fstype}) · {p.total_gb} Go · libre {p.free_gb} Go ({100 - Math.round(p.used_pct)}%)</div>
               <div className="h-1 bg-secondary mt-1"><div className="h-full" style={{ width: `${p.used_pct}%`, backgroundColor: p.used_pct > 85 ? "#FF3333" : p.used_pct > 70 ? "#FFB800" : "#00E676" }} /></div>
