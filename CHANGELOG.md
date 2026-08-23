@@ -2,6 +2,119 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.2.0-video-ocr-recording-latence] — 2026-08 — Enregistrements, OCR, viewer, latence API généralisée
+
+Session de debug en direct sur le serveur (accès SSH root), diagnostics
+prod-only (logs, ffprobe, mongosh, HAR réseau, screenshots) — chaque root
+cause listée ci-dessous a été confirmée sur le serveur réel avant d'être
+corrigée, aucune n'a été supposée. PR :
+[#1](https://github.com/mginformatique-code/mg-vms-beta-v0.1/pull/1).
+
+### Fixed — Enregistrements / lecture vidéo
+- **Connexion RTSP fantôme (`video-engine-v3`)** : un bloc de démarrage
+  mort, hérité d'une architecture WHEP-only abandonnée, ouvrait pour
+  chaque caméra une 2ᵉ connexion RTSP directe (PyAV) en plus de celle de
+  go2rtc — confirmé sans aucun consommateur (`subscribe_packets()` jamais
+  appelé avec le camera_id brut). Contention avec go2rtc sur les caméras à
+  connexions RTSP limitées. Supprimé entièrement.
+- **Durée de segment corrompue** (écran noir, durée aberrante type
+  "6:21:33" pour un segment de 2 min) : confirmé par ffprobe — un segment
+  de 1.6 Mo rapportait `format.duration=65678s` (18h) alors que le stream
+  vidéo réel ne fait que 0.05s, le muxer `segment` de ffmpeg déraillant
+  face aux discontinuités de timestamps d'un flux caméra instable.
+  `_probe_duration()` priorise désormais la durée du stream vidéo lui-même
+  (fiable) plutôt que la métadonnée `format` globale (pas fiable) ;
+  `+fflags genpts` ajouté en prévention sur l'entrée ffmpeg du recorder.
+- **Bug de fuseau horaire — la plus grosse cause de "Aucun enregistrement
+  ne couvre cet événement"** : le conteneur est en `TZ=Europe/Paris`
+  (UTC+2). ffmpeg nomme chaque segment avec l'heure LOCALE du conteneur
+  (`-strftime`), mais `_index_segments()` étiquetait cette valeur comme
+  UTC sans la convertir (`.replace(tzinfo=timezone.utc)`) — chaque
+  enregistrement indexé 2h dans le futur par rapport à l'UTC réel des
+  événements (`datetime.now(timezone.utc)`, correct). Fix :
+  `.astimezone(timezone.utc)` sur le datetime naïf.
+- **Le lecteur ne rejoignait jamais l'instant de l'événement** : l'API
+  calculait le bon offset (confirmé, ex. 88s dans un segment de 107s)
+  mais `videoRef.current.currentTime` était posé après un délai fixe de
+  200ms, avant que le `<video>` ait fini de charger ses métadonnées sur
+  un fichier de plusieurs Mo — seek silencieusement ignoré par le
+  navigateur, lecture repartant de 0. Déplacé dans le handler
+  `onLoadedMetadata`.
+
+### Fixed — OCR / ANPR
+- **fast-alpr ne lisait jamais aucune plaque via le plugin bus** : la
+  méthode `recognize()` appelait `ai_engine._analyze_frame_alpr` — une
+  fonction qui n'a **jamais existé** dans le code, retour `[]`
+  systématique. Réécrite pour appeler directement
+  `ai_engine._alpr.predict(...)` (mécanisme déjà éprouvé côté
+  `_stage_anpr`/`plate_registry`), offload sur un thread. Son état de bus
+  restait par ailleurs bloqué à `error` depuis le boot (réévalué une
+  seule fois, avant la fin du chargement async du modèle) —
+  `bus.refresh_lazy_states()` appelé avant dispatch pour corriger ça.
+  Vérifié : lecture réelle `ED535SV` à 80% (plaque réelle : EO-535-SY).
+- **Faux positif OCR pleine image** : le mode automatique (YOLO véhicule →
+  crop entier → OCR) a produit `G57695` au lieu de `ED-241-LZ` en prod —
+  les moteurs OCR sans localisation de plaque dédiée (tout sauf
+  fast-alpr) peuvent lire n'importe quel texte du crop entier. Mode
+  supprimé ; l'analyse manuelle passe désormais uniquement par une zone
+  tracée à la main dans l'événement (`ReanalyzeRequest.bbox` obligatoire).
+- **Le bouton "Analyser cette zone" ne déclenchait rien** : bug de
+  *bubbling* d'événement — le bandeau d'action est un descendant du
+  conteneur qui gère le tracé du rectangle (`mousedown`/`mouseup`), un
+  clic remontait au conteneur qui effaçait la sélection avant l'exécution
+  du `onClick`. `stopPropagation()` sur le bandeau.
+- **fast-alpr tournait entièrement sur CPU malgré un GPU idle** :
+  `ALPR(...)` était instancié sans jamais préciser de provider ONNX
+  Runtime — confirmé 3% GPU / 461% CPU (sur 6 coeurs) en prod alors que
+  `CUDAExecutionProvider` est disponible. `detector_providers=["CUDAExecutionProvider","CPUExecutionProvider"]`
+  + `ocr_device="cuda"`, repli CPU explicite si l'init GPU échoue.
+
+### Fixed — Fiabilité du viewer événements/alertes
+- **Le viewer changeait d'événement tout seul pendant la consultation**
+  (vidéo/métadonnées d'un événement différent affichées sous les yeux de
+  l'utilisateur) : `Events.jsx` (poll 15s qui préinsère les nouveaux
+  événements), `Alerts.jsx`/`Dashboard.jsx` (rechargement complet à
+  chaque alerte temps réel) suivaient l'événement ouvert par un simple
+  **numéro de position** dans un tableau qui bougeait sous le viewer.
+  Suivi par **id stable** partout (`Events.jsx`, `Alerts.jsx`,
+  `Dashboard.jsx`, `Anpr.jsx`) ; effet de reset de `EventViewer.jsx`
+  déplacé de `[index]` vers `[item?.id]` en défense supplémentaire.
+
+### Fixed — Plugin anti-vol (retail-suspicious-behavior, Phase 1)
+- **Purge de track trop agressive** : l'état par `(camera_id, track_id)`
+  était purgé dès qu'un track ByteTrack était absent d'UNE SEULE frame —
+  aurait remis le dwell-time à zéro à la moindre instabilité de tracking
+  sur un flux réel, empêchant en pratique la détection de fonctionner.
+  Grâce de 5s avant purge réelle (utilise le champ `last_seen`, déjà
+  suivi mais jamais exploité). Trouvé en relecture avant premier
+  déploiement.
+
+### Performance — Latence API généralisée (TOUS les endpoints, pas seulement vidéo/ANPR)
+Diagnostiqué par capture HAR : `/dashboard/stats`, `/security/timeout`,
+`/cameras`, `/events` — tous touchés par des pics aléatoires de 5 à 65s,
+signature d'un process backend (`--workers 1`, un seul event loop asyncio
++ GIL) saturé par du travail CPU continu. Trois causes cumulées,
+corrigées dans l'ordre où elles ont été isolées :
+1. `AI_INTERVAL_SECONDS` (cadence de la boucle IA, 0.15s par défaut soit
+   ~13 cycles/s pour 2 caméras) n'était jamais transmis au conteneur par
+   `docker-compose.yml` malgré son support déjà présent côté code —
+   ajouté au passthrough d'environnement, réglé à 0.5s en prod.
+2. fast-alpr sur CPU (voir plus haut) — déplacé sur GPU.
+3. **Cause dominante** : `_prerun_multi_anpr` dispatchait `easyocr`,
+   `opencv-ocr`, `paddle-ocr`, `tesseract` sur **chaque ROI véhicule à
+   chaque cycle IA** (pas seulement à la demande) — confirmé ~3071ms de
+   latence pour les 4, identique à la milliseconde près (signature de
+   contention GIL, dispatchés en parallèle via `asyncio.gather` mais en
+   pratique sérialisés par le GIL, aucun n'utilise le GPU). Avec
+   plusieurs véhicules détectés par cycle, ajoutait 10+ secondes à un
+   seul cycle. Ces 4 moteurs sont exclus du dispatch **live** continu ;
+   restent disponibles via la sélection manuelle de zone (action
+   ponctuelle et tolérante à la latence).
+
+**Résultat mesuré** : CPU conteneur backend 461% → 80% (sur 6 coeurs),
+latence `/api/events` : pics aléatoires de 5-65s → 81-160ms de façon
+constante sur 10 appels consécutifs.
+
 ## [v3.1.6-go2rtc-tcp-transport] — 2026-08 — Root cause packet loss RTSP (frames vertes/trous d'enregistrement) + bruit galerie Événements
 
 Suite d'un signalement en conditions réelles (capture d'événement avec frame
