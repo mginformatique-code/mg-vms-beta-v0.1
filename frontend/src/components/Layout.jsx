@@ -4,7 +4,9 @@ import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import Logo from "@/components/Logo";
 import LicenseSection from "@/components/LicenseSection";
+import CookieSection from "@/components/CookieSection";
 import WelcomePopup from "@/components/WelcomePopup";
+import CookieConsentBanner from "@/components/CookieConsentBanner";
 import {
   LayoutDashboard, Grid3x3, Cctv, Building2, ScanLine, Car, Bell, Map, Zap,
   ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock, Layers, ChevronDown, ChevronRight, LineChart, Sparkles, ShieldCheck, Lock, Info, LifeBuoy, ScrollText as LegalIcon,
@@ -235,6 +237,7 @@ function AboutDialog({ open, onOpenChange, t, isAdmin }) {
             </a>
           </div>
           {isAdmin && <LicenseSection t={t} />}
+          <CookieSection />
         </div>
       </DialogContent>
     </Dialog>
@@ -267,6 +270,7 @@ export default function Layout({ children }) {
   return (
     <>
     <WelcomePopup />
+    <CookieConsentBanner onOpenPreferences={() => setAboutOpen(true)} />
     <div className="h-screen flex overflow-hidden bg-background text-foreground">
       {/* Sidebar */}
       <aside className="w-60 shrink-0 border-r border-border bg-card flex flex-col" data-testid="sidebar">
