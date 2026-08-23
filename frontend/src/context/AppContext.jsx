@@ -47,6 +47,10 @@ export function AppProvider({ children }) {
     if (data.requires_2fa) return { requires_2fa: true };
     localStorage.setItem("mg_token", data.access_token);
     if (data.refresh_token) localStorage.setItem("mg_refresh", data.refresh_token);
+    // Marque une connexion FRAÎCHE (pas une restauration de session au
+    // rechargement de page) — consommé une seule fois par Layout pour
+    // déclencher le popup de bienvenue juste après le login.
+    sessionStorage.setItem("mg_just_logged_in", "1");
     setUser(data.user);
     return { ok: true };
   };
