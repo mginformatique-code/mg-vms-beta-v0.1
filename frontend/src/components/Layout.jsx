@@ -202,45 +202,39 @@ function NavGroupItem({ item, t, can, hasPerm }) {
   );
 }
 
-function AboutMenuItem({ t }) {
-  const [open, setOpen] = useState(false);
+function AboutDialog({ open, onOpenChange, t }) {
   return (
-    <>
-      <DropdownMenuItem onSelect={() => setOpen(true)} data-testid="about-menu-item">
-        <Info size={14} /> {t("nav.about")}
-      </DropdownMenuItem>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent data-testid="about-dialog">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Logo size={22} className="w-5 h-5" /> {t("about.title")}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 text-sm">
-            <div className="font-head font-bold text-base">{t("about.company")}</div>
-            <div className="border border-border p-3">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-2">
-                <LifeBuoy size={14} /> {t("about.support")}
-              </div>
-              <p className="text-xs text-muted-foreground leading-relaxed mb-2">{t("about.support_desc")}</p>
-              <a href="https://mg-vms.com/fr/contact" target="_blank" rel="noopener noreferrer"
-                 className="text-xs text-[#0044FF] hover:underline" data-testid="about-support-link">
-                mg-vms.com/fr/contact
-              </a>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent data-testid="about-dialog">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Logo size={22} className="w-5 h-5" /> {t("about.title")}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 text-sm">
+          <div className="font-head font-bold text-base">{t("about.company")}</div>
+          <div className="border border-border p-3">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-2">
+              <LifeBuoy size={14} /> {t("about.support")}
             </div>
-            <div className="border border-border p-3">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-2">
-                <LegalIcon size={14} /> {t("about.legal")}
-              </div>
-              <a href="https://mginformatique.com" target="_blank" rel="noopener noreferrer"
-                 className="text-xs text-[#0044FF] hover:underline" data-testid="about-legal-link">
-                mginformatique.com
-              </a>
-            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed mb-2">{t("about.support_desc")}</p>
+            <a href="https://mg-vms.com/fr/contact" target="_blank" rel="noopener noreferrer"
+               className="text-xs text-[#0044FF] hover:underline" data-testid="about-support-link">
+              mg-vms.com/fr/contact
+            </a>
           </div>
-        </DialogContent>
-      </Dialog>
-    </>
+          <div className="border border-border p-3">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-2">
+              <LegalIcon size={14} /> {t("about.legal")}
+            </div>
+            <a href="https://mginformatique.com" target="_blank" rel="noopener noreferrer"
+               className="text-xs text-[#0044FF] hover:underline" data-testid="about-legal-link">
+              mginformatique.com
+            </a>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -249,6 +243,7 @@ export default function Layout({ children }) {
   const navigate = useNavigate();
   const [sys, setSys] = useState({ cpu: 0, ram: 0, storage: 0, gpu: { available: false } });
   const [alertCount, setAlertCount] = useState(0);
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   const loadStats = () => {
     api.get("/dashboard/stats").then((r) => {
@@ -306,13 +301,16 @@ export default function Layout({ children }) {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" side="top" className="w-56" data-testid="user-menu-content">
-              <AboutMenuItem t={t} />
+              <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setAboutOpen(true); }} data-testid="about-menu-item">
+                <Info size={14} /> {t("nav.about")}
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => { logout(); navigate("/login"); }} data-testid="logout-btn">
                 <LogOut size={14} /> {t("nav.logout")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} t={t} />
         </div>
       </aside>
 
