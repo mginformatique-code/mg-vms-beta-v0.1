@@ -69,20 +69,36 @@ app = FastAPI(title="MG-VMS API", version="2.30.0-preview-ng", description="MG-V
 # (`/api/*` legacy + `/api/v1/*` cible), sans dupliquer les routes. Un middleware
 # léger réécrit `/api/v1/...` → `/api/...` en amont du routing. Émet un header
 # `X-API-Version-Alias` pour tracer l'usage. Compat 24 mois (chapitre 27).
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response as _Response
+#
+# v3.4 · ASGI pur, PAS BaseHTTPMiddleware : appliqué à CHAQUE requête (y
+# compris les 99% qui ne sont pas /api/v1/*), `call_next()` bufferise/rewrap
+# la réponse et casse le support natif des Range/206 de `FileResponse` —
+# root cause confirmée du rechargement complet répété des vidéos
+# d'événements (`/api/recordings/{id}/media`). Une réécriture ASGI directe
+# du scope ne touche jamais au corps de la réponse pour les requêtes qui ne
+# matchent pas /api/v1/*, donc aucun impact sur Range ailleurs.
+from starlette.datastructures import MutableHeaders
 
-class ApiVersionAliasMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        original_path = request.scope.get("path", "")
-        if original_path.startswith("/api/v1/"):
-            # Réécrit le path pour que les routers `/api/*` matchent
-            request.scope["path"] = "/api/" + original_path[len("/api/v1/"):]
-            request.scope["raw_path"] = request.scope["path"].encode()
-            response: _Response = await call_next(request)
-            response.headers["X-API-Version-Alias"] = "v1"
-            return response
-        return await call_next(request)
+class ApiVersionAliasMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not scope.get("path", "").startswith("/api/v1/"):
+            return await self.app(scope, receive, send)
+
+        scope = dict(scope)
+        original_path = scope["path"]
+        scope["path"] = "/api/" + original_path[len("/api/v1/"):]
+        scope["raw_path"] = scope["path"].encode()
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers["X-API-Version-Alias"] = "v1"
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
 
 app.add_middleware(ApiVersionAliasMiddleware)
 
