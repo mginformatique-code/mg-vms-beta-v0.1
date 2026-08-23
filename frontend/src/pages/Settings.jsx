@@ -3,7 +3,7 @@ import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import {
   Loader2, HardDrive, Save, Trash2, PlayCircle, Database, RefreshCw,
-  CheckCircle2, XCircle, AlertTriangle, Server, Film, Info, KeyRound, Ban,
+  CheckCircle2, XCircle, AlertTriangle, Server, Film, Info,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -33,7 +33,6 @@ export default function SettingsPage() {
       {user?.role === "admin" && <DatabaseCard />}
       {user?.role === "admin" && <RetentionCard />}
       {user?.role === "admin" && <VideoPoolsCard />}
-      {user?.role === "admin" && <LicenseCard />}
     </div>
   );
 }
@@ -98,19 +97,41 @@ function DedicatedBadge({ ok, labelOk = "Dédié", labelWarn = "Partagé" }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Utils : détecte la partition qui contient un chemin donné
+// Utils : détecte le disque (déjà dédupliqué par device) qui contient un
+// chemin donné, en cherchant le préfixe le plus long parmi TOUS ses points
+// de montage (un disque physique peut être bind-monté à plusieurs endroits).
 // ═══════════════════════════════════════════════════════════════════
 function partitionFor(partitions, targetPath) {
   if (!partitions?.length || !targetPath) return null;
-  // On garde la partition dont le mountpoint est le plus long préfixe.
-  let best = null;
+  let best = null, bestLen = -1;
   for (const p of partitions) {
-    const mp = p.mountpoint || "/";
-    if (targetPath === mp || targetPath.startsWith(mp === "/" ? "/" : mp + "/")) {
-      if (!best || (mp.length > (best.mountpoint || "").length)) best = p;
+    for (const mp of (p.mountpoints && p.mountpoints.length ? p.mountpoints : [p.mountpoint || "/"])) {
+      if (targetPath === mp || targetPath.startsWith(mp === "/" ? "/" : mp + "/")) {
+        if (mp.length > bestLen) { best = p; bestLen = mp.length; }
+      }
     }
   }
-  return best || partitions[0] || null;
+  // Pas de fallback sur partitions[0] : mieux vaut "non détecté" qu'un
+  // disque sans rapport affiché avec confiance (ex: bug historique où
+  // "/app" ne matchait jamais rien et retombait sur une partition random).
+  return best;
+}
+
+const DISK_TYPE_LABEL = { nvme: "NVMe", ssd: "SSD", hdd: "HDD", unknown: "Inconnu" };
+const DISK_TYPE_COLOR = { nvme: "#0044FF", ssd: "#00E676", hdd: "#FFB800", unknown: "#8892a0" };
+
+function DiskTypeBadge({ type }) {
+  const t = type || "unknown";
+  const color = DISK_TYPE_COLOR[t] || DISK_TYPE_COLOR.unknown;
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 border font-bold"
+      style={{ color, borderColor: `${color}99`, backgroundColor: `${color}1A` }}
+      data-testid={`disk-type-${t}`}
+    >
+      {DISK_TYPE_LABEL[t] || t}
+    </span>
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -128,9 +149,11 @@ function VMSDiskCard() {
     return () => { mounted = false; };
   }, []);
 
-  const vmsPart = useMemo(() => partitionFor(state?.partitions, "/app"), [state]);
+  // "/app" (racine du conteneur) n'est jamais un point de montage détectable
+  // séparément — on utilise /logs, garanti présent et sur le même disque.
+  const vmsPart = useMemo(() => partitionFor(state?.partitions, "/logs"), [state]);
   const videoPart = useMemo(() => partitionFor(state?.partitions, state?.primary_recordings_dir), [state]);
-  const isDedicated = vmsPart && videoPart && vmsPart.mountpoint !== videoPart.mountpoint;
+  const isDedicated = vmsPart && videoPart && vmsPart.device !== videoPart.device;
 
   const usedPct = vmsPart?.used_pct ?? 0;
 
@@ -148,14 +171,14 @@ function VMSDiskCard() {
         <>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
             <StatBox label={t("storage.vms_mount")} value={vmsPart.mountpoint} small />
-            <StatBox label={t("storage.vms_type")} value={vmsPart.fstype} small />
+            <StatBox label="Type" value={<DiskTypeBadge type={vmsPart.type} />} small />
             <StatBox label={t("storage.vms_total")} value={`${vmsPart.total_gb} Go`} />
             <StatBox label={t("storage.vms_used")} value={`${vmsPart.used_gb} Go`} color={usedPct > 85 ? "#FF3333" : usedPct > 70 ? "#FFB800" : undefined} />
             <StatBox label={t("storage.vms_free")} value={`${vmsPart.free_gb} Go`} color={usedPct > 85 ? "#FF3333" : undefined} />
           </div>
           <UsageBar pct={usedPct} />
           <div className="mono text-[10px] text-muted-foreground" data-testid="vms-device">
-            {vmsPart.device} · {usedPct}% utilisé
+            {vmsPart.device} ({vmsPart.fstype}) · {usedPct}% utilisé
           </div>
           {!isDedicated && (
             <div className="mt-3 text-[11px] text-[#FFB800] flex items-start gap-1.5">
@@ -239,6 +262,16 @@ function DatabaseCard() {
       icon={Database}
       badge={c && <DedicatedBadge ok={isDedicated} labelOk="Serveur dédié" labelWarn="Serveur local" />}
     >
+      <div className="border border-[#0044FF]/40 bg-[#0044FF]/5 p-3 mb-4 flex items-start gap-2" data-testid="db-nvme-warning">
+        <AlertTriangle size={14} className="text-[#0044FF] flex-shrink-0 mt-0.5" />
+        <div className="text-[11px] text-muted-foreground leading-relaxed">
+          <b className="text-foreground">MongoDB fait beaucoup d&apos;écritures aléatoires</b> (un événement/plaque = plusieurs
+          écritures). Un disque <b className="text-[#0044FF]">NVMe (ou SSD à défaut)</b> dédié à la base change directement la
+          latence de toute l&apos;API — un HDD la ralentit fortement. Emplacement disque local :
+          variable <code className="mono">MONGO_DATA_PATH</code> dans <code className="mono">deploy-app/.env</code>, appliquée
+          via <code className="mono">./install.sh</code> (le conteneur MongoDB étant séparé, ce n&apos;est pas modifiable ici en un clic).
+        </div>
+      </div>
       {c && (
         <div className="border border-border p-3 mb-4 bg-background">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Connexion active</div>
@@ -472,23 +505,41 @@ function VideoPoolsCard() {
         Dossier principal : <span className="text-foreground">{state.primary_recordings_dir}</span>
       </div>
 
-      {/* Partitions détectées — choix rapide */}
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Partitions physiques détectées ({state.partitions.length})</div>
+      <div className="border border-[#00E676]/40 bg-[#00E676]/5 p-3 mb-4 flex items-start gap-2" data-testid="video-hdd-tip">
+        <Info size={14} className="text-[#00E676] flex-shrink-0 mt-0.5" />
+        <div className="text-[11px] text-muted-foreground leading-relaxed">
+          Les enregistrements sont surtout de <b className="text-foreground">gros volumes séquentiels</b> — un
+          <b className="text-[#FFB800]"> HDD</b> convient très bien et coûte bien moins cher au Go qu&apos;un NVMe/SSD, qu&apos;il
+          vaut mieux réserver à la base de données (voir plus haut).
+        </div>
+      </div>
+
+      {/* Disques détectés — choix rapide */}
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Disques détectés ({state.partitions.length})</div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4">
-        {state.partitions.map((p, i) => (
-          <div key={i} className="border border-border p-2 text-xs" data-testid={`partition-${i}`}>
-            <div className="flex items-center justify-between">
-              <div><span className="mono text-[#0044FF]">{p.mountpoint}</span> <span className="text-muted-foreground">({p.fstype})</span></div>
-              <button onClick={() => setNewPool({ ...newPool, path: p.mountpoint, name: newPool.name || p.mountpoint })}
-                      className="text-[10px] px-2 py-0.5 border border-[#0044FF] text-[#0044FF] hover:bg-[#0044FF]/10"
-                      data-testid={`use-partition-${i}`}>
-                Utiliser
-              </button>
+        {state.partitions.map((p, i) => {
+          const isRecordingsDisk = state.recordings_disk?.device === p.device;
+          const isAppDisk = state.app_disk?.device === p.device;
+          return (
+            <div key={i} className="border border-border p-2 text-xs" data-testid={`partition-${i}`}>
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="mono text-[#0044FF]">{p.mountpoint}</span>
+                  <DiskTypeBadge type={p.type} />
+                  {isRecordingsDisk && <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-border text-muted-foreground">Enregistrements</span>}
+                  {isAppDisk && <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-border text-muted-foreground">Application</span>}
+                </div>
+                <button onClick={() => setNewPool({ ...newPool, path: p.mountpoint, name: newPool.name || p.mountpoint })}
+                        className="text-[10px] px-2 py-0.5 border border-[#0044FF] text-[#0044FF] hover:bg-[#0044FF]/10 shrink-0"
+                        data-testid={`use-partition-${i}`}>
+                  Utiliser pour vidéo
+                </button>
+              </div>
+              <div className="mono text-[10px] text-muted-foreground">{p.device} ({p.fstype}) · {p.total_gb} Go · libre {p.free_gb} Go ({100 - Math.round(p.used_pct)}%)</div>
+              <div className="h-1 bg-secondary mt-1"><div className="h-full" style={{ width: `${p.used_pct}%`, backgroundColor: p.used_pct > 85 ? "#FF3333" : p.used_pct > 70 ? "#FFB800" : "#00E676" }} /></div>
             </div>
-            <div className="mono text-[10px] text-muted-foreground mt-1">{p.device} · {p.total_gb} Go · libre {p.free_gb} Go ({100 - Math.round(p.used_pct)}%)</div>
-            <div className="h-1 bg-secondary mt-1"><div className="h-full" style={{ width: `${p.used_pct}%`, backgroundColor: p.used_pct > 85 ? "#FF3333" : p.used_pct > 70 ? "#FFB800" : "#00E676" }} /></div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Pools déclarés */}
@@ -498,10 +549,11 @@ function VideoPoolsCard() {
         {state.pools.map((pool) => (
           <div key={pool.id} className="border border-border p-3" data-testid={`pool-${pool.id}`}>
             <div className="flex items-center justify-between mb-2">
-              <div>
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-medium">{pool.name}</span>
-                <span className="mono text-[10px] text-muted-foreground ml-2">{pool.path}</span>
-                {!pool.enabled && <span className="ml-2 text-[10px] text-[#FFB800]">DÉSACTIVÉ</span>}
+                <span className="mono text-[10px] text-muted-foreground">{pool.path}</span>
+                <DiskTypeBadge type={pool.disk_type} />
+                {!pool.enabled && <span className="text-[10px] text-[#FFB800]">DÉSACTIVÉ</span>}
               </div>
               <div className="flex gap-1">
                 <button onClick={() => updatePool(pool, { enabled: !pool.enabled })} className="text-[10px] px-2 py-0.5 border border-border hover:bg-secondary" data-testid={`pool-toggle-${pool.id}`}>{pool.enabled ? "Désactiver" : "Activer"}</button>
@@ -540,94 +592,3 @@ function VideoPoolsCard() {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// 4. Licence (Gold Support)
-// ═══════════════════════════════════════════════════════════════════
-function LicenseCard() {
-  const { t } = useApp();
-  const [state, setState] = useState(null);
-  const [key, setKey] = useState("");
-  const [activating, setActivating] = useState(false);
-
-  const load = async () => {
-    try { const { data } = await api.get("/license/status"); setState(data); }
-    catch (e) { /* ignore */ }
-  };
-  useEffect(() => { load(); }, []);
-
-  const activate = async () => {
-    if (!key.trim()) return toast.error("Clé de licence requise");
-    setActivating(true);
-    try {
-      await api.post("/license/activate", { license_key: key.trim() });
-      toast.success("Licence activée"); setKey(""); load();
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Clé invalide"); }
-    finally { setActivating(false); }
-  };
-
-  const deactivate = async () => {
-    if (!window.confirm("Désactiver la licence actuelle ?")) return;
-    try { await api.delete("/license/deactivate"); toast.success("Licence désactivée"); load(); }
-    catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
-  };
-
-  const lic = state?.license;
-
-  return (
-    <SectionCard
-      id="license"
-      title={t("license.title")}
-      subtitle={t("license.desc")}
-      icon={KeyRound}
-      badge={state && (
-        <span
-          className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 border ${
-            state.active ? "text-[#00E676] border-[#00E676]/60 bg-[#00E676]/10"
-              : state.expired ? "text-[#FF3333] border-[#FF3333]/60 bg-[#FF3333]/10"
-              : "text-muted-foreground border-border"
-          }`}
-          data-testid="license-badge"
-        >
-          {state.active ? t("license.status_active") : state.expired ? t("license.status_expired") : t("license.status_none")}
-        </span>
-      )}
-    >
-      {lic && (
-        <div className="border border-border p-3 mb-4 bg-background">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm mb-3">
-            <div>
-              <div className="text-[10px] text-muted-foreground">{t("license.client")}</div>
-              <div className="text-xs" data-testid="license-client">{lic.client}</div>
-            </div>
-            <div>
-              <div className="text-[10px] text-muted-foreground">{t("license.type")}</div>
-              <div className="text-xs uppercase" data-testid="license-type">{lic.type}</div>
-            </div>
-            <div>
-              <div className="text-[10px] text-muted-foreground">{t("license.expires")}</div>
-              <div className="text-xs mono" data-testid="license-expires">
-                {lic.expires_at ? new Date(lic.expires_at).toLocaleDateString("fr-FR") : "—"}
-              </div>
-            </div>
-          </div>
-          <button onClick={deactivate} data-testid="license-deactivate"
-            className="flex items-center gap-1.5 px-3 py-1.5 border border-[#FF3333] text-[#FF3333] text-xs hover:bg-[#FF3333]/10">
-            <Ban size={12} /> Désactiver
-          </button>
-        </div>
-      )}
-
-      <label className="text-xs text-muted-foreground block mb-1">{t("license.key_label")}</label>
-      <div className="flex gap-2">
-        <input type="text" placeholder={t("license.key_placeholder")} value={key}
-               onChange={(e) => setKey(e.target.value)}
-               data-testid="license-key-input"
-               className="flex-1 px-3 py-2 bg-background border border-input outline-none mono text-xs focus:border-[#0044FF]" />
-        <button onClick={activate} disabled={activating || !key.trim()} data-testid="license-activate-btn"
-                className="flex items-center gap-2 px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40">
-          {activating ? <Loader2 size={13} className="animate-spin" /> : <KeyRound size={13} />} {t("license.activate")}
-        </button>
-      </div>
-    </SectionCard>
-  );
-}

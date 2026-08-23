@@ -11,6 +11,7 @@ Persistance : `settings.storage_pools` (liste de pools déclarés par l'admin).
 La base des disques auto-détectés n'est pas persistée — recalculée à chaque appel.
 """
 import os
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -24,6 +25,37 @@ from database import db
 from auth import get_current_user, require_role, log_audit
 
 storage_router = APIRouter(prefix="/api/storage", tags=["storage"])
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Détection du type de disque (NVMe / SSD / HDD)
+# ═══════════════════════════════════════════════════════════════════
+def _base_block_device(device: str) -> str:
+    """/dev/sda2 -> sda ; /dev/nvme0n1p1 -> nvme0n1 ; /dev/vdb1 -> vdb"""
+    name = os.path.basename(device)
+    m = re.match(r"^(nvme\d+n\d+)p?\d*$", name)
+    if m:
+        return m.group(1)
+    m = re.match(r"^([a-zA-Z]+)\d*$", name)
+    return m.group(1) if m else name
+
+
+def _disk_type(device: str) -> str:
+    """Type physique du disque : 'nvme' | 'ssd' | 'hdd' | 'unknown'.
+
+    Un conteneur partage le noyau de l'hôte, donc /sys/block/<device>/queue/
+    rotational reflète l'état RÉEL du disque physique hôte même pour un
+    volume bind-mounté. NVMe est identifié par le nom du device (toujours
+    un SSD, `rotational` n'est pas fiable pour ce type de contrôleur).
+    """
+    base = _base_block_device(device)
+    if base.startswith("nvme"):
+        return "nvme"
+    try:
+        with open(f"/sys/block/{base}/queue/rotational") as f:
+            return "hdd" if f.read().strip() == "1" else "ssd"
+    except OSError:
+        return "unknown"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -55,24 +87,43 @@ def _disk_usage(path: str) -> dict:
 
 
 def _detect_partitions() -> List[dict]:
-    """Liste tous les points de montage physiques (hors virtuels)."""
-    out = []
-    seen = set()
+    """Liste les disques physiques RÉELS, dédupliqués par device.
+
+    En conteneur Docker, chaque bind-mount (y compris un fichier isolé comme
+    /etc/hosts ou une lib NVIDIA individuelle) apparaît comme un point de
+    montage séparé dans /proc/mounts — même quand plusieurs partagent le
+    même disque physique hôte. Sans dédup, l'admin voyait des dizaines
+    d'entrées sans rapport avec un vrai choix de disque. On ignore les
+    montages de fichiers isolés (pas des dossiers) et on regroupe le reste
+    par device : un seul disque, avec la liste de ses points de montage.
+    """
+    by_device: dict = {}
     for p in psutil.disk_partitions(all=False):
-        # Filtre les fs virtuels/pseudos
         if p.fstype in ("", "squashfs", "overlay", "tmpfs", "devtmpfs", "sysfs", "proc", "cgroup", "cgroup2"):
             continue
-        if p.mountpoint in seen:
-            continue
-        seen.add(p.mountpoint)
-        info = _disk_usage(p.mountpoint)
-        out.append({
-            "device": p.device,
-            "mountpoint": p.mountpoint,
-            "fstype": p.fstype,
-            "opts": p.opts,
-            **info,
-        })
+        if not os.path.isdir(p.mountpoint):
+            continue  # bind-mount de fichier isolé — pas un disque
+        entry = by_device.get(p.device)
+        if entry is None:
+            info = _disk_usage(p.mountpoint)
+            by_device[p.device] = {
+                "device": p.device,
+                "type": _disk_type(p.device),
+                "mountpoint": p.mountpoint,
+                "mountpoints": [p.mountpoint],
+                "fstype": p.fstype,
+                **info,
+            }
+        else:
+            entry["mountpoints"].append(p.mountpoint)
+            # Le point de montage le plus court est le plus représentatif du disque
+            if len(p.mountpoint) < len(entry["mountpoint"]):
+                entry["mountpoint"] = p.mountpoint
+
+    out = list(by_device.values())
+    for entry in out:
+        entry["mountpoints"].sort()
+    out.sort(key=lambda d: d["mountpoint"])
     return out
 
 
@@ -84,6 +135,20 @@ async def _get_pools() -> List[dict]:
 async def _save_pools(pools: List[dict]) -> None:
     await db.settings.update_one({"key": "storage_pools"},
                                   {"$set": {"key": "storage_pools", "value": pools}}, upsert=True)
+
+
+def _partition_for(partitions: List[dict], target_path: str) -> Optional[dict]:
+    """Trouve le disque (déjà dédupliqué) dont un des points de montage est
+    le préfixe le plus long du chemin donné."""
+    if not target_path:
+        return None
+    best, best_len = None, -1
+    for p in partitions:
+        for mp in p["mountpoints"]:
+            if target_path == mp or target_path.startswith(mp.rstrip("/") + "/"):
+                if len(mp) > best_len:
+                    best, best_len = p, len(mp)
+    return best
 
 
 def _dir_size_bytes(path: str) -> int:
@@ -111,6 +176,8 @@ async def storage_overview(user: dict = Depends(get_current_user)):
     # Enrichit chaque pool avec l'usage réel de son dossier + le nombre d'enregistrements
     for pool in pools:
         pool["usage"] = _disk_usage(pool["path"])
+        disk = _partition_for(partitions, pool["path"])
+        pool["disk_type"] = disk["type"] if disk else "unknown"
         recs = await db.recordings.aggregate([
             {"$match": {"file_path": {"$regex": f"^{pool['path'].rstrip('/')}/"}}},
             {"$group": {"_id": None, "count": {"$sum": 1}, "size": {"$sum": "$size_mb"}}},
@@ -118,10 +185,20 @@ async def storage_overview(user: dict = Depends(get_current_user)):
         pool["recordings_count"] = recs[0]["count"] if recs else 0
         pool["recordings_size_gb"] = round((recs[0]["size"] if recs else 0) / 1000, 2)  # size_mb → gb
         pool["dir_size_gb"] = round(_dir_size_bytes(pool["path"]) / 1e9, 2)
+
+    primary_recordings_dir = os.environ.get("RECORDINGS_DIR", "/app/recordings")
+    recordings_disk = _partition_for(partitions, primary_recordings_dir)
+    # "/app" et "/" ne sont jamais des points de montage distincts en conteneur
+    # (racine = overlay, filtrée). /logs est garanti présent (volume compose) et
+    # partage le même disque physique que le reste des données applicatives.
+    app_disk = _partition_for(partitions, "/logs")
+
     return {
         "partitions": partitions,
         "pools": pools,
-        "primary_recordings_dir": os.environ.get("RECORDINGS_DIR", "/app/recordings"),
+        "primary_recordings_dir": primary_recordings_dir,
+        "recordings_disk": recordings_disk,
+        "app_disk": app_disk,
     }
 
 
