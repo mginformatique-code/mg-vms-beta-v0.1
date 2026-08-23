@@ -37,6 +37,7 @@ from routes.pipeline_diagnostic import pipeline_diag_router
 # video-engine-v3 · legacy routes SUPPRIMÉES : go2rtc_diagnostic, mjpeg_direct, video
 from routes.public_status import public_router
 from routes.database_settings import database_router
+from routes.license import license_router
 from routes.smart_zones import smart_zones_router
 from routes.workflows import workflows_router
 from routes.timeline import timeline_router
@@ -95,6 +96,7 @@ app.include_router(dashboard_router)
 app.include_router(audit_router)
 app.include_router(users_router)
 app.include_router(database_router)
+app.include_router(license_router)
 app.include_router(smart_zones_router)
 app.include_router(workflows_router)
 app.include_router(timeline_router)

@@ -5,8 +5,13 @@ import api from "@/lib/api";
 import Logo from "@/components/Logo";
 import {
   LayoutDashboard, Grid3x3, Cctv, Building2, ScanLine, Car, Bell, Map, Zap,
-  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock, Layers, ChevronDown, ChevronRight, LineChart, Sparkles, ShieldCheck, Lock,
+  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock, Layers, ChevronDown, ChevronRight, LineChart, Sparkles, ShieldCheck, Lock, Info, LifeBuoy, ScrollText as LegalIcon,
 } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const PLUGIN_ICON = {
   anpr: ScanLine, ai_detection: Brain, tracking: Activity, face_recognition: ScanFace,
@@ -197,6 +202,48 @@ function NavGroupItem({ item, t, can, hasPerm }) {
   );
 }
 
+function AboutMenuItem({ t }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <DropdownMenuItem onSelect={() => setOpen(true)} data-testid="about-menu-item">
+        <Info size={14} /> {t("nav.about")}
+      </DropdownMenuItem>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent data-testid="about-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Logo size={22} className="w-5 h-5" /> {t("about.title")}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 text-sm">
+            <div className="font-head font-bold text-base">{t("about.company")}</div>
+            <div className="border border-border p-3">
+              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-2">
+                <LifeBuoy size={14} /> {t("about.support")}
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed mb-2">{t("about.support_desc")}</p>
+              <a href="https://mg-vms.com/fr/contact" target="_blank" rel="noopener noreferrer"
+                 className="text-xs text-[#0044FF] hover:underline" data-testid="about-support-link">
+                mg-vms.com/fr/contact
+              </a>
+            </div>
+            <div className="border border-border p-3">
+              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-2">
+                <LegalIcon size={14} /> {t("about.legal")}
+              </div>
+              <a href="https://mginformatique.com" target="_blank" rel="noopener noreferrer"
+                 className="text-xs text-[#0044FF] hover:underline" data-testid="about-legal-link">
+                mginformatique.com
+              </a>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 export default function Layout({ children }) {
   const { t, user, logout, theme, toggleTheme, lang, toggleLang, can, hasPerm, liveMetrics, alertPing } = useApp();
   const navigate = useNavigate();
@@ -245,19 +292,27 @@ export default function Layout({ children }) {
           ))}
         </nav>
         <div className="border-t border-border p-3">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 bg-secondary flex items-center justify-center text-xs font-head font-bold">
-              {(user?.name || "U").slice(0, 2).toUpperCase()}
-            </div>
-            <div className="leading-tight min-w-0">
-              <div className="text-xs font-medium truncate">{user?.name}</div>
-              <div className="text-[10px] uppercase tracking-wider text-[#0044FF]">{user?.role}</div>
-            </div>
-          </div>
-          <button onClick={() => { logout(); navigate("/login"); }} data-testid="logout-btn"
-            className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-xs border border-border hover:bg-secondary transition-colors">
-            <LogOut size={14} /> {t("nav.logout")}
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="w-full flex items-center gap-2 px-1 py-1 hover:bg-secondary transition-colors" data-testid="user-menu-trigger">
+                <div className="w-8 h-8 bg-secondary flex items-center justify-center text-xs font-head font-bold shrink-0">
+                  {(user?.name || "U").slice(0, 2).toUpperCase()}
+                </div>
+                <div className="leading-tight min-w-0 text-left">
+                  <div className="text-xs font-medium truncate">{user?.name}</div>
+                  <div className="text-[10px] uppercase tracking-wider text-[#0044FF]">{user?.role}</div>
+                </div>
+                <ChevronDown size={14} className="ml-auto text-muted-foreground shrink-0" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" side="top" className="w-56" data-testid="user-menu-content">
+              <AboutMenuItem t={t} />
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => { logout(); navigate("/login"); }} data-testid="logout-btn">
+                <LogOut size={14} /> {t("nav.logout")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </aside>
 
