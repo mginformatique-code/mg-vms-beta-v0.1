@@ -105,6 +105,152 @@ def _build_rtsp_url(cam: dict) -> str:
     return url
 
 
+#: Largeur minimale acceptable pour un flux d'aperçu — en dessous, l'image
+#: est trop dégradée pour être exploitable dans le mur vidéo.
+_PREVIEW_MIN_WIDTH = 320
+
+
+def _stream_channel_key(url: str) -> Optional[str]:
+    """Identifie le CANAL physique auquel appartient une URL RTSP.
+
+    Indispensable pour l'aperçu : un même appareil peut exposer plusieurs
+    canaux (caméra multi-capteurs, NVR). Sur la Reolink de test, un seul
+    hôte sert `h264Preview_01_*` ET `h264Preview_02_*` — deux objectifs
+    DIFFÉRENTS. Choisir « le plus petit flux de l'appareil » sans vérifier
+    le canal fait afficher l'image du mauvais objectif dans le mur vidéo
+    (bug constaté puis corrigé avant mise en service).
+
+    Retourne ``None`` si le format d'URL n'est pas reconnu.
+    """
+    u = url or ""
+    m = re.search(r"h264preview_(\d+)_(?:main|sub)", u, re.IGNORECASE)   # Reolink
+    if m:
+        return f"reolink:{int(m.group(1))}"
+    m = re.search(r"/streaming/channels/(\d+)", u, re.IGNORECASE)         # Hikvision
+    if m:
+        d = m.group(1)
+        return f"hik:{int(d[:-1] or d)}"                                  # 101/102 → canal 1
+    m = re.search(r"[?&]channel=(\d+)", u, re.IGNORECASE)                 # Dahua
+    if m:
+        return f"dahua:{int(m.group(1))}"
+    return None
+
+
+def _derive_sub_url(main_url: str) -> str:
+    """Déduit l'URL du sous-flux à partir de celle du flux principal.
+
+    Utilisé UNIQUEMENT quand la découverte ONVIF n'a pas remonté de
+    sous-flux pour ce canal précis — c'est fréquent sur les appareils
+    multi-canaux, dont l'ONVIF ne liste souvent que les profils du
+    premier canal. Les conventions ci-dessous sont stables chez chaque
+    constructeur (vérifié en conditions réelles : `h264Preview_02_sub`
+    existe bien en 896×512 H264 alors que l'ONVIF ne le listait pas).
+
+    Retourne "" si aucune convention connue ne s'applique.
+    """
+    u = main_url or ""
+    m = re.search(r"(h264Preview_\d+_)main", u, re.IGNORECASE)            # Reolink
+    if m:
+        return u.replace(m.group(0), m.group(1) + "sub")
+    m = re.search(r"(/Streaming/Channels/)(\d+)", u, re.IGNORECASE)       # Hikvision
+    if m:
+        d = m.group(2)
+        ch = d[:-1] or d
+        return u.replace(m.group(0), f"{m.group(1)}{ch}02")
+    m = re.search(r"([?&]subtype=)(\d+)", u, re.IGNORECASE)               # Dahua
+    if m:
+        return u.replace(m.group(0), m.group(1) + "1")
+    return ""
+
+
+def pick_preview_stream(cam: dict) -> Optional[dict]:
+    """Choisit le sous-flux le plus léger utilisable pour l'APERÇU live.
+
+    v3.8 · L'aperçu consommait jusqu'ici le flux PRINCIPAL, ce qui est le
+    pire choix possible : sur une Reolink RLC-81MA le main est en 4K HEVC
+    (3840×2160, 8,3 Mpx/image) alors que le sub est en H264 896×512
+    (0,46 Mpx — 18× moins). Mesuré en conditions réelles, ffmpeg seul
+    (sans go2rtc dans la boucle) :
+        main 4K HEVC : 6–8 images/s reçues sur 10 s (source à 20 fps)
+        sub  H264    : 17 images/s, stable
+    Le décodage 4K HEVC ne tient donc PAS le temps réel sur ce serveur,
+    d'où l'aperçu saccadé et les artefacts « neige » (`Could not find ref
+    with POC 0` = images de référence perdues). L'appli constructeur est
+    fluide parce qu'elle fait exactement ça : elle prévisualise le
+    sous-flux, et décode en matériel côté client.
+
+    Sélection VOLONTAIREMENT basée sur la RÉSOLUTION, pas sur le codec
+    annoncé : l'ONVIF de cette caméra déclare `codec=h264` pour un flux
+    qui est en réalité du HEVC (vérifié par ffprobe) — se fier au codec
+    ONVIF reconduirait le bug. La plus petite résolution est de toute
+    façon le sous-flux, et c'est lui qui est en H264 chez tous les
+    constructeurs (le sous-flux sert justement à la compatibilité).
+
+    Retourne ``None`` si la caméra n'a pas de `streams_detected` (aucune
+    découverte ONVIF encore faite) → l'appelant garde son comportement
+    actuel, aucune régression.
+    """
+    main_url = (cam.get("rtsp_url") or "").strip()
+    main_key = _stream_channel_key(main_url)
+
+    streams = cam.get("streams_detected") or []
+    candidates = []
+    for s in streams:
+        url = (s.get("url") or "").strip()
+        if not url.lower().startswith(("rtsp://", "rtsps://")):
+            continue
+        # Sécurité canal : on n'accepte QUE des flux du même canal physique
+        # que le flux principal (voir _stream_channel_key). Si l'un des deux
+        # n'est pas identifiable, on refuse plutôt que d'afficher
+        # potentiellement l'image d'un autre objectif.
+        cand_key = _stream_channel_key(url)
+        if main_key is not None:
+            if cand_key != main_key:
+                continue
+        elif cand_key is not None:
+            continue
+        res = s.get("resolution") or [0, 0]
+        try:
+            w, h = int(res[0]), int(res[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if w < _PREVIEW_MIN_WIDTH:
+            continue
+        candidates.append((w * h, w, h, s))
+
+    if candidates:
+        candidates.sort(key=lambda c: c[0])
+        _px, w, h, best = candidates[0]
+        if (best.get("url") or "").strip() != main_url:
+            return {"url": best.get("url"), "name": best.get("name") or "sub",
+                    "width": w, "height": h, "codec": best.get("codec") or ""}
+
+    # Aucun sous-flux listé pour CE canal (cas courant sur les appareils
+    # multi-canaux dont l'ONVIF ne décrit que le canal 1) → on retombe sur
+    # la convention constructeur.
+    derived = _derive_sub_url(main_url)
+    if derived and derived != main_url:
+        return {"url": derived, "name": "sub (déduit)",
+                "width": 0, "height": 0, "codec": ""}
+    return None
+
+
+def build_preview_rtsp_url(cam: dict) -> str:
+    """URL RTSP (identifiants injectés) du flux d'APERÇU.
+
+    Retombe sur le flux principal si aucun sous-flux n'est connu — donc
+    strictement identique au comportement d'avant tant que la caméra n'a
+    pas été découverte (`streams_detected` absent).
+    """
+    preview = pick_preview_stream(cam)
+    if not preview or not preview.get("url"):
+        return _build_rtsp_url(cam)
+    # Réutilise l'injection d'identifiants de _build_rtsp_url en lui
+    # présentant le sous-flux comme s'il était l'URL principale — même
+    # encodage percent, même gestion des credentials déjà présents.
+    return _build_rtsp_url({**cam, "rtsp_url": preview["url"]})
+
+
 def _mask_url_password(url: str) -> str:
     """Masque le mot de passe dans une URL rtsp:// pour affichage sûr côté frontend."""
     if not url:
@@ -271,12 +417,28 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
         hd_filter = "video=mjpeg"
         sd_filter = "video=mjpeg#width=640"
 
-    # Config souhaitée : dict {stream_name: source_string}
-    desired = {
-        name: rtsp_source,
-        f"{name}_hd": f"ffmpeg:{name}#{hd_filter}",
-        f"{name}_sd": f"ffmpeg:{name}#{sd_filter}",
-    }
+    # v3.8 · Les variantes MJPEG d'APERÇU transcodent désormais depuis le
+    # SOUS-FLUX quand il existe, plus depuis le flux principal.
+    # Transcoder un 4K HEVC en MJPEG (format SANS compression inter-image :
+    # chaque image est un JPEG complet) est le pire cas possible, et c'est
+    # fait en logiciel — le conteneur go2rtc n'a pas d'accès GPU. Mesuré :
+    # le seul décodage du main tient déjà à peine 6-8 img/s contre 17 pour
+    # le sub. On garde le flux principal pour `name` (recorder + IA, qui en
+    # ont besoin en pleine résolution) et on n'allège QUE l'aperçu.
+    preview = pick_preview_stream(cam)
+    preview_source_name = name
+    desired = {name: rtsp_source}
+    if preview and preview.get("url"):
+        preview_url = build_preview_rtsp_url(cam)
+        if preview_url and preview_url != rtsp_url:
+            preview_source_name = f"{name}_preview"
+            desired[preview_source_name] = f"ffmpeg:{preview_url}"
+            dims = (f"{preview.get('width')}x{preview.get('height')}"
+                    if preview.get("width") else "résolution inconnue")
+            logger.info("register_camera_stream %s → aperçu via sous-flux %s (%s)",
+                        name, dims, preview.get("name"))
+    desired[f"{name}_hd"] = f"ffmpeg:{preview_source_name}#{hd_filter}"
+    desired[f"{name}_sd"] = f"ffmpeg:{preview_source_name}#{sd_filter}"
 
     # ─── Étape 1 : Diff avec la config existante côté go2rtc (idempotence) ───
     if not force:
@@ -315,34 +477,37 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             # Supprime les anciens enregistrements (source + variantes) pour repartir propre
-            for src in (name, f"{name}_hd", f"{name}_sd"):
+            for src in (name, f"{name}_preview", f"{name}_hd", f"{name}_sd"):
                 await client.delete(f"{GO2RTC_URL}/api/streams", params={"src": src})
-            # 1) Source unique RTSP (un seul décodage) — utilisée par le recorder et l'IA
-            # v3.1.6 · rtsp_source = `ffmpeg:rtsp://...` (transport TCP forcé, voir plus haut)
-            # P0-fix · `rtsp_source` contient déjà des identifiants percent-encodés
-            # (via _build_rtsp_url). Passer cette chaîne DÉJÀ encodée dans `params=`
-            # la fait ré-encoder une 2e fois par httpx (`%23` → `%2523`) → go2rtc
-            # reçoit une URL illisible et rejette avec 400 Bad Request. On construit
-            # donc l'URL manuellement pour que rtsp_source ne soit encodé qu'une fois.
-            r = await client.put(
-                f"{GO2RTC_URL}/api/streams?name={urlquote(name, safe='')}&src={rtsp_source}")
-            r.raise_for_status()
-            # 2) Variante HD : MJPEG à résolution native (avec accel matérielle si dispo)
-            r_hd = await client.put(f"{GO2RTC_URL}/api/streams",
-                                     params=[("name", f"{name}_hd"),
-                                             ("src", f"ffmpeg:{name}#{hd_filter}")])
-            r_hd.raise_for_status()
-            # 3) Variante SD : MJPEG 640 (avec accel matérielle si dispo)
-            r_sd = await client.put(f"{GO2RTC_URL}/api/streams",
-                                     params=[("name", f"{name}_sd"),
-                                             ("src", f"ffmpeg:{name}#{sd_filter}")])
-            r_sd.raise_for_status()
+            # v3.8 · Les 3-4 flux sont désormais publiés par la MÊME boucle, via
+            # `params=` (encodage httpx), au lieu d'une URL construite à la main
+            # pour la source RTSP.
+            #
+            # L'ancien code insérait `rtsp_source` BRUT dans la query string pour
+            # éviter un double encodage supposé. C'était l'inverse du bon
+            # comportement, et ça cassait deux choses (vérifié contre le go2rtc
+            # réel de production, cf. CHANGELOG v3.8) :
+            #   1. le mot de passe percent-encodé était décodé par go2rtc à la
+            #      lecture de la query → `Rlwt29%23%2Bjpf` redevenait
+            #      `Rlwt29#+jpf`, et ffmpeg tronquait alors le mot de passe au
+            #      `#` (séparateur de fragment) → authentification refusée ;
+            #   2. tout `&` présent dans l'URL RTSP (ex. `&profile=Profile_1`
+            #      chez Hikvision) terminait le paramètre `src` → l'URL
+            #      enregistrée était tronquée.
+            # Avec `params=`, httpx encode une fois, go2rtc décode une fois, et
+            # la chaîne stockée est exactement celle voulue — y compris les
+            # identifiants percent-encodés et les query params RTSP.
+            for stream_name, src_value in desired.items():
+                r = await client.put(f"{GO2RTC_URL}/api/streams",
+                                      params=[("name", stream_name), ("src", src_value)])
+                r.raise_for_status()
         if not await _stream_registered(name):
             logger.warning("go2rtc: flux %s introuvable après enregistrement", name)
             _lc_record(cam_id, "register_failed", reason="not found in go2rtc after PUT",
                        caller=caller)
             return False
-        _lc_record(cam_id, "created", reason="3 variants PUT to go2rtc", caller=caller,
+        _lc_record(cam_id, "created",
+                   reason=f"{len(desired)} variants PUT to go2rtc", caller=caller,
                    extra={"streams": list(desired.keys())})
         return True
     except httpx.HTTPError as e:
@@ -359,11 +524,18 @@ async def unregister_camera_stream(camera_id: str, *, caller: str = "unknown") -
     name = _stream_name(camera_id)
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            for stream in (name, f"{name}_hd", f"{name}_sd"):
+            # `_preview` : nouvelle variante v3.8, à retirer comme les autres.
+            for stream in (name, f"{name}_preview", f"{name}_hd", f"{name}_sd"):
                 await client.delete(f"{GO2RTC_URL}/api/streams", params={"src": stream})
         _lc_record(camera_id, "destroyed", reason="DELETE from go2rtc", caller=caller)
-    except httpx.HTTPError:
-        pass
+    except httpx.HTTPError as e:
+        # v3.8 · On journalise au lieu d'avaler silencieusement. Un flux
+        # orphelin (`cam_b65c469f…`) a été trouvé en production, tirant encore
+        # une session RTSP sur une caméra supprimée de la base depuis longtemps
+        # — sur un appareil qui n'accepte que quelques sessions simultanées.
+        # La cause exacte n'a pas pu être établie a posteriori, justement
+        # parce que cet échec ne laissait aucune trace.
+        logger.warning("go2rtc: échec du retrait des flux de %s : %s", camera_id, e)
 
 
 async def _ensure_variants(name: str) -> None:

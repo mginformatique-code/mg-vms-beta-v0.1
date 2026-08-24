@@ -48,12 +48,29 @@ class VideoCoreManager:
     def _webrtc_rtsp_url_of(cam: dict) -> str:
         """URL RTSP à utiliser pour WHEP navigateur (H264 obligatoire).
 
-        Priorité : `webrtc_rtsp_url` (sub H264) > `rtsp_url` (si déjà H264).
-        Retourne "" si aucun H264 dispo → WHEP refusera avec 415.
+        Priorité : `webrtc_rtsp_url` (override admin) > sous-flux détecté
+        > `rtsp_url` (si déjà H264). Retourne "" si rien d'exploitable.
+
+        v3.8 · Le sous-flux détecté passe AVANT le flux principal. Avant ce
+        changement :
+          - caméra HEVC → "" → WHEP refusait en 415, WebRTC mort ;
+          - caméra H264 → flux PRINCIPAL (jusqu'à 4K), que le pont WebRTC
+            décode puis RÉENCODE en Python (voir `_H264RelayTrack`, qui
+            n'est pas un vrai relais malgré son nom) → impossible à tenir
+            en temps réel, d'où les « Délai de connexion WebRTC dépassé ».
+        Le sous-flux (896×512 H264 sur la RLC-81MA de test) est à la fois
+        18× plus léger et systématiquement en H264 — donc compatible
+        navigateur, y compris quand le principal est en HEVC.
         """
         sub = (cam.get("webrtc_rtsp_url") or "").strip()
         if sub.lower().startswith(("rtsp://", "rtsps://")):
             return sub
+        try:
+            from streaming import pick_preview_stream, build_preview_rtsp_url
+            if pick_preview_stream(cam):
+                return build_preview_rtsp_url(cam)
+        except Exception:
+            pass
         codec = str(cam.get("codec") or "").lower()
         if codec in ("h264", ""):
             return VideoCoreManager._rtsp_url_of(cam)

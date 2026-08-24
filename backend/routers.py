@@ -247,6 +247,27 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
         payload["profile_token"] = selected.get("token", "")
         payload["profile_name"] = str(selected.get("name", ""))
         payload["protocol"] = "ONVIF"
+        # v3.8 · Persiste les profils ONVIF découverts dès la création.
+        # `streams_detected` n'était renseigné que par un POST /discover
+        # explicite : une caméra fraîchement ajoutée n'avait donc aucun
+        # sous-flux connu, et l'aperçu retombait sur le flux principal
+        # (4K HEVC) — le cas coûteux qu'on cherche justement à éviter.
+        # Les profils sont déjà en main ici, autant les garder.
+        detected = []
+        for p in profiles:
+            if not (p.get("rtsp_url") or ""):
+                continue
+            res = str(p.get("resolution") or "")
+            m = re.match(r"^\s*(\d+)\s*[xX]\s*(\d+)\s*$", res)
+            detected.append({
+                "name": str(p.get("name") or p.get("token") or ""),
+                "url": p["rtsp_url"],
+                "resolution": [int(m.group(1)), int(m.group(2))] if m else [0, 0],
+                "codec": str(p.get("codec") or "").lower(),
+                "fps": 0, "bitrate_kbps": 0,
+            })
+        if detected:
+            payload["streams_detected"] = detected
         if info.get("model"):
             payload["model"] = payload.get("model") or f"{info.get('manufacturer','')} {info['model']}".strip()
         payload["manufacturer"] = payload.get("manufacturer") or str(info.get("manufacturer") or "")
