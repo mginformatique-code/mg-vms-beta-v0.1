@@ -2,6 +2,41 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.6.0-drivers-constructeur] — 2026-08 — Drivers Hikvision & Dahua complets
+
+### Added
+- **Driver Hikvision (ISAPI) complet** (`backend/drivers/hikvision_driver.py`),
+  vérifié en conditions réelles sur une DS-2CD2086G2-I (firmware V5.7.2) :
+  lumière (`supplementLight`), IR (`ircutFilter`), sortie relais/sirène
+  (`System/IO/outputs`, gardée par les capacités déclarées `IOCap`), carte
+  SD (`ContentMgmt/Storage` + recherche VOD `ContentMgmt/search`).
+- **Driver Dahua (CGI) complet** (`backend/drivers/dahua_driver.py`) :
+  lumière (`Lighting_V2`), IR (`VideoInDayNightMode`), sirène/relais
+  (`AlarmOut`), carte SD (`storageDevice.cgi`), recherche VOD
+  (`mediaFileFind.cgi`, cycle factory.create → findFile → findNextFile).
+  **Non vérifié sur matériel réel** (aucune caméra Dahua disponible pour
+  ce correctif) — conventions CGI largement documentées/utilisées par
+  des intégrations tierces connues, statut `beta` conservé jusqu'à test.
+
+### Fixed
+- **Faux positif de détection "lumière blanche" sur Hikvision** : un
+  simple `GET /supplementLight` répond 200 même sur un modèle IR-only
+  (le schéma générique contient toujours le champ `whiteLightBrightness`,
+  utilisable ou non selon le modèle). Confirmé en conditions réelles sur
+  la DS-2CD2086G2-I testée : capacités réelles lues via l'énumération
+  `opt=` du sous-endpoint `/supplementLight/capabilities`
+  (`supplementLightMode opt="irLight,close"` → pas de lumière blanche
+  possible sur ce modèle, malgré le 200 précédent).
+- **ONVIF Hikvision inutilisable après activation** : deux blocages
+  distincts identifiés et corrigés sur la caméra testée (config caméra,
+  pas un bug MG-VMS) — horloge caméra bloquée en 1970 (WS-Security ONVIF
+  rejette tout timestamp hors tolérance de l'horloge du device) et
+  absence de compte ONVIF dédié (Hikvision firmware 5.x+ exige un compte
+  ONVIF séparé du compte admin ISAPI). Le protocole ONVIF lui-même doit
+  aussi être activé manuellement (`Configuration > Réseau > Avancé >
+  Protocole d'intégration > ONVIF`) — pas d'endpoint ISAPI documenté pour
+  ce toggle, à faire depuis l'interface caméra.
+
 ## [v3.5.0-reolink-relais] — 2026-08 — Driver Reolink (reolink-aio), relais caméra, carte SD
 
 ### Added
