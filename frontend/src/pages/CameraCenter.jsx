@@ -28,7 +28,7 @@ import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import {
   Camera, Wifi, Video, Layers, Cpu, Volume2, Sun, Bell, Move3d, Wrench,
   ScanLine, RefreshCw, AlertCircle, CircleCheck, ChevronLeft, ChevronRight,
-  ArrowLeft, HardDrive, Activity,
+  ArrowLeft, HardDrive, Activity, Download,
 } from "lucide-react";
 
 const TABS = [
@@ -201,7 +201,7 @@ export default function CameraCenter() {
 
         <TabsContent value="overview"><OverviewTab info={info} caps={caps} cameraId={cameraId} /></TabsContent>
         <TabsContent value="live"><LiveTab cameraId={cameraId} /></TabsContent>
-        <TabsContent value="network"><NetworkTab info={info} /></TabsContent>
+        <TabsContent value="network"><NetworkTab info={info} cameraId={cameraId} /></TabsContent>
         <TabsContent value="streams"><StreamsTab cameraId={cameraId} /></TabsContent>
         <TabsContent value="capabilities"><CapabilitiesTab caps={caps} /></TabsContent>
         <TabsContent value="ai"><AITab caps={caps} cameraId={cameraId} /></TabsContent>
@@ -364,14 +364,73 @@ function LiveTab({ cameraId }) {
   );
 }
 
-function NetworkTab({ info }) {
+function NetworkTab({ info, cameraId }) {
+  // v3.7 · Détails réseau constructeur (ports, protocoles, UID, WiFi) —
+  // /api/devices/{id}/network. 501 si le driver ne l'implémente pas :
+  // on garde alors uniquement les infos de base ci-dessous.
+  const [net, setNet] = useState(null);
+  const [unsupported, setUnsupported] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api.get(`/devices/${cameraId}/network`)
+       .then((r) => { if (alive) setNet(r.data || null); })
+       .catch(() => { if (alive) setUnsupported(true); });
+    return () => { alive = false; };
+  }, [cameraId]);
+
+  const yesNo = (v) => (v == null ? "—" : v ? "activé" : "désactivé");
+  const color = (v) => (v == null ? "" : v ? "text-[#00E676]" : "text-muted-foreground");
+
   return (
-    <Card className="p-4 space-y-1" data-testid="cam-network">
+    <Card className="p-4 space-y-4" data-testid="cam-network">
       <div className="grid grid-cols-2 gap-1 text-sm">
         <div>IP</div><div className="font-mono">{info?.ip || "—"}</div>
-        <div>MAC</div><div className="font-mono">{info?.mac || "—"}</div>
+        <div>MAC</div><div className="font-mono">{net?.mac || info?.mac || "—"}</div>
         <div>Hardware</div><div className="font-mono">{info?.hardware || "—"}</div>
+        {net?.uid && (<><div>UID</div><div className="font-mono">{net.uid}</div></>)}
+        {net?.wifi != null && (
+          <>
+            <div>WiFi</div>
+            <div className="font-mono">
+              {net.wifi ? `connecté${net.wifi_signal != null ? ` (${net.wifi_signal}%)` : ""}` : "filaire (Ethernet)"}
+            </div>
+          </>
+        )}
       </div>
+
+      {net?.ports && Object.keys(net.ports).length > 0 && (
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">Ports</div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            {Object.entries(net.ports).map(([name, port]) => (
+              <div key={name} className="border border-border px-2 py-1">
+                <span className="text-muted-foreground mr-1.5">{name}</span>
+                <span className="font-mono">{port || "—"}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {net?.protocols && Object.keys(net.protocols).length > 0 && (
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">Protocoles</div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            {Object.entries(net.protocols).map(([name, enabled]) => (
+              <div key={name} className="border border-border px-2 py-1">
+                <span className="text-muted-foreground mr-1.5">{name}</span>
+                <span className={`font-mono ${color(enabled)}`}>{yesNo(enabled)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {unsupported && (
+        <div className="text-xs text-muted-foreground">
+          Le driver de cette caméra ne remonte pas de paramètres réseau détaillés.
+        </div>
+      )}
     </Card>
   );
 }
@@ -633,6 +692,12 @@ function AlarmTab({ cameraId, caps }) {
   );
 }
 
+const fmtGb = (bytes) => {
+  if (!bytes || bytes <= 0) return "0 Go";
+  const gb = bytes / 1024 / 1024 / 1024;
+  return gb >= 1 ? `${gb.toFixed(2)} Go` : `${(bytes / 1024 / 1024).toFixed(0)} Mo`;
+};
+
 // ─── Carte SD (v3.6) — vendor-agnostic, pilotée par caps.sdcard ───
 // Lecture via /api/devices/{id}/recordings/stream (proxy ffmpeg côté
 // backend) — jamais d'URL caméra brute (avec identifiants) exposée ici.
@@ -669,10 +734,20 @@ function SdCardTab({ cameraId, caps }) {
     } finally { setLoading(false); }
   };
 
-  const playUrl = (fileName) => {
+  const recUrl = (kind, fileName) => {
     const token = localStorage.getItem("mg_token");
-    return `${process.env.REACT_APP_BACKEND_URL}/api/devices/${cameraId}/recordings/stream`
+    return `${process.env.REACT_APP_BACKEND_URL}/api/devices/${cameraId}/recordings/${kind}`
       + `?file=${encodeURIComponent(fileName)}&token=${encodeURIComponent(token || "")}`;
+  };
+  const playUrl = (fileName) => recUrl("stream", fileName);
+  const download = (fileName) => {
+    const a = document.createElement("a");
+    a.href = recUrl("download", fileName);
+    a.download = fileName.split("/").pop() || "recording.mp4";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    toast.success("Téléchargement lancé");
   };
 
   return (
@@ -680,13 +755,24 @@ function SdCardTab({ cameraId, caps }) {
       {storage && storage.length > 0 && (
         <div className="flex flex-wrap gap-2 text-xs" data-testid="sdcard-storage">
           {storage.map((s, i) => (
-            <div key={i} className="border border-border px-2 py-1">
-              <span className="text-muted-foreground mr-1.5">{s.type || "SD"} #{s.index}</span>
-              <span className={s.available ? "text-[#00E676]" : "text-[#FF3333]"}>
-                {s.available ? "OK" : "absente/erreur"}
-              </span>
-              {s.available && s.free_percent != null && (
-                <span className="ml-2 font-mono">{s.free_percent}% libre</span>
+            <div key={i} className="border border-border px-2 py-1.5 min-w-[220px]">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">{s.type || "SD"} #{s.index}</span>
+                <span className={s.available ? "text-[#00E676]" : "text-[#FF3333]"}>
+                  {s.available ? "OK" : "absente/erreur"}
+                </span>
+              </div>
+              {s.available && s.total_bytes > 0 && (
+                <>
+                  <div className="mt-1 font-mono text-[11px]">
+                    {fmtGb(s.total_bytes - s.free_bytes)} / {fmtGb(s.total_bytes)}
+                    <span className="text-muted-foreground ml-1.5">({s.used_percent}% utilisé)</span>
+                  </div>
+                  <div className="mt-1 h-1.5 bg-secondary overflow-hidden">
+                    <div className="h-full bg-[#0044FF]"
+                         style={{ width: `${Math.max(0, Math.min(100, s.used_percent))}%` }} />
+                  </div>
+                </>
               )}
             </div>
           ))}
@@ -735,6 +821,11 @@ function SdCardTab({ cameraId, caps }) {
                 <Button size="sm" variant="outline" data-testid="sdcard-play-btn"
                         onClick={(e) => { e.stopPropagation(); setPlaying(r.file_name); }}>
                   Lire
+                </Button>
+                <Button size="sm" variant="outline" data-testid="sdcard-download-btn"
+                        title="Télécharger le fichier en local"
+                        onClick={(e) => { e.stopPropagation(); download(r.file_name); }}>
+                  <Download className="w-3.5 h-3.5" />
                 </Button>
               </div>
             </div>

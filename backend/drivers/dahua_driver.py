@@ -254,13 +254,16 @@ class DahuaDriver(ONVIFDriver):
         out = []
         i = 0
         while f"info.{i}.State" in kv or f"info.{i}.Name" in kv:
+            # CGI Dahua : TotalBytes / UsedBytes déjà en octets.
             total = float(kv.get(f"info.{i}.TotalBytes", 0) or 0)
             used = float(kv.get(f"info.{i}.UsedBytes", 0) or 0)
             out.append({
                 "index": i,
                 "available": kv.get(f"info.{i}.State", "").lower() == "normal",
                 "type": "SD",
-                "free_percent": round(100 * (total - used) / total) if total > 0 else 0,
+                "used_percent": round(100 * used / total) if total > 0 else 0,
+                "total_bytes": int(total),
+                "free_bytes": int(max(0, total - used)),
             })
             i += 1
         return out

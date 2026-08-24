@@ -147,6 +147,15 @@ class CameraDriver(ABC):
         self._require("sdcard")
         raise UnsupportedCapabilityError("Lecture d'enregistrement local non implémentée par ce driver")
 
+    # ── Réseau (v3.7) ─────────────────────────────────────────────
+    async def get_network(self) -> dict:
+        """Paramètres réseau détaillés (ports, protocoles, UID, WiFi…).
+
+        Retourne un dict à clés libres — chaque driver remonte ce que son
+        API expose réellement, le frontend n'affiche que les clés présentes.
+        """
+        raise UnsupportedCapabilityError("Paramètres réseau non implémentés par ce driver")
+
     # ── Hooks à implémenter par les drivers concrets ─────────────
     async def _set_light(self, enabled: bool, brightness: Optional[int],
                           mode: LightMode) -> None:

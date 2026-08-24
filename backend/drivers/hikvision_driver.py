@@ -289,6 +289,27 @@ class HikvisionDriver(ONVIFDriver):
     async def _stop_audio(self) -> None:
         raise UnsupportedCapabilityError("Cf _start_audio")
 
+    # ── Réseau (v3.7) ─────────────────────────────────────────────
+    async def get_network(self) -> dict:
+        """Ports et protocoles déclarés par ``/ISAPI/Security/AdminAccesses``
+        (liste des protocoles d'intégration : HTTP/HTTPS/RTSP/SDK/WebSocket)."""
+        if self._http is None:
+            raise UnsupportedCapabilityError("Session ISAPI Hikvision non initialisée")
+        out = {"ports": {}, "protocols": {}}
+        try:
+            r = await self._http.get(f"http://{self.host}/ISAPI/Security/AdminAccesses", timeout=6.0)
+            if r.status_code == 200:
+                root = _strip_ns(ET.fromstring(r.text))
+                for proto in root.findall("AdminAccessProtocol"):
+                    name = (proto.findtext("protocol") or "").lower()
+                    if not name:
+                        continue
+                    out["ports"][name] = int(proto.findtext("portNo") or 0)
+                    out["protocols"][name] = (proto.findtext("enabled") or "false") == "true"
+        except Exception as e:
+            logger.debug("Hikvision AdminAccesses indispo (%s)", e)
+        return out
+
     # ── SD card / enregistrements locaux (v3.6) ───────────────────
     async def get_storage(self) -> list[dict]:
         if self._http is None:
@@ -303,13 +324,16 @@ class HikvisionDriver(ONVIFDriver):
         root = _strip_ns(ET.fromstring(r.text))
         out = []
         for hdd in root.findall("hddList/hdd"):
+            # ISAPI : capacity / freeSpace en Mo.
             capacity = float(hdd.findtext("capacity") or 0)
             freespace = float(hdd.findtext("freeSpace") or 0)
             out.append({
                 "index": hdd.findtext("id"),
                 "available": (hdd.findtext("status") or "") == "ok",
                 "type": hdd.findtext("hddType") or "SD",
-                "free_percent": round(100 * freespace / capacity) if capacity > 0 else 0,
+                "used_percent": round(100 * (capacity - freespace) / capacity) if capacity > 0 else 0,
+                "total_bytes": int(capacity * 1024 * 1024),
+                "free_bytes": int(freespace * 1024 * 1024),
             })
         return out
 

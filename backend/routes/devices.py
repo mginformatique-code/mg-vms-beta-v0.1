@@ -19,7 +19,8 @@ Endpoints v0.4.6 :
   POST /api/devices/{camera_id}/ptz/preset    · {id}
   GET  /api/devices/{camera_id}/storage       · supports SD/eMMC détectés
   GET  /api/devices/{camera_id}/recordings    · enregistrements locaux [start, end]
-  GET  /api/devices/{camera_id}/recordings/stream?file=… · proxy vidéo (ffmpeg, MP4)
+  GET  /api/devices/{camera_id}/recordings/stream?file=…   · proxy vidéo (ffmpeg, MP4)
+  GET  /api/devices/{camera_id}/recordings/download?file=… · téléchargement local
   GET  /api/devices/_supported                · liste des vendors supportés
 
 Endpoints v0.5.7 (Universal Camera API — Validator / Matrix / Health) :
@@ -175,6 +176,20 @@ async def device_capabilities(camera_id: str, user: dict = Depends(require_permi
         drv = await svc.get_driver(camera_id)
         caps = await drv.get_capabilities()
         return caps.to_dict()
+    except CameraDriverError as e:
+        raise _driver_error_response(e)
+
+
+@devices_router.get("/{camera_id}/network")
+async def device_network(camera_id: str, user: dict = Depends(require_permission("view_live"))):
+    """Paramètres réseau détaillés (ports, protocoles, UID, WiFi…).
+
+    Clés variables selon le constructeur — le frontend n'affiche que ce
+    qui est réellement remonté. 501 si le driver ne l'implémente pas.
+    """
+    try:
+        drv = await svc.get_driver(camera_id)
+        return await drv.get_network()
     except CameraDriverError as e:
         raise _driver_error_response(e)
 
@@ -380,4 +395,52 @@ async def device_recording_stream(camera_id: str, file: str,
         _recording_stream_generator(cmd),
         media_type="video/mp4",
         headers={"Cache-Control": "no-store, no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@devices_router.get("/{camera_id}/recordings/download")
+async def device_recording_download(camera_id: str, file: str,
+                                     user: dict = Depends(require_permission("view_live"))):
+    """Téléchargement local d'un enregistrement carte SD (fichier tel quel).
+
+    Contrairement à ``/stream`` (remux ffmpeg à la volée pour la lecture
+    navigateur), on relaie ici les octets bruts servis par la caméra, sans
+    ré-encodage. L'URL source (avec identifiants/token) reste côté serveur.
+    """
+    try:
+        drv = await svc.get_driver(camera_id)
+        src_url = await drv.get_recording_source(file)
+    except CameraDriverError as e:
+        raise _driver_error_response(e)
+
+    safe_name = (file.rsplit("/", 1)[-1] or "recording.mp4")
+    if not safe_name.lower().endswith((".mp4", ".dav", ".flv")):
+        safe_name += ".mp4"
+
+    async def _proxy() -> AsyncGenerator[bytes, None]:
+        if src_url.lower().startswith("rtsp"):
+            # Pas de fichier téléchargeable en RTSP (Hikvision) : on remux
+            # vers un MP4 avec ffmpeg, sans ré-encodage vidéo.
+            cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error",
+                   "-rtsp_transport", "tcp", "-i", src_url, "-c", "copy",
+                   "-f", "mp4", "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+                   "pipe:1"]
+            async for chunk in _recording_stream_generator(cmd):
+                yield chunk
+            return
+        import httpx
+        async with httpx.AsyncClient(verify=False, timeout=None, follow_redirects=True) as client:
+            async with client.stream("GET", src_url) as resp:
+                resp.raise_for_status()
+                async for chunk in resp.aiter_bytes(65536):
+                    yield chunk
+
+    return StreamingResponse(
+        _proxy(),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}"',
+            "Cache-Control": "no-store, no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
