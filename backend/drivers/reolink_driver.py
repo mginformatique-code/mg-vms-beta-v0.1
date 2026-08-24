@@ -169,6 +169,18 @@ class ReolinkDriver(ONVIFDriver):
             raise
         except Exception as e:
             logger.debug("Reolink GetAbility indispo (%s) — capacités ONVIF seules", e)
+        # v3.4 · `sdcard` existait dans CameraCapabilities mais rien ne le
+        # renseignait jamais pour Reolink — la carte SD montrait "non
+        # supportée" même sur des caméras qui en ont une. GetHddInfo (déjà
+        # utilisé par get_status() pour le taux d'usage) confirme aussi sa
+        # simple présence.
+        try:
+            h = await self._call("GetHddInfo", {})
+            caps.sdcard = bool((h or {}).get("HddInfo"))
+        except AuthenticationError:
+            raise
+        except Exception:
+            pass
         self._caps = caps
         return caps
 

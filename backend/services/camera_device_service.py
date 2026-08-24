@@ -58,8 +58,14 @@ class CameraDeviceService:
                 return d
             cam = await self._load_camera(cam_id)
             from crypto_utils import decrypt_secret
-            drv = resolve_driver(
-                vendor=cam.get("vendor") or "onvif",
+            # v3.4 · Aucune caméra existante n'a de champ "vendor" explicite
+            # (rien ne le renseigne à la création) — ça retombait TOUJOURS sur
+            # le driver ONVIF générique, qui ne détecte que les capacités
+            # ONVIF standard. Les extras Reolink (spotlight, sirène, SD card,
+            # IR) sont propriétaires et invisibles en ONVIF générique. Le
+            # fabricant réel EST déjà détecté et stocké (`manufacturer`, via
+            # GetDeviceInformation) — on l'utilise en repli avant "onvif".
+            vendor=cam.get("vendor") or cam.get("manufacturer") or "onvif",
                 host=cam["ip"],
                 username=cam.get("username") or "",
                 # v3.4 · Bug critique : le mot de passe caméra est chiffré Fernet
