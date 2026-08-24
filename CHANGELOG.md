@@ -2,6 +2,71 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.4.0-devices-securite] — 2026-08 — Contrôle caméras, popup bienvenue, 2FA licence
+
+### Added
+- **Popup de bienvenue post-login** : plein écran, fond flouté, affiché une
+  fois après une connexion fraîche (jamais au simple rechargement de page,
+  via un flag sessionStorage consommé une seule fois) — premiers pas,
+  bonnes pratiques stockage, sécurité (liens MFA/TLS/RBAC/audit),
+  tutoriels vidéo (à venir), activation de licence Gold pour les admins.
+  Case "Ne plus afficher au démarrage" persistée en localStorage.
+- **Bandeau cookies** + section "Cookies & stockage local" dans le popup
+  "À propos" (même emplacement que la licence, comme demandé) — inventaire
+  transparent de tout ce qui est stocké (cookie de session HttpOnly,
+  tokens localStorage, préférences), sans case à cocher factice puisque
+  tout est strictement nécessaire (aucun traceur tiers).
+- **Double authentification (TOTP + QR code)** sur l'admin de génération
+  de licences (`mg-vms.com/admin`, service séparé, hors dépôt) —
+  implémentation RFC 6238 pure PHP (libsodium natif, sans dépendance),
+  configuration obligatoire dès la première connexion, aucun contournement
+  possible. Le générateur de licences lui-même a été déménagé de son
+  ancien conteneur autonome (`mg-license-server` sur le serveur mg-vms-app)
+  vers l'admin de mg-vms.com — même paire de clés Ed25519 migrée (aucune
+  licence déjà émise invalidée), ancien service décommissionné.
+
+### Fixed
+- **Mot de passe caméra jamais déchiffré avant usage** (bug critique,
+  `services/camera_device_service.py`) : le mot de passe est chiffré
+  Fernet en base, mais était transmis TEL QUEL (ciphertext) au driver pour
+  toute action caméra passant par ce service — IR, lumière, sirène, PTZ,
+  détection de capacités, audio. L'authentification ONVIF échouait donc
+  SYSTÉMATIQUEMENT, jusqu'au verrouillage anti-bruteforce natif de la
+  caméra (confirmé en prod sur une Reolink RLC-81MA : "device is locked...
+  wrong username/password many times"). Root cause probable de "les
+  fonctions caméra ne marchent jamais" — decrypt_secret() est
+  rétro-compatible, aucun risque sur d'éventuels mots de passe en clair.
+- **Driver générique utilisé au lieu du driver constructeur** : aucune
+  caméra existante n'a de champ `vendor` renseigné, donc `get_driver()`
+  retombait toujours sur le driver ONVIF générique — invisible aux extras
+  propriétaires (spotlight, sirène Reolink via `GetAbility`, détectables
+  uniquement par le driver Reolink dédié). Fallback ajouté sur
+  `manufacturer` (déjà détecté via `GetDeviceInformation`) avant "onvif".
+- **Capacité "carte SD" jamais détectée** : le champ existait dans le
+  modèle (`CameraCapabilities.sdcard`) mais rien ne le renseignait jamais
+  pour Reolink — `GetHddInfo` (déjà utilisé pour le taux d'usage) confirme
+  aussi sa simple présence.
+- **Vidéos toujours retéléchargées en entier** (pas de vrai Range/206) :
+  le fix middleware précédent (v3.3.0 avait déjà commencé à investiguer)
+  n'était pas suffisant — Starlette 0.36.3 (pinnée dans ce projet)
+  n'implémente Range/206 nulle part dans `FileResponse`, confirmé en
+  lisant sa source. Implémenté manuellement
+  (`streaming.py::range_file_response`) plutôt que de monter
+  Starlette/FastAPI (risque de régression trop large pour un correctif
+  ciblé) — vrai 206 Partial Content avec Content-Range, vérifié via curl
+  direct sur un enregistrement réel.
+- **Popups (Dialog) illisibles quand le contenu dépasse l'écran** :
+  `DialogContent` n'avait ni max-height ni overflow — le bas du contenu
+  devenait inaccessible dès que le popup grandissait (ex. section Cookies
+  ajoutée à côté de la Licence). Corrigé au niveau du composant partagé,
+  bénéficie à tous les Dialogs de l'app.
+- **`AI_INTERVAL_SECONDS` et `MGVMS_ENCRYPTION_KEY` documentées mais
+  jamais transmises au conteneur** (`deploy-app/docker-compose.yml`) :
+  référencées en commentaire dans `.env.example` mais absentes du bloc
+  `environment:` du service backend — les définir dans `.env` n'avait
+  donc AUCUN effet, silencieusement. Les deux sont maintenant déclarées
+  des deux côtés.
+
 ## [v3.3.0-licence-stockage] — 2026-08 — Licence Gold, refonte stockage, menu "À propos"
 
 ### Added

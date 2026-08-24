@@ -89,6 +89,12 @@ services:
       DB_NAME: ${DB_NAME:-mgvms}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       JWT_SECRET: ${JWT_SECRET:-please_change_this_secret_in_production}
+      # v3.4 · Déclarée dans .env.example depuis longtemps référencée en
+      # commentaire mais jamais passée ici — comme AI_INTERVAL_SECONDS
+      # juste en dessous, la variable n'atteignait donc jamais le
+      # conteneur quoi qu'on mette dans .env. crypto_utils.py retombe sur
+      # JWT_SECRET si vide, donc aucune régression sur une install existante.
+      MGVMS_ENCRYPTION_KEY: ${MGVMS_ENCRYPTION_KEY:-}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@mg-vms.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@2026}
       GO2RTC_URL: ${GO2RTC_URL:-http://go2rtc:1984}
