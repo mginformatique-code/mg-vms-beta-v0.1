@@ -2,6 +2,42 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.7.2-sd-recherche-hd] — 2026-08 — Recherche SD réparée, HD/SD, port ONVIF automatique
+
+### Added
+- **Sélecteur HD / SD** dans l'onglet Carte SD. Reolink enregistre deux
+  jeux de fichiers distincts (`RecM04_*` pour le flux principal, `RecS04_*`
+  pour le sous-flux) : le choix se fait donc au moment de la **recherche**,
+  pas de la lecture. Vérifié sur une même plage horaire : HD 25,3 Mo vs
+  SD 12,3 Mo. Paramètre `stream` propagé jusqu'au contrat driver
+  (Hikvision : trackID 101/102 ; Dahua : non implémenté, driver toujours
+  non validé sur matériel réel).
+
+### Fixed
+- **Recherche carte SD silencieusement quasi-vide** (grave — la liste
+  paraissait fonctionner) : l'API Reolink ne sait pas répondre sur une
+  plage qui traverse plusieurs jours calendaires, elle renvoie une liste
+  **vide, sans erreur**, au lieu d'agréger. Mesuré sur RLC-81MA :
+  | Plage demandée | Fichiers renvoyés |
+  |---|---:|
+  | 23 août 00:00 → 23 août 23:59 | 240 |
+  | 23 août 14:15 → 24 août 14:15 | 1 |
+  | 23 août 00:00 → 25 août 00:00 | 0 |
+  La recherche « 24 dernières heures » (le défaut de l'UI) tombait donc
+  systématiquement dans ce piège : quelques enregistrements affichés sur
+  des centaines réellement présents. `search_recordings()` découpe
+  désormais la plage jour par jour puis agrège (dédoublonnage + tri).
+  Vérifié : une plage de 48 h renvoie **619 fichiers au lieu de 0**.
+- **Ajout d'une caméra Hikvision impossible** : le port ONVIF n'est pas
+  normalisé (80 chez Hikvision/Axis, 8000 chez Reolink, 2020 ailleurs) et
+  un mauvais port produit un message trompeur — sur une DS-2CD2086G2-I le
+  port 8000 sert le SDK propriétaire et coupe la connexion ONVIF, si bien
+  que l'utilisateur lit « vérifiez identifiants » alors qu'ils sont
+  corrects. `auto-detect` essaie maintenant le port demandé puis
+  80 / 8000 / 2020 / 8899, renvoie le port réellement retenu, et le
+  formulaire se corrige tout seul (le message d'échec liste les ports
+  essayés et rappelle les prérequis ONVIF côté caméra).
+
 ## [v3.7.1-carte-sd-lecture] — 2026-08 — Lecture SD réparée, stockage corrigé, téléchargement, réseau
 
 ### Added
