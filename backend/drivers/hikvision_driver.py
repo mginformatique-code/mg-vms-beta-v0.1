@@ -337,7 +337,10 @@ class HikvisionDriver(ONVIFDriver):
             })
         return out
 
-    async def search_recordings(self, start: datetime, end: datetime) -> list[dict]:
+    async def search_recordings(self, start: datetime, end: datetime,
+                                 stream: str = "main") -> list[dict]:
+        # `stream` : trackID 101 = flux principal (HD), 102 = sous-flux (SD).
+        track = f"{_CHANNEL}02" if stream == "sub" else f"{_CHANNEL}01"
         if self._http is None:
             raise UnsupportedCapabilityError("Session ISAPI Hikvision non initialisée")
         def _fmt(dt: datetime) -> str:
@@ -348,7 +351,7 @@ class HikvisionDriver(ONVIFDriver):
             '<?xml version="1.0" encoding="UTF-8"?>'
             '<CMSearchDescription xmlns="http://www.hikvision.com/ver20/XMLSchema" version="2.0">'
             "<searchID>MG-VMS-1</searchID>"
-            f"<trackList><trackID>{_CHANNEL}01</trackID></trackList>"
+            f"<trackList><trackID>{track}</trackID></trackList>"
             f"<timeSpanList><timeSpan><startTime>{_fmt(start)}</startTime>"
             f"<endTime>{_fmt(end)}</endTime></timeSpan></timeSpanList>"
             "<maxResults>40</maxResults><searchResultPostion>0</searchResultPostion>"
@@ -377,7 +380,10 @@ class HikvisionDriver(ONVIFDriver):
             })
         return out
 
-    async def get_recording_source(self, file_name: str) -> str:
+    async def get_recording_source(self, file_name: str, stream: str = "main") -> str:
+        # La playbackURI renvoyée par la recherche porte déjà le bon track
+        # (101 HD / 102 SD) — `stream` est donc sans effet ici, la sélection
+        # se fait au moment de search_recordings().
         # Le "file_name" retourné par search_recordings EST déjà l'URI RTSP
         # de lecture (playbackURI) — pas de résolution supplémentaire à faire,
         # sauf l'injection des identifiants (ISAPI ne les inclut jamais dans

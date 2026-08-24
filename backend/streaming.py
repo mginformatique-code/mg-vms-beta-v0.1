@@ -1838,17 +1838,52 @@ async def cameras_auto_detect(body: AutoDetectInput, user: dict = Depends(requir
     ip = (body.ip or "").strip()
     if not ip:
         raise HTTPException(400, "IP requise")
-    if not await asyncio.to_thread(_tcp_check, ip, int(body.onvif_port), 3.0):
-        raise HTTPException(400, f"Port ONVIF {body.onvif_port} injoignable sur {ip}")
-    try:
-        info = await asyncio.wait_for(
-            asyncio.to_thread(_onvif_probe, ip, int(body.onvif_port), body.username, body.password),
-            timeout=25,
-        )
-    except asyncio.TimeoutError:
-        raise HTTPException(504, "Appareil ONVIF injoignable (délai dépassé)")
-    except Exception as e:
-        raise HTTPException(400, f"ONVIF injoignable : {type(e).__name__}: {str(e)[:160]} — vérifiez identifiants")
+
+    # v3.7.2 · Repli automatique sur les autres ports ONVIF courants.
+    # Le port ONVIF n'est pas normalisé : 80 chez Hikvision/Axis, 8000 chez
+    # Reolink, 2020 chez certains Dahua/Uniview. Le formulaire propose une
+    # valeur par défaut qui ne peut pas être juste pour tout le monde, et
+    # une erreur de port produit un message trompeur : sur une Hikvision
+    # DS-2CD2086G2-I, le port 8000 sert le SDK propriétaire et coupe la
+    # connexion ONVIF — l'utilisateur voit "vérifiez identifiants" alors
+    # que les identifiants sont bons (constaté en conditions réelles).
+    # On essaie donc le port demandé d'abord, puis les autres candidats.
+    candidates = [int(body.onvif_port)]
+    for p in (80, 8000, 2020, 8899):
+        if p not in candidates:
+            candidates.append(p)
+
+    info = None
+    used_port = int(body.onvif_port)
+    last_error = None
+    reachable_any = False
+    for port in candidates:
+        if not await asyncio.to_thread(_tcp_check, ip, port, 2.0):
+            continue
+        reachable_any = True
+        try:
+            info = await asyncio.wait_for(
+                asyncio.to_thread(_onvif_probe, ip, port, body.username, body.password),
+                timeout=25,
+            )
+            used_port = port
+            if port != int(body.onvif_port):
+                logger.info("auto-detect %s : ONVIF trouvé sur le port %s (port demandé : %s)",
+                            ip, port, body.onvif_port)
+            break
+        except asyncio.TimeoutError:
+            last_error = "délai dépassé"
+        except Exception as e:
+            last_error = f"{type(e).__name__}: {str(e)[:160]}"
+
+    if info is None:
+        if not reachable_any:
+            raise HTTPException(400, f"Aucun port ONVIF joignable sur {ip} "
+                                      f"(essayés : {', '.join(str(p) for p in candidates)})")
+        raise HTTPException(400, f"ONVIF injoignable sur {ip} (ports essayés : "
+                                  f"{', '.join(str(p) for p in candidates)}) — {last_error} — "
+                                  f"vérifiez les identifiants, et que le protocole ONVIF est activé "
+                                  f"sur la caméra (avec un compte ONVIF dédié chez Hikvision)")
     # ffprobe le premier flux pour enrichir la résolution effective
     profiles = info.get("profiles", [])
     if profiles and profiles[0].get("rtsp_url"):
@@ -1859,7 +1894,9 @@ async def cameras_auto_detect(body: AutoDetectInput, user: dict = Depends(requir
             info["live_fps"] = details.get("fps")
             info["live_codec"] = details.get("codec")
     await log_audit(user, "onvif_auto_detect", target=ip)
-    return {"ip": ip, "onvif_port": body.onvif_port, **info}
+    # `onvif_port` renvoyé = le port RÉELLEMENT retenu, pour que le formulaire
+    # se corrige tout seul si le repli ci-dessus a joué.
+    return {"ip": ip, "onvif_port": used_port, **info}
 
 
 # ============ Aperçu vidéo depuis un flux temporaire (utilisé par Test Connexion) ============

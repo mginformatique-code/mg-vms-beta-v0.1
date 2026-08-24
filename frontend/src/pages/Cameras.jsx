@@ -180,6 +180,11 @@ export default function Cameras() {
         || (data.profiles || [])[0];
       setForm((f) => ({
         ...f, mode: "onvif", protocol: "ONVIF",
+        // v3.7.2 · Le backend essaie plusieurs ports ONVIF (80/8000/2020/8899)
+        // et renvoie celui qui a RÉELLEMENT répondu — on le réinjecte dans le
+        // formulaire, sinon la création qui suit repartirait sur le port saisi
+        // (faux) alors que la détection a réussi sur un autre.
+        onvif_port: data.onvif_port || f.onvif_port,
         manufacturer: data.manufacturer || f.manufacturer,
         model: (data.manufacturer && data.model) ? `${data.manufacturer} ${data.model}` : (data.model || f.model),
         firmware: data.firmware || f.firmware,
@@ -191,7 +196,9 @@ export default function Cameras() {
         fps: data.live_fps || f.fps,
         name: f.name || `${data.model || "Caméra"} (${data.ip})`,
       }));
-      toast.success(`Caméra détectée : ${data.manufacturer} ${data.model} · ${data.profiles?.length || 0} profil(s)`);
+      const portNote = (data.onvif_port && Number(data.onvif_port) !== (Number(form.onvif_port) || 80))
+        ? ` · port ONVIF corrigé → ${data.onvif_port}` : "";
+      toast.success(`Caméra détectée : ${data.manufacturer} ${data.model} · ${data.profiles?.length || 0} profil(s)${portNote}`);
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Détection échouée"); }
     finally { setDetecting(false); }
   };

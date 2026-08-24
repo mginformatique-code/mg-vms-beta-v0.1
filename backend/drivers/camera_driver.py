@@ -137,12 +137,17 @@ class CameraDriver(ABC):
         self._require("sdcard")
         raise UnsupportedCapabilityError("Stockage local non implémenté par ce driver")
 
-    async def search_recordings(self, start: datetime, end: datetime) -> list[dict]:
-        """Liste les enregistrements présents sur le stockage local caméra."""
+    async def search_recordings(self, start: datetime, end: datetime,
+                                 stream: str = "main") -> list[dict]:
+        """Liste les enregistrements présents sur le stockage local caméra.
+
+        ``stream`` : "main" (HD) ou "sub" (SD). Les drivers qui n'exposent
+        qu'un seul flux d'enregistrement ignorent simplement ce paramètre.
+        """
         self._require("sdcard")
         raise UnsupportedCapabilityError("Enregistrements locaux non implémentés par ce driver")
 
-    async def get_recording_source(self, file_name: str) -> str:
+    async def get_recording_source(self, file_name: str, stream: str = "main") -> str:
         """URL de lecture d'un enregistrement local (proxy/lecture directe)."""
         self._require("sdcard")
         raise UnsupportedCapabilityError("Lecture d'enregistrement local non implémentée par ce driver")

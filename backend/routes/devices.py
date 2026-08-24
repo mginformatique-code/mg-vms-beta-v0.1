@@ -326,16 +326,21 @@ async def device_storage(camera_id: str, user: dict = Depends(require_permission
 async def device_recordings(camera_id: str,
                              start: Optional[datetime] = None,
                              end: Optional[datetime] = None,
+                             stream: str = "main",
                              user: dict = Depends(require_permission("view_live"))):
     """Enregistrements présents sur le stockage local caméra sur ``[start, end]``.
 
-    Par défaut : 24 dernières heures.
+    Par défaut : 24 dernières heures. ``stream`` = "main" (HD) ou "sub" (SD).
     """
     end = end or datetime.now(timezone.utc)
     start = start or (end - timedelta(hours=24))
+    if stream not in ("main", "sub"):
+        raise HTTPException(status_code=400,
+                            detail={"error": "invalid_stream",
+                                    "message": "stream doit valoir 'main' (HD) ou 'sub' (SD)"})
     try:
         drv = await svc.get_driver(camera_id)
-        return {"recordings": await drv.search_recordings(start, end)}
+        return {"recordings": await drv.search_recordings(start, end, stream=stream)}
     except CameraDriverError as e:
         raise _driver_error_response(e)
 
@@ -366,7 +371,7 @@ async def _recording_stream_generator(cmd: list) -> AsyncGenerator[bytes, None]:
 
 
 @devices_router.get("/{camera_id}/recordings/stream")
-async def device_recording_stream(camera_id: str, file: str,
+async def device_recording_stream(camera_id: str, file: str, quality: str = "main",
                                    user: dict = Depends(require_permission("view_live"))):
     """Proxy vidéo (remux ffmpeg, ``-c copy`` sans transcodage) d'un
     enregistrement carte SD — quel que soit le protocole/vendor source
@@ -379,7 +384,7 @@ async def device_recording_stream(camera_id: str, file: str,
     """
     try:
         drv = await svc.get_driver(camera_id)
-        src_url = await drv.get_recording_source(file)
+        src_url = await drv.get_recording_source(file, stream=quality)
     except CameraDriverError as e:
         raise _driver_error_response(e)
 
@@ -399,7 +404,7 @@ async def device_recording_stream(camera_id: str, file: str,
 
 
 @devices_router.get("/{camera_id}/recordings/download")
-async def device_recording_download(camera_id: str, file: str,
+async def device_recording_download(camera_id: str, file: str, quality: str = "main",
                                      user: dict = Depends(require_permission("view_live"))):
     """Téléchargement local d'un enregistrement carte SD (fichier tel quel).
 
@@ -409,7 +414,7 @@ async def device_recording_download(camera_id: str, file: str,
     """
     try:
         drv = await svc.get_driver(camera_id)
-        src_url = await drv.get_recording_source(file)
+        src_url = await drv.get_recording_source(file, stream=quality)
     except CameraDriverError as e:
         raise _driver_error_response(e)
 

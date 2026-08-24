@@ -27,7 +27,7 @@ Librairie : https://github.com/starkillerOG/reolink_aio
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from reolink_aio.api import Host
@@ -303,24 +303,67 @@ class ReolinkDriver(ONVIFDriver):
                 logger.debug("Reolink hdd %s indispo (%s)", idx, e)
         return out
 
-    async def search_recordings(self, start: datetime, end: datetime) -> list[dict]:
-        """Liste les enregistrements présents sur la carte SD entre ``start`` et ``end``."""
+    async def search_recordings(self, start: datetime, end: datetime,
+                                 stream: str = "main") -> list[dict]:
+        """Liste les enregistrements présents sur la carte SD entre ``start`` et ``end``.
+
+        v3.7.2 · La recherche est découpée en tranches d'UNE JOURNÉE.
+        L'API Reolink ne sait pas répondre sur une plage qui traverse
+        plusieurs jours calendaires : elle renvoie une liste VIDE, sans
+        erreur, au lieu d'agréger. Mesuré sur une RLC-81MA :
+          - 23 août 00:00 → 23 août 23:59  →  240 fichiers
+          - 23 août 14:15 → 24 août 14:15  →    1 fichier (!)
+          - 23 août 00:00 → 25 août 00:00  →    0 fichier
+        Une recherche « 24 dernières heures » (le défaut de l'UI) tombait
+        donc systématiquement dans ce piège et n'affichait qu'une poignée
+        d'enregistrements sur des centaines réellement présents — sans le
+        moindre message d'erreur. On interroge donc jour par jour puis on
+        agrège, en bornant chaque tranche à l'intervalle demandé.
+
+        ``stream`` : "main" (HD) ou "sub" (SD, plus léger).
+        """
         if self._host_api is None:
             raise UnsupportedCapabilityError("Session Reolink non initialisée")
-        try:
-            _statuses, files = await self._host_api.request_vod_files(_CHANNEL, start, end)
-        except ApiError as e:
-            raise CameraDriverError(f"Reolink request_vod_files → {e}", code="device_error") from e
-        return [{
-            "file_name": f.file_name,
-            "start_time": f.start_time.isoformat(),
-            "end_time": f.end_time.isoformat(),
-            "duration_s": f.duration.total_seconds(),
-            "size_bytes": f.size,
-            "type": f.type,
-        } for f in files]
+        if end <= start:
+            return []
 
-    async def get_recording_source(self, file_name: str) -> str:
+        out: list[dict] = []
+        seen: set[str] = set()
+        # Journées calendaires couvertes par [start, end]
+        day = start.replace(hour=0, minute=0, second=0, microsecond=0)
+        while day < end:
+            day_end = day + timedelta(days=1)
+            chunk_start = max(start, day)
+            # 23:59:59 plutôt que minuit pile : la borne haute est inclusive
+            # côté caméra et minuit appartient déjà au jour suivant.
+            chunk_end = min(end, day_end - timedelta(seconds=1))
+            if chunk_end > chunk_start:
+                try:
+                    _statuses, files = await self._host_api.request_vod_files(
+                        _CHANNEL, chunk_start, chunk_end, stream=stream)
+                except ApiError as e:
+                    raise CameraDriverError(f"Reolink request_vod_files → {e}",
+                                             code="device_error") from e
+                except Exception as e:
+                    logger.warning("Reolink recherche VOD %s : %s", chunk_start.date(), e)
+                    files = []
+                for f in files:
+                    if f.file_name in seen:
+                        continue
+                    seen.add(f.file_name)
+                    out.append({
+                        "file_name": f.file_name,
+                        "start_time": f.start_time.isoformat(),
+                        "end_time": f.end_time.isoformat(),
+                        "duration_s": f.duration.total_seconds(),
+                        "size_bytes": f.size,
+                        "type": f.type,
+                    })
+            day = day_end
+        out.sort(key=lambda r: r["start_time"])
+        return out
+
+    async def get_recording_source(self, file_name: str, stream: str = "main") -> str:
         """URL de téléchargement d'un enregistrement SD (MP4 direct).
 
         v3.7 · Utilise ``VodRequestType.DOWNLOAD`` et non le défaut FLV.
@@ -343,7 +386,8 @@ class ReolinkDriver(ONVIFDriver):
         from reolink_aio.enums import VodRequestType
         try:
             _mime, url = await self._host_api.get_vod_source(
-                _CHANNEL, file_name, request_type=VodRequestType.DOWNLOAD)
+                _CHANNEL, file_name, stream=stream,
+                request_type=VodRequestType.DOWNLOAD)
         except ApiError as e:
             raise CameraDriverError(f"Reolink get_vod_source → {e}", code="device_error") from e
         return url

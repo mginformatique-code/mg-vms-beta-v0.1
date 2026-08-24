@@ -709,6 +709,8 @@ function SdCardTab({ cameraId, caps }) {
   const toLocalInput = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   const [start, setStart] = useState(toLocalInput(new Date(Date.now() - 24 * 3600 * 1000)));
   const [end, setEnd] = useState(toLocalInput(new Date()));
+  // "main" = flux principal (HD), "sub" = sous-flux (SD, plus léger/rapide)
+  const [quality, setQuality] = useState("main");
 
   useEffect(() => {
     if (!caps?.sdcard) return;
@@ -725,7 +727,11 @@ function SdCardTab({ cameraId, caps }) {
     setLoading(true); setRecordings(null); setPlaying(null);
     try {
       const { data } = await api.get(`/devices/${cameraId}/recordings`, {
-        params: { start: new Date(start).toISOString(), end: new Date(end).toISOString() },
+        params: {
+          start: new Date(start).toISOString(),
+          end: new Date(end).toISOString(),
+          stream: quality,
+        },
       });
       setRecordings(data.recordings || []);
       if (!(data.recordings || []).length) toast.info("Aucun enregistrement sur cette période");
@@ -737,7 +743,8 @@ function SdCardTab({ cameraId, caps }) {
   const recUrl = (kind, fileName) => {
     const token = localStorage.getItem("mg_token");
     return `${process.env.REACT_APP_BACKEND_URL}/api/devices/${cameraId}/recordings/${kind}`
-      + `?file=${encodeURIComponent(fileName)}&token=${encodeURIComponent(token || "")}`;
+      + `?file=${encodeURIComponent(fileName)}&quality=${quality}`
+      + `&token=${encodeURIComponent(token || "")}`;
   };
   const playUrl = (fileName) => recUrl("stream", fileName);
   const download = (fileName) => {
@@ -791,9 +798,28 @@ function SdCardTab({ cameraId, caps }) {
           <Label>Jusqu&apos;à</Label>
           <Input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} data-testid="sdcard-end" />
         </div>
+        <div>
+          <Label>Qualité</Label>
+          <div className="flex" data-testid="sdcard-quality">
+            {[["main", "HD"], ["sub", "SD"]].map(([val, label]) => (
+              <button key={val} type="button"
+                      onClick={() => { setQuality(val); setPlaying(null); }}
+                      data-testid={`sdcard-quality-${val}`}
+                      className={`px-3 py-2 text-sm border ${quality === val
+                        ? "bg-[#0044FF] text-white border-[#0044FF]"
+                        : "border-border hover:bg-secondary"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         <Button onClick={search} disabled={loading} data-testid="sdcard-search">
           {loading ? "Recherche…" : "Rechercher"}
         </Button>
+      </div>
+      <div className="text-[11px] text-muted-foreground">
+        HD = flux principal (qualité maximale) · SD = sous-flux (fichiers plus légers,
+        lecture et téléchargement plus rapides).
       </div>
 
       {playing && (

@@ -268,7 +268,11 @@ class DahuaDriver(ONVIFDriver):
             i += 1
         return out
 
-    async def search_recordings(self, start: datetime, end: datetime) -> list[dict]:
+    async def search_recordings(self, start: datetime, end: datetime,
+                                 stream: str = "main") -> list[dict]:
+        # Dahua : le sous-flux se sélectionne via condition.Flags/Subtype ;
+        # non implémenté ici (driver non validé sur matériel réel), on
+        # renvoie toujours le flux principal — cf. docstring du module.
         if self._http is None:
             raise UnsupportedCapabilityError("Session CGI Dahua non initialisée")
 
@@ -313,7 +317,7 @@ class DahuaDriver(ONVIFDriver):
         except httpx.HTTPError as e:
             raise DeviceConnectionError(f"Dahua mediaFileFind : {e}") from e
 
-    async def get_recording_source(self, file_name: str) -> str:
+    async def get_recording_source(self, file_name: str, stream: str = "main") -> str:
         if not file_name:
             raise CameraDriverError("Dahua : chemin d'enregistrement vide", code="device_error")
         # Téléchargement direct du fichier .dav via RPC_Loadfile — convention
