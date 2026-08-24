@@ -223,6 +223,12 @@ Confirmé par grep + tests :
 
 ---
 
+## 10bis. Ajouts post-v0.4.4 (non ré-audités globalement, journalisés ici)
+
+| Package | Version retenue | Justification |
+|---|---|---|
+| **reolink-aio** | **0.21.10** | Ajouté v3.5.0 (2026-08) — remplace le driver Reolink HTTP JSON fait main (`backend/drivers/reolink_driver.py`). Gère l'API JSON ET le protocole binaire Baichuan (port 9000, utilisé par l'app mobile officielle) avec auth par token/retries. Utilisée par l'intégration officielle Home Assistant — voir CHANGELOG.md. Aucun conflit de version détecté avec la stack IA (torch/numpy/onnxruntime) lors du build. |
+
 ## 10. Points ouverts / à valider sur machine cible
 
 1. **Build Docker sur RTX A2000** : lancer `docker compose build` pour valider :

@@ -2,6 +2,51 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.5.0-reolink-relais] — 2026-08 — Driver Reolink (reolink-aio), relais caméra, carte SD
+
+### Added
+- **Nouvelle dépendance `reolink-aio==0.21.10`** (pinnée dans
+  `backend/requirements.txt`, embarquée automatiquement au prochain
+  `sudo ./install.sh` — validation 2d du script confirme le pin, aucune
+  étape manuelle requise). Librairie tierce mature (utilisée par
+  l'intégration officielle Home Assistant), gère les DEUX protocoles
+  Reolink : l'API JSON HTTP (`/api.cgi`) ET le protocole binaire
+  propriétaire Baichuan (port 9000, chiffré, utilisé par l'app mobile
+  officielle — identifié par capture Wireshark sur le trafic réel de
+  l'app Reolink).
+- **Enregistrements carte SD / eMMC** (nouveau, absent du driver précédent) :
+  `GET /api/devices/{id}/storage` (supports détectés), `GET
+  /api/devices/{id}/recordings?start=&end=` (liste des fichiers sur la
+  période, 24 h par défaut), `GET
+  /api/devices/{id}/recordings/{file_name}/source` (URL de lecture directe).
+  Implémenté via `request_vod_files`/`get_vod_source` de reolink-aio.
+
+### Fixed
+- **Driver Reolink fait main remplacé** (`backend/drivers/reolink_driver.py`) :
+  l'implémentation HTTP JSON précédente (v3.4.0) détectait correctement
+  les capacités une fois le port et les clés `GetAbility` corrigés, mais
+  TOUTES les commandes de contrôle (`SetWhiteLed`, `SetIrLights`,
+  `AudioAlarmPlay`) échouaient avec `ability error` (rspCode -26).
+  Confirmé avec reolink-aio (implémentation indépendante) : échec
+  identique avec un compte "user" (`test`), succès immédiat avec le
+  compte "admin" — c'était une restriction de permission côté COMPTE
+  CAMÉRA, jamais un bug de code MG-VMS. Le credential caméra stocké a été
+  basculé sur le compte admin de la caméra concernée.
+- **Contrôle IR/lumière/sirène opérationnels** : conséquence directe du
+  point précédent — `SetIrLights` vérifié en conditions réelles (RLC-81MA,
+  compte admin) : succès.
+
+### Known limitations
+- **Audio bidirectionnel (talkback)** : toujours non implémenté.
+  reolink-aio expose les primitives bas niveau du protocole Baichuan
+  (`send`/`send_payload`) mais aucune méthode haut niveau "démarrer un
+  appel micro/HP" prête à l'emploi — nécessite un flux audio temps réel
+  dédié, hors scope de ce correctif.
+- **Mode IR "Auto"** : reolink-aio n'expose que du ON/OFF forcé côté
+  `set_ir_lights` (pas de 3ᵉ état "Auto" natif en haut niveau) — le mode
+  Auto de MG-VMS retombe sur ON en attendant une méthode dédiée dans la
+  librairie.
+
 ## [v3.4.0-devices-securite] — 2026-08 — Contrôle caméras, popup bienvenue, 2FA licence
 
 ### Added
