@@ -57,11 +57,21 @@ class CameraDeviceService:
             if d is not None and d._connected:
                 return d
             cam = await self._load_camera(cam_id)
+            from crypto_utils import decrypt_secret
             drv = resolve_driver(
                 vendor=cam.get("vendor") or "onvif",
                 host=cam["ip"],
                 username=cam.get("username") or "",
-                password=cam.get("password") or "",
+                # v3.4 · Bug critique : le mot de passe caméra est chiffré Fernet
+                # en base (voir crypto_utils.py) mais était passé TEL QUEL au
+                # driver — l'authentification ONVIF échouait donc TOUJOURS avec
+                # le ciphertext comme mot de passe, jamais le vrai mot de passe.
+                # Confirmé en prod : ce chemin causait des échecs 401 répétés
+                # jusqu'au verrouillage anti-bruteforce de la caméra (Reolink
+                # RLC-81MA, "device is locked... wrong username/password many
+                # times"). decrypt_secret() est rétro-compatible (renvoie la
+                # valeur telle quelle si déjà en clair).
+                password=decrypt_secret(cam.get("password") or ""),
                 port=cam.get("onvif_port") or 80,
             )
             await drv.connect()
