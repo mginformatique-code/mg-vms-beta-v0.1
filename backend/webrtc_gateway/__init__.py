@@ -157,11 +157,16 @@ async def whep_offer(camera_id: str, sdp_offer: str,
     if cam is None:
         raise LookupError(f"camera {camera_id} not found")
 
+    codec = str(cam.get("codec") or "")
     answer = await _whep_via_go2rtc(camera_id, sdp_offer, prefer_hd=prefer_hd,
-                                     main_codec=str(cam.get("codec") or ""))
+                                     main_codec=codec)
     if answer:
         await upsert_runtime(camera_id, status="online")
-        return answer, f"whep-g2r-{uuid.uuid4().hex[:12]}"
+        # Indique au client si le HD demandé n'a PAS pu être servi, pour qu'il
+        # l'affiche au lieu de laisser croire à un bouton cassé.
+        forced = prefer_hd and codec.lower() not in ("h264", "avc", "")
+        session = f"whep-g2r-{uuid.uuid4().hex[:12]}"
+        return answer, (f"{session}|sd_forced_{codec.lower()}" if forced else session)
 
     mgr = VideoCoreManager.instance()
     try:

@@ -607,28 +607,15 @@ export default function Cameras() {
                   ci-dessus (bouton Tester la connexion).
                 </p>
               </div>
-              <div className="col-span-2">
-                {/* P0-fix · Solution B (Go2RTC + MJPEG) : un seul vrai choix,
-                    stream_mode. "auto" = Go2RTC (par défaut, recommandé) ;
-                    "direct_rtsp" = pont ffmpeg local, sans Go2RTC (dépannage). */}
-                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                  Mode vidéo
-                </label>
-                <select
-                  value={form.stream_mode}
-                  onChange={(e) => setForm({ ...form, stream_mode: e.target.value })}
-                  className="inp"
-                  data-testid="stream-mode-select"
-                >
-                  <option value="auto">Auto — Go2RTC (recommandé)</option>
-                  <option value="direct_rtsp">Direct RTSP — sans Go2RTC (dépannage)</option>
-                </select>
-                <p className="text-[10px] text-muted-foreground mt-0.5">
-                  Go2RTC centralise le flux (1 seule connexion caméra, aperçu fluide). Direct RTSP
-                  ouvre une connexion ffmpeg par visionnage — à réserver au dépannage si Go2RTC échoue
-                  sur cette caméra.
-                </p>
-              </div>
+              {/* v3.9.1 · Sélecteur « Mode vidéo » retiré : « Direct RTSP »
+                  ouvrait une connexion ffmpeg PAR visionnage, là où le mode
+                  Go2RTC n'en ouvre qu'une seule, partagée. C'était un mode de
+                  dépannage historique, devenu contre-productif depuis le
+                  passage au passthrough WebRTC — et coûteux sur les caméras
+                  qui n'acceptent que quelques sessions RTSP simultanées.
+                  `stream_mode` reste envoyé à "auto" par défaut, et le backend
+                  continue d'honorer "direct_rtsp" pour les caméras existantes
+                  qui l'auraient déjà en base (aucune migration nécessaire). */}
               <div className="col-span-2">
                 <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
                   URL RTSP WebRTC (H264) — optionnel

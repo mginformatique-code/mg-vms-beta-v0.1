@@ -24,6 +24,8 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
   const pcRef = useRef(null);
   const [mode, setMode] = useState("connecting"); // "connecting" | "webrtc" | "mjpeg" | "error"
   const [errorMsg, setErrorMsg] = useState("");
+  // Codec du flux principal quand le HD demandé a dû être refusé (ex. "hevc")
+  const [qualityNote, setQualityNote] = useState("");
 
   useEffect(() => {
     if (!camera?.id) return;
@@ -32,6 +34,7 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
     let mediaWatchdog = null;
     setMode("connecting");
     setErrorMsg("");
+    setQualityNote("");
 
     const showError = (msg) => {
       if (cancelled) return;
@@ -96,11 +99,16 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
 
       try {
         const token = localStorage.getItem("mg_token") || "";
-        await fetch(`${API}/live/${camera.id}/start`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }).catch(() => {});
-
+        // v3.9.1 · L'appel à `/live/{id}/start` a été retiré. Il déclenchait
+        // `VideoCoreManager.ensure_camera()`, qui ouvre une connexion RTSP
+        // Python sur le flux PRINCIPAL — pour CHAQUE tuile affichée. Or plus
+        // rien n'en a besoin : le passthrough est servi par go2rtc, et le
+        // repli aiortc ouvre lui-même sa source (`ensure_webrtc_source`).
+        // Vérifié : `recorder.py`, `ai_engine.py` et `frame_source.py`
+        // n'utilisent pas VideoCoreManager, ils lisent le RTSP directement.
+        // C'était donc une connexion caméra pure perte, coûteuse sur les
+        // appareils qui n'acceptent que quelques sessions RTSP simultanées
+        // (une Reolink 2 canaux en ouvrait jusqu'à 2 de plus par mosaïque).
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
@@ -120,6 +128,13 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
           showError(detail || `WebRTC indisponible (HTTP ${r.status})`);
           return;
         }
+        // v3.9.1 · Le serveur signale ici qu'il n'a PAS pu servir le HD
+        // demandé (flux principal en HEVC, que WebRTC ne transporte pas vers
+        // un navigateur). Sans ce retour, le bouton HD semblait simplement
+        // cassé sur ces caméras alors que le repli est volontaire.
+        const q = r.headers.get("X-Stream-Quality") || "";
+        if (!cancelled) setQualityNote(q.startsWith("sd_forced") ? q.replace("sd_forced_", "") : "");
+
         const answerSdp = await r.text();
         if (cancelled) return;
         await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
@@ -163,6 +178,14 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
         <div className="absolute inset-0 flex items-center justify-center text-white/70 text-xs mono pointer-events-none"
              data-testid={`${dataTestId}-state`}>
           Connexion…
+        </div>
+      )}
+      {mode === "webrtc" && qualityNote && (
+        <div className="absolute top-1 right-1 px-1.5 py-0.5 text-[9px] mono uppercase tracking-wider
+                        bg-black/70 text-[#FFAA00] border border-[#FFAA00]/50 pointer-events-none"
+             title={`Le flux principal de cette caméra est en ${qualityNote.toUpperCase()}, que WebRTC ne sait pas transmettre à un navigateur. Le sous-flux H264 est utilisé à la place.`}
+             data-testid={`${dataTestId}-quality-note`}>
+          HD indispo ({qualityNote.toUpperCase()})
         </div>
       )}
       {mode === "error" && (

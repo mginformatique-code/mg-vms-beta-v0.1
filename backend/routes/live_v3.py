@@ -78,6 +78,11 @@ async def live_whep(camera_id: str, request: Request, hd: int = 0,
         logger.exception("whep %s error", camera_id)
         raise HTTPException(502, f"WHEP échec: {type(e).__name__}: {e}")
     from fastapi.responses import Response
-    return Response(content=answer_sdp, media_type="application/sdp",
-                     headers={"X-Whep-Session": session,
-                              "Access-Control-Expose-Headers": "X-Whep-Session"})
+    # `session` peut porter un suffixe `|sd_forced_<codec>` quand le HD demandé
+    # n'a pas pu être servi (flux principal non transportable par WebRTC).
+    sess, _, forced = session.partition("|")
+    headers = {"X-Whep-Session": sess,
+               "Access-Control-Expose-Headers": "X-Whep-Session, X-Stream-Quality"}
+    if forced:
+        headers["X-Stream-Quality"] = forced
+    return Response(content=answer_sdp, media_type="application/sdp", headers=headers)
