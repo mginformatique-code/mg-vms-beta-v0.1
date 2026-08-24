@@ -195,6 +195,7 @@ pytokens==0.4.1
 pytz==2026.3.post1
 PyYAML==6.0.2
 redis==5.0.1
+reolink-aio==0.21.10
 referencing==0.37.0
 regex==2024.9.11
 reportlab==4.2.5

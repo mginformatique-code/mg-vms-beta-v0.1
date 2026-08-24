@@ -17,6 +17,9 @@ Endpoints v0.4.6 :
   POST /api/devices/{camera_id}/ptz/move      · {direction, speed?}
   POST /api/devices/{camera_id}/ptz/zoom      · {value}
   POST /api/devices/{camera_id}/ptz/preset    · {id}
+  GET  /api/devices/{camera_id}/storage       · supports SD/eMMC détectés
+  GET  /api/devices/{camera_id}/recordings    · enregistrements locaux [start, end]
+  GET  /api/devices/{camera_id}/recordings/{file_name}/source · URL de lecture
   GET  /api/devices/_supported                · liste des vendors supportés
 
 Endpoints v0.5.7 (Universal Camera API — Validator / Matrix / Health) :
@@ -28,6 +31,7 @@ Endpoints v0.5.7 (Universal Camera API — Validator / Matrix / Health) :
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -286,5 +290,46 @@ async def device_ptz_preset(camera_id: str, body: PTZPresetBody,
         drv = await svc.get_driver(camera_id)
         await drv.ptz_preset(body.id)
         return {"success": True}
+    except CameraDriverError as e:
+        raise _driver_error_response(e)
+
+
+# ── Stockage local / enregistrements SD card (v3.5) ───────────────
+@devices_router.get("/{camera_id}/storage")
+async def device_storage(camera_id: str, user: dict = Depends(require_permission("view_live"))):
+    """Supports de stockage locaux détectés sur la caméra (carte SD/eMMC)."""
+    try:
+        drv = await svc.get_driver(camera_id)
+        return {"storage": await drv.get_storage()}
+    except CameraDriverError as e:
+        raise _driver_error_response(e)
+
+
+@devices_router.get("/{camera_id}/recordings")
+async def device_recordings(camera_id: str,
+                             start: Optional[datetime] = None,
+                             end: Optional[datetime] = None,
+                             user: dict = Depends(require_permission("view_live"))):
+    """Enregistrements présents sur le stockage local caméra sur ``[start, end]``.
+
+    Par défaut : 24 dernières heures.
+    """
+    end = end or datetime.now(timezone.utc)
+    start = start or (end - timedelta(hours=24))
+    try:
+        drv = await svc.get_driver(camera_id)
+        return {"recordings": await drv.search_recordings(start, end)}
+    except CameraDriverError as e:
+        raise _driver_error_response(e)
+
+
+@devices_router.get("/{camera_id}/recordings/{file_name}/source")
+async def device_recording_source(camera_id: str, file_name: str,
+                                   user: dict = Depends(require_permission("view_live"))):
+    """URL de lecture (proxy) d'un enregistrement local caméra."""
+    try:
+        drv = await svc.get_driver(camera_id)
+        url = await drv.get_recording_source(file_name)
+        return {"url": url}
     except CameraDriverError as e:
         raise _driver_error_response(e)

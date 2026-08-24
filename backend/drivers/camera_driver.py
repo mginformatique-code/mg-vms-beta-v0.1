@@ -12,6 +12,7 @@ Règle absolue (v0.4.6) :
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import Optional
 
 from .camera_models import (
@@ -129,6 +130,22 @@ class CameraDriver(ABC):
         """Rappel d'un preset PTZ enregistré côté caméra."""
         self._require("ptz")
         await self._ptz_preset(preset_id)
+
+    # ── Stockage local / enregistrements (v3.5) ───────────────────
+    async def get_storage(self) -> list[dict]:
+        """Liste les supports de stockage locaux (carte SD / eMMC / HDD)."""
+        self._require("sdcard")
+        raise UnsupportedCapabilityError("Stockage local non implémenté par ce driver")
+
+    async def search_recordings(self, start: datetime, end: datetime) -> list[dict]:
+        """Liste les enregistrements présents sur le stockage local caméra."""
+        self._require("sdcard")
+        raise UnsupportedCapabilityError("Enregistrements locaux non implémentés par ce driver")
+
+    async def get_recording_source(self, file_name: str) -> str:
+        """URL de lecture d'un enregistrement local (proxy/lecture directe)."""
+        self._require("sdcard")
+        raise UnsupportedCapabilityError("Lecture d'enregistrement local non implémentée par ce driver")
 
     # ── Hooks à implémenter par les drivers concrets ─────────────
     async def _set_light(self, enabled: bool, brightness: Optional[int],

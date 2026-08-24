@@ -1,147 +1,127 @@
-"""Driver Reolink (API HTTP JSON propriétaire).
+"""Driver Reolink — wrapper autour de la librairie ``reolink-aio``.
 
-Reolink expose une API HTTP JSON documentée (endpoint ``/api.cgi``) qui va
-bien au-delà d'ONVIF : spotlight, sirène, détection PIR, batterie, IA
-embarquée (person / vehicle / animal), audio bidirectionnel.
+v3.5 · Remplace l'implémentation HTTP JSON faite main (v3.4) par la
+librairie tierce ``reolink-aio`` (utilisée par l'intégration officielle
+Home Assistant) : gère les DEUX protocoles Reolink — l'API JSON HTTP
+(``/api.cgi``, port 443) ET le protocole binaire propriétaire Baichuan
+(port 9000, chiffré, utilisé par l'app mobile officielle — identifié par
+capture Wireshark) — avec auth par token et retries intégrés.
 
-Ce driver hérite d'ONVIFDriver pour la partie streaming/PTZ standard, et
-ajoute les commandes propriétaires via HTTP.
+Contexte (voir CHANGELOG v3.4.x pour le détail) : le driver fait main
+détectait déjà correctement les capacités une fois le port et les clés
+``GetAbility`` corrigés, mais TOUTES les commandes de contrôle
+(``SetWhiteLed``, ``SetIrLights``, ``AudioAlarmPlay``) échouaient avec
+``ability error`` (rspCode -26). Confirmé avec reolink-aio (implémentation
+indépendante) : même erreur avec le compte "test" (utilisateur, pas admin),
+succès immédiat avec le compte "admin" — c'était une restriction de
+permission côté compte caméra, jamais un bug de code.
 
-Documentation officielle :
-    https://reolink.com/support/documentation/reolink-api/
-Endpoint type :
-    POST http://<ip>/api.cgi?cmd=<Cmd>&user=<user>&password=<pass>
-    body : [{"cmd": "<Cmd>", "action": 0, "param": {...}}]
+reolink-aio est conservé malgré cette conclusion car il ouvre l'accès aux
+enregistrements SD card (``request_vod_files``/``download_vod``),
+totalement absent du driver fait main — cf. ``get_storage()`` /
+``search_recordings()`` ci-dessous.
+
+Documentation officielle Reolink : https://reolink.com/support/documentation/reolink-api/
+Librairie : https://github.com/starkillerOG/reolink_aio
 """
 from __future__ import annotations
 
-import asyncio
 import logging
+from datetime import datetime
 from typing import Optional
 
-import httpx
+from reolink_aio.api import Host
+from reolink_aio.exceptions import (
+    ApiError, CredentialsInvalidError, LoginError, ReolinkConnectionError,
+    ReolinkError, ReolinkTimeoutError,
+)
 
 from .camera_models import (
     CameraCapabilities, DeviceInfo, DeviceStatus, IRMode, LightMode,
 )
 from .exceptions import (
     AuthenticationError, DeviceConnectionError, UnsupportedCapabilityError,
-    CameraDriverError,
+    CameraDriverError, CommandTimeoutError,
 )
 from .onvif_driver import ONVIFDriver
 from .registry import register_driver
 
 logger = logging.getLogger("drivers.reolink")
 
+#: MG-VMS ne gère pas encore les NVR Reolink multi-canaux — chaque
+#: caméra MG-VMS correspond à un unique channel 0 côté reolink-aio.
+_CHANNEL = 0
+
 
 class ReolinkDriver(ONVIFDriver):
-    """Driver Reolink — étend l'ONVIF avec l'API propriétaire.
-
-    L'auth Reolink se fait par login (``Login`` command → token) OU par
-    query params ``user=&password=`` (simplifié, retenu ici).
-    """
+    """Driver Reolink — étend l'ONVIF avec la librairie ``reolink-aio``."""
 
     vendor = "reolink"
 
-    #: Métadonnées v0.5.7 · Driver Health
+    #: Métadonnées v3.5 · Driver Health
     MANIFEST: dict = {
         "driver": "reolink",
-        "version": "1.0",
+        "version": "2.0",
         "status": "stable",
-        "api": "Reolink JSON API (/api.cgi) + ONVIF fallback",
-        "protocols": ["reolink_api", "onvif", "rtsp", "http"],
+        "api": "reolink-aio (JSON API + Baichuan) + ONVIF fallback",
+        "protocols": ["reolink_api", "baichuan", "onvif", "rtsp", "http"],
         "supported_models": [
             "RLC-1224A", "RLC-820A", "RLC-810A", "RLC-410A", "RLC-510A",
-            "RLC-511WA", "Argus 3 Pro", "Duo 2", "TrackMix", "Doorbell",
+            "RLC-511WA", "RLC-81MA", "Argus 3 Pro", "Duo 2", "TrackMix", "Doorbell",
         ],
-        "coverage_pct": 88,
+        "coverage_pct": 92,
     }
 
     def __init__(self, host: str, username: str, password: str,
                  port: Optional[int] = None):
-        # `port` ici est le port ONVIF (8000 typiquement, transmis par
-        # camera_device_service.get_driver()) — l'API JSON propriétaire
-        # Reolink (/api.cgi) est un service SÉPARÉ, sur le port web
-        # standard de la caméra (443 HTTPS, certificat auto-signé),
-        # jamais le port ONVIF. Les réutiliser confondait les deux
-        # services : toute commande /api.cgi (GetAbility, GetHddInfo,
-        # SetWhiteLed, AudioAlarmPlay...) se terminait en connexion
-        # coupée sans réponse — confirmé en prod sur une RLC-81MA, port
-        # 443 direct fonctionne, port ONVIF (8000) jamais. La couche plus
-        # récente camera_api/providers/reolink.py avait déjà ce bon
-        # défaut (443/https) ; seul ce driver-ci avait le bug.
+        # `port` ici est le port ONVIF (transmis par
+        # camera_device_service.get_driver()) — reolink-aio gère lui-même
+        # la découverte des ports HTTP(S)/Baichuan réels de la caméra,
+        # aucun besoin de le lui transmettre.
         super().__init__(host, username, password, port or 80)
-        self._http: Optional[httpx.AsyncClient] = None
-        self._api_url = f"https://{host}:443/api.cgi"
+        self._host_api: Optional[Host] = None
 
     async def connect(self) -> None:
-        # Base ONVIF (streams, PTZ)
+        # Base ONVIF (streams, PTZ) — best-effort, reolink-aio est la
+        # source de vérité pour le reste.
         try:
             await super().connect()
         except Exception as e:
-            logger.debug("Reolink : ONVIF connect KO (%s), on continue avec HTTP", e)
+            logger.debug("Reolink : ONVIF connect KO (%s), on continue avec reolink-aio", e)
             self._device_info_cache = DeviceInfo(manufacturer="Reolink", ip=self.host)
             self._connected = True
-        # Session HTTP JSON — verify=False : HTTPS LAN Reolink = certificat
-        # auto-signé, comme déjà fait dans camera_api/providers/reolink.py.
-        self._http = httpx.AsyncClient(timeout=8.0, verify=False)
-        # Ping API JSON
+
+        self._host_api = Host(self.host, self.username, self.password)
         try:
-            info = await self._call("GetDevInfo", {})
-            if info:
-                di = self._device_info_cache or DeviceInfo(ip=self.host)
-                di.manufacturer = "Reolink"
-                di.model = info.get("model") or di.model
-                di.firmware = info.get("firmVer") or di.firmware
-                di.serial = info.get("serial") or di.serial
-                self._device_info_cache = di
-        except AuthenticationError:
-            raise
-        except Exception:
-            logger.debug("Reolink : GetDevInfo indispo (fallback ONVIF)")
+            await self._host_api.get_host_data()
+        except CredentialsInvalidError as e:
+            raise AuthenticationError(f"Reolink : identifiants rejetés ({e})") from e
+        except LoginError as e:
+            raise AuthenticationError(f"Reolink : login refusé ({e})") from e
+        except ReolinkTimeoutError as e:
+            raise CommandTimeoutError(f"Reolink {self.host} : délai dépassé ({e})") from e
+        except ReolinkConnectionError as e:
+            raise DeviceConnectionError(f"Reolink {self.host} injoignable ({e})") from e
+        except ReolinkError as e:
+            raise CameraDriverError(f"Reolink {self.host} : {e}") from e
+
+        di = self._device_info_cache or DeviceInfo(ip=self.host)
+        di.manufacturer = "Reolink"
+        di.model = self._host_api.model or di.model
+        di.firmware = self._host_api.sw_version or di.firmware
+        di.serial = self._host_api.serial(_CHANNEL) or di.serial
+        di.mac = self._host_api.mac_address or di.mac
+        self._device_info_cache = di
+        self._connected = True
 
     async def disconnect(self) -> None:
-        if self._http is not None:
+        if self._host_api is not None:
             try:
-                await self._http.aclose()
+                await self._host_api.logout()
             except Exception:
                 pass
-            self._http = None
+            self._host_api = None
         await super().disconnect()
-
-    async def _call(self, cmd: str, param: dict, timeout: float = 6.0) -> Optional[dict]:
-        """Envoi d'une commande Reolink JSON. Retourne le premier ``value``.
-
-        Lève :
-          - ``AuthenticationError`` si code -6/-7
-          - ``CameraDriverError`` sur autre code d'erreur
-        """
-        if self._http is None:
-            raise DeviceConnectionError("Session HTTP non initialisée")
-        params = {"cmd": cmd, "user": self.username, "password": self.password}
-        payload = [{"cmd": cmd, "action": 0, "param": param}]
-        try:
-            r = await self._http.post(self._api_url, params=params, json=payload,
-                                       timeout=timeout)
-        except httpx.HTTPError as e:
-            raise DeviceConnectionError(f"Reolink {self.host}: {e}")
-        if r.status_code == 401:
-            raise AuthenticationError("Reolink : identifiants rejetés")
-        try:
-            data = r.json()
-        except Exception:
-            raise CameraDriverError(f"Reolink : réponse non-JSON ({r.status_code})")
-        if not isinstance(data, list) or not data:
-            return None
-        first = data[0]
-        if first.get("code") != 0 or "error" in first:
-            err = first.get("error") or {}
-            rc = err.get("rspCode") if isinstance(err, dict) else None
-            if rc in (-6, -7):
-                raise AuthenticationError(f"Reolink code {rc}")
-            detail = err.get("detail") if isinstance(err, dict) else str(err)
-            raise CameraDriverError(f"Reolink {cmd} → {detail}", code="device_error")
-        return first.get("value") or {}
 
     async def get_capabilities(self) -> CameraCapabilities:
         if self._caps is not None:
@@ -150,126 +130,161 @@ class ReolinkDriver(ONVIFDriver):
         caps = await super().get_capabilities()
         caps.reolink_api = True
         # SetIrLights est l'une des commandes Reolink les plus universelles
-        # (quasi toute caméra Reolink avec LEDs IR) — la détection ONVIF
-        # standard (IrCutFilter via le service Imaging) est fréquemment peu
-        # fiable sur ces caméras et laissait ir_control à False alors que
-        # _set_ir_mode() ci-dessous fonctionne réellement.
+        # — la détection ONVIF standard (IrCutFilter) est peu fiable sur
+        # ces caméras et laissait ir_control à False.
         caps.ir_control = True
-        # GetAbility renvoie les capacités matérielles
+
+        chn_caps: set = set()
+        if self._host_api is not None:
+            try:
+                chn_caps = set(self._host_api.capabilities.get(_CHANNEL) or [])
+            except Exception:
+                chn_caps = set()
+
+        # v3.5 · Clés confirmées via host.capabilities réel (RLC-81MA,
+        # reolink-aio 0.21.10) — remplace les clés GetAbility brutes
+        # (alarmAudio/supportFLswitch/…) par les noms normalisés de la
+        # librairie, plus stables entre modèles/firmwares.
+        caps.spotlight = "floodLight" in chn_caps
+        caps.siren = "siren" in chn_caps
+        caps.audio_input = "audio" in chn_caps
+        caps.audio_output = "volume" in chn_caps
+        caps.two_way_audio = caps.audio_input and caps.audio_output
+        caps.microphone = caps.audio_input
+        caps.speaker = caps.audio_output
+        caps.pir_sensor = "PIR" in chn_caps
+
+        ai_map = {"ai_people": "person", "ai_vehicle": "vehicle",
+                  "ai_dog_cat": "animal", "ai_face": "face"}
+        ai_feats = [label for key, label in ai_map.items() if key in chn_caps]
+        caps.onboard_ai = bool(ai_feats)
+        caps.onboard_ai_features = tuple(ai_feats)
+
         try:
-            ab = await self._call("GetAbility", {"User": {"userName": self.username}})
-            # Structure Ability : ab["Ability"]["abilityChn"][0]{...} + ab["Ability"]["abilityVer"]
-            chns = (ab or {}).get("Ability", {}).get("abilityChn", [])
-            if chns:
-                ch = chns[0]
-                # Format : {"key": {"ver": <int>, "permit": <int>}, ...}
-                def _has(k: str) -> bool:
-                    v = ch.get(k) or {}
-                    return int(v.get("ver", 0)) > 0
-                # v3.4 · Clés corrigées après inspection d'une réponse RÉELLE
-                # (RLC-81MA) — floodLight/supportSpotLight/supportBuzzer/
-                # supportAudioAlarm n'existent tout simplement pas dans le
-                # schéma GetAbility de ce firmware. "FL" = Flood Light
-                # (projecteur), "alarmAudio" = sirène — confirmés par les
-                # commandes de contrôle réelles (SetWhiteLed, AudioAlarmPlay).
-                caps.spotlight = _has("supportFLswitch") or _has("supportFLBrightness")
-                caps.siren = _has("alarmAudio")
-                caps.audio_input = _has("mainEncType") or _has("recAudio")
-                caps.audio_output = _has("supportAoAdjust")
-                caps.two_way_audio = _has("supportAoAdjust")
-                caps.microphone = caps.audio_input
-                caps.speaker = caps.audio_output
-                caps.pir_sensor = _has("supportAlarmPir")
-                caps.battery = _has("battery")
-                caps.onboard_ai = _has("supportAiAnimal") or _has("supportAiVehicle") or _has("supportAiPeople")
-                ai_feats = []
-                if _has("supportAiPeople"): ai_feats.append("person")
-                if _has("supportAiVehicle"): ai_feats.append("vehicle")
-                if _has("supportAiAnimal"): ai_feats.append("animal")
-                if _has("supportAiFace"): ai_feats.append("face")
-                caps.onboard_ai_features = tuple(ai_feats)
-        except AuthenticationError:
-            raise
-        except Exception as e:
-            logger.debug("Reolink GetAbility indispo (%s) — capacités ONVIF seules", e)
-        # v3.4 · `sdcard` existait dans CameraCapabilities mais rien ne le
-        # renseignait jamais pour Reolink — la carte SD montrait "non
-        # supportée" même sur des caméras qui en ont une. GetHddInfo (déjà
-        # utilisé par get_status() pour le taux d'usage) confirme aussi sa
-        # simple présence.
-        try:
-            h = await self._call("GetHddInfo", {})
-            caps.sdcard = bool((h or {}).get("HddInfo"))
-        except AuthenticationError:
-            raise
+            caps.battery = self._host_api.battery_percentage(_CHANNEL) is not None
         except Exception:
-            pass
+            caps.battery = False
+
+        # v3.4 · `sdcard` existait dans CameraCapabilities mais rien ne le
+        # renseignait jamais pour Reolink. reolink-aio expose hdd_list +
+        # hdd_available() directement (confirmé en prod : hdd 0 = carte SD).
+        try:
+            caps.sdcard = any(self._host_api.hdd_available(i) for i in self._host_api.hdd_list)
+        except Exception:
+            caps.sdcard = False
+
         self._caps = caps
         return caps
 
     async def get_status(self) -> DeviceStatus:
         st = await super().get_status()
-        # GetBatteryInfo (batterie only)
-        if self._caps and self._caps.battery:
+        if self._host_api is not None:
+            if self._caps and self._caps.battery:
+                try:
+                    st.battery_percent = self._host_api.battery_percentage(_CHANNEL)
+                except Exception:
+                    pass
             try:
-                b = await self._call("GetBatteryInfo", {"channel": 0})
-                if b:
-                    st.battery_percent = int(b.get("batteryPercent", -1)) or None
+                hdds = self._host_api.hdd_list
+                if hdds:
+                    idx = hdds[0]
+                    available = self._host_api.hdd_available(idx)
+                    st.sd_card_status = "ok" if available else "missing"
+                    if available:
+                        # hdd_storage() renvoie l'espace LIBRE en % (confirmé
+                        # en prod : SD neuve/quasi-vide → ~99).
+                        free_pct = self._host_api.hdd_storage(idx)
+                        st.sd_card_used_percent = max(0, min(100, round(100 - free_pct)))
             except Exception:
                 pass
-        # HddInfo (SD card)
-        try:
-            h = await self._call("GetHddInfo", {})
-            if h and isinstance(h, dict):
-                hdds = h.get("HddInfo") or []
-                if hdds:
-                    hdd = hdds[0]
-                    used = int(hdd.get("size", 0)) - int(hdd.get("capacity", 0))
-                    total = int(hdd.get("size", 0)) or 1
-                    st.sd_card_used_percent = int(used * 100 / total)
-                    st.sd_card_status = "ok" if hdd.get("mount") else "error"
-        except Exception:
-            pass
         return st
 
     # ── Spotlight ────────────────────────────────────────────────
     async def _set_light(self, enabled: bool, brightness: Optional[int],
                           mode: LightMode) -> None:
-        param = {
-            "WhiteLed": {
-                "channel": 0,
-                "state": 1 if enabled else 0,
-                "mode": {LightMode.ON: 1, LightMode.OFF: 0, LightMode.AUTO: 3}[mode],
-            }
-        }
-        if brightness is not None:
-            param["WhiteLed"]["bright"] = max(0, min(100, int(brightness)))
-        await self._call("SetWhiteLed", param)
+        try:
+            await self._host_api.set_whiteled(
+                _CHANNEL, state=enabled,
+                brightness=brightness if brightness is not None else None,
+            )
+        except ApiError as e:
+            raise CameraDriverError(f"Reolink SetWhiteLed → {e}", code="device_error") from e
 
     # ── Siren ─────────────────────────────────────────────────────
     async def _set_siren(self, enabled: bool, duration: Optional[int]) -> None:
-        # AudioAlarmPlay v2 (durée ignorée par la caméra si sirène simple)
-        param = {"channel": 0, "manualSwitch": 1 if enabled else 0,
-                 "alarmMode": "manul"}
-        if duration and enabled:
-            param["duration"] = int(duration)
-        await self._call("AudioAlarmPlay", param)
+        try:
+            await self._host_api.set_siren(
+                _CHANNEL, enable=enabled, duration=duration if enabled else None,
+            )
+        except ApiError as e:
+            raise CameraDriverError(f"Reolink SetSiren → {e}", code="device_error") from e
 
-    # ── IR mode (surcharge : Reolink expose IRmode natif JSON) ──
+    # ── IR mode ───────────────────────────────────────────────────
     async def _set_ir_mode(self, mode: IRMode) -> None:
-        m = {IRMode.AUTO: "Auto", IRMode.ON: "On", IRMode.OFF: "Off"}[mode]
-        await self._call("SetIrLights", {"IrLights": {"channel": 0, "state": m}})
+        try:
+            if mode == IRMode.AUTO:
+                # reolink-aio set_ir_lights est un simple ON/OFF forcé — le
+                # mode Auto natif Reolink se pilote via SetIrLights state="Auto",
+                # non exposé en high-level. On retombe sur ON (comportement
+                # "actif la nuit" par défaut) plutôt que de lever une erreur.
+                await self._host_api.set_ir_lights(_CHANNEL, True)
+            else:
+                await self._host_api.set_ir_lights(_CHANNEL, mode == IRMode.ON)
+        except ApiError as e:
+            raise CameraDriverError(f"Reolink SetIrLights → {e}", code="device_error") from e
 
-    # ── Audio (talkback pris en charge par sous-flux séparé) ───
+    # ── Audio (talkback nécessite un flux temps réel séparé) ─────
     async def _start_audio(self) -> None:
-        # Reolink : le talkback passe par un WebSocket ou par le sous-flux
-        # audio dédié. Pour la V1, on utilise le "AudioAlarmPlay" en
-        # mode ordinateur → pas de talkback réel ici, à raffiner.
         raise UnsupportedCapabilityError(
-            "Talkback Reolink nécessite un client WebSocket dédié (à implémenter)")
+            "Talkback Reolink nécessite un flux audio temps réel dédié (à implémenter)")
 
     async def _stop_audio(self) -> None:
         raise UnsupportedCapabilityError("Cf _start_audio")
+
+    # ── SD card / enregistrements locaux (nouveau, v3.5) ─────────
+    async def get_storage(self) -> list[dict]:
+        """Liste les supports de stockage locaux (carte SD / eMMC)."""
+        if self._host_api is None:
+            raise UnsupportedCapabilityError("Session Reolink non initialisée")
+        out = []
+        for idx in self._host_api.hdd_list:
+            try:
+                out.append({
+                    "index": idx,
+                    "available": self._host_api.hdd_available(idx),
+                    "type": self._host_api.hdd_type(idx),
+                    "free_percent": self._host_api.hdd_storage(idx),
+                })
+            except Exception as e:
+                logger.debug("Reolink hdd %s indispo (%s)", idx, e)
+        return out
+
+    async def search_recordings(self, start: datetime, end: datetime) -> list[dict]:
+        """Liste les enregistrements présents sur la carte SD entre ``start`` et ``end``."""
+        if self._host_api is None:
+            raise UnsupportedCapabilityError("Session Reolink non initialisée")
+        try:
+            _statuses, files = await self._host_api.request_vod_files(_CHANNEL, start, end)
+        except ApiError as e:
+            raise CameraDriverError(f"Reolink request_vod_files → {e}", code="device_error") from e
+        return [{
+            "file_name": f.file_name,
+            "start_time": f.start_time.isoformat(),
+            "end_time": f.end_time.isoformat(),
+            "duration_s": f.duration.total_seconds(),
+            "size_bytes": f.size,
+            "type": f.type,
+        } for f in files]
+
+    async def get_recording_source(self, file_name: str) -> str:
+        """URL de lecture (FLV) d'un enregistrement SD, pour proxy/lecture directe."""
+        if self._host_api is None:
+            raise UnsupportedCapabilityError("Session Reolink non initialisée")
+        try:
+            _mime, url = await self._host_api.get_vod_source(_CHANNEL, file_name)
+        except ApiError as e:
+            raise CameraDriverError(f"Reolink get_vod_source → {e}", code="device_error") from e
+        return url
 
 
 register_driver("reolink", ReolinkDriver)
