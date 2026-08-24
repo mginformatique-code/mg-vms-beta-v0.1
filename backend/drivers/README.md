@@ -151,15 +151,20 @@ L'UI consomme `capabilities` pour n'afficher que les widgets pertinents
 
 ## Ordre d'implémentation constructeur
 
-| Driver | État v0.4.6 | Fonctions couvertes |
+| Driver | État v3.6 | Fonctions couvertes |
 |---|---|---|
 | **ONVIFDriver** | ✅ complet | connect, info, caps (PTZ+IR), streams, PTZ (move/zoom/preset), IR cut filter |
-| **ReolinkDriver** | ✅ complet | +GetAbility (spotlight/siren/PIR/battery/AI), SetWhiteLed, AudioAlarmPlay, SetIrLights, GetBatteryInfo, GetHddInfo |
-| **DahuaDriver** | 🟡 minimal | Hérite ONVIF · CGI `Lighting_V2` (white light) · sirène/audio à venir v0.4.7 |
-| **HikvisionDriver** | 🟡 minimal | Hérite ONVIF · ISAPI `supplementLight` détecté · sirène/audio à venir v0.4.7 |
-| **AxisDriver** | ⚪ à créer | VAPIX prévu v0.4.7 |
-| **HanwhaDriver** | ⚪ à créer | Sunapi prévu v0.4.7 |
-| **UniviewDriver** | ⚪ à créer | LAPI prévu v0.4.7 |
+| **ReolinkDriver** | ✅ complet, vérifié en conditions réelles | Wrapper `reolink-aio` (API JSON + Baichuan) : spotlight, sirène, IR, carte SD (storage/recordings), audio in/out, IA embarquée |
+| **HikvisionDriver** | ✅ complet, vérifié en conditions réelles (DS-2CD2086G2-I) | ISAPI `supplementLight` (avec détection réelle des modes câblés, pas juste un probe GET), `ircutFilter`, sortie relais/sirène (`IOCap`-gated), carte SD (`ContentMgmt/Storage` + `/search`) |
+| **DahuaDriver** | 🟡 complet mais NON vérifié sur matériel réel | CGI `Lighting_V2`, `VideoInDayNightMode`, `AlarmOut`, `storageDevice.cgi`, `mediaFileFind.cgi` — conventions largement documentées, à valider dès qu'une caméra Dahua est disponible pour test |
+| **AxisDriver** | ⚪ à créer | VAPIX prévu |
+| **HanwhaDriver** | ⚪ à créer | Sunapi prévu |
+| **UniviewDriver** | ⚪ à créer | LAPI prévu |
+
+Tous les drivers constructeur exposent désormais (au-delà du contrat
+`CameraDriver` de base) : `get_storage()`, `search_recordings(start, end)`,
+`get_recording_source(file_name)` — cf. endpoints `/api/devices/{id}/storage`
+et `/recordings` dans `routes/devices.py`.
 
 ## Extension : ajouter un nouveau driver constructeur
 
