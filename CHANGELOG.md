@@ -2,6 +2,52 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.7.1-carte-sd-lecture] — 2026-08 — Lecture SD réparée, stockage corrigé, téléchargement, réseau
+
+### Added
+- **Téléchargement local d'un enregistrement carte SD** (`GET
+  /api/devices/{id}/recordings/download?file=…`) — bouton dédié par ligne
+  dans l'onglet Carte SD. Relaie les octets bruts servis par la caméra
+  sans ré-encodage (remux ffmpeg uniquement pour les sources RTSP, type
+  Hikvision, qui n'exposent pas de fichier téléchargeable). Vérifié en
+  conditions réelles : fichier d'origine de 10 Mo, nom de fichier correct.
+- **Onglet Réseau enrichi** — ports (HTTP/HTTPS, RTSP, RTMP, ONVIF),
+  protocoles réellement activés, UID, WiFi/Ethernet. Nouveau
+  `get_network()` sur le contrat driver (`GET /api/devices/{id}/network`),
+  implémenté pour Reolink (via reolink-aio) et Hikvision (via
+  `/ISAPI/Security/AdminAccesses`) — 501 propre pour les drivers qui ne
+  l'exposent pas, le frontend n'affiche que les clés réellement remontées.
+
+### Fixed
+- **Lecture vidéo carte SD totalement muette** (écran vide, aucune erreur
+  visible) : `get_recording_source()` utilisait le mode FLV par défaut de
+  reolink-aio, qui construit une URL vers un service RTMP interne (port
+  1935) que la caméra referme immédiatement après le handshake TLS.
+  Diagnostic : ffmpeg ET curl échouaient tous deux sur cette URL, zéro
+  octet reçu (`Error in the pull function` / `unexpected eof while
+  reading`) — ce n'était donc pas un problème de remux ni de navigateur.
+  Corrigé en passant à `VodRequestType.DOWNLOAD` (URL
+  `/cgi-bin/api.cgi?cmd=Download` authentifiée par token), qui sert le MP4
+  réel. Le token expire en quelques secondes : l'URL est désormais résolue
+  juste avant le lancement de ffmpeg, jamais mise en cache ni exposée.
+- **Pourcentage de stockage inversé** : `hdd_storage()` de reolink-aio
+  renvoie le pourcentage **utilisé** (sa docstring le dit, calcul
+  `100 × (1 − libre/total)`), mais la v3.5 faisait `100 − valeur` en le
+  prenant pour de l'espace libre — une carte pleine à 99 % s'affichait à
+  1 % d'usage. `get_storage()` remonte maintenant `used_percent` +
+  `total_bytes` + `free_bytes` (structure unifiée sur les 3 drivers
+  constructeur) au lieu d'un pourcentage ambigu, et l'UI affiche la même
+  chose que l'application constructeur (« 116.89 Go / 117.74 Go — 99 %
+  utilisé » + barre de progression), vérifié côte à côte.
+
+### Notes
+- **Caméras Hikvision : le port ONVIF est 80, pas 8000.** Sur les modèles
+  testés (DS-2CD2086G2-I), le port 8000 sert le SDK propriétaire Hikvision
+  et coupe la connexion ONVIF (`Connection reset by peer`) — ce qui
+  ressemble à tort à un problème d'identifiants. Voir aussi les deux
+  prérequis caméra documentés en v3.6.0 (horloge à l'heure, compte ONVIF
+  dédié, protocole ONVIF activé).
+
 ## [v3.7.0-carte-sd-overlay-plaques] — 2026-08 — Carte SD, overlay contrôles, plaques depuis crop
 
 ### Added
