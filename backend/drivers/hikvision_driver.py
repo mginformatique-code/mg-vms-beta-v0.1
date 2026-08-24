@@ -45,6 +45,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import quote as _urlquote
 from xml.etree import ElementTree as ET
 
 import httpx
@@ -354,12 +355,22 @@ class HikvisionDriver(ONVIFDriver):
 
     async def get_recording_source(self, file_name: str) -> str:
         # Le "file_name" retourné par search_recordings EST déjà l'URI RTSP
-        # de lecture (playbackURI) — pas de résolution supplémentaire à faire.
+        # de lecture (playbackURI) — pas de résolution supplémentaire à faire,
+        # sauf l'injection des identifiants (ISAPI ne les inclut jamais dans
+        # l'URI générée ; le flux RTSP de lecture exige le même Digest Auth
+        # que le live — même convention que streaming.py::_build_rtsp_url).
+        # ⚠ Valeur RÉSERVÉE AU SERVEUR (ffmpeg côté backend) — ne jamais
+        # renvoyer cette URL telle quelle à un client HTTP/frontend.
         if not re.match(r"^rtsps?://", file_name or ""):
             raise CameraDriverError(
                 "Hikvision : identifiant d'enregistrement invalide (attendu une playbackURI RTSP "
                 "issue de search_recordings)", code="device_error")
-        return file_name
+        if "@" in file_name.split("://", 1)[1].split("/", 1)[0]:
+            return file_name  # déjà pourvue de credentials
+        scheme, rest = file_name.split("://", 1)
+        u = _urlquote(self.username, safe="")
+        p = _urlquote(self.password, safe="")
+        return f"{scheme}://{u}:{p}@{rest}"
 
 
 register_driver("hikvision", HikvisionDriver)

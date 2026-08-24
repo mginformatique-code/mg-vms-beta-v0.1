@@ -197,7 +197,8 @@ export default function Anpr() {
       </Dialog>
 
       {viewerIdx >= 0 && (
-        <EventViewer items={viewerItems} index={viewerIdx} onIndex={(i) => setViewerId(viewerItems[i]?.id ?? null)} onClose={() => setViewerId(null)} kind="plate" />
+        <EventViewer items={viewerItems} index={viewerIdx} onIndex={(i) => setViewerId(viewerItems[i]?.id ?? null)} onClose={() => setViewerId(null)} kind="plate"
+                     onPlateUpdated={(plateId, newPlate) => setPlates((prev) => prev.map((p) => (p.id === plateId ? { ...p, plate: newPlate } : p)))} />
       )}
     </div>
   );

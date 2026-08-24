@@ -4,7 +4,7 @@ import api from "@/lib/api";
 import {
   X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCcw,
   Download, Copy, PlayCircle, Camera as CamIcon, MapPin, Clock, Puzzle, ShieldAlert,
-  ScanSearch, Loader2, History, GanttChartSquare, ThumbsUp, ThumbsDown,
+  ScanSearch, Loader2, History, GanttChartSquare, ThumbsUp, ThumbsDown, Pencil, Check,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -19,8 +19,11 @@ import { toast } from "sonner";
  *   - onClose(): fermeture
  *   - onIndex(next): navigation
  *   - kind: "event" | "plate"  → pour titrage/actions
+ *   - onPlateUpdated(plateId, newPlate): appelé après correction manuelle
+ *     du numéro d'une plaque (kind="plate") — laisse le parent rafraîchir
+ *     sa liste sans recharger toute la page.
  */
-export default function EventViewer({ items, index, onClose, onIndex, onOpenPlate, kind = "event" }) {
+export default function EventViewer({ items, index, onClose, onIndex, onOpenPlate, onPlateUpdated, kind = "event" }) {
   const item = items[index];
   const navigate = useNavigate();
   const [scale, setScale] = useState(1);
@@ -34,6 +37,12 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
   // produisait des faux positifs silencieux avec les moteurs OCR sans
   // localisation de plaque dédiée.
   const [ocrResult, setOcrResult] = useState(null);
+  // v3.6 · Correction manuelle du numéro de plaque (erreur OCR) — édition
+  // en place du champ `plate` de la ligne db.plates courante (kind="plate").
+  const [plateOverride, setPlateOverride] = useState(null);
+  const [editingPlate, setEditingPlate] = useState(false);
+  const [plateDraft, setPlateDraft] = useState("");
+  const [savingPlate, setSavingPlate] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selectRect, setSelectRect] = useState(null); // {x, y, w, h} en px, relatif au container
   const [selectStart, setSelectStart] = useState(null);
@@ -55,7 +64,7 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
   // zoom/l'OCR de l'ANCIEN item affichés à côté des métadonnées du NOUVEAU.
   // Dépendre de `item?.id` (l'identité réelle affichée) au lieu de `index`
   // corrige ce désync, quel que soit le comportement du parent.
-  useEffect(() => { setScale(1); setPan({ x: 0, y: 0 }); setRecInfo(null); setShowVideo(false); setOcrResult(null); setFeedbackSent(item?.feedback || null); setSelectMode(false); setSelectRect(null); setSelectStart(null); }, [item?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setScale(1); setPan({ x: 0, y: 0 }); setRecInfo(null); setShowVideo(false); setOcrResult(null); setFeedbackSent(item?.feedback || null); setSelectMode(false); setSelectRect(null); setSelectStart(null); setPlateOverride(null); setEditingPlate(false); }, [item?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sécurité : dès qu'une plaque est trouvée (par n'importe quel chemin), on
   // sort du mode sélection pour fermer proprement l'overlay de dessin.
@@ -161,6 +170,21 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
     } catch (e) {
       toast.error(e.response?.data?.detail || "Analyse impossible");
     } finally { setZoneLoading(false); }
+  };
+
+  const savePlateEdit = async () => {
+    const value = plateDraft.trim().toUpperCase();
+    if (!value) { toast.error("Numéro de plaque requis"); return; }
+    setSavingPlate(true);
+    try {
+      const { data } = await api.put(`/plates/${item.id}`, { plate: value });
+      setPlateOverride(data.plate);
+      setEditingPlate(false);
+      toast.success(`Plaque corrigée : ${data.plate}`);
+      onPlateUpdated?.(item.id, data.plate);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Correction impossible");
+    } finally { setSavingPlate(false); }
   };
 
   const download = () => {
@@ -350,9 +374,36 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
       <aside className="w-80 bg-[#0a0a0a] border-l border-white/10 text-white overflow-y-auto" data-testid="viewer-panel">
         <div className="p-4 border-b border-white/10">
           <div className="text-[10px] uppercase tracking-wider text-white/50 mb-1">{kind === "plate" ? "Plaque" : "Événement"}</div>
-          <div className="text-lg font-head font-bold" data-testid="viewer-title">
-            {item.plate ? item.plate : (item.type || item.label || "Détection")}
-          </div>
+          {kind === "plate" && item.id && editingPlate ? (
+            <div className="flex items-center gap-1.5" data-testid="viewer-plate-edit">
+              <input
+                autoFocus
+                value={plateDraft}
+                onChange={(e) => setPlateDraft(e.target.value.toUpperCase())}
+                onKeyDown={(e) => { if (e.key === "Enter") savePlateEdit(); if (e.key === "Escape") setEditingPlate(false); }}
+                className="flex-1 min-w-0 px-2 py-1 bg-black border border-[#00E676] text-lg font-head font-bold mono uppercase tracking-widest outline-none"
+                data-testid="viewer-plate-edit-input"
+              />
+              <button onClick={savePlateEdit} disabled={savingPlate} data-testid="viewer-plate-edit-save"
+                      className="p-1.5 bg-[#00E676] text-black hover:bg-[#00c766] disabled:opacity-50 shrink-0">
+                {savingPlate ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+              </button>
+            </div>
+          ) : (
+            <div className="text-lg font-head font-bold flex items-center gap-2" data-testid="viewer-title">
+              <span>{plateOverride || item.plate || (item.type || item.label || "Détection")}</span>
+              {kind === "plate" && item.id && (
+                <button
+                  onClick={() => { setPlateDraft(plateOverride || item.plate || ""); setEditingPlate(true); }}
+                  title="Corriger le numéro de plaque"
+                  data-testid="viewer-plate-edit-btn"
+                  className="p-1 text-white/40 hover:text-white shrink-0"
+                >
+                  <Pencil size={14} />
+                </button>
+              )}
+            </div>
+          )}
           {item.confidence != null && (
             <div className="text-[11px] mono mt-1 text-[#00E676]">Confiance {(item.confidence * 100).toFixed(0)}%</div>
           )}
@@ -478,13 +529,13 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
             <PlayCircle size={16} /> {showVideo ? "Vidéo en cours" : "Lire la vidéo autour de cet événement"}
           </button>
           {/* v1.0-rc4 · Fusion : historique complet de la plaque / du véhicule */}
-          {(item.plate || ocrResult?.plate) && onOpenPlate && (
+          {(plateOverride || item.plate || ocrResult?.plate) && onOpenPlate && (
             <button
-              onClick={() => onOpenPlate(item.plate || ocrResult.plate)}
+              onClick={() => onOpenPlate(plateOverride || item.plate || ocrResult.plate)}
               data-testid="viewer-plate-history-btn"
               className="w-full flex items-center justify-center gap-2 px-3 py-2 border border-[#00E676] text-[#00E676] hover:bg-[#00E676]/10"
             >
-              <History size={15} /> Historique du véhicule ({item.plate || ocrResult.plate})
+              <History size={15} /> Historique du véhicule ({plateOverride || item.plate || ocrResult.plate})
             </button>
           )}
           <button

@@ -1,95 +1,108 @@
 /**
  * CameraControlOverlay — Contrôles terrain en overlay sur le lecteur live.
  *
- * 5 actions rapides :
- *   - Projecteur (relais ONVIF réel, token découvert)  · POST /api/cameras/{id}/relay/{token}/{on|off}
- *   - IR (filtre IR jour/nuit, endpoint dédié)          · POST /api/cameras/{id}/ir/{on|off}
- *   - Sirène (relais ONVIF réel, token découvert)       · POST /api/cameras/{id}/relay/{token}/{on|off}
- *   - TTS (parler)                                       · POST /api/cameras/{id}/audio/tts { text }
- *   - Reboot                                             · POST /api/cameras/{id}/reboot (confirm requis)
+ * v3.6 · Réécrit pour utiliser le device layer (`useDeviceCapabilities` +
+ * `/api/devices/{id}/light|siren|ir`) au lieu de l'ancienne heuristique de
+ * relais ONVIF génériques (`GET /cameras/{id}/relays` puis association
+ * positionnelle relais[0]→projecteur / relais[1]→sirène). Cette heuristique
+ * était fragile par construction : "ONVIF ne dit pas à quoi sert un relais,
+ * juste qu'il existe" (commentaire d'origine) — elle pouvait piloter la
+ * mauvaise sortie selon l'ordre de déclaration côté caméra, et n'affichait
+ * un bouton QUE si un relais générique existait, jamais en fonction de la
+ * capacité réelle (lumière/sirène) de la caméra.
  *
- * v3.1.4 · Les tokens ONVIF de relais sont des identifiants propres à
- * chaque caméra (ex. "RelayOutputToken_0"), jamais des noms génériques
- * comme "spotlight"/"siren" — l'appel échouait systématiquement en
- * envoyant ces libellés comme token. On découvre maintenant les VRAIS
- * relais via GET /cameras/{id}/relays et on associe les 2 premiers
- * trouvés aux boutons projecteur/sirène (heuristique : ONVIF ne dit pas
- * à quoi sert un relais, juste qu'il existe). Boutons désactivés si la
- * caméra n'expose aucun relais. L'IR bascule maintenant le vrai endpoint
- * dédié (filtre IR-cut) au lieu d'un relais fictif.
+ * Le device layer résout ce problème pour de bon : chaque driver
+ * constructeur (Reolink/Hikvision/Dahua/ONVIF générique) sait exactement
+ * quelle capacité est réellement câblée sur le modèle (cf.
+ * `backend/drivers/*.py`), donc les boutons ci-dessous n'apparaissent que
+ * si `caps.spotlight`/`caps.white_light`/`caps.siren`/`caps.ir_control`
+ * sont vrais pour CETTE caméra précise — peu importe la marque.
  *
- * S'affiche en overlay bottom-left du player, discret par défaut, apparaît au hover.
+ * 4 actions rapides pilotées par capacité :
+ *   - Lumière (spotlight/white light)  · POST /api/devices/{id}/light  {enabled, mode}
+ *   - IR (jour/nuit)                    · POST /api/devices/{id}/ir     {mode}
+ *   - Sirène                            · POST /api/devices/{id}/siren {enabled}
+ *   - TTS (parler, inchangé)            · POST /api/cameras/{id}/audio/tts { text }
+ *   - Reboot (inchangé)                 · POST /api/cameras/{id}/reboot (confirm requis)
+ *
+ * `footer` (bool, def. false) : rendu en barre pleine largeur persistante
+ * (usage : CameraCenter LiveTab) au lieu du petit cluster coin bas-gauche
+ * qui n'apparaît qu'au survol (usage : mosaïque LiveView, tuiles étroites).
  */
-import React, { useState, useEffect } from "react";
-import { Lightbulb, Moon, Siren, Volume2, RefreshCw, X } from "lucide-react";
+import React, { useState } from "react";
+import { Lightbulb, Moon, Siren, Volume2, RefreshCw, X, Loader2 } from "lucide-react";
 import api from "@/lib/api";
 import { toast } from "sonner";
+import useDeviceCapabilities from "@/hooks/useDeviceCapabilities";
 
 const BTN_CLS = "w-8 h-8 bg-black/70 hover:bg-[#00E5FF] hover:text-black flex items-center justify-center text-white transition-colors relative disabled:opacity-30 disabled:hover:bg-black/70 disabled:hover:text-white disabled:cursor-not-allowed";
 
-function ActionBtn({ children, onClick, testid, title, active, disabled }) {
+function ActionBtn({ children, onClick, testid, title, active, busy }) {
   return (
-    <button data-ptz-btn disabled={disabled} onClick={(e) => { e.stopPropagation(); onClick(e); }}
+    <button data-ptz-btn disabled={busy} onClick={(e) => { e.stopPropagation(); onClick(e); }}
       className={`${BTN_CLS} ${active ? "!bg-[#00E676] text-black" : ""}`}
       data-testid={testid} title={title}>
-      {children}
+      {busy ? <Loader2 size={13} className="animate-spin" /> : children}
     </button>
   );
 }
 
-export default function CameraControlOverlay({ cam }) {
+export default function CameraControlOverlay({ cam, footer = false }) {
+  const camId = cam?.id;
+  const { caps } = useDeviceCapabilities(camId);
   const [busy, setBusy] = useState(null);
   const [ttsOpen, setTtsOpen] = useState(false);
   const [ttsText, setTtsText] = useState("");
+  // État "dernière commande envoyée" — le device layer ne remonte pas
+  // (encore) l'état matériel courant lumière/sirène en lecture, juste des
+  // commandes ; ces booléens reflètent donc ce qu'on a demandé, pas un
+  // poll live de la caméra (cf. AlarmTab/LightingTab dans CameraCenter,
+  // même limite documentée).
+  const [lightOn, setLightOn] = useState(false);
+  const [sirenOn, setSirenOn] = useState(false);
   const [irOn, setIrOn] = useState(false);
-  // Relais réellement présents sur la caméra (tokens ONVIF opaques) — [] tant
-  // qu'on n'a pas encore interrogé/si la caméra n'en expose aucun.
-  const [availableRelays, setAvailableRelays] = useState(null); // null = pas encore chargé
-  const [relayState, setRelayState] = useState({}); // token -> bool (optimistic)
-
-  const camId = cam?.id;
-
-  useEffect(() => {
-    if (!camId) return;
-    let alive = true;
-    api.get(`/cameras/${camId}/relays`)
-      .then((r) => { if (alive) setAvailableRelays(r.data?.relays || []); })
-      .catch(() => { if (alive) setAvailableRelays([]); });
-    return () => { alive = false; };
-  }, [camId]);
 
   if (!camId) return null;
 
-  const spotlightToken = availableRelays?.[0]?.token;
-  const sirenToken = availableRelays?.[1]?.token;
+  const hasLight = !!(caps?.spotlight || caps?.white_light);
+  const hasSiren = !!caps?.siren;
+  const hasIr = !!caps?.ir_control;
+  const hasAnyDeviceControl = hasLight || hasSiren || hasIr;
 
-  const toggleRelay = async (token, label) => {
-    if (!token) return;
-    const next = !relayState[token];
-    setBusy(token);
+  const toggleLight = async () => {
+    const next = !lightOn;
+    setBusy("light");
     try {
-      await api.post(`/cameras/${camId}/relay/${encodeURIComponent(token)}/${next ? "on" : "off"}`);
-      setRelayState((r) => ({ ...r, [token]: next }));
-      toast.success(`${label} ${next ? "activé" : "désactivé"}`);
+      await api.post(`/devices/${camId}/light`, { enabled: next, mode: "on" });
+      setLightOn(next);
+      toast.success(`Lumière ${next ? "activée" : "désactivée"}`);
     } catch (e) {
-      toast.error(`Échec ${label} : ${e?.response?.data?.detail || "erreur"}`);
-    } finally {
-      setBusy(null);
-    }
+      toast.error(`Échec lumière : ${e?.response?.data?.detail?.message || e?.response?.data?.detail || "erreur"}`);
+    } finally { setBusy(null); }
   };
 
   const toggleIr = async () => {
     const next = !irOn;
     setBusy("ir");
     try {
-      await api.post(`/cameras/${camId}/ir/${next ? "on" : "off"}`);
+      await api.post(`/devices/${camId}/ir`, { mode: next ? "on" : "off" });
       setIrOn(next);
       toast.success(`IR ${next ? "activé" : "désactivé"}`);
     } catch (e) {
-      toast.error(`Échec IR : ${e?.response?.data?.detail || "erreur"}`);
-    } finally {
-      setBusy(null);
-    }
+      toast.error(`Échec IR : ${e?.response?.data?.detail?.message || e?.response?.data?.detail || "erreur"}`);
+    } finally { setBusy(null); }
+  };
+
+  const toggleSiren = async () => {
+    const next = !sirenOn;
+    setBusy("siren");
+    try {
+      await api.post(`/devices/${camId}/siren`, { enabled: next });
+      setSirenOn(next);
+      toast.success(`Sirène ${next ? "activée" : "désactivée"}`);
+    } catch (e) {
+      toast.error(`Échec sirène : ${e?.response?.data?.detail?.message || e?.response?.data?.detail || "erreur"}`);
+    } finally { setBusy(null); }
   };
 
   const sendTts = async () => {
@@ -120,61 +133,94 @@ export default function CameraControlOverlay({ cam }) {
     }
   };
 
-  return (
-    <div className="absolute bottom-2 left-2 opacity-70 hover:opacity-100 transition-opacity"
-         data-testid={`camera-controls-${camId}`}>
-      <div className="flex gap-0.5 bg-black/50 p-0.5 backdrop-blur-sm">
-        <ActionBtn onClick={() => toggleRelay(spotlightToken, "Projecteur")} testid="ctrl-spotlight"
-          disabled={!spotlightToken}
-          title={spotlightToken ? `Projecteur (relais ${spotlightToken}) ${relayState[spotlightToken] ? "ON" : "OFF"}` : "Aucun relais détecté sur cette caméra"}
-          active={relayState[spotlightToken]}>
+  const buttons = (
+    <>
+      {hasLight && (
+        <ActionBtn onClick={toggleLight} testid="ctrl-light" busy={busy === "light"}
+          title={`Lumière ${lightOn ? "ON" : "OFF"}`} active={lightOn}>
           <Lightbulb size={14} />
         </ActionBtn>
-        <ActionBtn onClick={toggleIr} testid="ctrl-ir"
+      )}
+      {hasIr && (
+        <ActionBtn onClick={toggleIr} testid="ctrl-ir" busy={busy === "ir"}
           title={`IR (filtre jour/nuit) ${irOn ? "ON" : "OFF"}`} active={irOn}>
           <Moon size={14} />
         </ActionBtn>
-        <ActionBtn onClick={() => toggleRelay(sirenToken, "Sirène")} testid="ctrl-siren"
-          disabled={!sirenToken}
-          title={sirenToken ? `Sirène (relais ${sirenToken}) ${relayState[sirenToken] ? "ON" : "OFF"}` : "Un seul relais détecté sur cette caméra (déjà utilisé pour le projecteur)"}
-          active={relayState[sirenToken]}>
+      )}
+      {hasSiren && (
+        <ActionBtn onClick={toggleSiren} testid="ctrl-siren" busy={busy === "siren"}
+          title={`Sirène / alarme ${sirenOn ? "ON" : "OFF"}`} active={sirenOn}>
           <Siren size={14} />
         </ActionBtn>
-        <ActionBtn onClick={() => setTtsOpen(true)} testid="ctrl-tts" title="TTS (parler)">
-          <Volume2 size={14} />
-        </ActionBtn>
-        <ActionBtn onClick={reboot} testid="ctrl-reboot" title="Redémarrer la caméra">
-          <RefreshCw size={14} className={busy === "reboot" ? "animate-spin" : ""} />
-        </ActionBtn>
-      </div>
+      )}
+      <ActionBtn onClick={() => setTtsOpen(true)} testid="ctrl-tts" title="TTS (parler)">
+        <Volume2 size={14} />
+      </ActionBtn>
+      <ActionBtn onClick={reboot} testid="ctrl-reboot" title="Redémarrer la caméra" busy={busy === "reboot"}>
+        <RefreshCw size={14} />
+      </ActionBtn>
+    </>
+  );
 
-      {/* Modal TTS (compact, inline, ne bloque pas le player) */}
+  if (footer) {
+    // Barre pleine largeur, persistante — pied de la visualisation
+    // (usage : CameraCenter LiveTab, plus de place qu'une tuile de mosaïque).
+    return (
+      <div className="absolute bottom-0 inset-x-0 flex items-center justify-between gap-2 px-2 py-1.5 bg-black/75 backdrop-blur-sm"
+           data-testid={`camera-controls-footer-${camId}`}>
+        <div className="flex items-center gap-3 text-[10px] uppercase tracking-wider text-white/50">
+          {!hasAnyDeviceControl && !caps && "Chargement des capacités…"}
+          {!hasAnyDeviceControl && caps && "Aucune fonction relais/lumière/sirène sur cette caméra"}
+        </div>
+        <div className="flex gap-0.5">{buttons}</div>
+        {ttsOpen && (
+          <div className="absolute bottom-11 right-2 bg-black/90 border border-[#00E5FF]/40 p-2 w-64 backdrop-blur-sm"
+               onClick={(e) => e.stopPropagation()} data-testid="tts-panel">
+            <TtsPanel ttsText={ttsText} setTtsText={setTtsText} onClose={() => setTtsOpen(false)} onSend={sendTts} busy={busy === "tts"} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="absolute bottom-2 left-2 opacity-70 hover:opacity-100 transition-opacity"
+         data-testid={`camera-controls-${camId}`}>
+      <div className="flex gap-0.5 bg-black/50 p-0.5 backdrop-blur-sm">{buttons}</div>
       {ttsOpen && (
         <div className="absolute bottom-9 left-0 bg-black/90 border border-[#00E5FF]/40 p-2 w-64 backdrop-blur-sm"
              onClick={(e) => e.stopPropagation()} data-testid="tts-panel">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[10px] uppercase text-[#00E5FF]">Message vocal</span>
-            <button onClick={() => setTtsOpen(false)} className="text-white/50 hover:text-white">
-              <X size={12} />
-            </button>
-          </div>
-          <textarea value={ttsText} onChange={(e) => setTtsText(e.target.value)}
-            placeholder="Tapez le message à diffuser…"
-            className="w-full h-16 text-xs bg-black/50 border border-white/20 p-1.5 text-white resize-none"
-            data-testid="tts-input" autoFocus />
-          <div className="flex justify-end gap-1 mt-1.5">
-            <button onClick={() => setTtsOpen(false)}
-              className="text-[10px] px-2 py-1 border border-white/20 text-white/70 hover:bg-white/10">
-              Annuler
-            </button>
-            <button onClick={sendTts} disabled={!ttsText.trim() || busy === "tts"}
-              className="text-[10px] px-2 py-1 bg-[#00E5FF] text-black hover:opacity-90 disabled:opacity-40"
-              data-testid="tts-send">
-              {busy === "tts" ? "Envoi…" : "Diffuser"}
-            </button>
-          </div>
+          <TtsPanel ttsText={ttsText} setTtsText={setTtsText} onClose={() => setTtsOpen(false)} onSend={sendTts} busy={busy === "tts"} />
         </div>
       )}
     </div>
+  );
+}
+
+function TtsPanel({ ttsText, setTtsText, onClose, onSend, busy }) {
+  return (
+    <>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[10px] uppercase text-[#00E5FF]">Message vocal</span>
+        <button onClick={onClose} className="text-white/50 hover:text-white">
+          <X size={12} />
+        </button>
+      </div>
+      <textarea value={ttsText} onChange={(e) => setTtsText(e.target.value)}
+        placeholder="Tapez le message à diffuser…"
+        className="w-full h-16 text-xs bg-black/50 border border-white/20 p-1.5 text-white resize-none"
+        data-testid="tts-input" autoFocus />
+      <div className="flex justify-end gap-1 mt-1.5">
+        <button onClick={onClose}
+          className="text-[10px] px-2 py-1 border border-white/20 text-white/70 hover:bg-white/10">
+          Annuler
+        </button>
+        <button onClick={onSend} disabled={!ttsText.trim() || busy}
+          className="text-[10px] px-2 py-1 bg-[#00E5FF] text-black hover:opacity-90 disabled:opacity-40"
+          data-testid="tts-send">
+          {busy ? "Envoi…" : "Diffuser"}
+        </button>
+      </div>
+    </>
   );
 }

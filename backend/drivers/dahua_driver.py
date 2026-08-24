@@ -27,9 +27,9 @@ Endpoints utilisés :
 from __future__ import annotations
 
 import logging
-import re
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import quote as _urlquote
 
 import httpx
 
@@ -316,8 +316,14 @@ class DahuaDriver(ONVIFDriver):
         # Téléchargement direct du fichier .dav via RPC_Loadfile — convention
         # CGI Dahua standard (file_name = FilePath renvoyé par mediaFileFind,
         # ex. "/mnt/sd/2026-08-24/001/dav/00/00.00.00-01.00.00[M][0@0][0].dav").
+        # Endpoint protégé par Digest Auth (comme tout /cgi-bin/) — credentials
+        # injectés dans l'URL (même convention que Hikvision/streaming.py) car
+        # cette valeur est consommée UNIQUEMENT côté serveur (ffmpeg), jamais
+        # renvoyée telle quelle à un client HTTP/frontend.
         path = file_name if file_name.startswith("/") else f"/{file_name}"
-        return f"http://{self.host}/cgi-bin/RPC_Loadfile{path}"
+        u = _urlquote(self.username, safe="")
+        p = _urlquote(self.password, safe="")
+        return f"http://{u}:{p}@{self.host}/cgi-bin/RPC_Loadfile{path}"
 
 
 register_driver("dahua", DahuaDriver)

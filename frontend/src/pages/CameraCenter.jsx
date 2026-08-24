@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import api from "@/lib/api";
 import useDeviceCapabilities from "@/hooks/useDeviceCapabilities";
 import LivePlayer from "@/components/video/LivePlayer";
+import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import {
   Camera, Wifi, Video, Layers, Cpu, Volume2, Sun, Bell, Move3d, Wrench,
   ScanLine, RefreshCw, AlertCircle, CircleCheck, ChevronLeft, ChevronRight,
@@ -41,6 +42,7 @@ const TABS = [
   { id: "audio",        label: "Audio",        icon: Volume2 },
   { id: "lighting",     label: "Lighting",     icon: Sun },
   { id: "alarm",        label: "Alarm",        icon: Bell },
+  { id: "sdcard",       label: "Carte SD",     icon: HardDrive },
   { id: "ptz",          label: "PTZ",          icon: Move3d },
   { id: "maintenance",  label: "Maintenance",  icon: Wrench },
 ];
@@ -207,6 +209,7 @@ export default function CameraCenter() {
         <TabsContent value="audio"><AudioTab cameraId={cameraId} caps={caps} /></TabsContent>
         <TabsContent value="lighting"><LightingTab cameraId={cameraId} caps={caps} /></TabsContent>
         <TabsContent value="alarm"><AlarmTab cameraId={cameraId} caps={caps} /></TabsContent>
+        <TabsContent value="sdcard"><SdCardTab cameraId={cameraId} caps={caps} /></TabsContent>
         <TabsContent value="ptz"><PTZTab cameraId={cameraId} caps={caps} /></TabsContent>
         <TabsContent value="maintenance"><MaintenanceTab cameraId={cameraId} /></TabsContent>
       </Tabs>
@@ -345,10 +348,16 @@ function LiveTab({ cameraId }) {
         {vs?.viewers != null && <span>Viewers : <b>{vs.viewers}</b></span>}
         {vs?.last_error && <span className="text-[#FF3333] truncate max-w-[280px]" title={vs.last_error} data-testid="pipeline-status-error">{vs.last_error}</span>}
       </div>
-      <div className="aspect-video bg-black">
+      <div className="relative aspect-video bg-black">
         {cam && (
-          <LivePlayer key={`${cameraId}-${reloadKey}`} camera={cam} hd={true}
-                      className="w-full h-full" dataTestId="center-player" />
+          <>
+            <LivePlayer key={`${cameraId}-${reloadKey}`} camera={cam} hd={true}
+                        className="w-full h-full" dataTestId="center-player" />
+            {/* v3.6 · Overlay pied de visualisation — lumière/IR/sirène pilotées
+                par les capacités réelles de la caméra (device layer), peu
+                importe le constructeur. Voir CameraControlOverlay.jsx. */}
+            <CameraControlOverlay cam={cam} footer />
+          </>
         )}
       </div>
     </Card>
@@ -620,6 +629,118 @@ function AlarmTab({ cameraId, caps }) {
         <Button onClick={trigger} data-testid="siren-trigger">Déclencher</Button>
         <Button variant="outline" onClick={stop} data-testid="siren-stop">Arrêter</Button>
       </div>
+    </Card>
+  );
+}
+
+// ─── Carte SD (v3.6) — vendor-agnostic, pilotée par caps.sdcard ───
+// Lecture via /api/devices/{id}/recordings/stream (proxy ffmpeg côté
+// backend) — jamais d'URL caméra brute (avec identifiants) exposée ici.
+function SdCardTab({ cameraId, caps }) {
+  const [storage, setStorage] = useState(null);
+  const [recordings, setRecordings] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [playing, setPlaying] = useState(null);
+  const toLocalInput = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const [start, setStart] = useState(toLocalInput(new Date(Date.now() - 24 * 3600 * 1000)));
+  const [end, setEnd] = useState(toLocalInput(new Date()));
+
+  useEffect(() => {
+    if (!caps?.sdcard) return;
+    let alive = true;
+    api.get(`/devices/${cameraId}/storage`)
+       .then((r) => { if (alive) setStorage(r.data?.storage || []); })
+       .catch(() => { if (alive) setStorage([]); });
+    return () => { alive = false; };
+  }, [cameraId, caps?.sdcard]);
+
+  if (!caps?.sdcard) return <NotSupported what="Carte SD / stockage local" />;
+
+  const search = async () => {
+    setLoading(true); setRecordings(null); setPlaying(null);
+    try {
+      const { data } = await api.get(`/devices/${cameraId}/recordings`, {
+        params: { start: new Date(start).toISOString(), end: new Date(end).toISOString() },
+      });
+      setRecordings(data.recordings || []);
+      if (!(data.recordings || []).length) toast.info("Aucun enregistrement sur cette période");
+    } catch (e) {
+      toast.error(e.response?.data?.detail?.message || "Recherche impossible");
+    } finally { setLoading(false); }
+  };
+
+  const playUrl = (fileName) => {
+    const token = localStorage.getItem("mg_token");
+    return `${process.env.REACT_APP_BACKEND_URL}/api/devices/${cameraId}/recordings/stream`
+      + `?file=${encodeURIComponent(fileName)}&token=${encodeURIComponent(token || "")}`;
+  };
+
+  return (
+    <Card className="p-4 space-y-3" data-testid="cam-sdcard">
+      {storage && storage.length > 0 && (
+        <div className="flex flex-wrap gap-2 text-xs" data-testid="sdcard-storage">
+          {storage.map((s, i) => (
+            <div key={i} className="border border-border px-2 py-1">
+              <span className="text-muted-foreground mr-1.5">{s.type || "SD"} #{s.index}</span>
+              <span className={s.available ? "text-[#00E676]" : "text-[#FF3333]"}>
+                {s.available ? "OK" : "absente/erreur"}
+              </span>
+              {s.available && s.free_percent != null && (
+                <span className="ml-2 font-mono">{s.free_percent}% libre</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {storage && storage.length === 0 && (
+        <div className="text-xs text-muted-foreground">Aucun support de stockage détecté sur cette caméra.</div>
+      )}
+
+      <div className="flex flex-wrap items-end gap-2">
+        <div>
+          <Label>Depuis</Label>
+          <Input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} data-testid="sdcard-start" />
+        </div>
+        <div>
+          <Label>Jusqu&apos;à</Label>
+          <Input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} data-testid="sdcard-end" />
+        </div>
+        <Button onClick={search} disabled={loading} data-testid="sdcard-search">
+          {loading ? "Recherche…" : "Rechercher"}
+        </Button>
+      </div>
+
+      {playing && (
+        <div className="aspect-video bg-black">
+          <video key={playing} src={playUrl(playing)} controls autoPlay
+                 className="w-full h-full" data-testid="sdcard-player" />
+        </div>
+      )}
+
+      {recordings && recordings.length > 0 && (
+        <div className="border border-border divide-y divide-border max-h-96 overflow-y-auto" data-testid="sdcard-list">
+          {recordings.map((r, i) => (
+            <div key={i}
+                 className="flex items-center justify-between px-3 py-2 text-xs hover:bg-secondary/50 cursor-pointer"
+                 onClick={() => setPlaying(r.file_name)} data-testid="sdcard-row">
+              <div>
+                <div className="font-mono">{r.start_time ? new Date(r.start_time).toLocaleString("fr-FR") : "—"}</div>
+                {r.end_time && (
+                  <div className="text-muted-foreground">→ {new Date(r.end_time).toLocaleTimeString("fr-FR")}</div>
+                )}
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                {r.duration_s != null && <span>{Math.round(r.duration_s)}s</span>}
+                {r.size_bytes != null && <span>{(r.size_bytes / 1024 / 1024).toFixed(1)} Mo</span>}
+                <Button size="sm" variant="outline" data-testid="sdcard-play-btn"
+                        onClick={(e) => { e.stopPropagation(); setPlaying(r.file_name); }}>
+                  Lire
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </Card>
   );
 }

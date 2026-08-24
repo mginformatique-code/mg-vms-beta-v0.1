@@ -758,7 +758,8 @@ async def _dispatch_all_plate_engines(numpy_bgr, camera_id: str, cam: Optional[d
 
 
 @api_router.post("/events/{event_id}/reanalyze")
-async def reanalyze_event(event_id: str, user: dict = Depends(require_permission("read_plates")),
+async def reanalyze_event(event_id: str, background: BackgroundTasks,
+                           user: dict = Depends(require_permission("read_plates")),
                            body: Optional[ReanalyzeRequest] = None):
     """v3.1.8 · Relance l'OCR sur une zone (tracée par l'utilisateur) de
     l'image thumbnail d'un événement — TOUS les moteurs PlateRecognizer
@@ -805,6 +806,8 @@ async def reanalyze_event(event_id: str, user: dict = Depends(require_permission
         y2 = max(y1 + 1, min(h, int(body.bbox[3] * h)))
         crop = img[y1:y2, x1:x2]
         candidates = await _dispatch_all_plate_engines(crop, ev.get("camera_id") or "__upload__", cam)
+        ok_jpg, crop_buf = cv2.imencode(".jpg", crop)
+        plate_crop_b64 = ("data:image/jpeg;base64," + base64.b64encode(crop_buf).decode("ascii")) if ok_jpg else ""
     except Exception as e:
         raise HTTPException(500, f"OCR indisponible: {e}")
 
@@ -826,13 +829,76 @@ async def reanalyze_event(event_id: str, user: dict = Depends(require_permission
         update["confidence"] = conf
     await db.events.update_one({"id": event_id}, {"$set": update})
 
+    plate_id = None
+    if plate:
+        # v3.6 · Un crop manuel réussi doit aussi apparaître dans le menu
+        # "Plaques" (db.plates), comme toute détection automatique — avec
+        # le crop de LA PLAQUE (pas le cadre entier), et la date/heure de
+        # l'image SOURCE (ev.timestamp), pas l'instant de la ré-analyse.
+        # Sans ça, une correction manuelle réussie restait invisible hors
+        # de l'événement d'origine, introuvable/non éditable depuis la
+        # liste Plaques comme une lecture automatique.
+        wl = await db.watchlist.find_one({"plate": plate}, {"_id": 0})
+        plate_doc = {
+            "id": str(uuid.uuid4()),
+            "plate": plate,
+            "camera_id": ev.get("camera_id") or (cam or {}).get("id") or "",
+            "camera_name": ev.get("camera_name") or (cam or {}).get("name") or "",
+            "site_id": ev.get("site_id") or (cam or {}).get("site_id") or "",
+            "site_name": ev.get("site_name") or (cam or {}).get("site_name") or "",
+            "confidence": conf,
+            "vehicle_color": "", "vehicle_make": "", "vehicle_model": "",
+            "vehicle_type": "Inconnu", "country": "", "direction": "—",
+            "lat": (cam or {}).get("lat", 0), "lng": (cam or {}).get("lng", 0),
+            "list_status": wl["list_type"] if wl else "none",
+            "vehicle_crop": thumb,             # image complète de l'événement source
+            "plate_crop": plate_crop_b64,      # crop serré de la plaque (zone tracée)
+            "timestamp": ev.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+            "engine": engine,
+            "source": "manual_crop",
+            "event_id": event_id,
+        }
+        await db.plates.insert_one(dict(plate_doc))
+        plate_id = plate_doc["id"]
+        plate_doc.pop("_id", None)
+        await maybe_blacklist_alert(plate_doc, background)
+
     return {
         "ok": True,
         "plate": plate or None,
         "confidence": conf,
         "engine": engine,
+        "plate_id": plate_id,
         "message": "Aucune plaque détectée dans cette zone" if not plate else None,
     }
+
+
+class PlateEditBody(BaseModel):
+    plate: str = Field(..., min_length=1, max_length=20)
+
+
+@api_router.put("/plates/{plate_id}")
+async def edit_plate(plate_id: str, body: PlateEditBody,
+                      user: dict = Depends(require_role("technician"))):
+    """Corrige manuellement le numéro d'une plaque (erreur OCR) — utilisé
+    depuis le menu Plaques après une lecture automatique ou un crop manuel
+    (voir ``reanalyze_event`` ci-dessus)."""
+    new_plate = body.plate.upper().replace(" ", "")
+    existing = await db.plates.find_one({"id": plate_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Plaque introuvable")
+    wl = await db.watchlist.find_one({"plate": new_plate}, {"_id": 0})
+    update = {
+        "plate": new_plate,
+        "list_status": wl["list_type"] if wl else "none",
+        "edited_at": datetime.now(timezone.utc).isoformat(),
+        "edited_by": user.get("email") or user.get("id"),
+        "original_plate": existing.get("original_plate", existing.get("plate")),
+    }
+    await db.plates.update_one({"id": plate_id}, {"$set": update})
+    await log_audit(user, "plate_edited", new_plate, f"était: {existing.get('plate')}")
+    updated = await db.plates.find_one({"id": plate_id}, {"_id": 0})
+    return updated
 
 
 async def _lookup_recording_for(ev: dict, user: dict) -> dict:

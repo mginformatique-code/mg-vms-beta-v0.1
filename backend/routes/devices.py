@@ -19,7 +19,7 @@ Endpoints v0.4.6 :
   POST /api/devices/{camera_id}/ptz/preset    · {id}
   GET  /api/devices/{camera_id}/storage       · supports SD/eMMC détectés
   GET  /api/devices/{camera_id}/recordings    · enregistrements locaux [start, end]
-  GET  /api/devices/{camera_id}/recordings/{file_name}/source · URL de lecture
+  GET  /api/devices/{camera_id}/recordings/stream?file=… · proxy vidéo (ffmpeg, MP4)
   GET  /api/devices/_supported                · liste des vendors supportés
 
 Endpoints v0.5.7 (Universal Camera API — Validator / Matrix / Health) :
@@ -30,11 +30,13 @@ Endpoints v0.5.7 (Universal Camera API — Validator / Matrix / Health) :
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import AsyncGenerator, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from drivers import (
@@ -323,13 +325,59 @@ async def device_recordings(camera_id: str,
         raise _driver_error_response(e)
 
 
-@devices_router.get("/{camera_id}/recordings/{file_name}/source")
-async def device_recording_source(camera_id: str, file_name: str,
+async def _recording_stream_generator(cmd: list) -> AsyncGenerator[bytes, None]:
+    """Lit stdout ffmpeg (MP4 fragmenté) et le relaie tel quel au client.
+
+    Même pattern que ``routes/mjpeg_direct.py`` (subprocess ffmpeg, lecture
+    par chunks, arrêt propre du process quand le client se déconnecte).
+    """
+    logger.info("recording-stream: spawn ffmpeg (source masquée — contient les identifiants caméra)")
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    try:
+        while True:
+            chunk = await proc.stdout.read(65536)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        try:
+            proc.terminate()
+            await asyncio.wait_for(proc.wait(), timeout=2.0)
+        except (ProcessLookupError, asyncio.TimeoutError):
+            try: proc.kill()
+            except Exception: pass
+        logger.info("recording-stream: subprocess terminé")
+
+
+@devices_router.get("/{camera_id}/recordings/stream")
+async def device_recording_stream(camera_id: str, file: str,
                                    user: dict = Depends(require_permission("view_live"))):
-    """URL de lecture (proxy) d'un enregistrement local caméra."""
+    """Proxy vidéo (remux ffmpeg, ``-c copy`` sans transcodage) d'un
+    enregistrement carte SD — quel que soit le protocole/vendor source
+    (RTSP Digest pour Hikvision, HTTP MP4/FLV crédentialé pour Reolink,
+    HTTP Digest .dav pour Dahua). Ne renvoie JAMAIS l'URL source réelle
+    (identifiants caméra inclus) au client — ffmpeg tourne côté serveur,
+    seul le flux MP4 fragmenté (lisible directement par ``<video>``) sort.
+
+    ``file`` = identifiant renvoyé par ``GET .../recordings`` (``file_name``).
+    """
     try:
         drv = await svc.get_driver(camera_id)
-        url = await drv.get_recording_source(file_name)
-        return {"url": url}
+        src_url = await drv.get_recording_source(file)
     except CameraDriverError as e:
         raise _driver_error_response(e)
+
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error"]
+    if src_url.lower().startswith("rtsp"):
+        cmd += ["-rtsp_transport", "tcp"]
+    cmd += [
+        "-i", src_url, "-c", "copy",
+        "-f", "mp4", "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+        "pipe:1",
+    ]
+    return StreamingResponse(
+        _recording_stream_generator(cmd),
+        media_type="video/mp4",
+        headers={"Cache-Control": "no-store, no-cache", "X-Accel-Buffering": "no"},
+    )
