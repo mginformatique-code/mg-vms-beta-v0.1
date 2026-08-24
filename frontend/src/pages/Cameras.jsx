@@ -569,26 +569,19 @@ export default function Cameras() {
               </div>
             )}
 
-            {/* Transport RTSP + codec préféré */}
-            <div className="col-span-2 grid grid-cols-2 md:grid-cols-3 gap-3 border border-border p-3 bg-secondary/30">
-              <div className="md:col-span-3 text-[10px] uppercase tracking-wider text-muted-foreground">Transport & codec</div>
-              <div>
-                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Transport RTSP</label>
-                <select value={form.rtsp_transport} onChange={(e) => setForm({ ...form, rtsp_transport: e.target.value })} className="inp" data-testid="rtsp-transport">
-                  <option value="tcp">TCP (recommandé)</option>
-                  <option value="udp">UDP</option>
-                </select>
-                <p className="text-[10px] text-muted-foreground mt-0.5">TCP = plus stable, UDP = plus faible latence</p>
-              </div>
-              <div>
-                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Codec préféré</label>
-                <select value={form.preferred_codec} onChange={(e) => setForm({ ...form, preferred_codec: e.target.value })} className="inp" data-testid="preferred-codec">
-                  <option value="auto">Auto (recommandé)</option>
-                  <option value="h264">H.264 (compatibilité maximale)</option>
-                  <option value="h265">H.265 (HEVC — bande passante réduite)</option>
-                </select>
-                <p className="text-[10px] text-muted-foreground mt-0.5">Live/IA préfèrent H.264, l&apos;enregistrement peut utiliser H.265</p>
-              </div>
+            {/* v3.9.1 · Les sélecteurs « Transport RTSP » (TCP/UDP) et « Codec
+                préféré » ont été retirés : ils n'avaient plus aucun effet réel
+                sur le pipeline. Le transport est forcé en TCP partout —
+                `recorder.py` et `frame_source.py` passent `-rtsp_transport tcp`
+                en dur, et go2rtc pull ses sources via `ffmpeg:` qui impose TCP
+                également. Quant au codec, il est imposé par la caméra : le live
+                prend le sous-flux (H264, seul transportable par WebRTC vers un
+                navigateur) et l'enregistrement copie le flux natif sans le
+                réencoder (`-c copy`). Ces deux réglages ne pouvaient donc que
+                donner l'illusion d'un choix. Les valeurs par défaut (tcp/auto)
+                restent envoyées au backend, rien ne change côté API. */}
+            <div className="col-span-2 grid grid-cols-1 gap-3 border border-border p-3 bg-secondary/30">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Analyse IA</div>
               <div>
                 {/* v3.1.1 · Résolution envoyée à YOLO/ANPR uniquement — l'enregistrement
                     est toujours natif (recorder.py fait `-c copy`, jamais concerné). */}
