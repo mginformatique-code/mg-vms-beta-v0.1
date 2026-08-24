@@ -1,5 +1,5 @@
 /**
- * AppDebugPanel — Volet debug app-level MG-VMS v1.0-rc4.5
+ * AppDebugPanel — Volet debug app-level MG-VMS
  *
  * ACTIVATION : Ctrl+Shift+D (fermeture Escape ou même combo)
  * ACCÈS      : administrateurs uniquement (user.role === "admin")
@@ -46,9 +46,20 @@ export default function AppDebugPanel() {
   const [results, setResults] = useState({});
   const [running, setRunning] = useState({});
   const [netRefresh, setNetRefresh] = useState(0);
+  const [appVersion, setAppVersion] = useState(null);
   const { user, lang, theme } = useApp() || {};
   const location = useLocation();
   const params = useParams();
+
+  // v3.4 · Le numéro de version était figé en dur ("v1.0-rc4.5", périmé
+  // depuis des dizaines de versions) — récupéré dynamiquement à chaque
+  // ouverture, même source que le Centre de bienvenue (CHANGELOG.md).
+  useEffect(() => {
+    if (!open) return;
+    api.get("/welcome/changelog", { params: { limit: 1 } })
+      .then((r) => setAppVersion(r.data?.current_version || null))
+      .catch(() => setAppVersion(null));
+  }, [open]);
 
   // ─── Auto-refresh onglet Réseau (500ms tant que ouvert) ──────────
   useEffect(() => {
@@ -103,6 +114,7 @@ export default function AppDebugPanel() {
 
   const runAuthMe = () => run("auth_me", async () => (await api.get("/auth/me")).data);
   const runSystemHealth = () => run("system_health", async () => (await api.get("/system-health")).data);
+  const runLicenseStatus = () => run("license_status", async () => (await api.get("/license/status")).data);
   const runPublicStatus = () => run("public_status", async () => (await api.get("/system/public-status")).data);
   const runBackendReachable = () => run("backend_reachable", async () => {
     const r = await fetch(`${process.env.REACT_APP_BACKEND_URL || ""}/api/system/public-status`);
@@ -112,6 +124,7 @@ export default function AppDebugPanel() {
   const runAll = async () => {
     await runAuthMe();
     await runSystemHealth();
+    await runLicenseStatus();
     await runPublicStatus();
     await runBackendReachable();
   };
@@ -134,7 +147,7 @@ export default function AppDebugPanel() {
     const ctx = { user, lang, theme };
     const parts = [
       "═══════════════════════════════════════════════════════════",
-      "  MG-VMS · App Debug Report v1.0-rc4.5",
+      `  MG-VMS · App Debug Report — ${appVersion || "version inconnue"}`,
       "═══════════════════════════════════════════════════════════",
       "",
       "── SESSION ─────────────────────────────────────────",
@@ -260,7 +273,7 @@ export default function AppDebugPanel() {
     <div style={panelStyle} data-testid="app-debug-panel" role="dialog" aria-label="App Debug Panel">
       <div style={headerStyle}>
         <strong style={{ color: "#00E5FF" }}>🛠 MG-VMS App Debug</strong>
-        <span style={{ color: "#666", fontSize: "10px" }}>v1.0-rc4.5 · admin</span>
+        <span style={{ color: "#666", fontSize: "10px" }}>{appVersion || "…"} · admin</span>
         <div style={{ marginLeft: "auto", display: "flex", gap: "6px" }}>
           {tabBtn("session", "Session")}
           {tabBtn("network", "Réseau")}
@@ -302,9 +315,11 @@ export default function AppDebugPanel() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "8px" }}>
               {btn("GET /auth/me", runAuthMe, "run-auth-me", running.auth_me)}
               {btn("GET /system-health", runSystemHealth, "run-system-health", running.system_health)}
+              {btn("GET /license/status", runLicenseStatus, "run-license-status", running.license_status)}
             </div>
             {results.auth_me && <><div style={{ fontSize: "10px", color: "#888" }}>auth/me</div>{resultBlock("auth_me")}</>}
             {results.system_health && <><div style={{ fontSize: "10px", color: "#888" }}>system-health</div>{resultBlock("system_health")}</>}
+            {results.license_status && <><div style={{ fontSize: "10px", color: "#888" }}>license/status</div>{resultBlock("license_status")}</>}
           </div>
         )}
 
