@@ -2,6 +2,71 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.8.0-apercu-sous-flux] — 2026-08 — Aperçu live sur le sous-flux (fluidité)
+
+### Fixed
+- **Aperçu live saccadé et « neigeux »** (cause racine). L'aperçu
+  consommait le flux **principal** — 4K HEVC sur la Reolink de test — et le
+  transcodait en MJPEG (format sans compression inter-image : chaque image
+  est un JPEG complet), en logiciel, dans le conteneur go2rtc qui n'a pas
+  d'accès GPU. Mesuré **sans go2rtc dans la boucle** (ffmpeg seul,
+  directement sur la caméra) :
+  | Flux | Images/s reçues sur 10 s |
+  |---|---:|
+  | main 4K HEVC (3840×2160) | **6–8** (source à 20 fps) |
+  | sub H264 (896×512) | **17**, stable |
+  Le décodage 4K HEVC ne tient donc pas le temps réel sur ce serveur —
+  d'où les saccades et les artefacts (`Could not find ref with POC 0` =
+  images de référence perdues). L'aperçu utilise désormais le sous-flux ;
+  le flux principal reste intact pour l'enregistrement et l'IA.
+  Résultat mesuré, images/s réellement servies à l'aperçu :
+  | Caméra | Avant | Après |
+  |---|---:|---:|
+  | test (4K HEVC) | 6–8 | **18** |
+  | test2 | erratique | **15** |
+  | test3 (Hikvision) | **0** (« Flux injoignable ») | **25** |
+  À noter : ce n'était **pas** un problème de proxy vidéo — le test
+  ci-dessus ne passait pas par go2rtc et plafonnait déjà. Remplacer go2rtc
+  par MediaMTX n'aurait donc rien changé.
+- **Identifiants caméra corrompus à la publication vers go2rtc.** Les flux
+  étaient publiés via une URL construite à la main : le mot de passe
+  percent-encodé était décodé par go2rtc (`%23` → `#`), et ffmpeg tronquait
+  alors le mot de passe au `#` → authentification refusée. Le premier `&`
+  de l'URL RTSP coupait en plus le paramètre (perte de `&profile=…` chez
+  Hikvision). Seules les caméras dont le mot de passe ne contient aucun
+  caractère spécial échappaient au problème. Publication via `params=`
+  désormais (encodage unique, vérifié contre le go2rtc réel).
+- **WebRTC inexploitable.** Une caméra HEVC était refusée (415) ; une
+  caméra H264 partait sur le flux principal (jusqu'à 4K) que le pont Python
+  décode puis **réencode** (`_H264RelayTrack` n'est pas un relais malgré son
+  nom) — impossible à tenir en temps réel, d'où les « Délai de connexion
+  WebRTC dépassé ». Le sous-flux est désormais prioritaire : plus léger, et
+  toujours en H264 donc compatible navigateur même quand le principal est
+  en HEVC.
+
+### Added
+- `streams_detected` est persisté **dès la création** de la caméra (les
+  profils ONVIF sont déjà connus à ce moment), au lieu d'exiger un
+  `POST /discover` manuel — sans quoi une caméra fraîchement ajoutée
+  n'avait aucun sous-flux connu et retombait sur le cas coûteux.
+- Déduction du sous-flux par convention constructeur quand l'ONVIF ne le
+  liste pas : l'ONVIF des appareils multi-canaux ne décrit souvent que le
+  canal 1 (vérifié : `h264Preview_02_sub` existe bien en 896×512 alors
+  qu'il était absent de la découverte).
+
+### Notes
+- **Sécurité canal** : un appareil multi-capteurs expose `h264Preview_01_*`
+  **et** `h264Preview_02_*` — deux objectifs différents. Une première
+  version choisissait « le plus petit flux de l'appareil » et affichait donc
+  l'image du **mauvais objectif** dans le mur vidéo ; corrigé avant mise en
+  service (l'aperçu doit appartenir au même canal que le flux principal,
+  sinon on retombe sur le principal).
+- Un flux orphelin (`cam_b65c469f…`) a été trouvé en production, tirant
+  encore une session RTSP sur une caméra supprimée de la base depuis
+  longtemps — sur un appareil qui n'accepte que quelques sessions
+  simultanées. Retiré. L'échec de suppression était silencieux ; il est
+  désormais journalisé.
+
 ## [v3.7.2-sd-recherche-hd] — 2026-08 — Recherche SD réparée, HD/SD, port ONVIF automatique
 
 ### Added
