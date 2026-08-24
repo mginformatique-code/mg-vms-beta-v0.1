@@ -916,12 +916,18 @@ async def range_file_response(path: str, request: Request, media_type: str = "vi
 
     if not range_header:
         async def _stream_full():
-            async with await asyncio.to_thread(open, path, "rb") as f:
+            # NB : un fichier ouvert par open() est un objet SYNCHRONE — pas
+            # de support de "async with" (pas de __aenter__). Fermeture
+            # manuelle via to_thread, comme _stream_range juste en dessous.
+            f = await asyncio.to_thread(open, path, "rb")
+            try:
                 while True:
                     chunk = await asyncio.to_thread(f.read, _RANGE_CHUNK)
                     if not chunk:
                         break
                     yield chunk
+            finally:
+                await asyncio.to_thread(f.close)
             if background:
                 await background()
         return StreamingResponse(_stream_full(), media_type=media_type, headers={
