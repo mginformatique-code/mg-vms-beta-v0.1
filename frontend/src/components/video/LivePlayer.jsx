@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL || ""}/api`;
 const WHEP_TIMEOUT_MS = 8000;
+// Délai avant de conclure « connecté mais aucune image » (chien de garde média)
+const MEDIA_TIMEOUT_MS = 6000;
 
 function mjpegUrl(cameraId, hd) {
   const token = localStorage.getItem("mg_token") || "";
@@ -27,12 +29,14 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
     if (!camera?.id) return;
     let cancelled = false;
     let watchdog = null;
+    let mediaWatchdog = null;
     setMode("connecting");
     setErrorMsg("");
 
     const showError = (msg) => {
       if (cancelled) return;
       if (watchdog) { clearTimeout(watchdog); watchdog = null; }
+      if (mediaWatchdog) { clearTimeout(mediaWatchdog); mediaWatchdog = null; }
       if (pcRef.current) {
         try { pcRef.current.close(); } catch { /* ignore */ }
         pcRef.current = null;
@@ -60,6 +64,30 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
         if (s === "connected" || s === "completed") {
           if (watchdog) { clearTimeout(watchdog); watchdog = null; }
           setMode("webrtc");
+          // v3.9 · Chien de garde MÉDIA, en plus du chien de garde ICE.
+          // ICE « connected » ne garantit PAS qu'une image arrive : si le
+          // profil H264 négocié ne peut pas porter le flux réel (typiquement
+          // un flux principal 4K High profile négocié en Baseline 3.1, qui
+          // plafonne vers 720p), la connexion s'établit et l'écran reste
+          // NOIR, sans erreur. On vérifie donc que des images sont
+          // réellement décodées, et on bascule sinon.
+          mediaWatchdog = setTimeout(async () => {
+            if (cancelled) return;
+            let decoded = 0;
+            try {
+              const stats = await pc.getStats();
+              stats.forEach((r) => {
+                if (r.type === "inbound-rtp" && r.kind === "video") {
+                  decoded = r.framesDecoded || 0;
+                }
+              });
+            } catch { /* getStats indisponible : on ne conclut pas */ return; }
+            if (decoded === 0) {
+              showError(hd
+                ? "Flux HD non décodable par ce navigateur — repassez en SD"
+                : "Connexion établie mais aucune image reçue");
+            }
+          }, MEDIA_TIMEOUT_MS);
         } else if (s === "failed" || s === "disconnected") {
           showError("Connexion WebRTC perdue (ICE)");
         }
@@ -76,7 +104,12 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
-        const r = await fetch(`${API}/live/${camera.id}/whep`, {
+        // v3.9 · `hd` est transmis au WHEP : depuis le passage au passthrough
+        // go2rtc, le WebRTC est le chemin normal, or `hd` n'était utilisé que
+        // dans l'URL MJPEG — le bouton HD/SD du mur vidéo n'avait donc plus
+        // aucun effet. Le backend ignore hd=1 si le flux principal est en
+        // HEVC (non transportable par WebRTC vers un navigateur).
+        const r = await fetch(`${API}/live/${camera.id}/whep?hd=${hd ? 1 : 0}`, {
           method: "POST",
           headers: { "Content-Type": "application/sdp", Authorization: `Bearer ${token}` },
           body: offer.sdp,
@@ -98,13 +131,16 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
     return () => {
       cancelled = true;
       if (watchdog) clearTimeout(watchdog);
+      if (mediaWatchdog) clearTimeout(mediaWatchdog);
       if (pcRef.current) {
         try { pcRef.current.close(); } catch { /* ignore */ }
         pcRef.current = null;
       }
       if (videoRef.current) videoRef.current.srcObject = null;
     };
-  }, [camera?.id]);
+    // `hd` fait partie des dépendances : basculer HD/SD doit relancer la
+    // négociation WHEP (la qualité se choisit à la connexion, côté go2rtc).
+  }, [camera?.id, hd]);
 
   const badge = mode === "webrtc"
     ? { txt: "WEBRTC", color: "#00E5FF" }

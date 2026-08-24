@@ -55,16 +55,21 @@ async def live_stop(camera_id: str, user: dict = Depends(get_current_user)):
 
 
 @live_v3_router.post("/{camera_id}/whep")
-async def live_whep(camera_id: str, request: Request,
+async def live_whep(camera_id: str, request: Request, hd: int = 0,
                      user: dict = Depends(get_current_user)):
-    """WHEP handshake · Content-Type: application/sdp · retourne l'answer SDP."""
+    """WHEP handshake · Content-Type: application/sdp · retourne l'answer SDP.
+
+    ``hd=1`` demande le flux principal plutôt que le sous-flux (bouton HD/SD
+    du mur vidéo) — ignoré si le principal est en HEVC, non transportable par
+    WebRTC vers un navigateur.
+    """
     await _load_cam(camera_id, user)
     sdp = (await request.body()).decode("utf-8", errors="ignore")
     if "v=0" not in sdp:
         raise HTTPException(400, "SDP offer requis (Content-Type: application/sdp)")
     from webrtc_gateway import whep_offer
     try:
-        answer_sdp, session = await whep_offer(camera_id, sdp)
+        answer_sdp, session = await whep_offer(camera_id, sdp, prefer_hd=bool(hd))
     except LookupError as e:
         raise HTTPException(404, str(e))
     except ValueError as e:

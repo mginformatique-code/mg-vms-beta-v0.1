@@ -97,23 +97,38 @@ class _H264RelayTrack:
             self._queue = None
 
 
-async def _whep_via_go2rtc(camera_id: str, sdp_offer: str) -> Optional[str]:
+async def _whep_via_go2rtc(camera_id: str, sdp_offer: str,
+                            prefer_hd: bool = False,
+                            main_codec: str = "") -> Optional[str]:
     """Relaie l'offre SDP à go2rtc et renvoie sa réponse (ou None).
 
     C'est le vrai passthrough : go2rtc réémet le H264 de la caméra sans le
     toucher, le navigateur le décode en matériel. Aucune charge vidéo côté
     serveur, contrairement au pont aiortc plus bas.
 
-    On préfère la variante `_preview` (sous-flux, cf. streaming.py) : plus
-    légère, et toujours en H264 même quand le flux principal est en HEVC —
-    or WebRTC ne sait pas transporter du HEVC vers un navigateur.
+    Choix de la source :
+      - par défaut, la variante `_preview` (sous-flux) : légère, et toujours
+        en H264 même quand le flux principal est en HEVC ;
+      - `prefer_hd` (bouton HD du mur vidéo) → flux principal, MAIS
+        uniquement s'il est en H264 : WebRTC ne sait pas transporter du HEVC
+        vers un navigateur, une caméra HEVC reste donc sur le sous-flux
+        (mieux vaut une image fluide qu'un flux qui ne démarre pas).
     """
     try:
         from streaming import GO2RTC_URL, _stream_name, _stream_registered
         name = _stream_name(camera_id)
-        src = f"{name}_preview"
-        if not await _stream_registered(src):
+        codec = (main_codec or "").lower()
+        hd_possible = prefer_hd and codec in ("h264", "avc", "")
+        if hd_possible and await _stream_registered(name):
             src = name
+        else:
+            src = f"{name}_preview"
+            if not await _stream_registered(src):
+                src = name
+            if prefer_hd and not hd_possible:
+                logger.info("whep[%s]: HD demandé mais flux principal en %s — "
+                            "WebRTC ne transporte pas ce codec, on reste sur le sous-flux",
+                            camera_id, codec or "?")
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.post(f"{GO2RTC_URL}/api/webrtc", params={"src": src},
                                    content=sdp_offer,
@@ -130,17 +145,20 @@ async def _whep_via_go2rtc(camera_id: str, sdp_offer: str) -> Optional[str]:
     return None
 
 
-async def whep_offer(camera_id: str, sdp_offer: str) -> tuple[str, str]:
+async def whep_offer(camera_id: str, sdp_offer: str,
+                      prefer_hd: bool = False) -> tuple[str, str]:
     """WHEP handshake. Retourne (answer_sdp, session_id).
 
     Passthrough go2rtc en priorité (aucun transcodage), pont aiortc en repli.
+    ``prefer_hd`` = bouton HD/SD du mur vidéo.
     """
     from database import db
     cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
     if cam is None:
         raise LookupError(f"camera {camera_id} not found")
 
-    answer = await _whep_via_go2rtc(camera_id, sdp_offer)
+    answer = await _whep_via_go2rtc(camera_id, sdp_offer, prefer_hd=prefer_hd,
+                                     main_codec=str(cam.get("codec") or ""))
     if answer:
         await upsert_runtime(camera_id, status="online")
         return answer, f"whep-g2r-{uuid.uuid4().hex[:12]}"

@@ -1518,14 +1518,24 @@ async def _probe_status_once(cam: dict) -> tuple[str, str, bool]:
         if ip and await asyncio.to_thread(_tcp_check, ip, port, 3.0):
             return ("online", "", False)
         return ("offline_transient", "aucune frame récente et port RTSP injoignable (direct_rtsp)", False)
-    try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": name})
-        if r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff":
-            return ("online", "", False)
-        return ("offline_transient", f"go2rtc frame HTTP {r.status_code}", False)
-    except httpx.HTTPError as e:
-        return ("offline_transient", f"HTTP client error: {type(e).__name__}", False)
+    # v3.9 · On sonde la variante `_preview` (sous-flux H264) AVANT le flux
+    # principal. `/api/frame.jpeg` doit produire un JPEG : go2rtc n'y arrive
+    # pas depuis une source HEVC et renvoie HTTP 500 — la caméra était donc
+    # affichée « NO SIGNAL » alors que son flux fonctionnait parfaitement
+    # (constaté en prod sur la Reolink 4K HEVC : main → 500, _preview → 200).
+    # Le sous-flux est en H264 chez tous les constructeurs, donc toujours
+    # convertible en JPEG.
+    last_err = ""
+    for candidate in (f"{name}_preview", name):
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                r = await client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": candidate})
+            if r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff":
+                return ("online", "", False)
+            last_err = f"go2rtc frame HTTP {r.status_code} ({candidate})"
+        except httpx.HTTPError as e:
+            last_err = f"HTTP client error: {type(e).__name__} ({candidate})"
+    return ("offline_transient", last_err, False)
 
 
 async def camera_status_loop() -> None:
