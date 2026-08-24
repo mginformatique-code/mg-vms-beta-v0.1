@@ -94,7 +94,7 @@ export default function WelcomePopup() {
             <Section icon={Youtube} title="Tutoriels vidéo" accent="#8892a0">
               <p>Des tutoriels vidéo pas-à-pas (installation, caméras, IA, sécurité) sont en préparation.</p>
               <p className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider px-2 py-0.5 border border-border text-muted-foreground">Bientôt disponible</p>
-              <p>En attendant, la <a href="https://mg-vms.com/fr" target="_blank" rel="noopener noreferrer" className="text-[#0044FF] hover:underline">documentation</a> couvre l&apos;essentiel.</p>
+              <p>En attendant, la <a href="https://docs.mg-vms.com" target="_blank" rel="noopener noreferrer" className="text-[#0044FF] hover:underline">documentation</a> couvre l&apos;essentiel.</p>
             </Section>
           </div>
 
@@ -115,7 +115,7 @@ export default function WelcomePopup() {
             <p>
               <a href="https://mg-vms.com/fr/contact" target="_blank" rel="noopener noreferrer" className="text-[#0044FF] hover:underline">Support MG Informatique</a>
               {" · "}
-              <a href="https://mg-vms.com/fr" target="_blank" rel="noopener noreferrer" className="text-[#0044FF] hover:underline">Documentation</a>
+              <a href="https://docs.mg-vms.com" target="_blank" rel="noopener noreferrer" className="text-[#0044FF] hover:underline">Documentation</a>
               {" · "}
               <button onClick={() => go("/welcome")} className="text-[#0044FF] hover:underline">Changelog des nouveautés</button>
             </p>

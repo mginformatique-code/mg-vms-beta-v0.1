@@ -70,11 +70,13 @@ const CENTERS = [
 
 // v3.1.2 · Les 4 liens pointaient vers des URLs factices (mg-vms.local
 // n'existe pas, github.com/mg-vms n'est pas le vrai dépôt) — jamais
-// vérifiées après leur ajout initial. Documentation/Support renvoient vers
-// le site public (pas de pages /docs ou /support dédiées côté site pour
-// l'instant — /contact existe et sert de page support réelle).
+// vérifiées après leur ajout initial. Support renvoie vers le site public
+// (/contact sert de page support réelle).
+// v3.7.3 · "Documentation" pointe désormais vers le wiki dédié
+// (docs.mg-vms.com, 32 pages FR+EN en lecture publique) et non plus vers
+// la page d'accueil commerciale du site, qui ne documente rien.
 const DOC_LINKS = [
-  { label: "Documentation",  href: "https://mg-vms.com/fr",                                        icon: BookOpen },
+  { label: "Documentation",  href: "https://docs.mg-vms.com",                                      icon: BookOpen },
   { label: "GitHub",         href: "https://github.com/mginformatique-code/mg-vms-beta-v0.1",       icon: Github },
   { label: "Changelog",      href: "#changelog",                                                    icon: Newspaper, internal: true },
   { label: "Support",        href: "https://mg-vms.com/fr/contact",                                 icon: LifeBuoy },
