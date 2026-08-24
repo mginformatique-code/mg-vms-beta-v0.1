@@ -1984,8 +1984,7 @@ async def recordings_media(recording_id: str, request: Request, t: float = 0):
     après ~2s au lieu de la durée réelle du segment). Voir
     streaming.py::transcode_to_temp_mp4 pour le détail.
     """
-    from streaming import stream_user, needs_transcode_for_browser, transcode_to_temp_mp4
-    from fastapi.responses import FileResponse
+    from streaming import stream_user, needs_transcode_for_browser, transcode_to_temp_mp4, range_file_response
     from starlette.background import BackgroundTask
     user = await stream_user(request, request.query_params.get("token"))
     if not has_permission(user, "view_recordings"):
@@ -2004,9 +2003,8 @@ async def recordings_media(recording_id: str, request: Request, t: float = 0):
             temp_path = await transcode_to_temp_mp4(path, start_sec=t)
         except Exception:
             raise HTTPException(502, "Transcodage HEVC→H264 échoué")
-        return FileResponse(temp_path, media_type="video/mp4",
-                             background=BackgroundTask(os.unlink, temp_path))
-    return FileResponse(path, media_type="video/mp4", filename=os.path.basename(path))
+        return await range_file_response(temp_path, request, background=BackgroundTask(os.unlink, temp_path))
+    return await range_file_response(path, request)
 
 
 # ============ EXPORT DE SÉQUENCE ============

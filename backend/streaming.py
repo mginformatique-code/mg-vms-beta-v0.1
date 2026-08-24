@@ -895,6 +895,72 @@ def _ffmpeg_supports_nvenc_h264() -> bool:
     return _HAS_NVENC_H264
 
 
+_RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)")
+_RANGE_CHUNK = 256 * 1024
+
+
+async def range_file_response(path: str, request: Request, media_type: str = "video/mp4",
+                               background=None) -> Response:
+    """FileResponse avec vrai support HTTP Range (206 Partial Content).
+
+    v3.4 · Starlette 0.36.3 (version pinnée ici) ne gère PAS les requêtes
+    Range dans FileResponse — confirmé en lisant sa source, elle renvoie
+    toujours 200 avec le fichier entier quel que soit le header `Range`
+    envoyé par le `<video>` du navigateur. Ça forçait des rechargements
+    complets à chaque lecture d'événement (20-30 Mo à chaque fois). Implémenté
+    manuellement ici plutôt que de monter de version Starlette/FastAPI (risque
+    de régression trop large sur le reste de l'app pour ce correctif ciblé).
+    """
+    file_size = os.path.getsize(path)
+    range_header = request.headers.get("range")
+
+    if not range_header:
+        async def _stream_full():
+            async with await asyncio.to_thread(open, path, "rb") as f:
+                while True:
+                    chunk = await asyncio.to_thread(f.read, _RANGE_CHUNK)
+                    if not chunk:
+                        break
+                    yield chunk
+            if background:
+                await background()
+        return StreamingResponse(_stream_full(), media_type=media_type, headers={
+            "Content-Length": str(file_size), "Accept-Ranges": "bytes",
+        })
+
+    m = _RANGE_RE.match(range_header)
+    if not m:
+        raise HTTPException(416, "Range invalide", headers={"Content-Range": f"bytes */{file_size}"})
+    start = int(m.group(1)) if m.group(1) else 0
+    end = int(m.group(2)) if m.group(2) else file_size - 1
+    end = min(end, file_size - 1)
+    if start > end or start >= file_size:
+        raise HTTPException(416, "Range non satisfiable", headers={"Content-Range": f"bytes */{file_size}"})
+    length = end - start + 1
+
+    async def _stream_range():
+        f = await asyncio.to_thread(open, path, "rb")
+        try:
+            await asyncio.to_thread(f.seek, start)
+            remaining = length
+            while remaining > 0:
+                chunk = await asyncio.to_thread(f.read, min(_RANGE_CHUNK, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+        finally:
+            await asyncio.to_thread(f.close)
+        if background:
+            await background()
+
+    return StreamingResponse(_stream_range(), status_code=206, media_type=media_type, headers={
+        "Content-Range": f"bytes {start}-{end}/{file_size}",
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(length),
+    })
+
+
 def needs_transcode_for_browser(path: str) -> bool:
     """True si le fichier local est dans un codec que <video> HTML5 ne décode
     pas (HEVC/H265). Sonde le FICHIER réel via ffprobe plutôt que de faire
