@@ -2,6 +2,38 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.9.0-webrtc-passthrough] — 2026-08 — WebRTC sans transcodage (décodage côté client)
+
+### Changed
+- **L'aperçu WebRTC ne transcode plus rien côté serveur.** L'offre SDP du
+  navigateur est relayée telle quelle à `go2rtc /api/webrtc`, qui réémet le
+  H264 de la caméra **sans le décoder ni le réencoder**. C'est le décodeur
+  **matériel du poste client** qui affiche le flux — l'idée d'accélération
+  côté client, sans aucun plugin (les plugins navigateur type VLC/NPAPI
+  n'existent plus sur les navigateurs modernes de toute façon).
+  Vérifié via l'endpoint réel `/api/live/{id}/whep` (SDP + réception RTP) :
+  | Caméra | Images / 7 s | Codec négocié |
+  |---|---:|---|
+  | test (principal HEVC) | 83 | H264/90000 |
+  | test2 | 61 | H264/90000 |
+  | test3 (Hikvision) | 154 | H264/90000 |
+
+### Fixed
+- **« Délai de connexion WebRTC dépassé ».** Le pont aiortc annonçait dans
+  sa docstring « zéro décode côté serveur, zéro transcodage », mais
+  `_H264RelayTrack` décode via PyAV puis laisse aiortc **réencoder** en
+  H264 baseline (sa propre docstring le dit) — le tout dans le process qui
+  sert aussi l'API (`uvicorn --workers 1`). Intenable dès que le flux était
+  un peu lourd. Ce chemin reste disponible en repli si go2rtc est
+  indisponible.
+- **Caméra HEVC refusée d'emblée (415).** WebRTC ne transporte pas de HEVC
+  vers un navigateur ; la source est désormais la variante `_preview`
+  (sous-flux), toujours en H264 même quand le flux principal est en HEVC.
+  Une caméra dont le principal est en 4K HEVC fonctionne donc maintenant.
+- go2rtc répond **201 Created** (et non 200) sur un handshake WebRTC
+  réussi : ne traiter que le 200 faisait échouer le passthrough en
+  silence et retomber sur l'ancien pont.
+
 ## [v3.8.0-apercu-sous-flux] — 2026-08 — Aperçu live sur le sous-flux (fluidité)
 
 ### Fixed
