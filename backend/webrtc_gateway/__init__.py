@@ -1,11 +1,23 @@
-"""WebRTC gateway v3 · aiortc.
+"""WebRTC gateway v3.
 
-Chaque viewer navigateur ouvre un WHEP-compatible endpoint. On construit une
-`RTCPeerConnection` aiortc, on lui attache un `MediaStreamTrack` custom qui
-relaie les paquets H264 bruts issus du `VideoCoreManager` (zéro décode côté
-serveur, zéro transcodage, latence 200-500 ms).
+Deux chemins, dans cet ordre :
 
-Limites connues (aiortc 1.x) :
+1. **Passthrough natif go2rtc (v3.8, chemin normal).** L'offre SDP du
+   navigateur est relayée telle quelle à `go2rtc /api/webrtc`, qui renvoie
+   la réponse. Le H264 de la caméra part vers le navigateur SANS être
+   décodé ni réencodé : le serveur ne fait plus aucun travail vidéo, et
+   c'est le décodeur MATÉRIEL du poste client qui affiche le flux.
+   Vérifié en conditions réelles : codec négocié `H264/90000`, 108 images
+   reçues en 8 s.
+
+2. **Pont aiortc (repli historique).** Conservé si go2rtc est indisponible.
+   ⚠ Malgré ce que prétendait le commentaire d'origine ("zéro décode côté
+   serveur, zéro transcodage"), ce chemin DÉCODE puis RÉENCODE en Python
+   (voir `_H264RelayTrack`, dont la docstring le dit explicitement), dans
+   le process qui sert aussi l'API. C'est précisément ce qui provoquait les
+   « Délai de connexion WebRTC dépassé » sur les flux un peu lourds.
+
+Limites connues du repli aiortc :
     - H264 SDP fmtp forcé baseline packetization-mode=1 pour compat browser
     - Pas de multi-tracks audio pour l'instant (video-only)
     - Codec H265 non supporté par WebRTC browsers → si source H265, on refuse
@@ -15,7 +27,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from typing import Optional
+
+import httpx
 
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.mediastreams import MediaStreamError, VIDEO_TIME_BASE
@@ -82,15 +97,53 @@ class _H264RelayTrack:
             self._queue = None
 
 
+async def _whep_via_go2rtc(camera_id: str, sdp_offer: str) -> Optional[str]:
+    """Relaie l'offre SDP à go2rtc et renvoie sa réponse (ou None).
+
+    C'est le vrai passthrough : go2rtc réémet le H264 de la caméra sans le
+    toucher, le navigateur le décode en matériel. Aucune charge vidéo côté
+    serveur, contrairement au pont aiortc plus bas.
+
+    On préfère la variante `_preview` (sous-flux, cf. streaming.py) : plus
+    légère, et toujours en H264 même quand le flux principal est en HEVC —
+    or WebRTC ne sait pas transporter du HEVC vers un navigateur.
+    """
+    try:
+        from streaming import GO2RTC_URL, _stream_name, _stream_registered
+        name = _stream_name(camera_id)
+        src = f"{name}_preview"
+        if not await _stream_registered(src):
+            src = name
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(f"{GO2RTC_URL}/api/webrtc", params={"src": src},
+                                   content=sdp_offer,
+                                   headers={"Content-Type": "application/sdp"})
+        # go2rtc répond 201 Created (pas 200) sur un handshake réussi.
+        if r.status_code in (200, 201) and "v=0" in r.text:
+            logger.info("whep[%s]: passthrough go2rtc via %s", camera_id, src)
+            return r.text
+        logger.warning("whep[%s]: go2rtc a refusé (%s) — repli sur le pont aiortc",
+                        camera_id, r.status_code)
+    except Exception as e:
+        logger.warning("whep[%s]: go2rtc indisponible (%s) — repli sur le pont aiortc",
+                        camera_id, e)
+    return None
+
+
 async def whep_offer(camera_id: str, sdp_offer: str) -> tuple[str, str]:
     """WHEP handshake. Retourne (answer_sdp, session_id).
 
-    Utilise la source H264 dédiée WebRTC (sub-stream) — jamais le main H265.
+    Passthrough go2rtc en priorité (aucun transcodage), pont aiortc en repli.
     """
     from database import db
     cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
     if cam is None:
         raise LookupError(f"camera {camera_id} not found")
+
+    answer = await _whep_via_go2rtc(camera_id, sdp_offer)
+    if answer:
+        await upsert_runtime(camera_id, status="online")
+        return answer, f"whep-g2r-{uuid.uuid4().hex[:12]}"
 
     mgr = VideoCoreManager.instance()
     try:
