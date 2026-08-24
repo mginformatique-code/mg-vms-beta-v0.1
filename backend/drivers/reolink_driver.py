@@ -59,10 +59,20 @@ class ReolinkDriver(ONVIFDriver):
 
     def __init__(self, host: str, username: str, password: str,
                  port: Optional[int] = None):
+        # `port` ici est le port ONVIF (8000 typiquement, transmis par
+        # camera_device_service.get_driver()) — l'API JSON propriétaire
+        # Reolink (/api.cgi) est un service SÉPARÉ, sur le port web
+        # standard de la caméra (443 HTTPS, certificat auto-signé),
+        # jamais le port ONVIF. Les réutiliser confondait les deux
+        # services : toute commande /api.cgi (GetAbility, GetHddInfo,
+        # SetWhiteLed, AudioAlarmPlay...) se terminait en connexion
+        # coupée sans réponse — confirmé en prod sur une RLC-81MA, port
+        # 443 direct fonctionne, port ONVIF (8000) jamais. La couche plus
+        # récente camera_api/providers/reolink.py avait déjà ce bon
+        # défaut (443/https) ; seul ce driver-ci avait le bug.
         super().__init__(host, username, password, port or 80)
-        # HTTP client réutilisable pour l'API JSON
         self._http: Optional[httpx.AsyncClient] = None
-        self._api_url = f"http://{host}:{self.port}/api.cgi"
+        self._api_url = f"https://{host}:443/api.cgi"
 
     async def connect(self) -> None:
         # Base ONVIF (streams, PTZ)
@@ -72,8 +82,9 @@ class ReolinkDriver(ONVIFDriver):
             logger.debug("Reolink : ONVIF connect KO (%s), on continue avec HTTP", e)
             self._device_info_cache = DeviceInfo(manufacturer="Reolink", ip=self.host)
             self._connected = True
-        # Session HTTP JSON
-        self._http = httpx.AsyncClient(timeout=8.0)
+        # Session HTTP JSON — verify=False : HTTPS LAN Reolink = certificat
+        # auto-signé, comme déjà fait dans camera_api/providers/reolink.py.
+        self._http = httpx.AsyncClient(timeout=8.0, verify=False)
         # Ping API JSON
         try:
             info = await self._call("GetDevInfo", {})
@@ -138,6 +149,12 @@ class ReolinkDriver(ONVIFDriver):
         # Base ONVIF + surcouche
         caps = await super().get_capabilities()
         caps.reolink_api = True
+        # SetIrLights est l'une des commandes Reolink les plus universelles
+        # (quasi toute caméra Reolink avec LEDs IR) — la détection ONVIF
+        # standard (IrCutFilter via le service Imaging) est fréquemment peu
+        # fiable sur ces caméras et laissait ir_control à False alors que
+        # _set_ir_mode() ci-dessous fonctionne réellement.
+        caps.ir_control = True
         # GetAbility renvoie les capacités matérielles
         try:
             ab = await self._call("GetAbility", {"User": {"userName": self.username}})
@@ -149,15 +166,21 @@ class ReolinkDriver(ONVIFDriver):
                 def _has(k: str) -> bool:
                     v = ch.get(k) or {}
                     return int(v.get("ver", 0)) > 0
-                caps.spotlight = _has("floodLight") or _has("supportSpotLight")
-                caps.siren = _has("supportBuzzer") or _has("supportAudioAlarm")
+                # v3.4 · Clés corrigées après inspection d'une réponse RÉELLE
+                # (RLC-81MA) — floodLight/supportSpotLight/supportBuzzer/
+                # supportAudioAlarm n'existent tout simplement pas dans le
+                # schéma GetAbility de ce firmware. "FL" = Flood Light
+                # (projecteur), "alarmAudio" = sirène — confirmés par les
+                # commandes de contrôle réelles (SetWhiteLed, AudioAlarmPlay).
+                caps.spotlight = _has("supportFLswitch") or _has("supportFLBrightness")
+                caps.siren = _has("alarmAudio")
                 caps.audio_input = _has("mainEncType") or _has("recAudio")
-                caps.audio_output = _has("supportPowerSaveTip") or _has("audio")
-                caps.two_way_audio = _has("supportAoAdjust") or _has("talk")
+                caps.audio_output = _has("supportAoAdjust")
+                caps.two_way_audio = _has("supportAoAdjust")
                 caps.microphone = caps.audio_input
                 caps.speaker = caps.audio_output
                 caps.pir_sensor = _has("supportAlarmPir")
-                caps.battery = _has("battery") or _has("supportPowerSaveTip")
+                caps.battery = _has("battery")
                 caps.onboard_ai = _has("supportAiAnimal") or _has("supportAiVehicle") or _has("supportAiPeople")
                 ai_feats = []
                 if _has("supportAiPeople"): ai_feats.append("person")
