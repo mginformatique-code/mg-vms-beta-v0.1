@@ -2,6 +2,45 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.7.0-carte-sd-overlay-plaques] — 2026-08 — Carte SD, overlay contrôles, plaques depuis crop
+
+### Added
+- **Onglet "Carte SD"** dans Camera Center — recherche et lecture des
+  enregistrements présents sur le stockage local caméra, vendor-agnostic
+  (fonctionne avec n'importe quel driver constructeur exposant
+  `capabilities.sdcard`). Lecture via un nouveau proxy vidéo backend (`GET
+  /api/devices/{id}/recordings/stream?file=…`, remux ffmpeg `-c copy`,
+  même pattern que `routes/mjpeg_direct.py`) — l'URL source réelle de la
+  caméra (avec identifiants) ne quitte jamais le serveur, un flux MP4
+  fragmenté est servi directement au `<video>`.
+- **Correction manuelle du numéro de plaque** (`PUT /api/plates/{id}`) —
+  bouton crayon dans la visionneuse événements/plaques (menu ANPR),
+  utile après une erreur OCR.
+
+### Changed
+- **`CameraControlOverlay` réécrit** pour piloter lumière/IR/sirène via le
+  device layer (`/api/devices/{id}/light|ir|siren`) au lieu de l'ancienne
+  heuristique de relais ONVIF génériques (association positionnelle des 2
+  premiers relais détectés à projecteur/sirène — fragile, pouvait piloter
+  la mauvaise sortie selon le constructeur). Les boutons n'apparaissent
+  désormais que si la caméra expose réellement la capacité correspondante.
+  Nouveau mode `footer` (barre persistante en pied de lecteur) utilisé dans
+  l'onglet Live de Camera Center ; le mode compact au survol reste utilisé
+  dans la mosaïque.
+- **Un crop manuel réussi (ANPR "Analyser OCR")** crée désormais une
+  entrée dans le menu Plaques (`db.plates`) — crop de la plaque, date/heure
+  de l'image SOURCE (pas l'instant de la ré-analyse), alerte liste noire
+  si applicable. Auparavant le résultat n'était visible que sur
+  l'événement d'origine, invisible du menu Plaques.
+
+### Fixed
+- **Faille potentielle corrigée avant mise en production** : l'endpoint
+  `GET /api/devices/{id}/recordings/{file}/source` (introduit en v3.5.0,
+  jamais déployé publiquement) renvoyait l'URL caméra brute — identifiants
+  Reolink en clair dans l'URL, ou identifiants Hikvision/Dahua qui
+  auraient été ajoutés à cette même URL exposée. Remplacé par le proxy
+  streaming ci-dessus avant tout déploiement concerné.
+
 ## [v3.6.0-drivers-constructeur] — 2026-08 — Drivers Hikvision & Dahua complets
 
 ### Added
