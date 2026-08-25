@@ -194,20 +194,32 @@ def pick_preview_stream(cam: dict) -> Optional[dict]:
     main_key = _stream_channel_key(main_url)
 
     streams = cam.get("streams_detected") or []
+
+    # v3.9.2 · Quand l'URL principale ne suit aucun motif connu (certaines
+    # caméras annoncent en ONVIF une URI principale sans chemin, ex.
+    # `rtsp://<ip>:554/`), on ne peut pas déduire son canal. La règle stricte
+    # d'origine refusait alors TOUT sous-flux, y compris quand l'appareil n'en
+    # expose manifestement qu'un seul — la caméra restait sur son flux
+    # principal 4K sans raison. On autorise donc ce cas à la condition qu'il
+    # n'y ait AUCUNE ambiguïté : un seul canal identifiable parmi les flux
+    # détectés. Dès qu'il y en a plusieurs (appareil multi-capteurs), on
+    # refuse comme avant — c'est ce qui évite d'afficher le mauvais objectif.
+    detected_keys = {k for k in (_stream_channel_key(s.get("url") or "")
+                                  for s in streams) if k is not None}
+    single_channel_device = len(detected_keys) <= 1
+
     candidates = []
     for s in streams:
         url = (s.get("url") or "").strip()
         if not url.lower().startswith(("rtsp://", "rtsps://")):
             continue
         # Sécurité canal : on n'accepte QUE des flux du même canal physique
-        # que le flux principal (voir _stream_channel_key). Si l'un des deux
-        # n'est pas identifiable, on refuse plutôt que d'afficher
-        # potentiellement l'image d'un autre objectif.
+        # que le flux principal (voir _stream_channel_key).
         cand_key = _stream_channel_key(url)
         if main_key is not None:
             if cand_key != main_key:
                 continue
-        elif cand_key is not None:
+        elif cand_key is not None and not single_channel_device:
             continue
         res = s.get("resolution") or [0, 0]
         try:
