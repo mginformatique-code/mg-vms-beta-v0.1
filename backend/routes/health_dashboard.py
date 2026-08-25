@@ -222,6 +222,15 @@ async def diagnostics_pipeline_metrics(user: dict = Depends(require_permission("
         runtime["ai_config"] = dict(_ae._runtime_config) if _ae._runtime_config else {}
     except Exception:
         pass
+    # v3.12 · Efficacité réelle du regroupement d'inférence. `avg_batch`
+    # proche de 1 signifie que les caméras n'arrivent PAS dans la même
+    # fenêtre et que le regroupement ne sert à rien — information nécessaire
+    # pour savoir s'il faut élargir la fenêtre ou chercher ailleurs.
+    try:
+        from pipeline_v2.batch_infer import batch_inference
+        runtime["batch_infer"] = batch_inference.stats()
+    except Exception:
+        pass
     try:
         import torch
         runtime["gpu"] = {

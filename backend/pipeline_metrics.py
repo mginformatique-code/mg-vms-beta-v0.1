@@ -33,7 +33,8 @@ class PipelineMetrics:
 
     _WINDOW = 100
     _STAGES = ("fetch_ms", "yolo_ms", "tracking_ms", "alpr_ms",
-               "realtime_ms", "downstream_ms")
+               "realtime_ms", "downstream_ms", "total_ms",
+               "decode_ms", "motion_ms", "roi_ms")
 
     def __init__(self):
         self._per_cam: dict[str, dict] = {}

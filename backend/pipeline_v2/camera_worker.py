@@ -44,33 +44,71 @@ def get_debug_snapshot(camera_id: str) -> dict:
 # déjà en pleine résolution pour une caméra donnée, ce grab HD via go2rtc
 # (frame.jpeg, même mécanisme que /api/stream/{id}/frame.jpeg) reste
 # disponible comme repli, déclenché uniquement au moment d'une détection.
+#: Cache court du grab HD + mémoire des échecs, par caméra.
+#: {camera_id: (timestamp, image_ou_None)}
+_HD_CACHE: dict[str, tuple[float, object]] = {}
+#: Durée de validité d'un grab HD réussi. Au-delà d'une seconde l'image
+#: n'est plus représentative de la scène pour un crop de plaque.
+_HD_CACHE_TTL_S = 1.0
+#: Après un échec, on n'insiste pas à chaque image : go2rtc ne sait pas
+#: produire de JPEG depuis une source HEVC (HTTP 500 constaté en prod), et
+#: réessayer en boucle coûtait plusieurs secondes PAR IMAGE.
+_HD_FAIL_BACKOFF_S = 30.0
+
+
 def _fetch_hd_crop_source(camera_id: str):
     """Frame BGR (numpy) en résolution native via go2rtc, ou None si échec.
 
-    Synchrone : CameraWorker.analyze() tourne déjà hors boucle asyncio
-    (ai_engine.py l'appelle via asyncio.to_thread), donc un appel HTTP
-    bloquant ici ne gèle rien d'autre.
+    ⚠ Appel HTTP + décodage JPEG. Il était exécuté à CHAQUE image comportant
+    un véhicule, avec un timeout de 4 s essayé sur DEUX sources — soit
+    jusqu'à 8 s par image. Mesuré en production, c'était 97 % du temps de
+    pipeline : l'étape `roi` montait à 5,4 s par image sur les caméras
+    concernées, contre 0 ms sur celle restée en 720p (qui saute cet appel).
+    Résultat : 0,4 image/s analysée et 98 % des images jetées en
+    backpressure, alors que le décodage GPU en fournissait 11/s.
+
+    Deux garde-fous ajoutés (v3.12) :
+      - cache court (1 s) : plusieurs véhicules sur la même image, ou deux
+        images consécutives, ne déclenchent plus qu'un seul grab ;
+      - backoff après échec (30 s) : go2rtc ne sait pas extraire de JPEG
+        d'un flux HEVC (HTTP 500), inutile de réessayer 10 fois par seconde.
+
+    Synchrone : CameraWorker.analyze() tourne hors boucle asyncio.
     """
+    now = time.monotonic()
+    cached = _HD_CACHE.get(camera_id)
+    if cached is not None:
+        ts, img = cached
+        ttl = _HD_CACHE_TTL_S if img is not None else _HD_FAIL_BACKOFF_S
+        if now - ts < ttl:
+            return img
+
     try:
         import cv2
         import numpy as np
         import httpx
         from streaming import GO2RTC_URL, _stream_name
     except Exception:
+        _HD_CACHE[camera_id] = (now, None)
         return None
     name = _stream_name(camera_id)
+    result = None
     for src in (name, f"{name}_hd"):
         try:
-            with httpx.Client(timeout=4.0) as client:
+            # Timeout resserré : ce grab est un CONFORT (crop plus net), il ne
+            # doit jamais retarder le pipeline temps réel.
+            with httpx.Client(timeout=1.5) as client:
                 r = client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": src})
             if r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff":
                 arr = np.frombuffer(r.content, dtype=np.uint8)
                 img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                 if img is not None and img.size > 0:
-                    return img
+                    result = img
+                    break
         except Exception:
             continue
-    return None
+    _HD_CACHE[camera_id] = (now, result)
+    return result
 
 
 class CameraWorker:
@@ -233,7 +271,14 @@ class CameraWorker:
 
         hd_img, hd_scale = None, None
         ai_res = ((camera or {}).get("ai_resolution") or "720p").lower()
-        if ai_res != "720p":
+        # v3.12 · Le grab HD n'a de sens que si l'image de travail est
+        # RÉELLEMENT plus petite que ce qu'on veut pour les crops. Depuis que
+        # frame_source délivre la frame à `ai_resolution` (1080p/native), elle
+        # est déjà largement suffisante pour découper une plaque : refaire un
+        # aller-retour HTTP vers go2rtc n'apportait rien et coûtait des
+        # secondes par image. On ne conserve ce repli que pour une frame
+        # basse définition (< 1600 px de large), ce pour quoi il a été écrit.
+        if ai_res != "720p" and w < 1600:
             hd_img = _fetch_hd_crop_source(self.camera_id)
             if hd_img is not None and w > 0 and h > 0:
                 hd_h, hd_w = hd_img.shape[:2]

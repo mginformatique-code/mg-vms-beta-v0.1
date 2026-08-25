@@ -758,6 +758,15 @@ async def _process_camera(cam: dict) -> None:
     pipeline_metrics.record_stage(cam["id"], "tracking_ms", tim.get("tracking_ms", 0))
     pipeline_metrics.record_stage(cam["id"], "alpr_ms", tim.get("alpr_ms", 0))
     pipeline_metrics.record_stage(cam["id"], "realtime_ms", t_frontier_ms)
+    # v3.12 · `total_ms` = durée mesurée DANS worker.analyze() (somme réelle
+    # de tous ses stages, y compris decode/motion/roi qui n'étaient chronométrés
+    # nulle part). L'écart entre `realtime_ms` et `total_ms` isole donc le temps
+    # passé HORS analyse — attente d'un thread du pool, ordonnancement, broadcast.
+    # Sans cette mesure, plusieurs secondes restaient inexpliquées entre la somme
+    # des étapes (~200 ms) et le total remonté (~5500 ms).
+    pipeline_metrics.record_stage(cam["id"], "total_ms", tim.get("total_ms", 0))
+    for _st in ("decode_ms", "motion_ms", "roi_ms"):
+        pipeline_metrics.record_stage(cam["id"], _st, tim.get(_st, 0))
 
     logger.info(
         "IA · %s (%s) : %d détection(s) [%s] · mouvement=%.1f%% · %d plaque(s) · "
