@@ -11,6 +11,7 @@ Rassemble en une seule requête toutes les métriques critiques du VMS :
 from __future__ import annotations
 
 import logging
+import re
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -231,6 +232,67 @@ async def diagnostics_pipeline_metrics(user: dict = Depends(require_permission("
         }
     except Exception:
         runtime["gpu"] = {"error": "torch unavailable"}
+    # v3.11 · Budget IA par caméra — dit POURQUOI le pipeline plafonne.
+    #
+    # Constat en production qui a motivé ce bloc : 5 caméras sur 6 tournaient
+    # en `ai_resolution=native`, donc le pipeline IA décodait du 4K (et même
+    # du 4512x2512) avant de le réduire. Mesures relevées côte à côte :
+    #
+    #     720p            realtime  138 ms   yolo 111 ms   0.4 fps
+    #     native 2304px   realtime  921 ms   yolo 266 ms   0.4 fps
+    #     native 3840px   realtime 6242 ms   yolo 418 ms   0.0 fps
+    #
+    # Soit un `realtime_ms` 45x pire en natif qu'en 720p, et un pipeline
+    # effectivement à l'arrêt sur les 4K. Le moniteur affichait bien ces
+    # chiffres mais rien n'indiquait la CAUSE : on l'expose ici.
+    try:
+        from database import db as _db
+        _PRESET_PX = {"720p": 1280 * 720, "1080p": 1920 * 1080}
+        async for cam in _db.cameras.find({}, {"_id": 0, "id": 1, "name": 1,
+                                                "ai_resolution": 1, "resolution": 1,
+                                                "enabled_plugins": 1}):
+            entry = snap.get(cam.get("id"))
+            if not isinstance(entry, dict):
+                continue
+            preset = (cam.get("ai_resolution") or "720p").lower()
+            px = _PRESET_PX.get(preset)
+            if px is None:  # "native" → résolution réelle de la caméra
+                m = re.match(r"^(\d{2,5})x(\d{2,5})$",
+                             (cam.get("resolution") or "").lower().replace(" ", ""))
+                px = int(m.group(1)) * int(m.group(2)) if m else 0
+            stages = entry.get("stages") or {}
+            rt = float(((stages.get("realtime_ms") or {}).get("avg")) or 0)
+            yolo = float(((stages.get("yolo_ms") or {}).get("avg")) or 0)
+
+            # Goulot dominant : acquisition de l'image ou inférence ?
+            if rt >= max(yolo * 2, 400):
+                bottleneck = "acquisition"
+            elif yolo >= 200:
+                bottleneck = "inference"
+            else:
+                bottleneck = "ok"
+
+            advice = ""
+            if preset == "native" and px > _PRESET_PX["1080p"]:
+                advice = ("Résolution IA « native » sur un flux à haute définition : "
+                          "le pipeline décode l'image entière avant de la réduire. "
+                          "Passer en 1080p (ou 720p) accélère fortement l'acquisition "
+                          "sans dégrader la détection, les crops de plaque restant "
+                          "générés à part.")
+            elif bottleneck == "inference":
+                advice = ("Temps d'inférence élevé : trop de plugins de détection "
+                          "actifs simultanément sur cette caméra, ou modèle trop lourd.")
+
+            entry["ai_budget"] = {
+                "ai_resolution": preset,
+                "ai_pixels": px,
+                "plugins_enabled": len(cam.get("enabled_plugins") or []),
+                "bottleneck": bottleneck,
+                "advice": advice,
+            }
+    except Exception as e:
+        logger.debug("ai_budget indisponible : %s", e)
+
     return {"cameras": snap, "plugins_dispatchable": counts, "runtime": runtime}
 
 

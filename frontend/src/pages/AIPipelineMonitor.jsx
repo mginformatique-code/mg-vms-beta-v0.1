@@ -79,6 +79,9 @@ function CameraCard({ id, cam, name }) {
   const rtWarn = rt < 500;
   const dropsOk = drops === 0;
   const plugins = cam.last_plugins || {};
+  // v3.11 · Diagnostic « pourquoi ça plafonne », fourni par le backend
+  // (voir routes/health_dashboard.py::diagnostics_pipeline_metrics).
+  const budget = cam.ai_budget || null;
 
   return (
     <div className="border border-border" data-testid={`cam-card-${id}`}>
@@ -94,6 +97,10 @@ function CameraCard({ id, cam, name }) {
           <StatusPill ok={fpsOk} warn={fpsWarn} label="FPS" value={fps} />
           <StatusPill ok={rtOk} warn={rtWarn} label="Live" value={rt.toFixed(0)} unit="ms" />
           <StatusPill ok={dropsOk} warn={false} label="Drops" value={drops} />
+          {budget && (
+            <StatusPill ok={budget.bottleneck === "ok"} warn={budget.bottleneck === "inference"}
+                        label="Rés. IA" value={budget.ai_resolution} />
+          )}
           {errors > 0 && <StatusPill ok={false} warn={false} label="Err" value={errors} />}
           {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </div>
@@ -101,6 +108,19 @@ function CameraCard({ id, cam, name }) {
       {open && (
         <div className="border-t border-border p-3 bg-background/30" data-testid={`cam-detail-${id}`}>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Latences par étape</div>
+          {budget && (budget.advice || budget.bottleneck !== "ok") && (
+            <div className="mb-3 border-l-2 border-[#FFAA00] pl-2 py-1" data-testid={`cam-budget-${id}`}>
+              <div className="text-[10px] uppercase tracking-wider text-[#FFAA00] mb-0.5">
+                Goulot : {budget.bottleneck === "acquisition" ? "acquisition de l'image" : budget.bottleneck === "inference" ? "inférence IA" : "aucun"}
+              </div>
+              <div className="text-[11px] text-muted-foreground leading-relaxed">
+                Résolution IA <b>{budget.ai_resolution}</b>
+                {budget.ai_pixels > 0 && ` (${(budget.ai_pixels / 1e6).toFixed(1)} Mpx par image)`}
+                {" · "}{budget.plugins_enabled} plugin(s) activé(s).
+                {budget.advice && <><br />{budget.advice}</>}
+              </div>
+            </div>
+          )}
           {Object.keys(STAGE_META).map((stage) => (
             <StageBar key={stage} stage={stage} stats={cam.stages?.[stage]} />
           ))}
