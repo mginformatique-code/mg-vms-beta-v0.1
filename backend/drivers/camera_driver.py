@@ -152,6 +152,20 @@ class CameraDriver(ABC):
         self._require("sdcard")
         raise UnsupportedCapabilityError("Lecture d'enregistrement local non implémentée par ce driver")
 
+    # ── Codec du flux principal (v3.10) ───────────────────────────
+    async def get_encoding_info(self, channel: int = 0) -> dict:
+        """État du codec du flux principal.
+
+        Retourne ``{"current": "h265"|"h264"|"", "options": [...],
+        "changeable": bool, "reason": "<pourquoi c'est verrouillé>"}``.
+        ``options`` vide + ``changeable`` False = la caméra impose son codec.
+        """
+        raise UnsupportedCapabilityError("Lecture du codec non implémentée par ce driver")
+
+    async def set_encoding(self, codec: str, channel: int = 0) -> None:
+        """Bascule le codec du flux principal (``h264`` / ``h265``)."""
+        raise UnsupportedCapabilityError("Changement de codec non implémenté par ce driver")
+
     # ── Réseau (v3.7) ─────────────────────────────────────────────
     async def get_network(self) -> dict:
         """Paramètres réseau détaillés (ports, protocoles, UID, WiFi…).

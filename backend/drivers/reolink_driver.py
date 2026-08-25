@@ -363,6 +363,70 @@ class ReolinkDriver(ONVIFDriver):
         out.sort(key=lambda r: r["start_time"])
         return out
 
+    # ── Codec du flux principal (v3.10) ───────────────────────────
+    async def get_encoding_info(self, channel: int = 0) -> dict:
+        """Codec courant du flux principal + possibilité réelle de le changer.
+
+        ⚠ Point vérifié en conditions réelles, contre-intuitif : `set_encoding`
+        renvoie « OK » sur une RLC-81MA alors que RIEN ne change — l'API
+        accepte la commande et l'ignore. La seule source fiable est la table
+        des valeurs autorisées (`GetEnc` avec action=1) :
+
+            main   vType : "h265"      <- valeur UNIQUE = codec verrouillé
+            profile     : ["Base","Main","High"]   <- LISTE = réglable
+
+        Quand `vType` est une chaîne et non une liste, le codec est figé par
+        le firmware pour ce flux (sur ce modèle : 4K en H265 uniquement, H264
+        uniquement en 896×512 sur le sous-flux). On le remonte donc comme
+        NON modifiable, au lieu d'exposer un bouton qui ne ferait rien.
+        """
+        if self._host_api is None:
+            raise UnsupportedCapabilityError("Session Reolink non initialisée")
+        try:
+            cur = await self._host_api.send(
+                [{"cmd": "GetEnc", "action": 0, "param": {"channel": channel}}],
+                expected_response_type="json")
+            enc = (cur[0].get("value") or {}).get("Enc") or {}
+            current = str((enc.get("mainStream") or {}).get("vType") or "")
+
+            rng_resp = await self._host_api.send(
+                [{"cmd": "GetEnc", "action": 1, "param": {"channel": channel}}],
+                expected_response_type="json")
+            rng = (rng_resp[0].get("range") or {}).get("Enc") or {}
+            if isinstance(rng, list):
+                rng = rng[0] if rng else {}
+            vtype = (rng.get("mainStream") or {}).get("vType")
+        except Exception as e:
+            raise CameraDriverError(f"Reolink GetEnc → {e}", code="device_error") from e
+
+        if isinstance(vtype, list) and len(vtype) > 1:
+            return {"current": current, "options": [str(v) for v in vtype],
+                    "changeable": True, "reason": ""}
+        return {"current": current, "options": [],
+                "changeable": False,
+                "reason": "Codec figé par le firmware de la caméra pour ce flux "
+                          "(la caméra n'annonce qu'une seule valeur possible)."}
+
+    async def set_encoding(self, codec: str, channel: int = 0) -> None:
+        codec = (codec or "").lower()
+        if codec not in ("h264", "h265"):
+            raise CameraDriverError("Codec attendu : h264 ou h265", code="device_error")
+        info = await self.get_encoding_info(channel)
+        if not info.get("changeable"):
+            raise UnsupportedCapabilityError(info.get("reason") or "Codec non modifiable")
+        if info.get("current") == codec:
+            return
+        try:
+            await self._host_api.set_encoding(channel, codec, stream="main")
+        except Exception as e:
+            raise CameraDriverError(f"Reolink set_encoding → {e}", code="device_error") from e
+        # Relecture : l'API peut acquiescer sans rien appliquer (cf. docstring).
+        after = (await self.get_encoding_info(channel)).get("current")
+        if after != codec:
+            raise CameraDriverError(
+                f"La caméra a accepté la commande mais est restée en {after or '?'} — "
+                f"codec non modifiable sur ce modèle", code="device_error")
+
     async def get_recording_source(self, file_name: str, stream: str = "main") -> str:
         """URL de téléchargement d'un enregistrement SD (MP4 direct).
 

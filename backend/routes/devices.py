@@ -311,6 +311,54 @@ async def device_ptz_preset(camera_id: str, body: PTZPresetBody,
         raise _driver_error_response(e)
 
 
+# ── Codec du flux principal (v3.10) ───────────────────────────────
+class EncodingBody(BaseModel):
+    codec: str = Field(..., description="h264 | h265")
+
+
+async def _camera_channel(camera_id: str) -> int:
+    """Canal physique de cette caméra sur l'appareil.
+
+    Un appareil multi-capteurs expose plusieurs canaux (`h264Preview_01_*`,
+    `h264Preview_02_*`) que MG-VMS présente comme des caméras distinctes.
+    Agir sur le canal 0 par défaut modifierait donc le mauvais objectif.
+    """
+    from database import db
+    from streaming import _stream_channel_key
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0}) or {}
+    key = _stream_channel_key(cam.get("rtsp_url") or "")
+    if key and ":" in key:
+        try:
+            # "reolink:1" → canal 0 (Reolink numérote ses URL à partir de 1)
+            return max(0, int(key.split(":", 1)[1]) - 1)
+        except ValueError:
+            pass
+    return 0
+
+
+@devices_router.get("/{camera_id}/encoding")
+async def device_get_encoding(camera_id: str,
+                               user: dict = Depends(require_permission("view_live"))):
+    """Codec du flux principal + est-il réellement modifiable sur ce modèle."""
+    try:
+        drv = await svc.get_driver(camera_id)
+        return await drv.get_encoding_info(await _camera_channel(camera_id))
+    except CameraDriverError as e:
+        raise _driver_error_response(e)
+
+
+@devices_router.post("/{camera_id}/encoding")
+async def device_set_encoding(camera_id: str, body: EncodingBody,
+                               user: dict = Depends(require_permission("manage_cameras"))):
+    """Bascule le codec du flux principal entre H.264 et H.265."""
+    try:
+        drv = await svc.get_driver(camera_id)
+        await drv.set_encoding(body.codec, await _camera_channel(camera_id))
+        return {"success": True, "codec": body.codec.lower()}
+    except CameraDriverError as e:
+        raise _driver_error_response(e)
+
+
 # ── Stockage local / enregistrements SD card (v3.5) ───────────────
 @devices_router.get("/{camera_id}/storage")
 async def device_storage(camera_id: str, user: dict = Depends(require_permission("view_live"))):

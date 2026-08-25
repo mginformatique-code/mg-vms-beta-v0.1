@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
+import CodecSwitch from "@/components/CodecSwitch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import CameraPluginsConfig from "@/pages/CameraPluginsConfig";
 import {
@@ -368,6 +369,7 @@ export default function Cameras() {
             <th className="px-3 py-2">Mode</th>
             <th className="px-3 py-2">{t("cam.video_mode")}</th>
             <th className="px-3 py-2">{t("cam.resolution")}</th>
+            <th className="px-3 py-2">Codec</th>
             <th className="px-3 py-2">PTZ</th>
             <th className="px-3 py-2 text-right">{t("common.actions")}</th>
           </tr></thead>
@@ -405,6 +407,7 @@ export default function Cameras() {
                 <td className="px-3 py-2 mono text-[11px]">
                   {c.resolution || "—"}{c.fps ? ` @ ${c.fps}` : ""} <span className="text-muted-foreground">{c.codec}</span>
                 </td>
+                <td className="px-3 py-2"><CodecSwitch camera={c} onChanged={() => load()} /></td>
                 <td className="px-3 py-2 text-center">{c.ptz_enabled ? <CheckCircle2 size={14} className="text-[#00E676] inline" /> : "—"}</td>
                 <td className="px-3 py-2"><div className="flex items-center justify-end gap-1">
                   <button onClick={() => test(c)} disabled={testing === c.id} data-testid="test-camera-btn" title="Tester la connexion" className="p-1.5 hover:bg-secondary">
