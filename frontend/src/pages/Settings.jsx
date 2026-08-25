@@ -165,8 +165,8 @@ function VMSDiskCard() {
       icon={Server}
       badge={vmsPart && <DedicatedBadge ok={isDedicated} />}
     >
-      {!state && <div className="text-xs text-muted-foreground flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> Chargement…</div>}
-      {state && !vmsPart && <p className="text-xs text-muted-foreground">Impossible de détecter la partition système.</p>}
+      {!state && <div className="text-xs text-muted-foreground flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> {t("set.loading")}</div>}
+      {state && !vmsPart && <p className="text-xs text-muted-foreground">{t("set.no_partition")}</p>}
       {vmsPart && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
@@ -185,7 +185,7 @@ function VMSDiskCard() {
               <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
               <span>
                 L&apos;application et les enregistrements vidéo partagent la même partition. Pour un déploiement production,
-                montez un disque dédié aux enregistrements (voir la section <b>Enregistrements vidéo</b> ci-dessous).
+                montez un disque dédié aux enregistrements (voir la section <b>{t("set.video_recordings")}</b> ci-dessous).
               </span>
             </div>
           )}
@@ -265,8 +265,8 @@ function DatabaseCard() {
       <div className="border border-[#0044FF]/40 bg-[#0044FF]/5 p-3 mb-4 flex items-start gap-2" data-testid="db-nvme-warning">
         <AlertTriangle size={14} className="text-[#0044FF] flex-shrink-0 mt-0.5" />
         <div className="text-[11px] text-muted-foreground leading-relaxed">
-          <b className="text-foreground">MongoDB fait beaucoup d&apos;écritures aléatoires</b> (un événement/plaque = plusieurs
-          écritures). Un disque <b className="text-[#0044FF]">NVMe (ou SSD à défaut)</b> dédié à la base change directement la
+          <b className="text-foreground">{t("set.mongo_writes")}</b> (un événement/plaque = plusieurs
+          écritures). Un disque <b className="text-[#0044FF]">{t("set.nvme_pref")}</b> dédié à la base change directement la
           latence de toute l&apos;API — un HDD la ralentit fortement. Emplacement disque local :
           variable <code className="mono">MONGO_DATA_PATH</code> dans <code className="mono">deploy-app/.env</code>, appliquée
           via <code className="mono">./install.sh</code> (le conteneur MongoDB étant séparé, ce n&apos;est pas modifiable ici en un clic).
@@ -279,7 +279,7 @@ function DatabaseCard() {
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Connexion active</div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
             <div>
-              <div className="text-[10px] text-muted-foreground">URI (masquée)</div>
+              <div className="text-[10px] text-muted-foreground">{t("set.uri_masked")}</div>
               <div className="mono text-xs break-all" data-testid="db-current-uri">{c.mongo_url_redacted || "—"}</div>
             </div>
             <div>
@@ -328,8 +328,8 @@ function DatabaseCard() {
              data-testid="db-test-result">
           {testResult.ok ? (
             <div>
-              <div className="flex items-center gap-1.5 mg-online mb-1"><CheckCircle2 size={12} /> Connexion réussie</div>
-              <div className="text-muted-foreground">Ping : <b>{testResult.ping_ms}ms</b> · Collections : <b>{testResult.collections}</b> · Caméras : <b>{testResult.cameras_count}</b></div>
+              <div className="flex items-center gap-1.5 mg-online mb-1"><CheckCircle2 size={12} /> {t("set.conn_ok")}</div>
+              <div className="text-muted-foreground">Ping : <b>{testResult.ping_ms}ms</b> · Collections : <b>{testResult.collections}</b>{t("set.cameras_count")}<b>{testResult.cameras_count}</b></div>
             </div>
           ) : (
             <div className="flex items-center gap-1.5 mg-error"><XCircle size={12} /> {testResult.error}</div>
@@ -358,7 +358,7 @@ function DatabaseCard() {
       <div className="text-[11px] text-muted-foreground border-t border-border pt-3 flex items-start gap-1.5">
         <AlertTriangle size={12} className="mg-warning flex-shrink-0 mt-0.5" />
         <span>
-          Pour une installation production, hébergez la base sur un <b>serveur ou disque dédié</b> (SSD recommandé).
+          Pour une installation production, hébergez la base sur un <b>{t("set.dedicated_disk")}</b> (SSD recommandé).
           Testez toujours la connexion avant d&apos;enregistrer. Backup automatique dans <code className="mono">/app/backend/.env.bak</code>.
         </span>
       </div>
@@ -370,6 +370,7 @@ function DatabaseCard() {
 // 3a. Rétention vidéo (seuils + purge)
 // ═══════════════════════════════════════════════════════════════════
 function RetentionCard() {
+  const { t } = useApp();
   const [state, setState] = useState(null);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -411,7 +412,7 @@ function RetentionCard() {
   const usedColor = usedPct > form.max_disk_pct ? "#FF3333" : usedPct > form.max_disk_pct - 10 ? "#FFB800" : "#00E676";
 
   return (
-    <SectionCard id="video-retention" title="Rétention vidéo" subtitle="Politique automatique de conservation et purge." icon={Film}>
+    <SectionCard id="video-retention" title={t("set.retention_title")} subtitle="Politique automatique de conservation et purge." icon={Film}>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
         <StatBox label="Disque total" value={`${state.disk.total_gb} Go`} />
         <StatBox label="Utilisé" value={`${state.disk.used_gb} Go`} color={usedColor} />
@@ -510,7 +511,7 @@ function VideoPoolsCard() {
       <div className="border border-[#00E676]/40 bg-[#00E676]/5 p-3 mb-4 flex items-start gap-2" data-testid="video-hdd-tip">
         <Info size={14} className="text-[#00E676] flex-shrink-0 mt-0.5" />
         <div className="text-[11px] text-muted-foreground leading-relaxed">
-          Les enregistrements sont surtout de <b className="text-foreground">gros volumes séquentiels</b> — un
+          Les enregistrements sont surtout de <b className="text-foreground">{t("set.seq_volumes")}</b> — un
           <b className="text-[#FFB800]"> HDD</b> convient très bien et coûte bien moins cher au Go qu&apos;un NVMe/SSD, qu&apos;il
           vaut mieux réserver à la base de données (voir plus haut).
         </div>
@@ -537,7 +538,7 @@ function VideoPoolsCard() {
                   {isAppDisk && <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-border text-muted-foreground">Application</span>}
                 </div>
                 {alreadyUsed ? (
-                  <span className="text-[10px] text-muted-foreground shrink-0">Déjà utilisé</span>
+                  <span className="text-[10px] text-muted-foreground shrink-0">{t("set.already_used")}</span>
                 ) : (
                   <button onClick={() => setNewPool({ ...newPool, path: p.mountpoint, name: newPool.name || p.mountpoint })}
                           className="text-[10px] px-2 py-0.5 border border-[#0044FF] text-[#0044FF] hover:bg-[#0044FF]/10 shrink-0"
@@ -555,7 +556,7 @@ function VideoPoolsCard() {
 
       {/* Pools déclarés */}
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Pools déclarés ({state.pools.length})</div>
-      {state.pools.length === 0 && <p className="text-xs text-muted-foreground mb-3">Aucun pool déclaré — les enregistrements vont dans le dossier principal.</p>}
+      {state.pools.length === 0 && <p className="text-xs text-muted-foreground mb-3">{t("set.no_pool")}</p>}
       <div className="space-y-2 mb-3">
         {state.pools.map((pool) => (
           <div key={pool.id} className="border border-border p-3" data-testid={`pool-${pool.id}`}>
@@ -564,7 +565,7 @@ function VideoPoolsCard() {
                 <span className="font-medium">{pool.name}</span>
                 <span className="mono text-[10px] text-muted-foreground">{pool.path}</span>
                 <DiskTypeBadge type={pool.disk_type} />
-                {!pool.enabled && <span className="text-[10px] text-[#FFB800]">DÉSACTIVÉ</span>}
+                {!pool.enabled && <span className="text-[10px] text-[#FFB800]">{t("set.disabled")}</span>}
               </div>
               <div className="flex gap-1">
                 <button onClick={() => updatePool(pool, { enabled: !pool.enabled })} className="text-[10px] px-2 py-0.5 border border-border hover:bg-secondary" data-testid={`pool-toggle-${pool.id}`}>{pool.enabled ? "Désactiver" : "Activer"}</button>
@@ -580,7 +581,7 @@ function VideoPoolsCard() {
                 <input type="number" min="0" defaultValue={pool.max_size_gb}
                        onBlur={(e) => updatePool(pool, { max_size_gb: Number(e.target.value) })}
                        className="w-full px-1.5 py-0.5 bg-background border border-input outline-none mono text-[10px]"
-                       title="0 = illimité" />
+                       title={t("set.unlimited")} />
               </div>
             </div>
           </div>

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import {
   X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCcw,
@@ -24,6 +25,7 @@ import { toast } from "sonner";
  *     sa liste sans recharger toute la page.
  */
 export default function EventViewer({ items, index, onClose, onIndex, onOpenPlate, onPlateUpdated, kind = "event" }) {
+  const { t } = useApp();
   const item = items[index];
   const navigate = useNavigate();
   const [scale, setScale] = useState(1);
@@ -306,7 +308,7 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
               <div className="absolute bottom-16 right-3 flex flex-col gap-1.5 z-10" data-testid="viewer-crops">
                 {item.vehicle_crop && (
                   <div className="bg-black/80 border border-white/20 p-1">
-                    <div className="text-[8px] uppercase tracking-wider text-white/50 mb-0.5 mono">Véhicule</div>
+                    <div className="text-[8px] uppercase tracking-wider text-white/50 mb-0.5 mono">{t("ev.vehicle")}</div>
                     <img src={item.vehicle_crop} alt="véhicule" className="max-w-[180px] max-h-[110px] object-contain block" data-testid="viewer-vehicle-crop" />
                   </div>
                 )}
@@ -362,9 +364,9 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
             <button onClick={() => zoomAt(-0.3)} className="p-2 text-white hover:bg-white/10" title="Zoom -"><ZoomOut size={16} /></button>
             <span className="text-white text-xs mono w-12 text-center">{Math.round(scale * 100)}%</span>
             <button onClick={() => zoomAt(0.3)} className="p-2 text-white hover:bg-white/10" title="Zoom +"><ZoomIn size={16} /></button>
-            <button onClick={() => { setScale(1); setPan({ x: 0, y: 0 }); }} className="p-2 text-white hover:bg-white/10" title="Réinitialiser"><RotateCcw size={16} /></button>
+            <button onClick={() => { setScale(1); setPan({ x: 0, y: 0 }); }} className="p-2 text-white hover:bg-white/10" title={t("ev.reset")}><RotateCcw size={16} /></button>
             <div className="w-px h-5 bg-white/20 mx-1" />
-            <button onClick={download} className="p-2 text-white hover:bg-white/10" title="Télécharger" data-testid="viewer-download-btn"><Download size={16} /></button>
+            <button onClick={download} className="p-2 text-white hover:bg-white/10" title={t("ev.download")} data-testid="viewer-download-btn"><Download size={16} /></button>
             <button onClick={copyImg} className="p-2 text-white hover:bg-white/10" title="Copier l'image" data-testid="viewer-copy-btn"><Copy size={16} /></button>
           </div>
         )}
@@ -395,7 +397,7 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
               {kind === "plate" && item.id && (
                 <button
                   onClick={() => { setPlateDraft(plateOverride || item.plate || ""); setEditingPlate(true); }}
-                  title="Corriger le numéro de plaque"
+                  title={t("ev.fix_plate")}
                   data-testid="viewer-plate-edit-btn"
                   className="p-1 text-white/40 hover:text-white shrink-0"
                 >
@@ -431,10 +433,10 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
             </div>
           )}
           {item.vehicle_color && (
-            <div className="text-xs"><span className="text-[10px] uppercase tracking-wider text-white/40 mr-1">Couleur véhicule</span><span className="mono">{item.vehicle_color}</span></div>
+            <div className="text-xs"><span className="text-[10px] uppercase tracking-wider text-white/40 mr-1">{t("ev.vehicle_color")}</span><span className="mono">{item.vehicle_color}</span></div>
           )}
           {item.vehicle_make && (
-            <div className="text-xs"><span className="text-[10px] uppercase tracking-wider text-white/40 mr-1">Véhicule</span><span className="mono">{item.vehicle_make} {item.vehicle_model} ({item.vehicle_type})</span></div>
+            <div className="text-xs"><span className="text-[10px] uppercase tracking-wider text-white/40 mr-1">{t("ev.vehicle")}</span><span className="mono">{item.vehicle_make} {item.vehicle_model} ({item.vehicle_type})</span></div>
           )}
           {item.motion_pct != null && (
             <div className="text-xs"><span className="text-[10px] uppercase tracking-wider text-white/40 mr-1">Mouvement</span><span className="mono">{item.motion_pct}%</span></div>
@@ -546,7 +548,7 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
             <GanttChartSquare size={15} /> Voir dans la Timeline
           </button>
           {showVideo && (
-            <button onClick={() => setShowVideo(false)} className="w-full text-xs text-white/60 hover:text-white">← Retour à l&apos;image</button>
+            <button onClick={() => setShowVideo(false)} className="w-full text-xs text-white/60 hover:text-white">{t("ev.back_to_image")}</button>
           )}
           <div className="text-[10px] text-white/40 text-center mono">
             {index + 1} / {items.length} · ← / → navigation · Échap fermer

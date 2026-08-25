@@ -262,6 +262,7 @@ function _kindFromEvent(ev) {
 
 
 function FocusTimeline({ cameraId, onSelect }) {
+  const { t } = useApp();
   // P5.b · Timeline dans LiveView façon Reolink :
   //   - fenêtre glissante (défaut 30 min) → scrub visuel + marqueurs par type
   //   - miniature générée à partir de `thumbnail` OU frame_thumb OU crop_thumb
@@ -353,7 +354,7 @@ function FocusTimeline({ cameraId, onSelect }) {
         )}
 
         {events.length === 0 ? (
-          <div className="text-[10px] text-white/40 py-1">Aucun événement dans la fenêtre.</div>
+          <div className="text-[10px] text-white/40 py-1">{t("lv.no_event_window")}</div>
         ) : (
           <>
             {/* Scrub bar façon Reolink : icônes positionnées sur une frise temporelle */}
@@ -490,19 +491,19 @@ export default function LiveView() {
         <div className="flex items-center gap-2">
           {focusedCam && (
             <>
-              <button onClick={() => gotoDelta(-1)} data-testid="focus-prev" title="Caméra précédente (←)"
+              <button onClick={() => gotoDelta(-1)} data-testid="focus-prev" title={t("lv.prev_camera")}
                       className="p-1.5 border border-border hover:bg-secondary">
                 <ChevronLeft size={14} />
               </button>
               <span className="text-[10px] mono text-muted-foreground px-1">
                 {focusedIndex + 1}/{gridCams.filter((c) => c?.id).length}
               </span>
-              <button onClick={() => gotoDelta(+1)} data-testid="focus-next" title="Caméra suivante (→)"
+              <button onClick={() => gotoDelta(+1)} data-testid="focus-next" title={t("lv.next_camera")}
                       className="p-1.5 border border-border hover:bg-secondary">
                 <ChevronRight size={14} />
               </button>
               <button onClick={() => setShowTimeline((v) => !v)} data-testid="focus-timeline-toggle"
-                      title="Afficher/masquer la timeline des événements (T)"
+                      title={t("lv.toggle_timeline")}
                       className={`px-2.5 py-1.5 text-xs border flex items-center gap-1 ${showTimeline ? "bg-[#00E5FF]/20 border-[#00E5FF] text-[#00E5FF]" : "border-border hover:bg-secondary"}`}>
                 Timeline
               </button>
@@ -514,7 +515,7 @@ export default function LiveView() {
           )}
           <button onClick={() => setShowOverlay((v) => !v)} data-testid="toggle-ai-overlay"
             className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs border ${showOverlay ? "bg-[#0044FF] text-white border-[#0044FF]" : "border-border hover:bg-secondary"}`}
-            title="Afficher/masquer les détections IA">
+            title={t("lv.toggle_ai")}>
             {showOverlay ? <Eye size={13} /> : <EyeOff size={13} />} Overlay IA
           </button>
           <button onClick={() => setHd(!hd)} data-testid="hd-toggle" className={`px-2.5 py-1.5 text-xs border ${hd ? "bg-[#00E676] text-black border-[#00E676]" : "border-border"} hover:opacity-80`}>{hd ? "HD" : "SD"}</button>

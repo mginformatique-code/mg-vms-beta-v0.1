@@ -36,6 +36,7 @@ function passageThumbUrl(passageId, kind = "vehicle") {
  * parcours, habitudes.
  */
 export function VehiclesSection({ embedded = false }) {
+  const { t } = useApp();
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [q, setQ] = useState("");
@@ -170,7 +171,7 @@ export function VehiclesSection({ embedded = false }) {
               onClick={() => setAdvOpen((o) => !o)}
               data-testid="adv-toggle"
               className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground border border-border px-1.5 py-0.5"
-              title="Filtres avancés"
+              title={t("veh.adv_filters")}
             >
               Filtres
             </button>
@@ -235,7 +236,7 @@ export function VehiclesSection({ embedded = false }) {
 
       {history.length > 0 && !smartResult && (
         <div className="mb-3 flex items-center gap-2 flex-wrap text-[11px]" data-testid="search-history">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Recherches récentes :</span>
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("veh.recent_searches")}</span>
           {history.map((h, i) => (
             <button
               key={`${h.query}-${i}`}
@@ -285,7 +286,7 @@ export function VehiclesSection({ embedded = false }) {
       {items.length === 0 && !loading && (
         <div className="border border-border p-8 text-center text-muted-foreground">
           <Car size={48} className="mx-auto mb-2 opacity-30" />
-          <div className="text-sm">Aucun véhicule détecté pour le moment.</div>
+          <div className="text-sm">{t("veh.none_yet")}</div>
         </div>
       )}
 
@@ -321,6 +322,7 @@ export function VehiclesSection({ embedded = false }) {
 // VehicleCard — effet cascade + badge +N
 // ═══════════════════════════════════════════════════════════════════
 function VehicleCard({ v, onOpen }) {
+  const { t } = useApp();
   // v1.0-rc2 · Utilise le helper module `passageThumbUrl` qui appende ?token=
   // (les <img> HTML ne peuvent pas envoyer de Bearer header).
   const thumbUrl = (id, kind = "vehicle") => passageThumbUrl(id, kind);
@@ -400,6 +402,7 @@ function VehicleCard({ v, onOpen }) {
 // Événements fusionnée : historique plaque/véhicule depuis le viewer)
 // ═══════════════════════════════════════════════════════════════════
 export function VehicleDrawer({ plate, onClose, onWatchChanged }) {
+  const { t } = useApp();
   const open = !!plate;
   const [detail, setDetail] = useState(null);
   const reload = useCallback(() => {
@@ -424,7 +427,7 @@ export function VehicleDrawer({ plate, onClose, onWatchChanged }) {
         <SheetHeader className="border-b border-border p-4 sticky top-0 bg-card z-10">
           <SheetTitle className="font-head flex items-center gap-3">
             {detail && <PlateBadge value={detail.plate} status={detail.list_status} />}
-            {!detail && <span className="text-muted-foreground text-sm">Chargement…</span>}
+            {!detail && <span className="text-muted-foreground text-sm">{t("veh.loading")}</span>}
             {detail && (
               <span className="text-xs text-muted-foreground">
                 {[detail.vehicle_make, detail.vehicle_model, detail.vehicle_color].filter(Boolean).join(" · ")}
@@ -440,7 +443,7 @@ export function VehicleDrawer({ plate, onClose, onWatchChanged }) {
               <TabsTrigger value="gallery"   className="rounded-none text-xs py-2" data-testid="tab-gallery">Galerie</TabsTrigger>
               <TabsTrigger value="timeline"  className="rounded-none text-xs py-2" data-testid="tab-timeline">Timeline</TabsTrigger>
               <TabsTrigger value="heatmap"   className="rounded-none text-xs py-2" data-testid="tab-heatmap">Heatmap</TabsTrigger>
-              <TabsTrigger value="cameras"   className="rounded-none text-xs py-2" data-testid="tab-cameras">Caméras</TabsTrigger>
+              <TabsTrigger value="cameras"   className="rounded-none text-xs py-2" data-testid="tab-cameras">{t("veh.cameras")}</TabsTrigger>
               <TabsTrigger value="journey"   className="rounded-none text-xs py-2" data-testid="tab-journey">Parcours</TabsTrigger>
             </TabsList>
 
@@ -609,9 +612,9 @@ function TabOverview({ d, onWatchChanged }) {
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
             <Info size={11} /> Habitudes observées
           </div>
-          {habits.typical_arrival && <div>Arrivée habituelle : <b className="mono">{habits.typical_arrival}</b></div>}
-          {habits.typical_departure && <div>Départ habituel : <b className="mono">{habits.typical_departure}</b></div>}
-          {habits.typical_days?.length > 0 && <div>Jours prédominants : <b>{habits.typical_days.join(", ")}</b></div>}
+          {habits.typical_arrival && <div>{t("veh.usual_arrival")}<b className="mono">{habits.typical_arrival}</b></div>}
+          {habits.typical_departure && <div>{t("veh.usual_departure")}<b className="mono">{habits.typical_departure}</b></div>}
+          {habits.typical_days?.length > 0 && <div>{t("veh.main_days")}<b>{habits.typical_days.join(", ")}</b></div>}
           {habits.nocturnal_note && (
             <div className="text-[#FFB800]">
               🌙 {habits.nocturnal_note} ({fmtDateTime(habits.nocturnal_first_seen)})
@@ -627,11 +630,12 @@ function TabOverview({ d, onWatchChanged }) {
 // Section Personnes (résultats smart-search cross-domain)
 // ═══════════════════════════════════════════════════════════════════
 function PersonsSection({ persons, description }) {
+  const { t } = useApp();
   return (
     <div className="mt-6" data-testid="persons-section">
       <div className="flex items-center gap-2 mb-3">
         <Users size={16} className="text-[#0044FF]" />
-        <h2 className="font-head text-lg tracking-tight">Personnes détectées <span className="mono text-sm text-muted-foreground">({persons.length})</span></h2>
+        <h2 className="font-head text-lg tracking-tight">{t("veh.people_detected")}<span className="mono text-sm text-muted-foreground">({persons.length})</span></h2>
         {description && (
           <span className="text-xs text-muted-foreground italic">— « {description} » (tri visuel manuel)</span>
         )}
@@ -933,6 +937,7 @@ function AnomaliesBanner({ items, onOpen, onDismiss }) {
 }
 
 function TabGallery({ plate }) {
+  const { t } = useApp();
   const [items, setItems] = useState([]);
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
@@ -964,7 +969,7 @@ function TabGallery({ plate }) {
                target="_blank" rel="noreferrer"
                className="block relative"
                data-testid={`gallery-frame-link-${p.id}`}
-               title="Voir la photo complète">
+               title={t("veh.view_full_photo")}>
               <img
                 src={passageThumbUrl(p.id, "vehicle")}
                 alt=""
@@ -1059,11 +1064,12 @@ function TabTimeline({ plate }) {
 }
 
 function TabHeatmap({ plate }) {
+  const { t } = useApp();
   const [d, setD] = useState(null);
   useEffect(() => {
     api.get(`/vehicles/${encodeURIComponent(plate)}/heatmap`).then(({ data }) => setD(data));
   }, [plate]);
-  if (!d) return <div className="text-xs text-muted-foreground">Chargement…</div>;
+  if (!d) return <div className="text-xs text-muted-foreground">{t("veh.loading")}</div>;
 
   const maxH = Math.max(1, ...d.by_hour);
   const maxD = Math.max(1, ...d.by_dow);
@@ -1107,6 +1113,7 @@ function TabHeatmap({ plate }) {
 }
 
 function TabCameras({ plate }) {
+  const { t } = useApp();
   const [items, setItems] = useState([]);
   useEffect(() => {
     api.get(`/vehicles/${encodeURIComponent(plate)}/cameras`).then(({ data }) => setItems(data.items || []));
@@ -1127,12 +1134,13 @@ function TabCameras({ plate }) {
           </div>
         </div>
       ))}
-      {items.length === 0 && <div className="text-xs text-muted-foreground">Aucune caméra concernée.</div>}
+      {items.length === 0 && <div className="text-xs text-muted-foreground">{t("veh.no_camera")}</div>}
     </div>
   );
 }
 
 function TabJourney({ plate }) {
+  const { t } = useApp();
   const [items, setItems] = useState([]);
   useEffect(() => {
     api.get(`/vehicles/${encodeURIComponent(plate)}/journey`).then(({ data }) => setItems(data.items || []));
@@ -1155,7 +1163,7 @@ function TabJourney({ plate }) {
           {i < chrono.length - 1 && <ChevronDown size={12} className="text-muted-foreground rotate-[-90deg] hidden" />}
         </div>
       ))}
-      {chrono.length === 0 && <div className="text-xs text-muted-foreground">Aucun parcours à afficher.</div>}
+      {chrono.length === 0 && <div className="text-xs text-muted-foreground">{t("veh.no_journey")}</div>}
     </div>
   );
 }

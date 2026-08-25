@@ -13,6 +13,7 @@ const SEV = {
 };
 
 function AiRulesDialog({ open, onClose }) {
+  const { t } = useApp();
   const [rules, setRules] = useState(null);
   const [arming, setArming] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -44,12 +45,12 @@ function AiRulesDialog({ open, onClose }) {
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="rounded-none border-border max-w-lg max-h-[85vh] overflow-y-auto">
-        <DialogHeader><DialogTitle className="font-head flex items-center gap-2"><BrainCircuit size={18} /> Règles d'alertes IA</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle className="font-head flex items-center gap-2"><BrainCircuit size={18} /> {t("alr.ai_rules")}</DialogTitle></DialogHeader>
         {!rules || !arming ? <div className="text-sm text-muted-foreground py-6">Chargement...</div> : (
           <div className="space-y-2">
             <div className="border border-border p-3 space-y-2" data-testid="arming-section">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">Armement du système</span>
+                <span className="text-sm font-medium">{t("alr.arming")}</span>
                 <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 border ${arming.armed_now ? "border-[#00E676] text-[#00E676]" : "border-[#FF3333] text-[#FF3333]"}`} data-testid="armed-status">
                   {arming.armed_now ? "Armé" : "Désarmé"}
                 </span>
@@ -57,9 +58,9 @@ function AiRulesDialog({ open, onClose }) {
               <select value={arming.mode} data-testid="arming-mode-select"
                 onChange={(e) => setArming({ ...arming, mode: e.target.value })}
                 className="w-full px-2 py-1.5 bg-card border border-input text-sm">
-                <option value="always">Toujours armé</option>
+                <option value="always">{t("alr.always_armed")}</option>
                 <option value="schedule">Selon planning</option>
-                <option value="off">Désarmé (scénarios suspendus)</option>
+                <option value="off">{t("alr.disarmed")}</option>
               </select>
               {arming.mode === "schedule" && (
                 <>
@@ -73,7 +74,7 @@ function AiRulesDialog({ open, onClose }) {
                     <span className="text-xs text-muted-foreground">De</span>
                     <input type="number" min="0" max="23" value={arming.start_h} data-testid="arming-start"
                       onChange={(e) => setArming({ ...arming, start_h: +e.target.value })} className="w-16 px-2 py-1 bg-card border border-input text-sm" />
-                    <span className="text-xs text-muted-foreground">h à</span>
+                    <span className="text-xs text-muted-foreground">{t("alr.hours_to")}</span>
                     <input type="number" min="0" max="24" value={arming.end_h} data-testid="arming-end"
                       onChange={(e) => setArming({ ...arming, end_h: +e.target.value })} className="w-16 px-2 py-1 bg-card border border-input text-sm" />
                     <span className="text-xs text-muted-foreground">h (UTC)</span>
@@ -149,7 +150,7 @@ export default function Alerts() {
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h1 className="font-head font-bold text-2xl tracking-tight flex items-center gap-2"><Bell size={22} /> {t("alerts.title")}</h1>
         <div className="flex items-center gap-2">
-          {can("technician") && <button onClick={() => setRulesOpen(true)} data-testid="ai-rules-btn" className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border hover:bg-secondary"><BrainCircuit size={14} /> Règles IA</button>}
+          {can("technician") && <button onClick={() => setRulesOpen(true)} data-testid="ai-rules-btn" className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border hover:bg-secondary"><BrainCircuit size={14} /> {t("alr.ai_rules_short")}</button>}
           <div className="flex border border-border">
             {[["all", t("common.all")], ["unacked", t("alerts.unacked")], ["acked", t("alerts.acked")]].map(([k, lbl]) => (
               <button key={k} onClick={() => setFilter(k)} data-testid={`alert-filter-${k}`}
