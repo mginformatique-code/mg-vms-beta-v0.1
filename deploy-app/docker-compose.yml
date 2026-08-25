@@ -111,7 +111,17 @@ services:
       # /events touchés, pas seulement ANPR/recordings). Relevé ici pour
       # réduire la fréquence sans toucher au code — au prix d'une détection
       # légèrement moins réactive.
-      AI_INTERVAL_SECONDS: ${AI_INTERVAL_SECONDS:-0.15}
+      #
+      # v3.12 · Défaut abaissé 0.15 -> 0.03. La valeur 0.15 plafonnait
+      # MATHÉMATIQUEMENT le pipeline à 6,7 images/s par caméra, quel que soit
+      # le matériel. Elle avait été relevée pour contenir une saturation dont
+      # la vraie cause vient d'être trouvée et corrigée : un appel HTTP
+      # bloquant vers go2rtc exécuté à chaque image dans `_stage_roi`
+      # (jusqu'à 8 s par image, cf. camera_worker.py). Une fois ce goulot
+      # levé, 0.15 ne protégeait plus rien et bridait tout — mesuré :
+      # 0,4 -> 5,6 images/s par caméra sur 6 caméras.
+      # Un nouveau déploiement doit être performant sans réglage manuel.
+      AI_INTERVAL_SECONDS: ${AI_INTERVAL_SECONDS:-0.03}
       # ── Recherche IA / Smart Search (v1.0-rc4) ──────────────
       # Clé LLM (Emergent Universal Key). Absente = /api/smart-search
       # retourne 503 SMART_SEARCH_LLM_NOT_CONFIGURED, la vue Events
