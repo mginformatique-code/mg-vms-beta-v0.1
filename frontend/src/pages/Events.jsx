@@ -135,6 +135,21 @@ export default function Events() {
   // entre-temps (poll, recherche IA qui change la source, etc.).
   const viewerIdx = viewerId !== null ? shown.findIndex((x) => x.id === viewerId) : -1;
 
+  // v3.13 · La liste /events ne renvoie plus la scène 1920px (`thumbnail`,
+  // ~400 Ko par événement) : la galerie n'affiche que `thumbnail_sm` (17 Ko).
+  // La grande version est chargée à la demande, une seule fois par
+  // événement, quand la visionneuse s'ouvre.
+  const [eventDetails, setEventDetails] = useState({});
+  useEffect(() => {
+    if (!viewerId || eventDetails[viewerId]) return undefined;
+    let cancelled = false;
+    api.get(`/events/${viewerId}`)
+      .then((r) => { if (!cancelled) setEventDetails((prev) => ({ ...prev, [viewerId]: r.data })); })
+      .catch(() => { /* la petite vignette reste affichée */ });
+    return () => { cancelled = true; };
+  }, [viewerId, eventDetails]);
+  const viewerItems = shown.map((e) => (eventDetails[e.id] ? { ...e, ...eventDetails[e.id] } : e));
+
   const setFiltre = (id) => {
     const next = new URLSearchParams(searchParams);
     if (id === "tous") next.delete("filtre"); else next.set("filtre", id);
@@ -311,7 +326,7 @@ export default function Events() {
             return (
               <button key={e.id} onClick={() => setViewerId(e.id)} className="border border-border bg-card overflow-hidden text-left hover:border-[#0044FF] transition-colors" data-testid="event-card">
                 <div className="relative bg-black aspect-video cursor-zoom-in">
-                  {e.thumbnail ? (
+                  {(e.thumbnail_sm || e.thumbnail) ? (
                     <img src={e.thumbnail_sm || e.thumbnail} alt={e.type} className="w-full h-full object-cover"
                          loading="lazy" />
                   ) : (
@@ -357,7 +372,7 @@ export default function Events() {
 
       {viewerIdx >= 0 && (
         <EventViewer
-          items={shown}
+          items={viewerItems}
           index={viewerIdx}
           onIndex={(i) => setViewerId(shown[i]?.id ?? null)}
           onClose={() => setViewerId(null)}

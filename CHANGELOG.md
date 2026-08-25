@@ -2,6 +2,160 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.13-plaques-allegees] — 2026-08 — Page Plaques : plus de plantage
+
+### Fixed
+- **La page « Plaques » tombait dans l'ErrorBoundary.** La liste renvoyait
+  l'intégralité des images stockées en base pour chaque plaque. Mesuré :
+  `frame_thumb` (la scène HD complète) pèse **709 Ko en moyenne** sur les
+  1531 plaques automatiques, et `vehicle_crop` 88 Ko — soit **~35 Mo de
+  JSON** pour les 50 plaques d'une page, que le navigateur n'encaissait pas.
+  Ces deux champs sont désormais exclus de la liste ; le tableau n'affiche
+  d'ailleurs aucune image. Mesures avant / après :
+  | Requête | Avant | Après |
+  |---|---:|---:|
+  | `/plates?limit=5` | 3,5 Mo | 24,6 Ko |
+  | `/plates?limit=50` (page par défaut) | ~35 Mo | 266 Ko |
+- **Le crop manuel ANPR dupliquait l'image source.** `reanalyze_event`
+  recopiait la photo entière de l'événement dans `vehicle_crop`
+  (~750 Ko par plaque créée à la main), alors que l'événement d'origine
+  est déjà référencé par `event_id`. Seul le crop serré de la plaque est
+  conservé.
+
+### Added
+- **`GET /api/plates/{id}`** — fiche complète d'une plaque, images
+  comprises. La visionneuse la charge à la demande, une seule fois par
+  plaque : l'affichage reste identique pour l'utilisateur (scène HD
+  complète + insets), sans peser sur la liste.
+  ⚠ Cette route est déclarée **après** `/plates/export`, sinon FastAPI
+  ferait passer le mot « export » pour un identifiant et casserait
+  l'export CSV. Vérifié : `/plates/export` → 200 CSV,
+  `/plates/{inconnu}` → 404.
+- **`GET /api/events/{id}`** — même principe pour la visionneuse
+  d'événements. Vérifié que `/events/{id}/recording` n'est pas masquée.
+
+### Fixed (suite — trouvés en auditant la même classe de défaut)
+- **La page « Événements » transportait 20 Mo par page.** Le champ
+  `thumbnail` est la scène en 1920px : **399 Ko de moyenne** sur les
+  19 368 événements qui en portent une. Or la galerie n'affiche que
+  `thumbnail_sm` (17 Ko), et **les 19 368 en ont un** — vérifié, aucune
+  vignette perdue. Mesuré : `/events?limit=50` **~20 Mo → 3,2 Mo**.
+- **L'export CSV chargeait plus d'1 Go en mémoire.** `/plates/export`
+  rapatriait 2000 documents entiers, images comprises, pour écrire un
+  fichier texte qui n'en utilise aucune. Seules les 11 colonnes du CSV
+  sont désormais lues. Au passage, l'écriture passe de `p["champ"]` à
+  `p.get("champ", "")` : une seule plaque incomplète (créée par crop
+  manuel) faisait échouer l'export entier en `KeyError`.
+- **`/vehicles/{plaque}/passages` téléchargeait les images pour les
+  ignorer.** Cette liste ne renvoie que des booléens `has_frame` /
+  `has_vehicle` / `has_plate` ; elle rapatriait ~800 Ko d'images par
+  document juste pour tester s'ils étaient vides. MongoDB calcule
+  maintenant le booléen côté serveur.
+- **La grille « Recherche véhicule » affiche bien ses vignettes.** C'est
+  la seule liste qui a réellement besoin de `vehicle_crop` : elle le
+  demande explicitement via `with_images=1`. La scène complète y est
+  aussi chargée à l'ouverture de la fiche.
+
+### Non corrigé — à décider
+- **La base pèse ~15,4 Go** (`events` 12,8 Go, `plates` 1,2 Go,
+  `alerts` 1,4 Go) pour ~35 700 documents. Les corrections ci-dessus
+  allègent le **transport** ; elles ne réduisent pas le **stockage**.
+  La cause de fond est que les images sont stockées en base64 **dans les
+  documents Mongo** plutôt que sur disque. Deux pistes non engagées :
+  purge/rétention des scènes 1920px anciennes, ou déport des images vers
+  des fichiers avec une simple référence en base.
+
+## [v3.12-pipeline-ia-performance] — 2026-08 — Pipeline IA : le vrai goulot
+
+### Fixed
+- **Le pipeline IA plafonnait à 0,4 image/s par caméra.** La cause n'était
+  ni le GPU ni YOLO (deux hypothèses testées puis **écartées par la
+  mesure** : le décodage 4K HEVC tournait déjà sur GPU à 10-12 img/s, et
+  le regroupement d'inférence n'a donné qu'un gain négligeable). Le
+  coupable était l'étape `roi`, jusque-là **non chronométrée** : elle
+  lançait un appel HTTP **bloquant** vers go2rtc pour récupérer une image
+  HD, à chaque image analysée, jusqu'à 8 s d'attente. Résultat mesuré sur
+  6 caméras :
+  | Mesure | Avant | Après |
+  |---|---:|---:|
+  | étape `roi` | 5415 ms | ~0 ms |
+  | analyse complète | 5565 ms | ~150 ms |
+  | images/s par caméra | 0,4 | 5,6 |
+- **ByteTrack affichait la scène avec 20 à 30 s de retard** pendant que la
+  vue WebRTC était bien en direct. Le lecteur ffmpeg consommait les images
+  une par une sans jamais rattraper le tampon accumulé quand l'analyse
+  prenait du retard. Il purge maintenant les images périmées déjà en
+  mémoire (jusqu'à 8 par cycle, sans jamais bloquer). Mesuré :
+  **âge de l'image 14 000 ms → 92 ms** (20 à 182 ms selon la caméra).
+
+### Changed
+- `AI_INTERVAL_SECONDS` passe de 0,15 à **0,03 s**. À 0,15 s le pipeline
+  était plafonné *mathématiquement* à 6,7 img/s quel que soit le matériel.
+  Cette valeur avait été relevée pour contenir une saturation dont la
+  cause réelle est corrigée ci-dessus ; une nouvelle installation doit être
+  performante sans réglage manuel.
+- **Détection de mouvement sur image réduite** (max 480 px de large, noyau
+  de flou proportionnel) : le flou gaussien 21×21 sur une image 4K coûtait
+  bien plus cher que l'information qu'il apportait.
+- **Cache + backoff sur la récupération d'image HD** (1 s de cache, 30 s de
+  mise à l'écart après échec) et grab HD désactivé quand l'image de
+  travail fait déjà 1600 px ou plus.
+
+### Added
+- `backend/pipeline_v2/batch_infer.py` — regroupement des appels YOLO
+  (fenêtre 8 ms, lot max 12, repli individuel en cas d'échec). Vérifié :
+  6 threads → 1 seul appel de 6 images. Gain réel modeste, conservé car
+  il ne coûte rien.
+- Chronométrage des étapes `decode`, `motion`, `roi` et `total` dans les
+  métriques — c'est précisément leur absence qui avait masqué le goulot
+  pendant deux diagnostics erronés.
+
+### Limites connues (mesurées, pas estimées)
+- **30 images/s est hors de portée du matériel en place** : les caméras
+  livrent 20 img/s sur le flux principal et 15 img/s sur le téléobjectif.
+  On ne peut pas analyser plus d'images que la caméra n'en produit.
+- Au-delà d'environ 5,6 img/s × 6 caméras, le plafond est le **GIL** du
+  process Python unique (`--workers 1`), qui sert aussi l'API HTTP.
+  Mesure à l'appui : `detect()` prend 24,6 ms dans un process isolé contre
+  130 ms dans le backend en charge. Passer outre demande un pipeline IA
+  **multi-process** — non fait à ce stade.
+
+## [v3.11-diagnostic-pipeline] — 2026-08 — Pipeline Center : dire pourquoi ça plafonne
+
+### Fixed
+- **La page « Pipeline Center » ne récupérait plus les bonnes informations.**
+
+### Added
+- **Budget IA par caméra** exposé par le backend et affiché sur la page :
+  résolution d'analyse, nombre de pixels, plugins actifs, **goulot
+  identifié** et conseil associé. Répond à la question posée pour une
+  caméra dédiée ANPR : quel est le maximum atteignable en images/s et en
+  qualité, et qu'est-ce qui l'en empêche.
+- Statistiques du regroupement d'inférence (`batch_infer`) dans le bloc
+  runtime.
+
+## [v3.10-codec-langues-licences] — 2026-08 — Bascule H265/H264, traductions, licences
+
+### Added
+- **Interrupteur H265 | H264 dans la liste des appareils** (pas dans les
+  réglages de la caméra, comme demandé). La compatibilité n'est vérifiée
+  qu'au clic ; si le firmware refuse, un cadenas s'affiche avec le motif.
+  Vérifié sur matériel réel : certaines caméras ont ce réglage **verrouillé
+  par leur firmware** — le bouton le dit au lieu d'échouer en silence.
+- **Menu « À propos »** : licence d'utilisation / clé de licence MG-VMS, et
+  section **« Licences open source »** listant les composants réellement
+  utilisés avec leur version et leur licence. L'AGPL-3.0 d'Ultralytics y
+  est mise en évidence — c'est la seule à contrainte forte pour une
+  distribution commerciale.
+- Les liens « documentation » pointent désormais vers le wiki.
+
+### Fixed
+- **Traductions incomplètes.** 123 clés ajoutées, parité FR/EN vérifiée
+  (479 clés de chaque côté). Au passage, une classe de bug invisible au
+  contrôle de syntaxe a été corrigée : une vingtaine de fonctions
+  utilisaient `t(...)` sans que `t` soit dans leur portée — JSX
+  parfaitement valide, plantage garanti à l'exécution.
+
 ## [v3.9.2-apercu-fiabilite] — 2026-08 — Fiabilité de l'aperçu, moins de sessions caméra
 
 ### Fixed

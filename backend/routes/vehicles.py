@@ -570,8 +570,17 @@ async def vehicle_passages(plate: str,
     q["plate"] = {"$regex": normalized, "$options": "i"}
 
     total = await db.plates.count_documents(q)
-    docs = await db.plates.find(q, {"_id": 0}).sort("timestamp", -1) \
-                          .skip(offset).limit(limit).to_list(limit)
+    # v3.13 · Cette liste ne renvoie que des booléens `has_*` — inutile de
+    # rapatrier les images pour tester si elles sont vides. MongoDB calcule
+    # le booléen côté serveur (expressions autorisées en projection depuis
+    # la 4.4) : on passait de ~800 Ko à quelques octets par document.
+    docs = await db.plates.find(q, {
+        "_id": 0, "id": 1, "timestamp": 1, "camera_id": 1, "camera_name": 1,
+        "confidence": 1, "engine": 1, "direction": 1,
+        "has_frame": {"$gt": [{"$strLenCP": {"$ifNull": ["$frame_thumb", ""]}}, 0]},
+        "has_vehicle": {"$gt": [{"$strLenCP": {"$ifNull": ["$vehicle_crop", ""]}}, 0]},
+        "has_plate": {"$gt": [{"$strLenCP": {"$ifNull": ["$plate_crop", ""]}}, 0]},
+    }).sort("timestamp", -1).skip(offset).limit(limit).to_list(limit)
 
     items = []
     for p in docs:
@@ -583,9 +592,9 @@ async def vehicle_passages(plate: str,
             "confidence": p.get("confidence"),
             "engine": p.get("engine") or "fast-alpr",
             "direction": p.get("direction"),
-            "has_frame": bool((p.get("frame_thumb") or "").strip()),
-            "has_vehicle": bool((p.get("vehicle_crop") or "").strip()),
-            "has_plate": bool((p.get("plate_crop") or "").strip()),
+            "has_frame": bool(p.get("has_frame")),
+            "has_vehicle": bool(p.get("has_vehicle")),
+            "has_plate": bool(p.get("has_plate")),
         })
     return {"total": total, "count": len(items), "offset": offset, "items": items}
 

@@ -256,6 +256,36 @@ def _reader_loop(w: _Worker):
                                    w.camera_id, len(buf), frame_bytes)
                     w.frames_dropped_decode += 1  # v0.8-rc5 · trace catégorie
                     break
+                # v3.12 · Purge du retard accumulé.
+                #
+                # Le thread lecteur partage le GIL avec les 6 pipelines IA et
+                # l'API. Quand il est ralenti, le tuyau stdout de ffmpeg se
+                # remplit : ffmpeg bloque à l'écriture et met ses images en
+                # attente en amont. L'image ensuite lue n'est alors PLUS la
+                # scène courante — mesuré en production jusqu'à 14 s d'écart,
+                # ce qui faisait apparaître les boîtes de détection très en
+                # retard sur la vidéo live (elle, servie directement par
+                # go2rtc, donc temps réel).
+                #
+                # Tant que d'autres images complètes attendent déjà dans le
+                # tuyau, elles sont périmées par définition : on les saute
+                # pour ne garder que la plus récente. C'est exactement ce que
+                # le pipeline fait déjà en aval (98 % des images sont écartées
+                # en backpressure) — on le fait juste AVANT d'accumuler du
+                # retard plutôt qu'après.
+                skipped = 0
+                while skipped < _MAX_CATCHUP_FRAMES and _has_full_frame_ready(
+                        w.proc.stdout, frame_bytes):
+                    nxt = _read_exact(w.proc.stdout, frame_bytes, timeout_sec=1.0)
+                    if nxt is None or len(nxt) != frame_bytes:
+                        break
+                    buf = nxt
+                    skipped += 1
+                if skipped:
+                    w.frames_dropped += skipped
+                    w.frames_dropped_backpressure += skipped
+                    w.frames_produced += skipped
+
                 # Convertit en numpy BGR24 sans copie
                 frame = np.frombuffer(buf, dtype=np.uint8).reshape((h_out, w_out, 3))
                 now = time.monotonic()
@@ -309,6 +339,37 @@ def _reader_loop(w: _Worker):
         logger.info("frame-source: %s en attente %.1fs avant redémarrage", w.camera_id, backoff)
         if not w.stop_event.wait(backoff):
             backoff = min(backoff * 1.5, _RESTART_MAX_BACKOFF_SEC)
+
+
+#: Nombre maximal d'images périmées sautées d'un coup. Borne le rattrapage
+#: pour qu'un worker très en retard ne monopolise pas le thread lecteur.
+_MAX_CATCHUP_FRAMES = int(os.environ.get("MGVMS_AI_CATCHUP_FRAMES", "8"))
+
+
+def _has_full_frame_ready(stream, frame_bytes: int) -> bool:
+    """True si une image COMPLÈTE attend déjà dans le tampon du tuyau.
+
+    Test strictement non bloquant : sert uniquement à savoir s'il y a du
+    retard à purger. En cas de doute (plateforme sans select utilisable sur
+    ce descripteur, erreur quelconque) on répond False — on préfère garder
+    l'image courante plutôt que risquer de bloquer le lecteur.
+    """
+    try:
+        import select
+        raw = getattr(stream, "raw", stream)
+        # Données déjà bufferisées côté Python (BufferedReader) ?
+        buffered = 0
+        try:
+            buffered = len(getattr(stream, "peek", lambda _n=0: b"")(1))
+        except Exception:
+            buffered = 0
+        if buffered <= 0:
+            r, _, _ = select.select([raw], [], [], 0)
+            if not r:
+                return False
+        return True
+    except Exception:
+        return False
 
 
 def _read_exact(stream, nbytes: int, timeout_sec: float) -> Optional[bytes]:

@@ -34,19 +34,37 @@ export default function Anpr() {
   // visionneuse est ouverte.
   const [viewerId, setViewerId] = useState(null);
 
+  // v3.13 · La liste /plates ne renvoie plus `frame_thumb` (~700 Ko par
+  // plaque) : à 50 plaques par page la réponse atteignait ~35 Mo et faisait
+  // tomber toute la page Plaques dans l'ErrorBoundary. La scène complète est
+  // donc chargée à la demande, une seule fois par plaque, à l'ouverture de
+  // la visionneuse — l'affichage reste identique pour l'utilisateur.
+  const [plateDetails, setPlateDetails] = useState({});
+  useEffect(() => {
+    if (!viewerId || plateDetails[viewerId]) return undefined;
+    let cancelled = false;
+    api.get(`/plates/${viewerId}`)
+      .then((r) => { if (!cancelled) setPlateDetails((prev) => ({ ...prev, [viewerId]: r.data })); })
+      .catch(() => { /* la vignette de secours reste affichée */ });
+    return () => { cancelled = true; };
+  }, [viewerId, plateDetails]);
+
   // Hybridation ANPR : scène HD complète (frame_thumb) en visuel principal
   // + plate_crop + vehicle_crop en insets nets dans EventViewer.
   // Affichage du moteur ANPR utilisé (P8+ Feb 2026) : chaque plaque expose
   // maintenant `engine` (fast-alpr / plate-recognizer / paddle-ocr / …).
-  const viewerItems = plates.map((p) => ({
-    ...p,
-    thumbnail: p.frame_thumb || p.vehicle_crop || p.plate_crop || p.thumbnail,
-    plate_crop: p.plate_crop,
-    vehicle_crop: p.vehicle_crop,
-    type: "Plaque détectée",
-    plugin: `ANPR (${p.engine || "fast-alpr"})`,
-    engine: p.engine || "fast-alpr",
-  }));
+  const viewerItems = plates.map((p) => {
+    const full = plateDetails[p.id] || p;   // scène complète si déjà chargée
+    return {
+      ...p,
+      thumbnail: full.frame_thumb || full.vehicle_crop || p.plate_crop || p.thumbnail,
+      plate_crop: p.plate_crop,
+      vehicle_crop: full.vehicle_crop,
+      type: "Plaque détectée",
+      plugin: `ANPR (${p.engine || "fast-alpr"})`,
+      engine: p.engine || "fast-alpr",
+    };
+  });
   const viewerIdx = viewerId !== null ? viewerItems.findIndex((x) => x.id === viewerId) : -1;
 
   const load = async (reset = true) => {

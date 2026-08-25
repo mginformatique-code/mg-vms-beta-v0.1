@@ -695,8 +695,29 @@ async def list_events(response: Response, type: Optional[str] = None, types: Opt
     site_scope(q, user)
     total = await db.events.count_documents(q)
     response.headers["X-Total-Count"] = str(total)
-    events = await db.events.find(q, {"_id": 0}).sort("timestamp", -1).skip(offset).limit(limit).to_list(limit)
+    # v3.13 · Même correction que pour /plates, sur une collection 4x plus
+    # grosse. `thumbnail` est la scène en 1920px : 399 Ko en moyenne sur les
+    # 19 368 événements qui en portent une, soit ~20 Mo pour une seule page
+    # de 50. La galerie n'affiche QUE `thumbnail_sm` (17 Ko), et les 19 368
+    # événements concernés en ont un — vérifié, aucun ne perd sa vignette.
+    # La grande version est servie à la demande par `GET /events/{id}`.
+    events = await db.events.find(
+        q, {"_id": 0, "thumbnail": 0},
+    ).sort("timestamp", -1).skip(offset).limit(limit).to_list(limit)
     return events
+
+
+@api_router.get("/events/{event_id}")
+async def get_event(event_id: str, user: dict = Depends(get_current_user)):
+    """Fiche complète d'un événement, scène 1920px comprise.
+
+    Chargée à l'ouverture de la visionneuse — voir le commentaire de la
+    liste juste au-dessus.
+    """
+    ev = await db.events.find_one({"id": event_id}, {"_id": 0})
+    if not ev:
+        raise HTTPException(404, "Événement introuvable")
+    return ev
 
 
 @api_router.get("/events/{event_id}/recording")
@@ -872,7 +893,10 @@ async def reanalyze_event(event_id: str, background: BackgroundTasks,
             "vehicle_type": "Inconnu", "country": "", "direction": "—",
             "lat": (cam or {}).get("lat", 0), "lng": (cam or {}).get("lng", 0),
             "list_status": wl["list_type"] if wl else "none",
-            "vehicle_crop": thumb,             # image complète de l'événement source
+            # v3.13 · On ne duplique PLUS l'image complète ici. Elle pesait
+            # ~750 Ko par plaque, alourdissait la liste Plaques et faisait
+            # doublon avec l'événement source, déjà référencé par `event_id`.
+            "vehicle_crop": "",
             "plate_crop": plate_crop_b64,      # crop serré de la plaque (zone tracée)
             "timestamp": ev.get("timestamp") or datetime.now(timezone.utc).isoformat(),
             "engine": engine,
@@ -980,7 +1004,8 @@ async def search_plates(response: Response, plate: Optional[str] = None, color: 
                         site_id: Optional[str] = None, camera_id: Optional[str] = None,
                         direction: Optional[str] = None, list_status: Optional[str] = None,
                         date_from: Optional[str] = None, date_to: Optional[str] = None,
-                        limit: int = 50, offset: int = 0, user: dict = Depends(require_permission("read_plates"))):
+                        limit: int = 50, offset: int = 0, with_images: bool = False,
+                        user: dict = Depends(require_permission("read_plates"))):
     q = {}
     if plate:
         q["plate"] = {"$regex": plate.upper().replace(" ", ""), "$options": "i"}
@@ -1009,23 +1034,67 @@ async def search_plates(response: Response, plate: Optional[str] = None, color: 
     site_scope(q, user)
     total = await db.plates.count_documents(q)
     response.headers["X-Total-Count"] = str(total)
-    plates = await db.plates.find(q, {"_id": 0}).sort("timestamp", -1).skip(offset).limit(limit).to_list(limit)
+    # v3.13 · `frame_thumb` (la scène HD complète) est EXCLUE de la liste.
+    # Elle pèse ~709 Ko par plaque en base : à 50 plaques par page, la réponse
+    # atteignait ~35 Mo et faisait tomber la page Plaques côté navigateur
+    # (ErrorBoundary). Mesuré : /plates?limit=5 renvoyait 3,5 Mo.
+    # `vehicle_crop` (~88 Ko) est exclu par défaut pour la même raison : ni le
+    # tableau Plaques ni la frise LiveView n'affichent d'image issue de la
+    # liste. La vignette « Recherche véhicule », elle, en a besoin pour ses
+    # cartes : elle passe `with_images=1`, ce qui réintègre `vehicle_crop`
+    # SEUL — jamais `frame_thumb`, qui reste réservé à `GET /plates/{id}`.
+    projection = {"_id": 0, "frame_thumb": 0}
+    if not with_images:
+        projection["vehicle_crop"] = 0
+    plates = await db.plates.find(
+        q, projection,
+    ).sort("timestamp", -1).skip(offset).limit(limit).to_list(limit)
     return plates
 
 
 @api_router.get("/plates/export")
 async def export_plates(user: dict = Depends(require_permission("export_files"))):
-    plates = await db.plates.find({}, {"_id": 0}).sort("timestamp", -1).to_list(2000)
+    # v3.13 · Ne charger QUE les colonnes écrites dans le CSV. Avant, les
+    # 2000 documents étaient chargés entiers, images comprises : à ~800 Ko
+    # d'images par plaque, l'export montait à plus d'1 Go en mémoire dans le
+    # process backend unique — pour un fichier texte qui n'utilise aucune
+    # de ces images.
+    plates = await db.plates.find({}, {
+        "_id": 0, "plate": 1, "timestamp": 1, "camera_name": 1, "site_name": 1,
+        "vehicle_color": 1, "vehicle_make": 1, "vehicle_model": 1,
+        "vehicle_type": 1, "direction": 1, "confidence": 1, "list_status": 1,
+    }).sort("timestamp", -1).to_list(2000)
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["Plaque", "Date", "Caméra", "Site", "Couleur", "Marque", "Modèle", "Type", "Direction", "Confiance", "Liste"])
     for p in plates:
-        writer.writerow([p["plate"], p["timestamp"], p["camera_name"], p["site_name"], p["vehicle_color"],
-                         p["vehicle_make"], p["vehicle_model"], p["vehicle_type"], p["direction"], p["confidence"], p["list_status"]])
+        # `.get()` et non `[...]` : une plaque créée à la main (crop ANPR)
+        # n'a pas forcément toutes les colonnes véhicule, et un seul document
+        # incomplet faisait échouer l'export entier en KeyError.
+        writer.writerow([p.get("plate", ""), p.get("timestamp", ""), p.get("camera_name", ""),
+                         p.get("site_name", ""), p.get("vehicle_color", ""), p.get("vehicle_make", ""),
+                         p.get("vehicle_model", ""), p.get("vehicle_type", ""), p.get("direction", ""),
+                         p.get("confidence", ""), p.get("list_status", "")])
     output.seek(0)
     await log_audit(user, "plates_exported", "CSV")
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": "attachment; filename=anpr_export.csv"})
+
+
+# ⚠ Cette route paramétrée doit rester APRÈS `/plates/export` : FastAPI
+# résout dans l'ordre de déclaration, et `/plates/{plate_id}` capturerait
+# sinon le mot « export » comme identifiant, cassant l'export CSV.
+@api_router.get("/plates/{plate_id}")
+async def get_plate(plate_id: str, user: dict = Depends(require_permission("read_plates"))):
+    """Fiche complète d'une plaque, images comprises (`frame_thumb`).
+
+    Séparée de la liste pour que celle-ci reste légère — voir le commentaire
+    de `search_plates`.
+    """
+    doc = await db.plates.find_one({"id": plate_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Plaque introuvable")
+    return doc
 
 
 # ============ WATCHLIST ============
