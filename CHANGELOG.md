@@ -2,6 +2,43 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.9.2-apercu-fiabilite] — 2026-08 — Fiabilité de l'aperçu, moins de sessions caméra
+
+### Fixed
+- **Caméra bloquée « NO SIGNAL » alors qu'elle répondait.** Son ONVIF
+  annonce une URI principale **sans chemin** (`rtsp://<ip>:554/`), dont
+  aucun motif constructeur ne permet de déduire le canal. La règle de
+  sécurité canal (v3.8) refusait alors tout sous-flux, même quand
+  l'appareil n'en expose manifestement qu'un seul : sans variante
+  `_preview`, le statut retombait sur le flux principal en HEVC, dont
+  go2rtc ne sait pas extraire de JPEG (HTTP 500) → caméra offline.
+  Le sous-flux est désormais accepté quand il n'y a **aucune ambiguïté**
+  (un seul canal identifiable parmi les flux détectés) ; dès qu'il y en a
+  plusieurs, on refuse comme avant. Vérifié sur 6 caméras : les paires
+  téléobjectif prennent toujours le bon canal (`_02_sub`), et la caméra
+  bloquée décode 200 images en 8 s.
+- **Bouton HD qui semblait cassé.** Sur une caméra dont le flux principal
+  est en HEVC, le repli sur le sous-flux est volontaire (WebRTC ne
+  transporte pas le HEVC vers un navigateur) mais rien ne l'indiquait. Le
+  serveur renvoie maintenant `X-Stream-Quality: sd_forced_<codec>` et la
+  tuile affiche un badge « HD indispo (HEVC) » avec infobulle.
+
+### Changed
+- **Une connexion RTSP en moins par tuile affichée.** `LivePlayer`
+  appelait `/live/{id}/start`, qui ouvre une connexion RTSP Python sur le
+  flux principal. Plus rien n'en a besoin depuis le passthrough : go2rtc
+  sert l'aperçu, et le repli aiortc ouvre sa propre source. Vérifié :
+  `recorder.py`, `ai_engine.py` et `frame_source.py` n'utilisent pas
+  `VideoCoreManager`. Une Reolink 2 canaux ouvrait ainsi jusqu'à 2
+  sessions inutiles par mosaïque — piste sérieuse pour les flux qui
+  tombaient KO par intermittence sur les appareils à sessions limitées.
+- **Sélecteurs retirés du formulaire caméra** : « Mode vidéo »
+  (Direct RTSP ouvrait une connexion ffmpeg par visionnage), ainsi que
+  « Transport RTSP » et « Codec préféré » — ces deux derniers n'avaient
+  plus aucun effet réel (`recorder.py` et `frame_source.py` forcent
+  `-rtsp_transport tcp` en dur, go2rtc tire via `ffmpeg:` qui impose TCP,
+  et le codec est imposé de bout en bout par la caméra).
+
 ## [v3.9.0-webrtc-passthrough] — 2026-08 — WebRTC sans transcodage (décodage côté client)
 
 ### Changed
