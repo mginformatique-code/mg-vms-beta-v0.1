@@ -24,6 +24,10 @@ sans modifier une seule ligne du code métier (voir Phase C).
 """
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger("pipeline_v2.detector")
+
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -87,15 +91,33 @@ class YoloDetector:
         import ai_engine as _ae
         if _ae._model is None or frame_bgr is None:
             return []
-        try:
+
+        def _predict_batch(images):
+            # UN seul appel GPU pour toutes les caméras du lot. Le verrou est
+            # conservé : Ultralytics n'est pas sûr en appel concurrent sur la
+            # même instance de modèle — mais il n'est plus disputé par 6
+            # threads, il protège désormais un appel unique par lot.
             with _ae.YOLO_INFERENCE_LOCK:
-                results = _ae._model.predict(
-                    frame_bgr,
+                return _ae._model.predict(
+                    images,
                     conf=_ae._cfg("confidence", _ae.AI_CONFIDENCE),
                     device=_ae._detected_device(),
                     verbose=False,
-                )[0]
-        except Exception:
+                )
+
+        results = None
+        try:
+            from .batch_infer import batch_inference
+            results = batch_inference.infer(frame_bgr, _predict_batch)
+        except Exception as e:
+            # Repli sur l'ancien chemin individuel : l'agrégateur ne doit
+            # jamais rendre le pipeline moins fiable qu'avant son ajout.
+            logger.debug("batch_infer indisponible (%s) — inférence individuelle", e)
+            try:
+                results = _predict_batch([frame_bgr])[0]
+            except Exception:
+                return []
+        if results is None:
             return []
         return _yolo_results_to_objects(results, _ae)
 
