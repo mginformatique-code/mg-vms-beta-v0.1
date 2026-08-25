@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import useDeviceCapabilities from "@/hooks/useDeviceCapabilities";
 import LivePlayer from "@/components/video/LivePlayer";
@@ -86,6 +87,7 @@ function HealthBanner() {
 }
 
 export default function CameraCenter() {
+  const { t } = useApp();
   const { cameraId } = useParams();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -155,7 +157,7 @@ export default function CameraCenter() {
           <div className="flex gap-2 items-start">
             <AlertCircle className="w-4 h-4 mt-1 text-destructive" />
             <div>
-              <div className="font-medium">Impossible de lire les capacités</div>
+              <div className="font-medium">{t("camc.caps_read_fail")}</div>
               {/* v1.0-rc4.5 · error.label est un message français ciblé par code
                   (authentication_failed / device_locked / device_unreachable /
                   command_timeout / ...) — voir useDeviceCapabilities.js.
@@ -170,7 +172,7 @@ export default function CameraCenter() {
               )}
               {error.status === 404 && (
                 <div className="text-xs mt-1">
-                  Astuce : cliquez sur <b>Détecter capacités</b> pour lancer la probe initiale.
+                  Astuce : cliquez sur <b>{t("camc.detect_caps")}</b> pour lancer la probe initiale.
                 </div>
               )}
               {error.code === "authentication_failed" && (
@@ -250,6 +252,7 @@ const EventPanel = ({ title, items, render }) => (
 
 // ─── Overview ─── v0.5.0.b · tableau de bord complet
 function OverviewTab({ info, caps, cameraId }) {
+  const { t } = useApp();
   const [rt, setRt] = useState({});
   useEffect(() => {
     const load = async () => {
@@ -272,22 +275,22 @@ function OverviewTab({ info, caps, cameraId }) {
   return (
     <div className="grid gap-3 md:grid-cols-3" data-testid="cam-overview">
       <Card className="p-4 space-y-1">
-        <div className="text-sm text-muted-foreground">Identité</div>
+        <div className="text-sm text-muted-foreground">{t("camc.identity")}</div>
         <div className="grid grid-cols-2 gap-1 text-sm">
           <div>Nom</div><div className="font-mono truncate">{cam.name || "—"}</div>
-          <div>État</div><div>{w.alive ? <Badge>en ligne</Badge> : <Badge variant="destructive">hors ligne</Badge>}</div>
+          <div>{t("camc.state")}</div><div>{w.alive ? <Badge>en ligne</Badge> : <Badge variant="destructive">hors ligne</Badge>}</div>
           <div>Driver</div><div className="font-mono">{cam.driver || "onvif"}</div>
           <div>Fabricant</div><div className="font-mono">{info?.manufacturer || "—"}</div>
-          <div>Modèle</div><div className="font-mono">{info?.model || "—"}</div>
+          <div>{t("camc.model")}</div><div className="font-mono">{info?.model || "—"}</div>
           <div>Firmware</div><div className="font-mono">{info?.firmware || "—"}</div>
         </div>
       </Card>
       <Card className="p-4 space-y-1">
-        <div className="text-sm text-muted-foreground">Vidéo · Capture</div>
+        <div className="text-sm text-muted-foreground">{t("camc.video_capture")}</div>
         <div className="grid grid-cols-2 gap-1 text-sm">
           <div>RTSP</div><div className="font-mono truncate text-xs">{cam.rtsp_url ? "configuré" : "—"}</div>
           <div>Codec</div><div className="font-mono">{w.codec || "—"}</div>
-          <div>Résolution</div><div className="font-mono">{w.resolution || "—"}</div>
+          <div>{t("cam.resolution")}</div><div className="font-mono">{w.resolution || "—"}</div>
           <div>FPS capture</div><div className="font-mono">{w.fps_capture_1min ?? "—"}</div>
           <div>Frames dropped</div><div className="font-mono">{w.frames_dropped ?? 0}</div>
           <div>Warmup</div><div className="font-mono">{fmtMs(w.warmup_ms)}</div>
@@ -311,6 +314,7 @@ function OverviewTab({ info, caps, cameraId }) {
 }
 
 function LiveTab({ cameraId }) {
+  const { t } = useApp();
   // video-pipeline-v2 · UN SEUL choix de pipeline par caméra :
   //   ○ Direct RTSP  ○ MJPEG  ○ MediaMTX
   // + bandeau statut (Pipeline / État / FPS / latence) via /video-status.
@@ -334,7 +338,7 @@ function LiveTab({ cameraId }) {
   return (
     <Card className="p-3 space-y-2" data-testid="cam-live">
       <div className="flex items-center justify-between">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Moteur vidéo</div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("camc.video_engine")}</div>
         <div className="text-[10px] mono uppercase tracking-wider px-2.5 py-1 border border-[#00E5FF]/60 bg-[#00E5FF]/15 text-[#00E5FF]"
               data-testid="video-engine-badge">WEBRTC → MJPEG (auto)</div>
       </div>
@@ -436,6 +440,7 @@ function NetworkTab({ info, cameraId }) {
 }
 
 function StreamsTab({ cameraId }) {
+  const { t } = useApp();
   const [streams, setStreams] = useState([]);
   useEffect(() => {
     api.get(`/devices/${cameraId}/streams`).then((r) => setStreams(r.data || []))
@@ -445,7 +450,7 @@ function StreamsTab({ cameraId }) {
     <Card className="p-4" data-testid="cam-streams">
       <table className="w-full text-sm">
         <thead className="text-left text-muted-foreground">
-          <tr><th>Nom</th><th>Résolution</th><th>FPS</th><th>Codec</th><th>URL</th></tr>
+          <tr><th>Nom</th><th>{t("cam.resolution")}</th><th>FPS</th><th>Codec</th><th>URL</th></tr>
         </thead>
         <tbody>
           {streams.map((s, i) => (
@@ -459,7 +464,7 @@ function StreamsTab({ cameraId }) {
           ))}
           {streams.length === 0 && (
             <tr><td colSpan={5} className="py-6 text-center text-muted-foreground">
-              Aucun stream déclaré. Cliquer sur <b>Détecter capacités</b>.
+              Aucun stream déclaré. Cliquer sur <b>{t("camc.detect_caps")}</b>.
             </td></tr>
           )}
         </tbody>
@@ -470,7 +475,8 @@ function StreamsTab({ cameraId }) {
 
 // v0.5.0.b · Capabilities catégorisées (jamais du JSON brut)
 function CapabilitiesTab({ caps }) {
-  if (!caps) return <Card className="p-6 text-sm">Capabilités non détectées. Lancez un discover.</Card>;
+  const { t } = useApp();
+  if (!caps) return <Card className="p-6 text-sm">{t("camc.caps_none")}</Card>;
   const groups = [
     { title: "VIDEO", fields: [
       { key: "onvif", label: "RTSP (ONVIF)" },
@@ -521,7 +527,7 @@ function CapabilitiesTab({ caps }) {
       ))}
       {caps.onboard_ai_features?.length > 0 && (
         <Card className="p-4 space-y-1 md:col-span-2 xl:col-span-3">
-          <div className="text-xs uppercase tracking-wider text-muted-foreground">Features IA embarquées</div>
+          <div className="text-xs uppercase tracking-wider text-muted-foreground">{t("camc.ai_features")}</div>
           <div className="flex flex-wrap gap-1 pt-1">
             {caps.onboard_ai_features.map((f) => <Badge key={f} variant="secondary">{f}</Badge>)}
           </div>
@@ -533,6 +539,7 @@ function CapabilitiesTab({ caps }) {
 
 // v0.5.0.b · AI enrichi (état plugins + latence inférence live)
 function AITab({ caps, cameraId }) {
+  const { t } = useApp();
   const [ai, setAi] = useState({});
   useEffect(() => {
     const load = async () => {
@@ -554,17 +561,17 @@ function AITab({ caps, cameraId }) {
       <Card className="p-4 space-y-2">
         <div className="text-xs uppercase tracking-wider text-muted-foreground">Pipeline actif</div>
         <div className="grid grid-cols-2 gap-1 text-sm">
-          <div>Détection</div><div className="font-mono">YOLO11</div>
+          <div>{t("camc.detection")}</div><div className="font-mono">YOLO11</div>
           <div>Tracking</div><div className="font-mono">{ai.cam?.tracker_algo || "ByteTrack"}</div>
           <div>ANPR</div>
           <div>{plugins.includes("fast-alpr") ? <Badge>FastALPR</Badge> : <Badge variant="secondary">OFF</Badge>}</div>
-          <div>IA embarquée</div>
+          <div>{t("camc.onboard_ai")}</div>
           <div>{caps?.onboard_ai ? <Badge variant="secondary">dispo</Badge> : "—"}</div>
           <div>Plugins actifs</div><div className="font-mono">{plugins.length}</div>
         </div>
       </Card>
       <Card className="p-4 space-y-2">
-        <div className="text-xs uppercase tracking-wider text-muted-foreground">Latences (dernière frame)</div>
+        <div className="text-xs uppercase tracking-wider text-muted-foreground">{t("camc.latencies")}</div>
         <div className="grid grid-cols-2 gap-1 text-sm">
           <div>Decode</div><div className="font-mono">{fmtMs(stages.decode)}</div>
           <div>YOLO</div><div className="font-mono">{fmtMs(stages.detection)}</div>
@@ -580,6 +587,7 @@ function AITab({ caps, cameraId }) {
 
 // v0.5.0.b · Events par caméra (plaques + alertes + erreurs)
 function EventsTab({ cameraId }) {
+  const { t } = useApp();
   const [ev, setEv] = useState({ plates: [], alerts: [], errors: [] });
   useEffect(() => {
     const load = async () => {
@@ -599,21 +607,21 @@ function EventsTab({ cameraId }) {
   }, [cameraId]);
   return (
     <div className="grid gap-3 md:grid-cols-3" data-testid="cam-events">
-      <EventPanel title="Dernières plaques" items={ev.plates}
+      <EventPanel title={t("camc.last_plates")} items={ev.plates}
              render={(p) => (
                <div className="flex justify-between">
                  <span className="font-mono">{p.plate || "—"}</span>
                  <span className="text-muted-foreground">{p.confidence != null ? `${Math.round(p.confidence * 100)}%` : ""}</span>
                </div>
              )} />
-      <EventPanel title="Dernières alertes" items={ev.alerts}
+      <EventPanel title={t("camc.last_alerts")} items={ev.alerts}
              render={(a) => (
                <div>
                  <div className="font-medium">{a.title || a.type || "Alerte"}</div>
                  <div className="text-muted-foreground text-[10px]">{a.created_at?.slice(0, 19)?.replace("T", " ")}</div>
                </div>
              )} />
-      <EventPanel title="Dernières erreurs" items={ev.errors}
+      <EventPanel title={t("camc.last_errors")} items={ev.errors}
              render={(e) => <div>{e.message || "—"}</div>} />
     </div>
   );
@@ -621,6 +629,7 @@ function EventsTab({ cameraId }) {
 
 // ─── Audio (conditionnel) ───
 function AudioTab({ cameraId, caps }) {
+  const { t } = useApp();
   if (!caps?.audio_input && !caps?.audio_output) return <NotSupported what="Audio" />;
   const start = () => api.post(`/devices/${cameraId}/audio/start`).then(() => toast.success("Audio démarré"))
                           .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
@@ -634,8 +643,8 @@ function AudioTab({ cameraId, caps }) {
       <div className="flex gap-2">
         {caps.audio_output && (
           <>
-            <Button onClick={start} data-testid="audio-start">Démarrer</Button>
-            <Button variant="outline" onClick={stop} data-testid="audio-stop">Arrêter</Button>
+            <Button onClick={start} data-testid="audio-start">{t("camc.start")}</Button>
+            <Button variant="outline" onClick={stop} data-testid="audio-stop">{t("camc.stop")}</Button>
           </>
         )}
       </div>
@@ -645,6 +654,7 @@ function AudioTab({ cameraId, caps }) {
 
 // ─── Lighting (conditionnel) ───
 function LightingTab({ cameraId, caps }) {
+  const { t } = useApp();
   const supported = caps?.spotlight || caps?.white_light;
   const [brightness, setBrightness] = useState(80);
   if (!supported) return <NotSupported what="Lumière (spotlight / white light)" />;
@@ -660,7 +670,7 @@ function LightingTab({ cameraId, caps }) {
              data-testid="light-brightness" />
       <div className="flex gap-2">
         <Button onClick={() => toggle(true)} data-testid="light-on">Allumer</Button>
-        <Button variant="outline" onClick={() => toggle(false)} data-testid="light-off">Éteindre</Button>
+        <Button variant="outline" onClick={() => toggle(false)} data-testid="light-off">{t("camc.turn_off")}</Button>
       </div>
     </Card>
   );
@@ -668,6 +678,7 @@ function LightingTab({ cameraId, caps }) {
 
 // ─── Alarm (Siren) ───
 function AlarmTab({ cameraId, caps }) {
+  const { t } = useApp();
   const [duration, setDuration] = useState(10);
   if (!caps?.siren) return <NotSupported what="Sirène" />;
   const trigger = () =>
@@ -680,13 +691,13 @@ function AlarmTab({ cameraId, caps }) {
        .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
   return (
     <Card className="p-4 space-y-3" data-testid="cam-alarm">
-      <Label>Durée (s)</Label>
+      <Label>{t("camc.duration_s")}</Label>
       <Input type="number" min={1} max={600} value={duration}
              onChange={(e) => setDuration(Number(e.target.value))}
              data-testid="siren-duration" />
       <div className="flex gap-2">
-        <Button onClick={trigger} data-testid="siren-trigger">Déclencher</Button>
-        <Button variant="outline" onClick={stop} data-testid="siren-stop">Arrêter</Button>
+        <Button onClick={trigger} data-testid="siren-trigger">{t("camc.trigger")}</Button>
+        <Button variant="outline" onClick={stop} data-testid="siren-stop">{t("camc.stop")}</Button>
       </div>
     </Card>
   );
@@ -702,6 +713,7 @@ const fmtGb = (bytes) => {
 // Lecture via /api/devices/{id}/recordings/stream (proxy ffmpeg côté
 // backend) — jamais d'URL caméra brute (avec identifiants) exposée ici.
 function SdCardTab({ cameraId, caps }) {
+  const { t } = useApp();
   const [storage, setStorage] = useState(null);
   const [recordings, setRecordings] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -786,7 +798,7 @@ function SdCardTab({ cameraId, caps }) {
         </div>
       )}
       {storage && storage.length === 0 && (
-        <div className="text-xs text-muted-foreground">Aucun support de stockage détecté sur cette caméra.</div>
+        <div className="text-xs text-muted-foreground">{t("camc.no_storage")}</div>
       )}
 
       <div className="flex flex-wrap items-end gap-2">
@@ -795,11 +807,11 @@ function SdCardTab({ cameraId, caps }) {
           <Input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} data-testid="sdcard-start" />
         </div>
         <div>
-          <Label>Jusqu&apos;à</Label>
+          <Label>{t("camc.until")}</Label>
           <Input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} data-testid="sdcard-end" />
         </div>
         <div>
-          <Label>Qualité</Label>
+          <Label>{t("camc.quality")}</Label>
           <div className="flex" data-testid="sdcard-quality">
             {[["main", "HD"], ["sub", "SD"]].map(([val, label]) => (
               <button key={val} type="button"
@@ -849,7 +861,7 @@ function SdCardTab({ cameraId, caps }) {
                   Lire
                 </Button>
                 <Button size="sm" variant="outline" data-testid="sdcard-download-btn"
-                        title="Télécharger le fichier en local"
+                        title={t("camc.download_local")}
                         onClick={(e) => { e.stopPropagation(); download(r.file_name); }}>
                   <Download className="w-3.5 h-3.5" />
                 </Button>
@@ -916,12 +928,13 @@ function PTZTab({ cameraId, caps }) {
 }
 
 function MaintenanceTab({ cameraId }) {
+  const { t } = useApp();
   const [status, setStatus] = useState(null);
   useEffect(() => {
     api.get(`/devices/${cameraId}/status`).then((r) => setStatus(r.data))
        .catch(() => setStatus(null));
   }, [cameraId]);
-  if (!status) return <Card className="p-6 text-sm">Aucune donnée de statut.</Card>;
+  if (!status) return <Card className="p-6 text-sm">{t("camc.no_status")}</Card>;
   return (
     <Card className="p-4 space-y-1" data-testid="cam-maintenance">
       <div className="grid grid-cols-2 gap-1 text-sm">

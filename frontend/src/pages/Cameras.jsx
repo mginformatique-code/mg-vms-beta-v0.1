@@ -366,8 +366,8 @@ export default function Cameras() {
             <th className="px-3 py-2">Site</th>
             <th className="px-3 py-2">Adresse IP</th>
             <th className="px-3 py-2">Mode</th>
-            <th className="px-3 py-2">Mode vidéo</th>
-            <th className="px-3 py-2">Résolution</th>
+            <th className="px-3 py-2">{t("cam.video_mode")}</th>
+            <th className="px-3 py-2">{t("cam.resolution")}</th>
             <th className="px-3 py-2">PTZ</th>
             <th className="px-3 py-2 text-right">{t("common.actions")}</th>
           </tr></thead>
@@ -412,7 +412,7 @@ export default function Cameras() {
                   </button>
                   <button onClick={() => openDiagnostic(c)} data-testid="diagnostic-camera-btn" title="Diagnostic complet" className="p-1.5 hover:bg-secondary text-[#00E676]"><Radar size={15} /></button>
                   <button onClick={() => snapshot(c)} data-testid="snapshot-camera-btn" title="Snapshot" className="p-1.5 hover:bg-secondary"><CamIcon size={15} /></button>
-                  <button onClick={() => openDebug(c)} data-testid="debug-ia-camera-btn" title="Debug IA (plugins chargés)" className="p-1.5 hover:bg-secondary text-[#0044FF]"><BrainCircuit size={15} /></button>
+                  <button onClick={() => openDebug(c)} data-testid="debug-ia-camera-btn" title={t("cam.ai_debug_title")} className="p-1.5 hover:bg-secondary text-[#0044FF]"><BrainCircuit size={15} /></button>
                   {can("technician") && <button onClick={() => openEdit(c)} data-testid="edit-camera-btn" title="Modifier" className="p-1.5 hover:bg-secondary"><Pencil size={15} /></button>}
                   {can("technician") && <button onClick={() => del(c)} data-testid="delete-camera-btn" title="Supprimer" className="p-1.5 hover:bg-secondary text-[#FF3333]"><Trash2 size={15} /></button>}
                 </div></td>
@@ -464,7 +464,7 @@ export default function Cameras() {
             {form.mode === "onvif" && (
               <div className="col-span-2 border border-border p-3 space-y-2" data-testid="onvif-panel">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Détection automatique</span>
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("cam.autodetect")}</span>
                   <button type="button" onClick={autoDetect} disabled={detecting} data-testid="auto-detect-btn"
                     className="px-3 py-1.5 bg-[#00E676]/20 text-[#00E676] border border-[#00E676] hover:bg-[#00E676]/30 text-xs flex items-center gap-1">
                     {detecting ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />} Détecter automatiquement la caméra
@@ -477,7 +477,7 @@ export default function Cameras() {
                 )}
                 {profiles.length > 0 && (
                   <div>
-                    <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Profil vidéo — le flux choisi sera utilisé exactement</label>
+                    <label className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("cam.profile_hint")}</label>
                     <div className="mt-1 space-y-1" data-testid="onvif-profiles">
                       {profiles.map((p, i) => {
                         const label = (p.name || "").toLowerCase();
@@ -515,11 +515,11 @@ export default function Cameras() {
               <div className="col-span-2 border border-border p-3 space-y-2" data-testid="rtsp-wizard">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Assistant RTSP</span>
-                  <span className="text-[10px] text-muted-foreground">Génère l&apos;URL depuis le fabricant. Toujours modifiable.</span>
+                  <span className="text-[10px] text-muted-foreground">{t("cam.wizard_hint")}</span>
                 </div>
                 <div className="grid grid-cols-4 gap-2">
                   <select value={form.wiz_brand} onChange={(e) => setForm({ ...form, wiz_brand: e.target.value, wiz_model_idx: 0, wiz_stream: "main" })} className="inp text-xs" data-testid="wiz-brand">
-                    <option value="">Fabricant…</option>
+                    <option value="">{t("cam.manufacturer_ph")}</option>
                     {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                   </select>
                   <select value={form.wiz_model_idx} onChange={(e) => setForm({ ...form, wiz_model_idx: Number(e.target.value), wiz_stream: "main" })} className="inp text-xs" disabled={!currentBrand} data-testid="wiz-model">
@@ -531,7 +531,7 @@ export default function Cameras() {
                   <div className="flex items-center gap-1">
                     <input type="number" min="1" max="64" placeholder="Canal"
                       value={form.wiz_channel} onChange={(e) => setForm({ ...form, wiz_channel: e.target.value })}
-                      className="inp text-xs mono" style={{ width: 60 }} title="Numéro de canal (multi-cam)" data-testid="wiz-channel" />
+                      className="inp text-xs mono" style={{ width: 60 }} title={t("cam.channel_title")} data-testid="wiz-channel" />
                     <button type="button" onClick={applyWizard} disabled={!form.wiz_brand} data-testid="wiz-generate-btn"
                       className="px-3 py-2 bg-[#0044FF] text-white text-xs flex items-center gap-1 hover:bg-[#0033cc] disabled:opacity-50">
                       <ChevronRight size={12} /> Générer
@@ -551,11 +551,11 @@ export default function Cameras() {
             {/* Options avancées enregistrement / IA */}
             <div className="col-span-2 flex items-center gap-5 flex-wrap">
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.ptz_enabled} onChange={(e) => setForm({ ...form, ptz_enabled: e.target.checked })} /> PTZ</label>
-              <label className="flex items-center gap-2 text-sm" data-testid="record-toggle"><input type="checkbox" checked={form.record_enabled} onChange={(e) => setForm({ ...form, record_enabled: e.target.checked })} /> Enregistrement activé</label>
+              <label className="flex items-center gap-2 text-sm" data-testid="record-toggle"><input type="checkbox" checked={form.record_enabled} onChange={(e) => setForm({ ...form, record_enabled: e.target.checked })} /> {t("cam.record_enabled")}</label>
               <label className="flex items-center gap-2 text-sm" data-testid="detect-toggle">
                 <input type="checkbox" checked={form.detect_enabled} onChange={(e) => setForm({ ...form, detect_enabled: e.target.checked })} />
                 Analyse IA activée
-                <span className="text-[10px] text-muted-foreground">(kill-switch global caméra)</span>
+                <span className="text-[10px] text-muted-foreground">{t("cam.ai_killswitch")}</span>
               </label>
             </div>
 
@@ -594,9 +594,9 @@ export default function Cameras() {
                   className="inp"
                   data-testid="ai-resolution-select"
                 >
-                  <option value="720p">720p — crops en résolution de scan (défaut)</option>
-                  <option value="1080p">1080p — crops en haute qualité</option>
-                  <option value="native">Native — crops en qualité maximale</option>
+                  <option value="720p">{t("cam.ai_res_720")}</option>
+                  <option value="1080p">{t("cam.ai_res_1080")}</option>
+                  <option value="native">{t("cam.ai_res_native")}</option>
                 </select>
                 <p className="text-[10px] text-muted-foreground mt-0.5">
                   Le scan continu (détection véhicule) tourne toujours en résolution légère, quel que
@@ -640,7 +640,7 @@ export default function Cameras() {
                       });
                     }}
                   >
-                    <option value="">— Choisir un profil détecté sur la caméra —</option>
+                    <option value="">{t("cam.choose_profile")}</option>
                     {profiles.map((p, i) => {
                       const codec = (p.codec || "").toUpperCase().replace("VIDEO", "").trim();
                       const compatible = codec === "H264" || codec === "";
@@ -700,15 +700,15 @@ export default function Cameras() {
                     <select value={form.record_mode} onChange={(e) => setForm({ ...form, record_mode: e.target.value })} className="inp" data-testid="record-mode">
                       <option value="continuous">Continu (24/7)</option>
                       <option value="motion">Sur mouvement</option>
-                      <option value="ai">Sur événement IA</option>
-                      <option value="off">Désactivé</option>
+                      <option value="ai">{t("cam.rec_ai_event")}</option>
+                      <option value="off">{t("cam.rec_off")}</option>
                     </select>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">Mouvement/IA : les segments sans détection sont supprimés à l&apos;indexation.</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">{t("cam.rec_mode_hint")}</p>
                   </div>
                   <div>
                     <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Canal ONVIF (profil)</label>
                     <select value={form.profile_token} onChange={(e) => setForm({ ...form, profile_token: e.target.value })} className="inp" disabled={profiles.length === 0} data-testid="record-profile">
-                      <option value="">— Défaut (Main stream) —</option>
+                      <option value="">{t("cam.default_main")}</option>
                       {profiles.map((p) => (
                         <option key={p.token} value={p.token}>{p.name} {p.resolution ? `· ${p.resolution}` : ""}</option>
                       ))}
@@ -726,7 +726,7 @@ export default function Cameras() {
                   </div>
                   <div>
                     <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Quota max. (Go)</label>
-                    <input type="number" min="0" value={form.storage_max_size_gb} onChange={(e) => setForm({ ...form, storage_max_size_gb: e.target.value })} className="inp mono" placeholder="0 = illimité" data-testid="record-quota" />
+                    <input type="number" min="0" value={form.storage_max_size_gb} onChange={(e) => setForm({ ...form, storage_max_size_gb: e.target.value })} className="inp mono" placeholder={t("cam.quota_ph")} data-testid="record-quota" />
                   </div>
                 </div>
               </div>
@@ -741,7 +741,7 @@ export default function Cameras() {
                   {checking && <Loader2 size={12} className="animate-spin" />} Tester la connexion
                 </button>
               </div>
-              {!connCheck && <p className="text-muted-foreground text-[11px]">Cliquez sur « Tester la connexion » — chaque étape (Ping · ONVIF · RTSP · go2rtc · Aperçu) affichera son statut ci-dessous.</p>}
+              {!connCheck && <p className="text-muted-foreground text-[11px]">{t("cam.test_hint")}</p>}
               {connCheck && (
                 <div className="space-y-1" data-testid="conn-test-result">
                   {connCheck.steps.map((s, i) => <StepRow key={i} step={s} />)}
@@ -752,7 +752,7 @@ export default function Cameras() {
                       <summary className="text-[10px] uppercase tracking-wider text-muted-foreground cursor-pointer">
                         Debug RTSP — {connCheck.debug_attempts.length} tentative(s)
                         {connCheck.rtsp_url_validated && (
-                          <span className="ml-2 text-[#00E676]">✓ URL validée</span>
+                          <span className="ml-2 text-[#00E676]">{t("cam.url_validated")}</span>
                         )}
                       </summary>
                       <ol className="mt-1.5 space-y-0.5 text-[10px] mono">
@@ -775,7 +775,7 @@ export default function Cameras() {
                   )}
                   {connCheck.steps.find((s) => s.preview_url) && (
                     <div className="mt-2">
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Aperçu vidéo</div>
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("cam.video_preview")}</div>
                       <img alt="preview" src={`${process.env.REACT_APP_BACKEND_URL}/api/stream/preview.jpeg?name=${connCheck.steps.find((s) => s.temp_stream).temp_stream}&token=${encodeURIComponent(localStorage.getItem("mg_token") || "")}`}
                         className="max-h-40 border border-border" data-testid="conn-test-preview" />
                     </div>
@@ -819,7 +819,7 @@ export default function Cameras() {
             <DialogHeader><DialogTitle className="font-head flex items-center gap-2"><BrainCircuit size={18} /> Debug IA — {debugSnap.cam_name}</DialogTitle></DialogHeader>
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div className="col-span-2 border border-border p-2 mono">
-                <div>Résolution analysée : <b>{debugSnap.resolution}</b> · Device : <b>{debugSnap.device}</b> · Timestamp : {new Date(debugSnap.timestamp).toLocaleString()}</div>
+                <div>{t("cam.analyzed_res")}<b>{debugSnap.resolution}</b> · Device : <b>{debugSnap.device}</b> · Timestamp : {new Date(debugSnap.timestamp).toLocaleString()}</div>
                 <div className="mt-1">
                   Timings : YOLO <b>{debugSnap.timings?.yolo_ms}ms</b> · ALPR <b>{debugSnap.timings?.alpr_ms}ms</b>
                   · décodage {debugSnap.timings?.decode_ms}ms · mouvement {debugSnap.timings?.motion_ms}ms · <b>total {debugSnap.timings?.total_ms}ms</b>
@@ -827,7 +827,7 @@ export default function Cameras() {
                 <div className="mt-1">Mouvement : <b>{debugSnap.motion_pct}%</b></div>
               </div>
               <div className="col-span-2">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Image analysée</div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("cam.analyzed_image")}</div>
                 {debugSnap.frame_preview && <img src={debugSnap.frame_preview} alt="frame" className="w-full border border-border" />}
               </div>
               <div>
@@ -849,7 +849,7 @@ export default function Cameras() {
                     {p.expires_in !== undefined && <span> ({p.expires_in}s)</span>}
                   </div>
                 ))}
-                {(!debugSnap.plate_attempts || !debugSnap.plate_attempts.length) && <p className="text-[11px] text-muted-foreground">(aucune tentative — pas de véhicule)</p>}
+                {(!debugSnap.plate_attempts || !debugSnap.plate_attempts.length) && <p className="text-[11px] text-muted-foreground">{t("cam.no_attempt")}</p>}
               </div>
             </div>
           </DialogContent>
@@ -866,6 +866,7 @@ export default function Cameras() {
 }
 
 function PipelineDiagnosticDialog({ state, onClose, onRefresh }) {
+  const { t } = useApp();
   const { cam, loading, steps, verdict, stream_mode, stream_name, go2rtc_url } = state;
   const [refreshing, setRefreshing] = useState(false);
   const doRefresh = async () => {
@@ -896,7 +897,7 @@ function PipelineDiagnosticDialog({ state, onClose, onRefresh }) {
           </DialogTitle>
         </DialogHeader>
         {loading ? (
-          <div className="flex items-center gap-2 py-6 text-muted-foreground"><Loader2 size={18} className="animate-spin" /> Sonde en cours…</div>
+          <div className="flex items-center gap-2 py-6 text-muted-foreground"><Loader2 size={18} className="animate-spin" /> {t("cam.probing")}</div>
         ) : (
           <div className="space-y-3">
             <div className="grid grid-cols-3 gap-2 text-xs">
@@ -929,7 +930,7 @@ function PipelineDiagnosticDialog({ state, onClose, onRefresh }) {
                   {s.detail && <div className="text-xs text-muted-foreground pl-6">{s.detail}</div>}
                   {s.data && Object.keys(s.data).length > 0 && (
                     <details className="pl-6 mt-1">
-                      <summary className="text-[10px] mono text-muted-foreground cursor-pointer hover:text-foreground">Détails techniques</summary>
+                      <summary className="text-[10px] mono text-muted-foreground cursor-pointer hover:text-foreground">{t("cam.tech_details")}</summary>
                       <pre className="text-[10px] mono text-muted-foreground mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap">{JSON.stringify(s.data, null, 2)}</pre>
                     </details>
                   )}
@@ -951,6 +952,7 @@ function PipelineDiagnosticDialog({ state, onClose, onRefresh }) {
 }
 
 function DiagnosticDialog({ state, onClose, onRefresh }) {
+  const { t } = useApp();
   const { cam, loading, camera, flux, ai, stats_24h, last_event, last_plate } = state;
   const ok = (v) => v ? <CheckCircle2 size={13} className="text-[#00E676]" /> : <XCircle size={13} className="text-[#FF3333]" />;
   const [refreshing, setRefreshing] = useState(false);
@@ -970,15 +972,15 @@ function DiagnosticDialog({ state, onClose, onRefresh }) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Radar size={16} className="text-[#00E676]" /> Diagnostic — {cam?.name}</DialogTitle>
         </DialogHeader>
-        {loading ? <div className="py-8 text-center text-muted-foreground"><Loader2 size={20} className="animate-spin inline mr-2" /> Chargement…</div> : (
+        {loading ? <div className="py-8 text-center text-muted-foreground"><Loader2 size={20} className="animate-spin inline mr-2" /> {t("cam.loading")}</div> : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
             <section className="border border-border p-3">
-              <div className="font-head font-semibold mb-2">Flux vidéo</div>
+              <div className="font-head font-semibold mb-2">{t("cam.video_stream")}</div>
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2">{ok(flux?.camera_online)} <span className="text-xs">Caméra {camera?.status?.toUpperCase()}</span></div>
-                <div className="flex items-center gap-2">{ok(flux?.go2rtc_registered)} <span className="text-xs">go2rtc — flux source enregistré</span></div>
-                <div className="flex items-center gap-2">{ok(flux?.go2rtc_hd_registered)} <span className="text-xs">go2rtc — variante <b>HD</b> (résolution native)</span></div>
-                <div className="flex items-center gap-2">{ok(flux?.go2rtc_sd_registered)} <span className="text-xs">go2rtc — variante <b>SD</b> (640 px)</span></div>
+                <div className="flex items-center gap-2">{ok(flux?.go2rtc_registered)} <span className="text-xs">{t("cam.g2r_source")}</span></div>
+                <div className="flex items-center gap-2">{ok(flux?.go2rtc_hd_registered)} <span className="text-xs">{t("cam.g2r_variant")}<b>HD</b>{t("cam.native_res")}</span></div>
+                <div className="flex items-center gap-2">{ok(flux?.go2rtc_sd_registered)} <span className="text-xs">{t("cam.g2r_variant")}<b>SD</b> (640 px)</span></div>
                 <div className="text-xs text-muted-foreground mono">Fabricant : <b className="text-foreground">{camera?.manufacturer || "—"}</b> · Modèle : <b className="text-foreground">{camera?.model || "—"}</b></div>
                 <div className="text-xs text-muted-foreground mono">Profil : <b className="text-foreground">{camera?.profile_name || camera?.profile_token || "—"}</b></div>
                 <div className="text-xs text-muted-foreground mono">Transport : <b>{(flux?.rtsp_transport_used || "tcp").toUpperCase()}</b> · Codec : <b>{(camera?.codec || "auto").toUpperCase()}</b></div>
@@ -988,7 +990,7 @@ function DiagnosticDialog({ state, onClose, onRefresh }) {
                   if (w > 0 && h > 0 && (w < 1280 || h < 720)) {
                     return (
                       <div className="text-[11px] text-[#FFB800] mt-1 p-1.5 border border-[#FFB800]/40 bg-[#FFB800]/10" data-testid="substream-warning">
-                        ⚠ <b>Sous-flux détecté</b> ({camera.resolution}) — la caméra utilise probablement le profil <i>sub</i>. Fermez ce diagnostic, cliquez sur « Modifier » et re-cochez le profil <b>MAIN</b> (résolution &ge; 1280×720).
+                        ⚠ <b>{t("cam.substream_detected")}</b> ({camera.resolution}) — la caméra utilise probablement le profil <i>sub</i>. Fermez ce diagnostic, cliquez sur « Modifier » et re-cochez le profil <b>MAIN</b> (résolution &ge; 1280×720).
                       </div>
                     );
                   }
@@ -1017,11 +1019,11 @@ function DiagnosticDialog({ state, onClose, onRefresh }) {
                 <div className="text-xs text-muted-foreground mono">Dernière analyse : {ai?.last_analysis_at ? new Date(ai.last_analysis_at).toLocaleTimeString() : "—"}</div>
                 <div className="text-xs text-muted-foreground mono">YOLO : {ai?.last_yolo_ms ? `${ai.last_yolo_ms} ms` : "—"} · ALPR : {ai?.last_alpr_ms ? `${ai.last_alpr_ms} ms` : "—"}</div>
                 <div className="text-xs text-muted-foreground mono">Mouvement : {ai?.motion_pct != null ? `${ai.motion_pct.toFixed(1)} %` : "—"}</div>
-                <div className="text-xs text-muted-foreground mono">Détections dernière frame : <b className="text-foreground">{ai?.last_detections_count || 0}</b></div>
+                <div className="text-xs text-muted-foreground mono">{t("cam.last_frame_det")}<b className="text-foreground">{ai?.last_detections_count || 0}</b></div>
               </div>
             </section>
             <section className="border border-border p-3 md:col-span-2">
-              <div className="font-head font-semibold mb-2">Activité (24 h)</div>
+              <div className="font-head font-semibold mb-2">{t("cam.activity_24h")}</div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center">
                 <StatBoxD label="Événements" value={stats_24h?.events || 0} />
                 <StatBoxD label="Plaques lues" value={stats_24h?.plates || 0} />
@@ -1081,6 +1083,7 @@ function streamLabel(key) {
 }
 
 function OnvifDiscovery({ open, onClose, onPick }) {
+  const { t } = useApp();
   // ─────────────── State ───────────────
   const [phase, setPhase] = useState("config"); // config | scanning | done
   const [interfaces, setInterfaces] = useState([]);
@@ -1238,7 +1241,7 @@ function OnvifDiscovery({ open, onClose, onPick }) {
         {phase === "config" && (
           <div className="space-y-3 max-h-[70vh] overflow-y-auto">
             <div className="flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">Sélectionnez les interfaces et/ou ajoutez des réseaux personnalisés à scanner.</p>
+              <p className="text-xs text-muted-foreground">{t("disc.select_hint")}</p>
               <label className="flex items-center gap-2 text-xs cursor-pointer" data-testid="show-virtual-toggle">
                 <input type="checkbox" checked={showVirtual} onChange={(e) => setShowVirtual(e.target.checked)} />
                 Afficher les interfaces virtuelles
@@ -1248,9 +1251,9 @@ function OnvifDiscovery({ open, onClose, onPick }) {
             {/* Interfaces */}
             <div className="border border-border">
               <div className="grid grid-cols-[24px_1fr_140px_140px_100px_70px] gap-2 px-3 py-2 bg-muted text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border">
-                <div></div><div>Interface</div><div>Adresse / CIDR</div><div>Passerelle</div><div>Vitesse</div><div>État</div>
+                <div></div><div>Interface</div><div>Adresse / CIDR</div><div>Passerelle</div><div>Vitesse</div><div>{t("disc.state")}</div>
               </div>
-              {visibleIfaces.length === 0 && <div className="p-3 text-sm text-muted-foreground">Aucune interface détectée.</div>}
+              {visibleIfaces.length === 0 && <div className="p-3 text-sm text-muted-foreground">{t("disc.no_iface")}</div>}
               {visibleIfaces.map((i) => (
                 <label key={i.name} className={`grid grid-cols-[24px_1fr_140px_140px_100px_70px] gap-2 items-center px-3 py-2 border-b border-border last:border-0 cursor-pointer hover:bg-secondary/50 ${i.virtual ? "opacity-60" : ""}`} data-testid={`iface-row-${i.name}`}>
                   <input type="checkbox" checked={!!selected[i.name]} onChange={(e) => setSelected((s) => ({ ...s, [i.name]: e.target.checked }))} disabled={!i.cidr} />
@@ -1269,7 +1272,7 @@ function OnvifDiscovery({ open, onClose, onPick }) {
             {/* Custom networks */}
             <div className="border border-border p-3 space-y-2">
               <div className="flex items-center justify-between">
-                <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Réseaux personnalisés (CIDR)</div>
+                <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">{t("disc.custom_nets")}</div>
                 <button onClick={addCidr} className="text-[11px] px-2 py-1 border border-border hover:bg-secondary" data-testid="add-custom-cidr">+ Ajouter</button>
               </div>
               {customCidrs.map((c, i) => (
@@ -1290,9 +1293,9 @@ function OnvifDiscovery({ open, onClose, onPick }) {
           <div className="space-y-3">
             {/* Progress bar */}
             <div className="grid grid-cols-4 gap-3 text-xs">
-              <div className="border border-border p-2"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Testées</div><div className="font-mono text-sm">{progress.tested} / {progress.total || "?"}</div></div>
-              <div className="border border-border p-2"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Caméras</div><div className="font-mono text-sm text-[#00CC66]">{devices.length}</div></div>
-              <div className="border border-border p-2"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Écoulé</div><div className="font-mono text-sm">{progress.elapsed_sec}s</div></div>
+              <div className="border border-border p-2"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">{t("disc.tested")}</div><div className="font-mono text-sm">{progress.tested} / {progress.total || "?"}</div></div>
+              <div className="border border-border p-2"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">{t("disc.cameras")}</div><div className="font-mono text-sm text-[#00CC66]">{devices.length}</div></div>
+              <div className="border border-border p-2"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">{t("disc.elapsed")}</div><div className="font-mono text-sm">{progress.elapsed_sec}s</div></div>
               <div className="border border-border p-2"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Restant</div><div className="font-mono text-sm">{phase === "done" ? "—" : `${progress.eta_sec}s`}</div></div>
             </div>
             <div className="h-2 bg-muted relative overflow-hidden border border-border">
@@ -1320,21 +1323,21 @@ function OnvifDiscovery({ open, onClose, onPick }) {
             {/* Summary */}
             {phase === "done" && summary && (
               <div className="border border-border p-3 text-xs space-y-1" data-testid="scan-summary">
-                <div className="font-semibold text-sm uppercase tracking-widest mb-1">Résumé</div>
-                <div>Interfaces analysées : <span className="font-mono">{summary.interfaces_scanned}</span></div>
-                <div>Adresses testées : <span className="font-mono">{summary.addresses_tested}</span></div>
-                <div>Caméras détectées : <span className="font-mono text-[#00CC66]">{summary.cameras_found}</span> (ONVIF : {summary.onvif_count})</div>
+                <div className="font-semibold text-sm uppercase tracking-widest mb-1">{t("disc.summary")}</div>
+                <div>{t("disc.ifaces_scanned")}<span className="font-mono">{summary.interfaces_scanned}</span></div>
+                <div>{t("disc.addr_tested")}<span className="font-mono">{summary.addresses_tested}</span></div>
+                <div>{t("disc.cams_found")}<span className="font-mono text-[#00CC66]">{summary.cameras_found}</span> (ONVIF : {summary.onvif_count})</div>
                 {Object.entries(summary.by_manufacturer || {}).map(([k, v]) => (<div key={k} className="pl-3 text-muted-foreground">• {k} : {v}</div>))}
-                <div>Équipements non-caméras : <span className="font-mono">{summary.other_devices_found}</span></div>
+                <div>{t("disc.non_cams")}<span className="font-mono">{summary.other_devices_found}</span></div>
                 <div>Erreurs : <span className="font-mono">{summary.errors}</span></div>
-                <div>Durée : <span className="font-mono">{summary.elapsed_sec}s</span> · Statut : <span className="font-mono">{summary.status}</span></div>
+                <div>{t("disc.duration")}<span className="font-mono">{summary.elapsed_sec}s</span> · Statut : <span className="font-mono">{summary.status}</span></div>
               </div>
             )}
 
             {/* Devices found */}
             {phase === "done" && devices.length > 0 && (
               <div className="border border-border" data-testid="scan-devices-cameras">
-                <div className="px-3 py-2 bg-muted text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border">Caméras détectées</div>
+                <div className="px-3 py-2 bg-muted text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border">{t("disc.cams_found_title")}</div>
                 {devices.map((d, i) => (
                   <div key={i} className="flex items-center justify-between px-3 py-2 border-b border-border last:border-0">
                     <div className="flex items-center gap-3 text-xs">
@@ -1343,7 +1346,7 @@ function OnvifDiscovery({ open, onClose, onPick }) {
                       {d.model && <span className="text-muted-foreground">{d.model}</span>}
                       {d.onvif && <span className="text-[9px] px-1 border border-[#00CC66]/40 text-[#00CC66]">ONVIF</span>}
                       {d.auth_required && <span className="text-[9px] px-1 border border-[#FFB800]/40 text-[#FFB800]">auth</span>}
-                      {d.already_added && <span className="text-[9px] px-1 border border-border text-muted-foreground">déjà ajoutée</span>}
+                      {d.already_added && <span className="text-[9px] px-1 border border-border text-muted-foreground">{t("disc.already_added")}</span>}
                     </div>
                     <button onClick={() => onPick({ ip: d.ip, port: d.onvif_port || 80 })} className="px-3 py-1 bg-[#0044FF] text-white text-xs" data-testid={`pick-device-${d.ip}`}>Utiliser cette IP</button>
                   </div>
@@ -1352,12 +1355,12 @@ function OnvifDiscovery({ open, onClose, onPick }) {
             )}
             {phase === "done" && others.length > 0 && (
               <div className="border border-border" data-testid="scan-devices-others">
-                <div className="px-3 py-2 bg-muted text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border">Autres équipements réseau</div>
+                <div className="px-3 py-2 bg-muted text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border">{t("disc.other_devices")}</div>
                 {others.map((d, i) => (
                   <div key={i} className="flex items-center gap-3 px-3 py-2 border-b border-border last:border-0 text-xs opacity-70">
                     <span className="font-mono">{d.ip}</span>
                     <span>{d.manufacturer || "Unknown"}</span>
-                    <span className="text-muted-foreground">Équipement détecté mais non compatible avec MG-VMS</span>
+                    <span className="text-muted-foreground">{t("disc.not_compatible")}</span>
                   </div>
                 ))}
               </div>
