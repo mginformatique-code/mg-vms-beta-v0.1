@@ -55,6 +55,10 @@ _HD_CACHE_TTL_S = 1.0
 #: réessayer en boucle coûtait plusieurs secondes PAR IMAGE.
 _HD_FAIL_BACKOFF_S = 30.0
 
+#: Largeur de travail pour la détection de mouvement. Le pourcentage de
+#: pixels modifiés ne demande pas la pleine résolution.
+_MOTION_MAX_W = 480
+
 
 def _fetch_hd_crop_source(camera_id: str):
     """Frame BGR (numpy) en résolution native via go2rtc, ou None si échec.
@@ -148,10 +152,31 @@ class CameraWorker:
         return ctx.image is not None
 
     def _stage_motion(self, ctx: FrameContext) -> None:
+        """Pourcentage de pixels ayant changé depuis l'image précédente.
+
+        v3.12 · Calculé sur une image RÉDUITE. Le flou gaussien 21x21 sur une
+        frame 1080p/native coûtait ~18-20 ms par image et par caméra, pour une
+        mesure qui est un simple POURCENTAGE — donc invariante à l'échelle.
+
+        Le noyau de flou est réduit dans la même proportion que l'image
+        (21 -> 5 pour un facteur 4) afin de conserver le même lissage spatial
+        effectif : sans cela, un noyau 21x21 sur une image 4x plus petite
+        lisserait 4x plus fort et modifierait la sensibilité, donc le
+        déclenchement des enregistrements en mode "mouvement" et le seuil
+        MOTION_THRESHOLD_PCT.
+        """
         import cv2
         t0 = time.monotonic()
-        gray = cv2.cvtColor(ctx.image, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (21, 21), 0)
+        img = ctx.image
+        h, w = img.shape[:2]
+        k = 21
+        if w > _MOTION_MAX_W:
+            ratio = _MOTION_MAX_W / float(w)
+            img = cv2.resize(img, (_MOTION_MAX_W, max(1, int(round(h * ratio)))),
+                             interpolation=cv2.INTER_AREA)
+            k = max(3, int(round(21 * ratio)) | 1)   # impair, minimum 3
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (k, k), 0)
         prev = self._prev_gray
         self._prev_gray = gray
         if prev is not None and prev.shape == gray.shape:
