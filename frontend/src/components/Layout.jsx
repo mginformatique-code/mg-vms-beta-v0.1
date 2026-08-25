@@ -5,6 +5,7 @@ import api from "@/lib/api";
 import Logo from "@/components/Logo";
 import LicenseSection from "@/components/LicenseSection";
 import CookieSection from "@/components/CookieSection";
+import OpenSourceLicenses from "@/components/OpenSourceLicenses";
 import WelcomePopup from "@/components/WelcomePopup";
 import CookieConsentBanner from "@/components/CookieConsentBanner";
 import {
@@ -206,7 +207,7 @@ function NavGroupItem({ item, t, can, hasPerm }) {
   );
 }
 
-function AboutDialog({ open, onOpenChange, t, isAdmin }) {
+function AboutDialog({ open, onOpenChange, t, isAdmin, lang }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-testid="about-dialog">
@@ -236,7 +237,22 @@ function AboutDialog({ open, onOpenChange, t, isAdmin }) {
               mginformatique.com
             </a>
           </div>
+          {/* Licence d'utilisation (EULA) — visible par TOUS les profils :
+              c'est le cadre juridique d'usage du logiciel, pas un réglage
+              d'administration. La clé de licence Gold ci-dessous, elle, reste
+              réservée aux admins puisqu'eux seuls peuvent l'activer. */}
+          <div className="border border-border p-3" data-testid="about-eula-section">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-2">
+              <ScrollText size={14} /> {t("eula.title")}
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed mb-2">{t("eula.desc")}</p>
+            <a href="https://mg-vms.com/fr/cgu" target="_blank" rel="noopener noreferrer"
+               className="text-xs text-[#0044FF] hover:underline" data-testid="about-eula-link">
+              {t("eula.link")}
+            </a>
+          </div>
           {isAdmin && <LicenseSection t={t} />}
+          <OpenSourceLicenses t={t} lang={lang} />
           <CookieSection />
         </div>
       </DialogContent>
@@ -319,7 +335,7 @@ export default function Layout({ children }) {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} t={t} isAdmin={user?.role === "admin"} />
+          <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} t={t} isAdmin={user?.role === "admin"} lang={lang} />
         </div>
       </aside>
 
