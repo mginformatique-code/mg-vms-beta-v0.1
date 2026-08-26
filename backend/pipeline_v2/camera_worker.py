@@ -59,6 +59,14 @@ _HD_FAIL_BACKOFF_S = 30.0
 #: pixels modifiés ne demande pas la pleine résolution.
 _MOTION_MAX_W = 480
 
+#: Squelette overlay (retail-suspicious-behavior) — throttle indépendant de
+#: la cadence de détection principale. Le vrai goulot du pipeline est le
+#: CPU/GIL (process Python unique), pas la VRAM — un stage pose ajoute du
+#: post-traitement Python à chaque appel, donc on le limite explicitement
+#: plutôt que de le laisser tourner à la cadence IA complète.
+_POSE_INTERVAL_S = 0.3
+_POSE_MAX_PERSONS = 5
+
 
 def _fetch_hd_crop_source(camera_id: str):
     """Frame BGR (numpy) en résolution native via go2rtc, ou None si échec.
@@ -127,6 +135,11 @@ class CameraWorker:
         # véhicule tracké (typique d'un véhicule stationné).
         self._crop_cache: dict[tuple, datetime] = {}
         self._last_ts: float = 0.0
+        # Squelette overlay (retail-suspicious-behavior) — throttle + cache
+        # du dernier résultat par track_id pour éviter un squelette qui
+        # clignote entre deux cycles throttlés (voir _stage_pose).
+        self._last_pose_ts: float = 0.0
+        self._last_pose_result: dict = {}
 
     # ── Stages ───────────────────────────────────────────────────────
 
@@ -564,6 +577,71 @@ class CameraWorker:
             "frame_preview": ctx.jpeg_data_uri(640, 60),
         }
 
+    def _stage_pose(self, ctx: FrameContext, enabled_plugins: Optional[list]) -> None:
+        """Squelette par personne — overlay Camera Center, plugin
+        retail-suspicious-behavior UNIQUEMENT (pas de coût pour les autres
+        caméras). Top-down : inférence sur les crops des personnes déjà
+        détectées par `_stage_detection`, pas sur la frame entière.
+
+        Throttlée indépendamment de la cadence de détection principale — le
+        goulot documenté de ce pipeline est le CPU/GIL, pas la VRAM (voir
+        plan). Entre deux cycles throttlés, réutilise le dernier squelette
+        connu par track_id (évite un clignotement visuel) plutôt que de
+        l'omettre.
+        """
+        if "retail-suspicious-behavior" not in (enabled_plugins or []):
+            return
+        persons = [d for d in ctx.detections if d["class"] == "person"][:_POSE_MAX_PERSONS]
+        if not persons:
+            return
+
+        now = time.monotonic()
+        if now - self._last_pose_ts < _POSE_INTERVAL_S:
+            for d in persons:
+                kp = self._last_pose_result.get(d.get("track_id"))
+                if kp is not None:
+                    d["_keypoints_norm"] = kp
+            return
+
+        import ai_engine as _ae
+        t0 = time.monotonic()
+        model = _ae._load_pose_model()
+        if model is None:
+            return
+        img = ctx.image
+        w, h = ctx.width, ctx.height
+        for d in persons:
+            x1, y1, x2, y2 = d["_bbox"]
+            mx, my = int((x2 - x1) * 0.1), int((y2 - y1) * 0.1)
+            cx1, cy1 = max(0, x1 - mx), max(0, y1 - my)
+            cx2, cy2 = min(w, x2 + mx), min(h, y2 + my)
+            crop = img[cy1:cy2, cx1:cx2]
+            if crop.size == 0:
+                continue
+            try:
+                with _ae.YOLO_INFERENCE_LOCK:
+                    res = model.predict(crop, verbose=False)[0]
+            except Exception:
+                logger.exception("pose predict error (%s)", self.camera_id)
+                continue
+            kobj = getattr(res, "keypoints", None)
+            if kobj is None or kobj.xy is None or len(kobj.xy) == 0:
+                continue
+            kxy = kobj.xy[0].tolist()
+            kconf = kobj.conf[0].tolist() if kobj.conf is not None else [1.0] * len(kxy)
+            keypoints_norm = []
+            for (kx, ky), kc in zip(kxy, kconf):
+                fx = (cx1 + kx) / w if w else 0.0
+                fy = (cy1 + ky) / h if h else 0.0
+                keypoints_norm.append([round(fx, 4), round(fy, 4), round(float(kc), 2)])
+            d["_keypoints_norm"] = keypoints_norm
+            self._last_pose_result[d.get("track_id")] = keypoints_norm
+
+        self._last_pose_ts = now
+        ms = (time.monotonic() - t0) * 1000
+        ctx.timings["pose_ms"] = round(ms, 1)
+        inspector.record(self.camera_id, "pose", ms)
+
     # ── Entrée principale (sync, appelée via asyncio.to_thread) ─────
 
     def analyze(self, frame_input, enabled_plugins: Optional[list] = None,
@@ -604,18 +682,24 @@ class CameraWorker:
             self._stage_roi(ctx, camera)
         with _trace_stage(_trc, "anpr"):
             self._stage_anpr(ctx, enabled_plugins, camera)
+        with _trace_stage(_trc, "pose"):
+            self._stage_pose(ctx, enabled_plugins)
 
-        # Overlay LIVE : bboxes normalisées + track_id
+        # Overlay LIVE : bboxes normalisées + track_id (+ squelette pose si
+        # calculé par _stage_pose, retail-suspicious-behavior uniquement)
         w, h = ctx.width, ctx.height
         for d in ctx.detections:
             x1, y1, x2, y2 = d["_bbox"]
-            ctx.overlay_boxes.append({
+            box = {
                 "cls": d["class"], "label": d["label"], "confidence": d["confidence"],
                 "vehicle_color": d.get("vehicle_color"),
                 "track_id": d.get("track_id"),
                 "bbox_norm": [round(x1 / w, 4), round(y1 / h, 4),
                               round(x2 / w, 4), round(y2 / h, 4)],
-            })
+            }
+            if d.get("_keypoints_norm"):
+                box["keypoints_norm"] = d["_keypoints_norm"]
+            ctx.overlay_boxes.append(box)
             ctx.counts[d["label"]] = ctx.counts.get(d["label"], 0) + 1
 
         ctx.timings["total_ms"] = round((time.monotonic() - t_total) * 1000, 1)

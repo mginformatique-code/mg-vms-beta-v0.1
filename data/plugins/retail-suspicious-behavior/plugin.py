@@ -59,6 +59,27 @@ def _point_in_polygon(pt, poly):
     return inside
 
 
+# Seuil de vitesse (px/s, en pixels de l'image d'analyse) distinguant
+# "walking" de "standing" — heuristique grossière (dépend de la résolution
+# d'analyse et de la distance caméra/sujet, jamais calibrée), pas une mesure
+# de vitesse réelle. À ajuster après observation en conditions réelles.
+_WALKING_SPEED_PX_S = 8.0
+
+
+def _activity_from_positions(positions) -> str:
+    """"walking"/"standing" à partir des deux derniers échantillons de
+    position — pas de nouveau modèle, réutilise l'historique déjà collecté
+    pour `_check_erratic_path`."""
+    if len(positions) < 2:
+        return "standing"
+    (t0, x0, y0), (t1, x1, y1) = positions[-2], positions[-1]
+    dt = t1 - t0
+    if dt <= 0:
+        return "standing"
+    speed = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5 / dt
+    return "walking" if speed >= _WALKING_SPEED_PX_S else "standing"
+
+
 def _new_track_state():
     return {
         "inside_since": None,
@@ -141,6 +162,7 @@ class RetailSuspiciousBehaviorPlugin(PipelineConsumer):
             out[tid] = {
                 "dwell_s": int(dwell),
                 "visits": len(st["visit_ends"]),
+                "activity": _activity_from_positions(st["positions"]),
                 "loitering": dwell >= cfg["dwell_warning_s"],
                 "critical": dwell >= cfg["dwell_critical_s"],
                 "repeated_visits": len(st["visit_ends"]) >= cfg["visits_threshold"],

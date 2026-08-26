@@ -223,6 +223,7 @@ VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle"}
 # ── Modèles + santé IA ──────────────────────────────────────────────
 _model = None
 _alpr = None
+_pose_model = None  # yolo11n-pose — chargé au 1er besoin (retail-suspicious-behavior)
 _ai_health: dict = {
     "yolo_loaded": False,
     "yolo_error": None,
@@ -365,6 +366,37 @@ def _load_models():
             _ai_health["alpr_error"] = f"{type(e).__name__}: {str(e)[:240]}"
             logger.exception("fast-alpr indisponible — LAPI désactivée (essai #%d)",
                              _ai_health["alpr_load_attempts"])
+
+
+def _load_pose_model():
+    """Chargement paresseux du modèle de pose (squelette Camera Center,
+    plugin retail-suspicious-behavior). Séparé de `_load_models()` : ne se
+    déclenche que si une caméra a réellement ce plugin actif — pas de coût
+    (VRAM/démarrage) pour une installation qui ne l'utilise pas.
+
+    `yolo11n-pose.pt` suit la même convention que `yolo11n.pt` (poids
+    vendorisés dans `backend/`, cf. AI_MODEL) — si absent, ultralytics tente
+    un téléchargement automatique depuis ses releases GitHub officielles
+    (nécessite un accès réseau sortant sur le serveur, à vérifier)."""
+    global _pose_model
+    if _pose_model is not None:
+        return _pose_model or None  # _pose_model peut être `False` (échec déjà tenté)
+    try:
+        from ultralytics import YOLO
+        model_path = os.environ.get("AI_POSE_MODEL", "yolo11n-pose.pt")
+        model = YOLO(model_path)
+        device = _detected_device()
+        try:
+            model.to(device)
+        except Exception as gpu_err:
+            logger.warning("YOLO-pose .to(%s) échec (%s) — fallback CPU", device, gpu_err)
+            model.to("cpu")
+        _pose_model = model
+        logger.info("Modèle pose chargé : %s", model_path)
+    except Exception as e:
+        _pose_model = False
+        logger.exception("Modèle pose indisponible — squelette overlay désactivé (%s)", e)
+    return _pose_model or None
 
 
 def get_ai_health() -> dict:
