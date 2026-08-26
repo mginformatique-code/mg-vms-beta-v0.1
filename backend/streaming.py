@@ -1167,10 +1167,12 @@ def needs_transcode_for_browser(path: str) -> bool:
 #: Mesuré en conditions réelles avant ce changement, segment de 2 min :
 #:   caméra 3840×2160 (GPU nvenc)      : ~38 s d'attente
 #:   caméra 4512×2512 (repli logiciel) : ~138 s d'attente
-#: Une fenêtre de 60 s (déjà calée 5 s avant l'événement par l'appelant)
-#: couvre largement le contexte utile sans faire attendre l'utilisateur
-#: la durée d'un segment qu'il n'a pas demandé à voir en entier.
-DEFAULT_CLIP_DURATION_SEC = 60.0
+#: Une fenêtre de 30 s (déjà calée 5 s avant l'événement par l'appelant,
+#: donc ~25 s après) couvre le contexte utile sans faire attendre
+#: l'utilisateur la durée d'un segment qu'il n'a pas demandé à voir en
+#: entier. Abaissé de 60 à 30 s (retour utilisateur) — coupe encore le
+#: temps d'attente en deux par rapport à la version précédente.
+DEFAULT_CLIP_DURATION_SEC = 30.0
 
 
 async def transcode_to_temp_mp4(path: str, start_sec: float = 0.0,
