@@ -2,6 +2,42 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.15-charge-mongo] — 2026-08 — La base relisait la config à chaque image
+
+### Fixed
+- **226 requêtes/s vers MongoDB pour 23 images analysées.** `run_downstream`
+  s'exécute à chaque image et y relisait trois documents de `settings` —
+  `face_recognition_config`, `plugin_manager_pipeline` et `anpr_config` —
+  soit des réglages d'administration modifiés au mieux une fois par jour.
+  Ils sont désormais mémorisés 5 s (une modification faite dans l'interface
+  reste donc appliquée en moins de 5 s, sans câbler un signal
+  d'invalidation dans chaque route qui écrit un réglage).
+
+  | Mesure | Avant | Après |
+  |---|---:|---:|
+  | Requêtes MongoDB/s | 226,6 | **137,6** |
+  | CPU de `mongod` | 60 % | **15 %** |
+
+### Constaté — et ce que ça règle définitivement
+- **Le débit IA n'a PAS bougé** : 22,8 → 23,6 analyses/s, dans le bruit.
+  C'est une expérience naturelle qui tranche la question « faut-il ajouter
+  du CPU / déporter MongoDB sur une autre VM ? » : on vient de libérer
+  ~45 % d'un cœur, et l'IA ne l'a pas pris. Elle n'est pas privée de CPU —
+  le processus Python unique plafonne à ~1,5 cœur à cause du GIL **alors
+  que des cœurs sont déjà inoccupés** (21-42 % de repos sur 6 cœurs).
+
+  Conséquence pratique : ni un CPU plus gros, ni le déport de MongoDB ne
+  feront gagner d'images/s tant que le pipeline IA tient dans un seul
+  processus Python. Le seul levier est le **multi-process**.
+
+### Reste à traiter
+- Le cache WiredTiger est à **2 Go pour une base de 15,4 Go** : 33 Go
+  relus depuis le disque en 2 h 42. L'hôte a 28 Go disponibles — relever ce
+  cache ne coûte rien et supprimerait le reste de la pression disque.
+- La base pèse 15,4 Go parce que les images sont stockées en base64 **dans**
+  les documents. Déporter MongoDB ailleurs déplacerait ce problème sans le
+  résoudre.
+
 ## [v3.14-boucle-par-camera] — 2026-08 — Fin de la barrière : chaque caméra à son propre rythme
 
 ### Fixed

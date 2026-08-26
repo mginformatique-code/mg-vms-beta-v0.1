@@ -27,6 +27,38 @@ from .scenarios import _evaluate_scenarios, _raise_blacklist_alert, cooldown_ok
 logger = logging.getLogger("pipeline_v2.downstream")
 
 
+# ══════════════════════════════════════════════════════════════════════
+# v3.15 · Cache court des réglages lus dans le chemin par image
+# ══════════════════════════════════════════════════════════════════════
+# `run_downstream` s'exécute à CHAQUE image analysée et y relisait trois
+# documents de `settings` — `face_recognition_config`,
+# `plugin_manager_pipeline` et `anpr_config`. Ce sont des réglages
+# d'administration, modifiés au mieux une fois par jour.
+#
+# Mesuré : 226 requêtes/s vers MongoDB pour seulement ~23 images analysées/s
+# sur 6 caméras, soit ~10 requêtes par image. Ces relectures de config en
+# représentaient l'essentiel. Effet de bord aggravant : le cache WiredTiger
+# (2 Go pour une base de 15,4 Go) passait son temps à s'auto-évincer —
+# 33 Go relus depuis le disque en 2 h 42 — et `mongod` tenait 60 % d'un cœur.
+#
+# TTL volontairement court : une modification faite dans l'interface prend
+# effet en moins de 5 s, sans avoir à câbler un signal d'invalidation dans
+# chaque route qui écrit un réglage.
+_SETTINGS_TTL_S = 5.0
+_settings_cache: dict = {}
+
+
+async def _setting(key: str):
+    """Document `settings` pour cette clé, mémorisé `_SETTINGS_TTL_S` secondes."""
+    now = time.monotonic()
+    hit = _settings_cache.get(key)
+    if hit is not None and (now - hit[0]) < _SETTINGS_TTL_S:
+        return hit[1]
+    doc = await db.settings.find_one({"key": key}, {"_id": 0})
+    _settings_cache[key] = (now, doc)
+    return doc
+
+
 def _apply_hierarchical_anpr_fusion(cam: dict, result: dict) -> None:
     """v0.5.6 P0-4 — Fusion hiérarchique des lectures multi-OCR (in-place).
 
@@ -139,7 +171,7 @@ def _apply_hierarchical_anpr_fusion(cam: dict, result: dict) -> None:
 
 
 async def _get_global_anpr_country():
-    doc = await db.settings.find_one({"key": "anpr_config"}, {"_id": 0})
+    doc = await _setting("anpr_config")
     return ((doc or {}).get("value", {}) or {}).get("country")
 
 
@@ -298,7 +330,7 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
         })
 
     # ── Reconnaissance faciale ───────────────────────────────────────
-    face_cfg = await db.settings.find_one({"key": "face_recognition_config"}, {"_id": 0})
+    face_cfg = await _setting("face_recognition_config")
     if (face_cfg or {}).get("value", {}).get("enabled"):
         known = await db.faces.find({"encoding": {"$ne": None, "$exists": True}},
                                      {"_id": 0, "id": 1, "name": 1, "watchlist": 1, "encoding": 1}).to_list(2000)
@@ -393,9 +425,7 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
     # ── PluginBus per-camera (graph registry) — TRACKS PRÉ-CALCULÉS ──
     t_dispatch = time.perf_counter()
     try:
-        pipeline_cfg = await db.settings.find_one(
-            {"key": "plugin_manager_pipeline"}, {"_id": 0}
-        )
+        pipeline_cfg = await _setting("plugin_manager_pipeline")
         if (pipeline_cfg or {}).get("value", {}).get("enabled", True):
             from plugin_manager import bus as _plugin_bus, Frame as _Frame
             from plugin_manager.interfaces import Detection as _Detection, Track as _Track
