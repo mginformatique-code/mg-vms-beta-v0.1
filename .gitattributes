@@ -1,0 +1,32 @@
+# Fins de ligne — garde-fou déploiement.
+#
+# Le dépôt est édité depuis Windows mais déployé sur Linux. Sans cette
+# règle, `git archive` (utilisé pour synchroniser /opt/mg-vms-beta-v0.1)
+# livrait des scripts en CRLF : le noyau lisait alors le shebang comme
+# « /usr/bin/env bash\r » et install.sh échouait avec
+#   env: ‘bash\r’: Aucun fichier ou dossier de ce nom
+# Le déploiement sortait en code 0 sans rien reconstruire — panne
+# silencieuse, containers laissés sur l'ancienne image.
+#
+# Tout ce qui est lu par Linux, Docker ou un interpréteur reste en LF.
+
+* text=auto
+
+*.sh            text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.conf          text eol=lf
+Dockerfile      text eol=lf
+Dockerfile.*    text eol=lf
+*.py            text eol=lf
+.env.example    text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pt  binary
+*.onnx binary
+*.tar binary
+*.gz  binary
