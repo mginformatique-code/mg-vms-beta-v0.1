@@ -50,6 +50,14 @@ async def create_indexes():
     await _safe_index(db.cameras, "status")
 
     # ── Événements IA (recherche par temps/caméra/type) ──
+    # v3.17 · `id` manquait ici alors que `db.cameras`/`db.tls_certificates`
+    # plus bas l'ont bien. Sans conséquence tant que rien ne cherchait un
+    # événement par son id — jusqu'à `GET /events/{id}` (visionneuse, image
+    # complète à l'ouverture) : chaque appel faisait un scan complet de la
+    # collection (42 336 documents, 8,5 s mesurés) faute d'index. Même
+    # défaut sur `plates` et `recordings` ci-dessous, pour la même raison
+    # (`GET /plates/{id}`, lookup vidéo par id de segment).
+    await _safe_index(db.events, "id")
     await _safe_index(db.events, "timestamp")
     await _safe_index(db.events, "camera_id")
     await _safe_index(db.events, "type")
@@ -57,6 +65,7 @@ async def create_indexes():
     await _safe_index(db.events, [("camera_id", 1), ("timestamp", -1)])
 
     # ── Plaques ANPR ──
+    await _safe_index(db.plates, "id")
     await _safe_index(db.plates, "plate")
     await _safe_index(db.plates, "timestamp")
     await _safe_index(db.plates, "camera_id")
@@ -64,6 +73,8 @@ async def create_indexes():
     await _safe_index(db.plates, [("plate", 1), ("timestamp", -1)])
 
     # ── Enregistrements ──
+    await _safe_index(db.recordings, "id")
+    await _safe_index(db.recordings, "file_path")
     await _safe_index(db.recordings, "camera_id")
     await _safe_index(db.recordings, "start")
     await _safe_index(db.recordings, "start_ts")
