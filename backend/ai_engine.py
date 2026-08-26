@@ -755,12 +755,24 @@ async def _process_camera(cam: dict, frame=None) -> None:
     t_ws = time.perf_counter()
     try:
         from realtime import broadcast_ai_detections
-        await broadcast_ai_detections(cam["id"], cam.get("site_id", ""), {
+        payload = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "boxes": result.get("overlay_boxes", []),
             "counts": result.get("counts", {}),
             "motion_pct": result.get("motion_pct", 0.0),
-        })
+        }
+        # État live du plugin retail (dwell-time/passages répétés par track) —
+        # injecté seulement si le plugin est chargé et actif sur cette caméra,
+        # pour ne pas payer le coût sur les caméras qui ne l'utilisent pas.
+        if "retail-suspicious-behavior" in _enabled:
+            try:
+                from plugin_manager.bus import bus as _plugin_bus
+                _entry = _plugin_bus._entries.get("retail-suspicious-behavior")
+                if _entry is not None and _entry.instance is not None:
+                    payload["retail"] = _entry.instance.live_state(cam["id"])
+            except Exception:
+                logger.exception("retail live_state error")
+        await broadcast_ai_detections(cam["id"], cam.get("site_id", ""), payload)
     except Exception:
         logger.exception("broadcast_ai_detections error")
     _inspector.record(cam["id"], "websocket", (time.perf_counter() - t_ws) * 1000)

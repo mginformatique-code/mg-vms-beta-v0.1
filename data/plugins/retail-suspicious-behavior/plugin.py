@@ -5,11 +5,13 @@ Phase 1 du chantier anti-vol MG-VMS. Détecte, par personne trackée :
   1b. les passages répétés dans cette zone sur une fenêtre glissante ;
   1c. (optionnel, désactivé par défaut) une trajectoire erratique.
 
-S'appuie uniquement sur les tracks déjà produits par YOLO11 + ByteTrack —
-aucun modèle IA dédié n'est requis pour ce scénario (voir plan Phase 1).
-La caméra doit donc avoir `yolo-detection` + `bytetrack` (ou équivalents)
-dans `enabled_plugins` en plus de ce plugin, sinon `pipeline.tracks` est
-vide et rien ne se déclenche.
+S'appuie uniquement sur les tracks déjà produits par le cœur IA (YOLO +
+TrackerPool, `precomputed_tracks`) — aucun modèle IA dédié n'est requis pour
+ce scénario (voir plan Phase 1). Contrairement à une première hypothèse, il
+n'est PAS nécessaire d'avoir les plugins `yolo-detection`/`bytetrack` dans
+`enabled_plugins` : la détection/le tracking sont core, gérés par
+`detect_enabled` sur la caméra, indépendamment de ce plugin. Seul ce plugin
+lui-même doit être dans `enabled_plugins` pour que `consume()` soit appelé.
 
 Un plugin est un singleton partagé par toutes les caméras qui l'activent
 (sa config est globale, pas par caméra) — tout l'état interne est donc
@@ -122,6 +124,28 @@ class RetailSuspiciousBehaviorPlugin(PipelineConsumer):
             "message": f"Trajectoire erratique — track {track_id}",
             "data": {"track_id": track_id, "camera_id": camera_id, "path_ratio": round(ratio, 2)},
         }
+
+    def live_state(self, camera_id: str) -> dict:
+        """État courant par track pour cette caméra — lu par l'overlay live du
+        Camera Center (`GET /api/plugins/retail-suspicious-behavior/state/{camera_id}`,
+        ou injecté dans le broadcast `ai_detections`). Snapshot en mémoire du
+        cycle en cours, pas une source persistée — pas de garantie de
+        fraîcheur au-delà du cycle IA courant."""
+        now = time.time()
+        cfg = self._zone_cfg(camera_id)
+        out = {}
+        for (cid, tid), st in self._tracks.items():
+            if cid != camera_id:
+                continue
+            dwell = (now - st["inside_since"]) if st["inside_since"] is not None else 0.0
+            out[tid] = {
+                "dwell_s": int(dwell),
+                "visits": len(st["visit_ends"]),
+                "loitering": dwell >= cfg["dwell_warning_s"],
+                "critical": dwell >= cfg["dwell_critical_s"],
+                "repeated_visits": len(st["visit_ends"]) >= cfg["visits_threshold"],
+            }
+        return out
 
     async def consume(self, frame: Frame, pipeline: PipelineResult) -> list:
         now = time.time()
