@@ -1013,6 +1013,15 @@ async def _lookup_recording_for(ev: dict, user: dict) -> dict:
         ev_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
         rec_start_dt = datetime.fromisoformat(rec["start"].replace("Z", "+00:00"))
         offset_sec = max(0, int((ev_dt - rec_start_dt).total_seconds()) - 5)  # 5 s avant
+        # v3.17 · Le repli (règle 2 ci-dessus) peut accrocher l'événement au
+        # segment PRÉCÉDENT quand le sien n'est pas encore indexé — l'écart
+        # calculé peut alors dépasser la durée réelle de CE segment-là (`-ss`
+        # au-delà de la fin du fichier → vidéo vide). On borne à la fin
+        # utile du segment, en gardant 2 s de marge pour que `-ss` reste sur
+        # du contenu réel.
+        duration = rec.get("duration_sec")
+        if isinstance(duration, (int, float)) and duration > 0:
+            offset_sec = min(offset_sec, max(0, int(duration) - 2))
     except (ValueError, KeyError):
         offset_sec = 0
     return {

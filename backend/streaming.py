@@ -1160,7 +1160,21 @@ def needs_transcode_for_browser(path: str) -> bool:
     return (details or {}).get("codec", "") in ("HEVC", "H265")
 
 
-async def transcode_to_temp_mp4(path: str, start_sec: float = 0.0) -> str:
+#: v3.17 · Fenêtre transcodée par défaut. Le bouton dit « Lire la vidéo
+#: AUTOUR de cet événement » — transcoder le segment entier (jusqu'à
+#: 2 min) n'a jamais correspondu à cette promesse, et son coût grandit
+#: avec la durée du segment quel que soit le moteur (GPU ou logiciel).
+#: Mesuré en conditions réelles avant ce changement, segment de 2 min :
+#:   caméra 3840×2160 (GPU nvenc)      : ~38 s d'attente
+#:   caméra 4512×2512 (repli logiciel) : ~138 s d'attente
+#: Une fenêtre de 60 s (déjà calée 5 s avant l'événement par l'appelant)
+#: couvre largement le contexte utile sans faire attendre l'utilisateur
+#: la durée d'un segment qu'il n'a pas demandé à voir en entier.
+DEFAULT_CLIP_DURATION_SEC = 60.0
+
+
+async def transcode_to_temp_mp4(path: str, start_sec: float = 0.0,
+                                 duration_sec: Optional[float] = DEFAULT_CLIP_DURATION_SEC) -> str:
     """Transcode HEVC→H264 vers un fichier temporaire COMPLET, pas un flux
     streamé en direct.
 
@@ -1200,6 +1214,12 @@ async def transcode_to_temp_mp4(path: str, start_sec: float = 0.0) -> str:
         if use_gpu_decode:
             cmd += ["-hwaccel", "cuda", "-c:v", "hevc_cuvid"]
         cmd += ["-i", path]
+        if duration_sec and duration_sec > 0:
+            # APRÈS -i (et non avant, comme -ss) : borne la durée de SORTIE,
+            # pas une position de lecture. Combiné à -ss ci-dessus, ne
+            # décode/encode que la fenêtre demandée — pas le reste du
+            # segment, potentiellement 2 min que personne ne consultera.
+            cmd += ["-t", str(duration_sec)]
         if gpu_encode:
             cmd += ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "23"]
         else:
