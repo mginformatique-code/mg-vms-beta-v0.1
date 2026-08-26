@@ -1193,33 +1193,63 @@ async def transcode_to_temp_mp4(path: str, start_sec: float = 0.0) -> str:
     fd, out_path = tempfile.mkstemp(suffix=".mp4", prefix="mgvms_transcode_")
     os.close(fd)
 
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "warning", "-nostdin"]
-    if start_sec > 0:
-        cmd += ["-ss", str(max(0.0, start_sec))]
-    if use_gpu_decode:
-        cmd += ["-hwaccel", "cuda", "-c:v", "hevc_cuvid"]
-    cmd += ["-i", path]
-    if use_gpu_encode:
-        cmd += ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "23"]
-    else:
-        cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]
-    # +faststart : réordonne le moov en tête de fichier une fois l'encodage
-    # terminé — démarrage rapide côté lecteur, mais fichier COMPLET normal
-    # (à ne pas confondre avec le MP4 fragmenté abandonné ci-dessus).
-    cmd += ["-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-f", "mp4", out_path]
+    def _build_cmd(gpu_encode: bool) -> list[str]:
+        cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "warning", "-nostdin"]
+        if start_sec > 0:
+            cmd += ["-ss", str(max(0.0, start_sec))]
+        if use_gpu_decode:
+            cmd += ["-hwaccel", "cuda", "-c:v", "hevc_cuvid"]
+        cmd += ["-i", path]
+        if gpu_encode:
+            cmd += ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "23"]
+        else:
+            cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]
+        # +faststart : réordonne le moov en tête de fichier une fois l'encodage
+        # terminé — démarrage rapide côté lecteur, mais fichier COMPLET normal
+        # (à ne pas confondre avec le MP4 fragmenté abandonné ci-dessus).
+        cmd += ["-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-f", "mp4", out_path]
+        return cmd
 
-    logger.info("recording-transcode: start (gpu_decode=%s gpu_encode=%s ss=%s) %s → %s",
-                use_gpu_decode, use_gpu_encode, start_sec, os.path.basename(path), out_path)
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-    )
-    _, stderr = await proc.communicate()
-    if proc.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
+    async def _run(gpu_encode: bool):
+        cmd = _build_cmd(gpu_encode)
+        logger.info("recording-transcode: start (gpu_decode=%s gpu_encode=%s ss=%s) %s → %s",
+                    use_gpu_decode, gpu_encode, start_sec, os.path.basename(path), out_path)
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        ok = proc.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 0
+        return ok, proc.returncode, stderr
+
+    ok, rc, stderr = await _run(use_gpu_encode)
+    if not ok and use_gpu_encode:
+        # v3.17 · Repli logiciel automatique. Constaté en production :
+        # h264_nvenc (encodeur MATÉRIEL) refuse toute image de plus de
+        # 4096 px de large — limite documentée du chip, pas de la caméra
+        # ni de MG-VMS. Une caméra enregistrant en 4512px natif (native,
+        # au-dessus de 4K) faisait donc échouer TOUT transcodage,
+        # systématiquement, sans que rien ne l'indique à l'utilisateur
+        # (« Transcodage HEVC→H264 échoué », générique). libx264 (logiciel)
+        # n'a pas cette limite — plus lent, mais fiable quelle que soit la
+        # résolution source. On y bascule sur tout échec d'encodage GPU,
+        # pas seulement ce cas précis : plus robuste face à d'autres
+        # limites NVENC non répertoriées (débit, profil, etc.).
         try:
             os.unlink(out_path)
         except OSError:
             pass
-        logger.warning("recording-transcode: échec (rc=%s) %s", proc.returncode,
+        fd, out_path = tempfile.mkstemp(suffix=".mp4", prefix="mgvms_transcode_")
+        os.close(fd)
+        logger.warning("recording-transcode: encodage GPU échoué (rc=%s) %s — repli logiciel (libx264)",
+                        rc, (stderr or b"")[:300].decode(errors="replace"))
+        ok, rc, stderr = await _run(False)
+
+    if not ok:
+        try:
+            os.unlink(out_path)
+        except OSError:
+            pass
+        logger.warning("recording-transcode: échec (rc=%s) %s", rc,
                         (stderr or b"")[:300].decode(errors="replace"))
         raise RuntimeError("transcodage HEVC→H264 échoué")
     logger.info("recording-transcode: terminé (%d octets) %s",
