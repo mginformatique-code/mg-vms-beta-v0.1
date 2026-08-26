@@ -112,6 +112,9 @@ class _Worker:
     proc: Optional[subprocess.Popen] = None
     latest_frame: Optional[np.ndarray] = None
     latest_ts: float = 0.0
+    #: v3.14 · Incrémenté à CHAQUE nouvelle image publiée. Identifie l'image
+    #: de façon non ambiguë pour un consommateur (cf. `wait_for_new_frame`).
+    latest_seq: int = 0
     stop_event: threading.Event = field(default_factory=threading.Event)
     reader_thread: Optional[threading.Thread] = None
     restart_count: int = 0
@@ -307,6 +310,14 @@ def _reader_loop(w: _Worker):
                 w.latest_frame = frame
                 w.latest_ts = now
                 w.frames_produced += 1
+                # v3.14 · Numéro de série + réveil des consommateurs.
+                # `latest_seq` permet à un consommateur de savoir s'il a DÉJÀ
+                # analysé cette image-là (avant, il ne pouvait que comparer des
+                # horodatages, donc réanalysait la même image ou en sautait).
+                # `_notify_new_frame` réveille immédiatement les boucles qui
+                # attendent : plus de sondage, latence = temps d'analyse.
+                w.latest_seq += 1
+                _notify_new_frame(w.camera_id)
                 if not w.first_frame_at:
                     w.first_frame_at = now
                 last_read_ts = now
@@ -477,6 +488,109 @@ def stop(camera_id: str) -> None:
 def stop_all() -> None:
     for cam_id in list(_workers.keys()):
         stop(cam_id)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# v3.14 · Réveil des consommateurs à l'arrivée d'une image
+# ══════════════════════════════════════════════════════════════════════
+# Le thread lecteur ffmpeg n'est PAS dans la boucle asyncio. Pour réveiller
+# une coroutine sans sondage, il pose l'`asyncio.Event` via
+# `loop.call_soon_threadsafe` — seule façon sûre de toucher un objet asyncio
+# depuis un autre thread.
+#
+# Les attentes sont à usage unique : une fois réveillées elles sont retirées
+# de la liste. Un consommateur qui repart en attente se ré-enregistre. Ça
+# évite d'accumuler des Event orphelins si une boucle caméra s'arrête.
+_frame_waiters: dict = {}
+_frame_waiters_lock = threading.Lock()
+
+
+def _notify_new_frame(camera_id: str) -> None:
+    """Réveille les boucles en attente d'une image de cette caméra.
+
+    Appelé depuis le thread lecteur — ne doit jamais lever ni bloquer, sinon
+    c'est la capture vidéo elle-même qui s'arrête.
+    """
+    try:
+        with _frame_waiters_lock:
+            waiters = _frame_waiters.get(camera_id)
+            if not waiters:
+                return
+            pending = list(waiters)
+            waiters.clear()
+        for loop, ev in pending:
+            try:
+                loop.call_soon_threadsafe(ev.set)
+            except RuntimeError:
+                # Boucle asyncio fermée (arrêt du process) — sans conséquence.
+                pass
+    except Exception:
+        logger.debug("frame-source: notification consommateurs ignorée", exc_info=True)
+
+
+def get_latest_frame_seq(camera_id: str, max_age_sec: float = 5.0):
+    """Comme `get_latest_frame`, mais renvoie aussi le numéro de série.
+
+    Returns:
+        ``(frame, seq)`` — ``(None, -1)`` si aucune image exploitable.
+    """
+    w = _workers.get(camera_id)
+    if w is None or w.latest_frame is None:
+        return None, -1
+    now = time.monotonic()
+    if now - w.latest_ts > max_age_sec:
+        return None, -1
+    w.consumed_ts = now
+    return w.latest_frame, w.latest_seq
+
+
+async def wait_for_new_frame(camera_id: str, after_seq: int, timeout: float,
+                              max_age_sec: float = 5.0):
+    """Attend une image PLUS RÉCENTE que `after_seq`, sans sondage.
+
+    C'est le cœur du « zéro latence » : la boucle IA d'une caméra est cadencée
+    par les images réellement produites par cette caméra — elle ne réanalyse
+    jamais deux fois la même image, et ne dort jamais alors qu'une image
+    fraîche attend.
+
+    Returns:
+        ``(frame, seq)``. ``(None, after_seq)`` si rien n'est arrivé dans le
+        délai imparti — l'appelant peut alors décider quoi faire (le worker
+        ffmpeg, lui, se relance tout seul).
+    """
+    frame, seq = get_latest_frame_seq(camera_id, max_age_sec=max_age_sec)
+    if frame is not None and seq != after_seq:
+        return frame, seq
+
+    loop = asyncio.get_running_loop()
+    ev = asyncio.Event()
+    entry = (loop, ev)
+    with _frame_waiters_lock:
+        _frame_waiters.setdefault(camera_id, []).append(entry)
+
+    # Course possible : une image peut être publiée entre la lecture ci-dessus
+    # et l'enregistrement de l'attente. On revérifie donc APRÈS s'être inscrit.
+    frame, seq = get_latest_frame_seq(camera_id, max_age_sec=max_age_sec)
+    if frame is not None and seq != after_seq:
+        _drop_waiter(camera_id, entry)
+        return frame, seq
+
+    try:
+        await asyncio.wait_for(ev.wait(), timeout)
+    except asyncio.TimeoutError:
+        _drop_waiter(camera_id, entry)
+        return None, after_seq
+    return get_latest_frame_seq(camera_id, max_age_sec=max_age_sec)
+
+
+def _drop_waiter(camera_id: str, entry) -> None:
+    with _frame_waiters_lock:
+        lst = _frame_waiters.get(camera_id)
+        if lst:
+            try:
+                lst.remove(entry)
+            except ValueError:
+                pass
 
 
 def get_latest_frame(camera_id: str, max_age_sec: float = 5.0) -> Optional[np.ndarray]:
