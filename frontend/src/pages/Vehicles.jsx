@@ -462,6 +462,7 @@ export function VehicleDrawer({ plate, onClose, onWatchChanged }) {
 
 // ─── Tabs contents ───────────────────────────────────────────────
 function TabOverview({ d, onWatchChanged }) {
+  const { t } = useApp();
   const [habits, setHabits] = useState(null);
   const [anomaly, setAnomaly] = useState(null);
   const [wlSaving, setWlSaving] = useState(false);
