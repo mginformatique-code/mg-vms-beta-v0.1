@@ -26,7 +26,13 @@ services:
     container_name: mgvms-mongo
     restart: unless-stopped
     command:
-      - --wiredTigerCacheSizeGB=2
+      # v3.15 · 2 Go -> 8 Go. La base pèse 15,4 Go (les images sont stockées
+      # en base64 DANS les documents) : avec 2 Go, le cache s'auto-évinçait
+      # en permanence — 33 Go relus depuis le disque en 2 h 42, `mongod` à
+      # 60 % d'un cœur et kswapd actif. L'hôte a 41 Go dont 28 disponibles ;
+      # 8 Go couvre largement les index et les documents récents sans
+      # rapprocher la machine de l'OOM (une occurrence constatée le 25/08).
+      - --wiredTigerCacheSizeGB=8
     volumes:
       - ${MONGO_DATA_PATH:-/mnt/storage/mongodb}:/data/db
     healthcheck:

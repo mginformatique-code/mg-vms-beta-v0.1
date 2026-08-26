@@ -5,6 +5,7 @@ import asyncio
 import io
 import csv
 import base64
+import logging
 from datetime import datetime, timezone, timedelta
 import time
 from typing import Optional, List, Dict
@@ -15,6 +16,11 @@ from pydantic import BaseModel, Field
 
 from database import db
 from auth import get_current_user, require_role, require_permission, has_permission, public_user, log_audit, hash_password, ROLES, PERMISSIONS, site_scope, allowed_sites
+
+# v3.17 · `logger` était utilisé (create_camera, update_camera) sans jamais
+# être défini dans ce module — un NameError latent, invisible tant que ces
+# branches `except` précises n'étaient pas déclenchées. Corrigé au passage.
+logger = logging.getLogger("mg-vms.routers")
 from notifications import send_notification
 from realtime import metrics_snapshot, broadcast_alert, broadcast_camera_status
 from plugins import is_enabled
@@ -981,6 +987,26 @@ async def _lookup_recording_for(ev: dict, user: dict) -> dict:
                     rec = None   # trop vieux, on n'accepte pas ce fallback
             except (ValueError, KeyError):
                 rec = None
+    if not rec:
+        # v3.17 · Rattrapage à la demande, une seule fois. L'indexation des
+        # segments (recorder._index_segments) tourne toutes les 30 s en
+        # arrière-plan : un événement qui vient d'arriver peut légitimement
+        # tomber dans cette fenêtre, ou l'indexation peut avoir pris du
+        # retard sur une caméra précise (isolé désormais par caméra, mais
+        # un retard ponctuel reste possible). Plutôt que de faire attendre
+        # l'utilisateur jusqu'au prochain tick, on force le rattrapage pour
+        # CETTE caméra avant de répondre 404.
+        cam = await db.cameras.find_one({"id": ev.get("camera_id")}, {"_id": 0})
+        if cam:
+            try:
+                import recorder as _recorder
+                await _recorder._index_segments(cam)
+                rec = await db.recordings.find_one(
+                    {"camera_id": ev.get("camera_id"), "start": {"$lte": ts}, "end": {"$gte": ts}},
+                    {"_id": 0},
+                )
+            except Exception:
+                logger.exception("Rattrapage indexation à la demande échoué pour %s", ev.get("camera_id"))
     if not rec:
         raise HTTPException(404, "Aucun enregistrement ne couvre cet événement")
     try:

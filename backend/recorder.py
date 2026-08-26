@@ -564,34 +564,48 @@ async def recorder_loop() -> None:
             active_ids = set()
             for cam in cams:
                 active_ids.add(cam["id"])
-                proc = _processes.get(cam["id"])
-                if proc is None or proc.returncode is not None:
-                    # Watchdog FFmpeg (P1) — trace la reprise dans diagnostics_events
-                    if proc is not None and proc.returncode is not None:
-                        stderr_tail = ""
-                        log_path = _stderr_logs.get(cam["id"])
-                        if log_path is not None:
-                            try:
-                                stderr_tail = log_path.read_text(errors="replace")[-2000:].strip()
-                            except OSError:
-                                pass
-                        logger.warning(
-                            "recorder.watchdog : ffmpeg mort pour %s (rc=%s) — relance auto%s",
-                            cam["id"], proc.returncode,
-                            f" — stderr: {stderr_tail}" if stderr_tail else " (stderr vide)",
-                        )
-                        try:
-                            from diagnostics import record_disconnect
-                            await record_disconnect(
-                                cam,
-                                f"ffmpeg process died (rc={proc.returncode}) — restart auto",
-                                {"pid": getattr(proc, "pid", None), "returncode": proc.returncode,
-                                 "source": "recorder.watchdog", "stderr_tail": stderr_tail},
+                # v3.17 · Isolation par caméra. Auparavant, un seul try/except
+                # entourait TOUTE la boucle : si `_index_segments` levait pour
+                # UNE caméra, les caméras suivantes de `cams` étaient sautées
+                # pour tout le tick (30s), sans aucune trace dans les logs
+                # (le handler externe se contente de journaliser et
+                # `continue` au tick d'après). Constaté en direct : un trou
+                # de 6 min sur une caméra pendant que les 5 autres
+                # continuaient de s'indexer normalement — exactement la
+                # signature de ce défaut. Chaque caméra a maintenant son
+                # propre filet : une erreur ne prive plus les autres de
+                # leur passage de ce tick.
+                try:
+                    proc = _processes.get(cam["id"])
+                    if proc is None or proc.returncode is not None:
+                        # Watchdog FFmpeg (P1) — trace la reprise dans diagnostics_events
+                        if proc is not None and proc.returncode is not None:
+                            stderr_tail = ""
+                            log_path = _stderr_logs.get(cam["id"])
+                            if log_path is not None:
+                                try:
+                                    stderr_tail = log_path.read_text(errors="replace")[-2000:].strip()
+                                except OSError:
+                                    pass
+                            logger.warning(
+                                "recorder.watchdog : ffmpeg mort pour %s (rc=%s) — relance auto%s",
+                                cam["id"], proc.returncode,
+                                f" — stderr: {stderr_tail}" if stderr_tail else " (stderr vide)",
                             )
-                        except Exception:
-                            logger.exception("recorder.watchdog record_disconnect failed")
-                    await _start_ffmpeg(cam)
-                await _index_segments(cam)
+                            try:
+                                from diagnostics import record_disconnect
+                                await record_disconnect(
+                                    cam,
+                                    f"ffmpeg process died (rc={proc.returncode}) — restart auto",
+                                    {"pid": getattr(proc, "pid", None), "returncode": proc.returncode,
+                                     "source": "recorder.watchdog", "stderr_tail": stderr_tail},
+                                )
+                            except Exception:
+                                logger.exception("recorder.watchdog record_disconnect failed")
+                        await _start_ffmpeg(cam)
+                    await _index_segments(cam)
+                except Exception:
+                    logger.exception("recorder_loop : erreur isolée sur %s — les autres caméras continuent", cam.get("name", cam["id"]))
             # stoppe les enregistreurs des caméras désactivées/supprimées
             for cam_id, proc in list(_processes.items()):
                 if cam_id not in active_ids and proc.returncode is None:

@@ -129,7 +129,14 @@ export default function Events() {
   const clearSmart = () => { setSmart(""); setSmartResult(null); };
 
   // Source affichée : résultats IA si une recherche est active, sinon flux normal
-  const shown = smartResult ? (smartResult.events || []) : events;
+  // v3.17 · `qos_alert` (pipeline_v2/qos_alerts.py) est une alerte système
+  // texte (latence, drops...) SANS caméra ni image par conception — elle
+  // s'affichait ici comme une carte photo cassée (« Aucune image
+  // disponible »), indiscernable d'un vrai bug de chargement. Cette galerie
+  // est une vue de détections visuelles ; les alertes système restent en
+  // base (consultables ailleurs) mais n'y apparaissent plus.
+  const shown = (smartResult ? (smartResult.events || []) : events)
+    .filter((e) => e.type !== "qos_alert");
   // Position courante de l'id suivi dans `shown` — recalculée à chaque
   // render, donc toujours correcte même si `shown`/`events` a été reconstruit
   // entre-temps (poll, recherche IA qui change la source, etc.).
