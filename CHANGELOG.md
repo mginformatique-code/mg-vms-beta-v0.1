@@ -2,6 +2,86 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.14-boucle-par-camera] — 2026-08 — Fin de la barrière : chaque caméra à son propre rythme
+
+### Fixed
+- **Les 6 caméras étaient bloquées à 0,4 img/s, toutes au même chiffre.**
+  `ai_loop` faisait `await asyncio.gather(*[_process_camera(c) …])` puis
+  dormait `interval_seconds` : le `gather` attend **toutes** les caméras,
+  donc la période du cycle valait celle de la plus lente et toutes les
+  autres y retombaient. Le signe qui l'a trahi : la caméra 720p, dont le
+  chemin critique ne dure que 200 ms, affichait exactement le même 0,4 que
+  deux caméras 1080p à 1734 et 1998 ms — des charges très différentes qui
+  donnent le même chiffre, c'est un point de rendez-vous, pas une
+  saturation de calcul (le GPU était à 11 %).
+
+  Chaque caméra a désormais **sa propre tâche**, cadencée par ses propres
+  images. `frame_source` numérote chaque image publiée et réveille les
+  boucles en attente via `loop.call_soon_threadsafe` : aucun sondage,
+  aucune image analysée deux fois, aucune image périmée analysée.
+  `interval_seconds` ne cadence plus l'analyse.
+
+  Mesuré sur 30 s en régime établi (débits soutenus, pas des pics) :
+
+  | Caméra | Plugins | Rés. IA | Avant | Après |
+  |---|---:|---|---:|---:|
+  | test_bureau | 6 | 720p | 0,4 | **7,3** |
+  | rue_vers_centre | 19 | 1080p | 0,4 | **3,6** |
+  | portail_villeparisis | 8 | 1080p | 0,4 | **3,8** |
+  | rue_vers_centre_telephoto | 8 | 1080p | 0,4 | **3,5** |
+  | rue_vers_villers | 20 | 1080p | 0,4 | **2,7** |
+  | rue_vers_villers_telephoto | 12 | 1080p | 0,4 | **1,9** |
+  | **Total analyses/s** | | | **2,4** | **22,8** |
+
+- **Latence de bout en bout.** Le chemin critique passe de ~6000 ms à
+  **100-300 ms**, et `realtime_ms` colle maintenant à `total_ms`
+  (141,7 contre 140,1) — autrement dit il n'y a **plus aucune attente de
+  file** entre l'arrivée de l'image et son analyse. Âge de l'image servie
+  à l'IA : **1 à 83 ms** en régime établi. C'est ce qui rend l'overlay
+  ByteTrack synchrone avec la vue WebRTC.
+
+- **Le correctif ROI de la v3.12 avait été perdu.** Il avait été injecté
+  dans le conteneur (`docker cp`) et vérifié en direct, mais jamais écrit
+  dans le dépôt du serveur : le rebuild suivant l'a effacé sans erreur.
+  Le serveur tournait en réalité 4 commits en arrière, sans
+  `batch_infer.py`, avec `AI_INTERVAL_SECONDS` à 0,15 et l'ancien `_STAGES`
+  — donc `decode_ms` / `motion_ms` / `roi_ms` / `total_ms` renvoyaient 0 et
+  masquaient le vrai coût. Le dépôt serveur est désormais synchronisé sur
+  le commit exact (`git archive` + extraction), pas fichier par fichier.
+
+- **Le déploiement pouvait échouer en silence.** `git archive` livrait les
+  scripts en CRLF : le noyau lisait le shebang comme `/usr/bin/env bash\r`,
+  `install.sh` s'arrêtait immédiatement **en code 0** et laissait les
+  conteneurs sur l'ancienne image. Un `.gitattributes` force maintenant LF
+  sur tout ce que lisent Linux, Docker et les interpréteurs.
+
+### Changed
+- **Regroupement d'inférence GPU enfin efficace** : 1,74 image par appel
+  (11 557 images en 6 652 appels, 0 repli). C'était impossible avant — la
+  barrière faisait arriver les images en lock-step. Le gain jugé
+  « négligeable » en v3.12 l'était pour cette raison.
+- **Journal d'analyse limité à 1 ligne par caméra et par seconde.** Il
+  était écrit à chaque image : indolore à 0,4 img/s, il serait devenu un
+  goulot (I/O + GIL) sur le chemin critique à 10 img/s sur 6 caméras. Une
+  détection ou une plaque force l'écriture — aucun événement réel n'est
+  perdu, seule la répétition du ralenti disparaît.
+
+### Limites connues (mesurées, pas estimées)
+- **L'objectif de 15 img/s par caméra n'est pas atteint** : on est à 1,9-7,3
+  selon la caméra. Deux plafonds durs subsistent :
+  1. **La sortie ffmpeg est bridée à 10 img/s** (`MGVMS_AI_OUTPUT_FPS`).
+     Aucune caméra ne peut dépasser ce chiffre, quel que soit le reste.
+     Le relever n'a d'intérêt qu'une fois le point 2 levé.
+  2. **Le processus Python unique (`--workers 1`)** : le GIL empêche
+     d'exploiter les 6 cœurs — le conteneur plafonne à ~300 % de CPU sur
+     600 % disponibles, GPU à 31 %. Le coût par image (YOLO 90-134 ms,
+     ALPR 90-113 ms quand actif) impose de descendre sous 67 ms par image
+     pour tenir 15 img/s, ce qui n'est pas atteignable ainsi.
+
+  Le vrai levier restant est un **pipeline IA multi-process**. Deux
+  réglages donnent un gain immédiat sans refonte : passer les caméras en
+  720p (mesuré : ~2× face au 1080p) et alléger les caméras à 19-20 plugins.
+
 ## [v3.13-plaques-allegees] — 2026-08 — Page Plaques : plus de plantage
 
 ### Fixed
