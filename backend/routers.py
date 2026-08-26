@@ -781,11 +781,22 @@ async def _dispatch_all_plate_engines(numpy_bgr, camera_id: str, cam: Optional[d
     # utilisable dès que son modèle est réellement prêt.
     _bus.refresh_lazy_states()
     whitelist = set((cam or {}).get("enabled_plugins") or [])
-    # Fail-open MINIMAL pour cette action manuelle explicite : si la caméra
-    # n'a aucun moteur ANPR configuré, on tente quand même les moteurs OCR
-    # locaux "de base" — l'utilisateur vient de demander explicitement une
-    # lecture, ce n'est pas un déclenchement automatique silencieux.
-    if not whitelist:
+    # v3.17 · `if not whitelist` ne se déclenchait QUE si `enabled_plugins`
+    # était vide — mais une caméra de surveillance générale (personnes,
+    # véhicules, incendie...) a en général une LISTE NON VIDE de plugins,
+    # simplement sans AUCUN moteur ANPR dedans. Confirmé en conditions
+    # réelles : `enabled_plugins` contenait 19 plugins (occupancy,
+    # person-counting, fire-detection...), aucun n'étant un moteur de
+    # plaques — le fail-open ne se déclenchait jamais, l'analyse manuelle
+    # renvoyait systématiquement 0 candidat en silence. On vérifie
+    # maintenant une INTERSECTION avec les moteurs OCR connus, pas
+    # seulement que la liste soit vide.
+    _KNOWN_PLATE_ENGINES = {"fast-alpr", "easyocr", "opencv-ocr", "paddle-ocr",
+                            "tesseract", "anpr-eps", "plate-recognizer", "codeproject-ai"}
+    if not (whitelist & _KNOWN_PLATE_ENGINES):
+        # Fail-open MINIMAL pour cette action manuelle explicite : l'utilisateur
+        # vient de demander explicitement une lecture, ce n'est pas un
+        # déclenchement automatique silencieux.
         whitelist = {"fast-alpr", "easyocr", "opencv-ocr", "paddle-ocr", "tesseract"}
     entries = [e for e in _bus.active("PlateRecognizer") if e.name in whitelist]
     if not entries or numpy_bgr is None or getattr(numpy_bgr, "size", 0) == 0:
