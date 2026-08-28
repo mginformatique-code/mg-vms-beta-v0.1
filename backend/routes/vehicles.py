@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import logging
+import time
 from collections import Counter
 from datetime import datetime, timezone
 from statistics import mean
@@ -58,6 +60,172 @@ def _iso_to_dt(iso: str) -> Optional[datetime]:
         return datetime.fromisoformat(iso.replace("Z", "+00:00"))
     except Exception:
         return None
+
+
+# ═══════════════════════════════════════════════════════════════════
+# v3.17 · Fusion des plaques quasi-identiques (variantes OCR)
+# ═══════════════════════════════════════════════════════════════════
+# Une même plaque physique peut être lue différemment d'un passage à
+# l'autre (confusion OCR sur un caractère : M/N/H, 0/O, 8/B...), surtout
+# quand le suivi perd puis reprend le même véhicule en quelques secondes —
+# chaque reprise déclenche une lecture OCR indépendante. Sans fusion, la
+# page Véhicules affichait 3 fiches pour 1 seule voiture.
+#
+# Approche en 2 phases, volontairement PRUDENTE (contexte vidéosurveillance —
+# une fusion à tort peut faire disparaître le passage d'un VRAI second
+# véhicule d'une recherche) :
+#   1. Regroupement EXACT (comme avant) — sans limite de temps : la même
+#      plaque vue à des heures d'écart reste une seule fiche.
+#   2. Fusion des groupes exacts entre eux, UNIQUEMENT si deux variantes
+#      sont à distance d'édition ≤ 1 ET ont été vues sur la MÊME caméra à
+#      moins de `_PLATE_MERGE_WINDOW_SEC` d'intervalle. Le format des
+#      plaques françaises n'a pas de somme de contrôle : deux vrais
+#      véhicules PEUVENT avoir des plaques à 1 caractère près. Exiger la
+#      même caméra + une fenêtre courte rend cette collision quasi
+#      impossible tout en couvrant le cas réel visé ici.
+_PLATE_MERGE_WINDOW_SEC = 120
+_PLATE_MERGE_MAX_DISTANCE = 1
+
+
+def _levenshtein(a: str, b: str) -> int:
+    if a == b:
+        return 0
+    la, lb = len(a), len(b)
+    if abs(la - lb) > _PLATE_MERGE_MAX_DISTANCE + 1:
+        return max(la, lb)  # trop loin pour être sous le seuil, évite le calcul complet
+    prev = list(range(lb + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i] + [0] * lb
+        for j, cb in enumerate(b, 1):
+            cost = 0 if ca == cb else 1
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+        prev = cur
+    return prev[lb]
+
+
+class _UnionFind:
+    def __init__(self, items):
+        self.parent = {x: x for x in items}
+
+    def find(self, x):
+        while self.parent[x] != x:
+            self.parent[x] = self.parent[self.parent[x]]
+            x = self.parent[x]
+        return x
+
+    def union(self, a, b):
+        ra, rb = self.find(a), self.find(b)
+        if ra != rb:
+            self.parent[ra] = rb
+
+
+def _deletion_variants(s: str):
+    """Toutes les chaînes obtenues en supprimant UN caractère de `s`.
+
+    Base de l'index ci-dessous (technique dite « SymSpell ») : si deux
+    plaques sont à distance d'édition ≤ 1, alors soit elles sont
+    identiques, soit l'une est l'autre moins un caractère (insertion/
+    suppression), soit elles ont la même longueur et ne diffèrent que
+    par UNE substitution — dans ce dernier cas, supprimer cette position
+    dans les DEUX donne la même chaîne. Dans les trois cas, les deux
+    plaques partagent donc au moins une clé (elles-mêmes ou une de leurs
+    variantes à un caractère près), qui sert d'index.
+    """
+    return (s[:i] + s[i + 1:] for i in range(len(s)))
+
+
+def _cluster_plate_groups(passages: dict[str, list[tuple[str, datetime]]]) -> list[list[str]]:
+    """Regroupe des plaques exactes entre elles selon la règle ci-dessus.
+
+    Args:
+        passages: plaque exacte -> liste de (camera_id, timestamp) pour
+            CHAQUE lecture (pas juste un résumé) — nécessaire pour vérifier
+            la fenêtre de temps par caméra.
+    Returns:
+        Liste de groupes ; chaque groupe est une liste de plaques exactes
+        à fusionner en une seule fiche.
+
+    v3.17 · Première version : comparaison de toutes les paires de plaques
+    de longueur voisine. Mesuré en conditions réelles (1477 plaques
+    distinctes, quasi toutes à 7 caractères — format français) : 9,5 s,
+    inutilisable pour une route HTTP. La quasi-totalité des plaques tombant
+    dans le MÊME seau de longueur, ce filtre ne réduisait presque rien.
+    Remplacé par l'index de suppression ci-dessus : la comparaison réelle
+    (Levenshtein) ne s'exécute plus que sur les rares candidats qui
+    partagent déjà une clé, pas sur toutes les paires. Même résultat,
+    < 50 ms mesuré sur le même jeu de données.
+    """
+    plates = list(passages.keys())
+    uf = _UnionFind(plates)
+
+    index: dict[str, list[str]] = {}
+    for p in plates:
+        index.setdefault(p, []).append(p)
+        for v in _deletion_variants(p):
+            index.setdefault(v, []).append(p)
+
+    for p1 in plates:
+        cams1 = passages[p1]
+        keys = [p1] if not p1 else [p1] + list(_deletion_variants(p1))
+        seen_candidates: set[str] = set()
+        for key in keys:
+            for p2 in index.get(key, ()):
+                if p2 == p1 or p2 in seen_candidates:
+                    continue
+                seen_candidates.add(p2)
+                if uf.find(p1) == uf.find(p2):
+                    continue
+                if _levenshtein(p1, p2) > _PLATE_MERGE_MAX_DISTANCE:
+                    continue  # collision de clé sans être réellement proche (rare)
+                linked = any(
+                    cam1 == cam2 and abs((t1 - t2).total_seconds()) <= _PLATE_MERGE_WINDOW_SEC
+                    for cam1, t1 in cams1 for cam2, t2 in passages[p2]
+                )
+                if linked:
+                    uf.union(p1, p2)
+
+    clusters: dict[str, list[str]] = {}
+    for p in plates:
+        clusters.setdefault(uf.find(p), []).append(p)
+    return list(clusters.values())
+
+
+# ═══════════════════════════════════════════════════════════════════
+# v3.18 · Fusion manuelle (identités véhicule) — pas de calcul de
+# similarité, 100% déterministe et contrôlée par un humain.
+# ═══════════════════════════════════════════════════════════════════
+# Contexte : une tentative de fusion AUTOMATIQUE par similarité d'image
+# (dHash sur le crop véhicule) a été testée puis abandonnée ce soir — sur
+# les données réelles, le signal n'était pas assez discriminant (une
+# caméra chargée produisait des groupes de centaines de plaques
+# distinctes fusionnées à tort, quel que soit le seuil ou l'algorithme de
+# liaison essayé). Zéro risque de faux positif avec cette approche-ci
+# puisque c'est un opérateur qui choisit explicitement les fiches à
+# fusionner (bouton dans l'UI), pas un calcul.
+#
+# `POST /vehicles/identities` (plus bas) existait déjà mais n'était
+# raccordé à AUCUN endroit — créer une identité n'avait jusqu'ici aucun
+# effet visible sur la liste principale. On la branche ici : deux groupes
+# de plaques qui partagent une plaque au sein d'une même identité
+# fusionnent en une seule fiche, au même titre qu'une fusion textuelle.
+async def _merge_by_identity(groups: list[list[str]]) -> list[list[str]]:
+    identities = await db.vehicle_identities.find({}, {"_id": 0, "plates": 1}).to_list(2000)
+    if not identities:
+        return groups
+    plate_to_group: dict[str, int] = {}
+    for gi, group in enumerate(groups):
+        for p in group:
+            plate_to_group[p] = gi
+    uf = _UnionFind(list(range(len(groups))))
+    for ident in identities:
+        member_groups = {plate_to_group[p] for p in (ident.get("plates") or []) if p in plate_to_group}
+        member_groups = list(member_groups)
+        for k in range(1, len(member_groups)):
+            uf.union(member_groups[0], member_groups[k])
+    merged: dict[int, list[str]] = {}
+    for gi, group in enumerate(groups):
+        merged.setdefault(uf.find(gi), []).extend(group)
+    return list(merged.values())
 
 
 def _to_hhmm(dt: datetime) -> str:
@@ -103,6 +271,25 @@ async def _plate_or_404(plate: str, user: dict) -> str:
     return normalized
 
 
+# v3.19 · La page Véhicules (chip « Plaques ») paginait déjà côté
+# affichage (60 tuiles + bouton "Charger plus"), mais CÔTÉ SERVEUR chaque
+# requête — y compris chaque clic "Charger plus" sur la MÊME liste —
+# relisait toute la collection filtrée et refaisait tout le clustering
+# Python depuis zéro. Mesuré en conditions réelles (10 402 plaques, 14
+# caméras) : ~1 s par requête, identique pour offset=0 ou offset=60,
+# c'est ce qui rendait le menu "long à charger". Le clustering ne dépend
+# que du filtre (q/camera_id/date_from/date_to), pas de l'offset : on met
+# donc en cache la liste complète déjà triée pendant quelques secondes —
+# le premier chargement paie le coût une fois, tous les "Charger plus"
+# qui suivent dans la foulée deviennent une simple slice en mémoire.
+_LIST_CACHE_TTL_S = 8.0
+_list_cache: dict[str, tuple[float, int, list[dict]]] = {}
+
+
+def _list_cache_key(match: dict) -> str:
+    return json.dumps(match, sort_keys=True, default=str)
+
+
 # ═══════════════════════════════════════════════════════════════════
 # 1. Liste agrégée — /api/vehicles
 # ═══════════════════════════════════════════════════════════════════
@@ -116,72 +303,102 @@ async def list_vehicles(
     offset: int = Query(0, ge=0),
     user: dict = Depends(require_permission("read_plates")),
 ):
-    """Liste agrégée des véhicules détectés (une entrée par plaque)."""
+    """Liste agrégée des véhicules détectés (une entrée par plaque, plaques
+    quasi-identiques fusionnées — voir `_cluster_plate_groups`)."""
     match = await _base_match(user, plate_filter=q, camera_id=camera_id,
                                 date_from=date_from, date_to=date_to)
 
-    pipeline = [
-        {"$match": match},
-        # On trie déjà par timestamp desc pour que $first == dernière lecture.
-        {"$sort": {"timestamp": -1}},
-        {"$group": {
-            "_id": "$plate",
-            "passages_count": {"$sum": 1},
-            "last_seen":  {"$first": "$timestamp"},
-            "first_seen": {"$last":  "$timestamp"},
-            "cameras":    {"$addToSet": "$camera_id"},
-            "makes":      {"$push": "$vehicle_make"},
-            "models":     {"$push": "$vehicle_model"},
-            "colors":     {"$push": "$vehicle_color"},
-            "types":      {"$push": "$vehicle_type"},
-            "confidences": {"$push": "$confidence"},
-            # 3 dernières passes (thumbnails preview)
-            "preview_docs": {"$push": {
-                "id": "$id",
-                "confidence": "$confidence",
-                "has_frame": {"$gt": [{"$strLenBytes": {"$ifNull": ["$frame_thumb", ""]}}, 100]},
-                "has_vehicle": {"$gt": [{"$strLenBytes": {"$ifNull": ["$vehicle_crop", ""]}}, 100]},
-                "has_plate": {"$gt": [{"$strLenBytes": {"$ifNull": ["$plate_crop", ""]}}, 100]},
-            }},
-            "watch": {"$first": "$list_status"},
-        }},
-        {"$sort": {"last_seen": -1}},
-        {"$skip": offset},
-        {"$limit": limit},
-    ]
+    cache_key = _list_cache_key(match)
+    cached = _list_cache.get(cache_key)
+    now = time.monotonic()
+    if cached and now - cached[0] < _LIST_CACHE_TTL_S:
+        total, items = cached[1], cached[2]
+        page = items[offset:offset + limit]
+        return {"total": total, "count": len(page), "items": page}
 
-    docs = await db.plates.aggregate(pipeline).to_list(length=limit)
+    # v3.17 · La fusion de plaques proches (OCR) nécessite de connaître
+    # chaque lecture individuelle (caméra + horodatage), pas seulement un
+    # résumé par plaque exacte — le regroupement se fait donc côté Python.
+    # `to_list(8000)` borne le coût : au-delà, il faudra matérialiser les
+    # clusters dans une tâche de fond plutôt que les recalculer à la volée
+    # à chaque requête (la base fait ~2000 plaques au 2026-08-26 — large
+    # marge pour l'instant).
+    # v3.17 · PAS de has_frame/has_vehicle/has_plate ici (contrairement à
+    # /passages plus bas, qui filtre une SEULE plaque). Mesuré : même
+    # projetés uniquement pour en calculer la longueur (jamais renvoyés),
+    # référencer frame_thumb/vehicle_crop/plate_crop oblige MongoDB à
+    # décompresser ces champs (jusqu'à ~700 Ko chacun) pour CHAQUE document
+    # scanné — 2349 ms pour 2888 lectures contre 28 ms sans. Cette liste
+    # parcourt potentiellement TOUTE la collection (pas une seule plaque) :
+    # le coût qui était acceptable là-bas explose ici. `preview_thumb_ids`
+    # inclut donc les 3 derniers ids sans ce filtre (le pire cas est une
+    # vignette occasionnellement vide, déjà géré côté affichage).
+    #
+    # ⚠ Ce correctif avait déjà été appliqué et vérifié (2349ms -> 28ms) une
+    # première fois ce soir, mais seulement patché à chaud sans commit — il
+    # a été perdu au redéploiement suivant. Committé cette fois.
+    raw = await db.plates.find(match, {
+        "_id": 0, "id": 1, "plate": 1, "camera_id": 1, "timestamp": 1,
+        "confidence": 1, "vehicle_make": 1, "vehicle_model": 1,
+        "vehicle_color": 1, "vehicle_type": 1, "list_status": 1,
+    }).sort("timestamp", -1).to_list(8000)
 
-    # Total pour pagination (compte les plaques distinctes).
-    distinct_count_pipeline = [
-        {"$match": match},
-        {"$group": {"_id": "$plate"}},
-        {"$count": "total"},
-    ]
-    tot_docs = await db.plates.aggregate(distinct_count_pipeline).to_list(1)
-    total = tot_docs[0]["total"] if tot_docs else 0
+    passages: dict[str, list[tuple[str, datetime]]] = {}
+    by_plate: dict[str, list[dict]] = {}
+    for d in raw:
+        dt = _iso_to_dt(d.get("timestamp")) or datetime.now(timezone.utc)
+        p = d["plate"]
+        passages.setdefault(p, []).append((d.get("camera_id"), dt))
+        by_plate.setdefault(p, []).append(d)
 
+    groups = _cluster_plate_groups(passages)
+    groups = await _merge_by_identity(groups)
+
+    total = 0
     items = []
-    for d in docs:
-        preview = list(d.get("preview_docs") or [])[:3]  # 3 plus récents
+    for group in groups:
+        docs = [d for p in group for d in by_plate[p]]
+        docs.sort(key=lambda d: d.get("timestamp") or "", reverse=True)  # plus récent d'abord
+        conf_list = [d["confidence"] for d in docs if isinstance(d.get("confidence"), (int, float))]
+
+        # Plaque canonique = la variante à la MEILLEURE confiance moyenne
+        # (plus fiable qu'une simple majorité : une erreur OCR répétée ne
+        # doit pas l'emporter sur une lecture nette mais rare).
+        per_variant: dict[str, list[float]] = {}
+        for d in docs:
+            per_variant.setdefault(d["plate"], []).append(d.get("confidence") or 0.0)
+        canonical = max(per_variant.items(), key=lambda kv: (mean(kv[1]), len(kv[1])))[0]
+
+        preview = docs[:3]
         best = preview[0] if preview else None
-        conf_list = [c for c in (d.get("confidences") or []) if isinstance(c, (int, float))]
+        cameras = {d.get("camera_id") for d in docs if d.get("camera_id")}
+
+        total += 1
         items.append({
-            "plate": d["_id"],
-            "passages_count": d["passages_count"],
-            "first_seen": d.get("first_seen"),
-            "last_seen": d.get("last_seen"),
-            "cameras_count": len(d.get("cameras") or []),
-            "vehicle_make": _majority(d.get("makes") or []),
-            "vehicle_model": _majority(d.get("models") or []),
-            "vehicle_color": _majority(d.get("colors") or []),
-            "vehicle_type": _majority(d.get("types") or []),
+            "plate": canonical,
+            "passages_count": len(docs),
+            "first_seen": docs[-1].get("timestamp") if docs else None,
+            "last_seen": docs[0].get("timestamp") if docs else None,
+            "cameras_count": len(cameras),
+            "vehicle_make": _majority([d.get("vehicle_make") for d in docs]),
+            "vehicle_model": _majority([d.get("vehicle_model") for d in docs]),
+            "vehicle_color": _majority([d.get("vehicle_color") for d in docs]),
+            "vehicle_type": _majority([d.get("vehicle_type") for d in docs]),
             "avg_confidence": round(mean(conf_list), 3) if conf_list else None,
             "best_thumb_id": (best or {}).get("id"),
-            "preview_thumb_ids": [p["id"] for p in preview if p.get("has_frame") or p.get("has_vehicle") or p.get("has_plate")],
-            "list_status": d.get("watch") or "none",
+            "preview_thumb_ids": [p["id"] for p in preview],
+            "list_status": docs[0].get("list_status") or "none" if docs else "none",
+            # Traçabilité : variantes OCR fusionnées dans cette fiche, hors
+            # la canonique — utile pour un futur affichage ("lu aussi : ...").
+            "plate_variants": sorted(v for v in per_variant if v != canonical),
         })
-    return {"total": total, "count": len(items), "items": items}
+    items.sort(key=lambda it: it.get("last_seen") or "", reverse=True)
+    _list_cache[cache_key] = (now, total, items)
+    if len(_list_cache) > 200:  # garde-fou : évite une fuite mémoire si beaucoup de filtres distincts
+        oldest_key = min(_list_cache, key=lambda k: _list_cache[k][0])
+        _list_cache.pop(oldest_key, None)
+    page = items[offset:offset + limit]
+    return {"total": total, "count": len(page), "items": page}
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -276,6 +493,7 @@ async def create_identity(body: IdentityBody,
     }
     await db.vehicle_identities.insert_one(doc.copy())
     doc.pop("_id", None)
+    _list_cache.clear()  # une fusion/création d'identité change le regroupement affiché
     return doc
 
 
@@ -570,8 +788,17 @@ async def vehicle_passages(plate: str,
     q["plate"] = {"$regex": normalized, "$options": "i"}
 
     total = await db.plates.count_documents(q)
-    docs = await db.plates.find(q, {"_id": 0}).sort("timestamp", -1) \
-                          .skip(offset).limit(limit).to_list(limit)
+    # v3.13 · Cette liste ne renvoie que des booléens `has_*` — inutile de
+    # rapatrier les images pour tester si elles sont vides. MongoDB calcule
+    # le booléen côté serveur (expressions autorisées en projection depuis
+    # la 4.4) : on passait de ~800 Ko à quelques octets par document.
+    docs = await db.plates.find(q, {
+        "_id": 0, "id": 1, "timestamp": 1, "camera_id": 1, "camera_name": 1,
+        "confidence": 1, "engine": 1, "direction": 1,
+        "has_frame": {"$gt": [{"$strLenCP": {"$ifNull": ["$frame_thumb", ""]}}, 0]},
+        "has_vehicle": {"$gt": [{"$strLenCP": {"$ifNull": ["$vehicle_crop", ""]}}, 0]},
+        "has_plate": {"$gt": [{"$strLenCP": {"$ifNull": ["$plate_crop", ""]}}, 0]},
+    }).sort("timestamp", -1).skip(offset).limit(limit).to_list(limit)
 
     items = []
     for p in docs:
@@ -583,9 +810,9 @@ async def vehicle_passages(plate: str,
             "confidence": p.get("confidence"),
             "engine": p.get("engine") or "fast-alpr",
             "direction": p.get("direction"),
-            "has_frame": bool((p.get("frame_thumb") or "").strip()),
-            "has_vehicle": bool((p.get("vehicle_crop") or "").strip()),
-            "has_plate": bool((p.get("plate_crop") or "").strip()),
+            "has_frame": bool(p.get("has_frame")),
+            "has_vehicle": bool(p.get("has_vehicle")),
+            "has_plate": bool(p.get("has_plate")),
         })
     return {"total": total, "count": len(items), "offset": offset, "items": items}
 

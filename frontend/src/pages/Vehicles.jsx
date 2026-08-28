@@ -5,12 +5,13 @@ import VirtualGrid from "@/components/VirtualGrid";
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
 } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Search, Car, Camera as CameraIcon, Clock, Route as RouteIcon,
   Activity, BarChart3, Loader2, Info, ChevronDown, ChevronRight,
   AlertTriangle, ShieldAlert, ShieldCheck, Shield, Bell, X as XIcon,
-  CheckCircle2, GitMerge, Sparkles, Users, Link2,
+  CheckCircle2, GitMerge, Sparkles, Users, Link2, Plus,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -43,6 +44,82 @@ export function VehiclesSection({ embedded = false }) {
   const [loading, setLoading] = useState(false);
   const [openPlate, setOpenPlate] = useState(null);
   const [anomalies, setAnomalies] = useState([]);
+  // v3.18 · Fusion manuelle de fiches — sélection explicite par l'opérateur,
+  // pas de calcul automatique (voir _merge_by_identity côté backend).
+  const [mergeMode, setMergeMode] = useState(false);
+  const [selectedPlates, setSelectedPlates] = useState(new Set());
+  const [merging, setMerging] = useState(false);
+  const togglePlateSelection = (plate) => {
+    setSelectedPlates((prev) => {
+      const next = new Set(prev);
+      next.has(plate) ? next.delete(plate) : next.add(plate);
+      return next;
+    });
+  };
+  const cancelMerge = () => { setMergeMode(false); setSelectedPlates(new Set()); };
+  // v3.19 · Créer une fiche véhicule manuellement — ex. véhicule signalé
+  // volé : on connaît la plaque avant toute lecture ANPR. Compose deux
+  // endpoints déjà en place et testés (pas de nouveau code backend) :
+  // POST /vehicles/identities (la fiche) puis, si liste noire cochée,
+  // POST /watchlist (déclenche déjà alerte + notification à la prochaine
+  // lecture de cette plaque, voir routers.py::maybe_blacklist_alert).
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createForm, setCreateForm] = useState({
+    plate: "", name: "", vehicle_make: "", vehicle_color: "", vehicle_type: "",
+    notes: "", blacklist: false, reason: "",
+  });
+  const resetCreateForm = () => setCreateForm({
+    plate: "", name: "", vehicle_make: "", vehicle_color: "", vehicle_type: "",
+    notes: "", blacklist: false, reason: "",
+  });
+  const submitCreate = async () => {
+    const plate = createForm.plate.trim().toUpperCase().replace(/\s|-/g, "");
+    if (!plate) { toast.error("La plaque est requise"); return; }
+    setCreating(true);
+    try {
+      await api.post("/vehicles/identities", {
+        plates: [plate],
+        name: createForm.name.trim() || plate,
+        vehicle_make: createForm.vehicle_make.trim() || null,
+        vehicle_color: createForm.vehicle_color.trim() || null,
+        vehicle_type: createForm.vehicle_type.trim() || null,
+        notes: createForm.notes.trim(),
+      });
+      if (createForm.blacklist) {
+        await api.post("/watchlist", { plate, list_type: "black", reason: createForm.reason.trim() });
+      }
+      toast.success(`Fiche créée pour ${plate}`);
+      setCreateOpen(false);
+      resetCreateForm();
+      load(q);
+      loadIdentities();
+    } catch (e) {
+      toast.error(e.response?.data?.detail?.message || "Création de la fiche impossible");
+    } finally {
+      setCreating(false);
+    }
+  };
+  const confirmMerge = async () => {
+    if (selectedPlates.size < 2) return;
+    setMerging(true);
+    try {
+      // Envoie la plaque canonique ET ses variantes déjà fusionnées pour
+      // chaque fiche sélectionnée — l'identité doit couvrir tout ce qui est
+      // déjà regroupé, pas seulement la plaque affichée.
+      const plates = items
+        .filter((it) => selectedPlates.has(it.plate))
+        .flatMap((it) => [it.plate, ...(it.plate_variants || [])]);
+      await api.post("/vehicles/identities", { plates, name: plates[0] });
+      toast.success(`${selectedPlates.size} fiches fusionnées`);
+      cancelMerge();
+      load(q);
+    } catch (e) {
+      toast.error("Fusion impossible");
+    } finally {
+      setMerging(false);
+    }
+  };
   // Smart search
   const [smart, setSmart] = useState(""); // AI query
   const [smartLoading, setSmartLoading] = useState(false);
@@ -113,11 +190,19 @@ export function VehiclesSection({ embedded = false }) {
     if (query.trim()) { setSmart(query); setTimeout(runSmartSearch, 50); }
   }, [adv, q, runSmartSearch]);
 
+  // v3.19 · 20 tuiles par page (demande explicite : les 20 dernières
+  // plaques avec miniatures, puis "Charger plus" pour la suite — même
+  // principe que le menu Événements). Le vrai gain de vitesse vient du
+  // cache serveur ci-dessus (_list_cache) : avant, chaque page — y
+  // compris "Charger plus" sur la même liste — repayait ~1s de
+  // reclustering complet côté backend.
+  const PAGE_SIZE = 20;
+  const [loadingMore, setLoadingMore] = useState(false);
   const load = useCallback(async (search = "") => {
     setLoading(true);
     try {
       const { data } = await api.get("/vehicles", {
-        params: { q: search, limit: 60, offset: 0 },
+        params: { q: search, limit: PAGE_SIZE, offset: 0 },
       });
       setItems(data.items || []);
       setTotal(data.total || 0);
@@ -127,6 +212,21 @@ export function VehiclesSection({ embedded = false }) {
       setLoading(false);
     }
   }, []);
+
+  const loadMore = useCallback(async () => {
+    setLoadingMore(true);
+    try {
+      const { data } = await api.get("/vehicles", {
+        params: { q, limit: PAGE_SIZE, offset: items.length },
+      });
+      setItems((prev) => [...prev, ...(data.items || [])]);
+      setTotal(data.total || 0);
+    } catch (e) {
+      toast.error("Impossible de charger la suite");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [q, items.length]);
 
   // Chargement initial + refresh 30 s (pausé si le drawer est ouvert)
   useEffect(() => { load(""); loadAnomalies(); loadIdentities(); }, [load, loadAnomalies, loadIdentities]);
@@ -226,13 +326,130 @@ export function VehiclesSection({ embedded = false }) {
             ? `${(smartResult.vehicles_count || 0)} véhicule(s) + ${(smartResult.persons_count || 0)} personne(s) pour « ${smartResult.query} »`
             : `${items.length} véhicule${items.length > 1 ? "s" : ""} affiché${items.length > 1 ? "s" : ""} sur ${total}`}
         </span>
-        {smartResult && (
-          <button onClick={clearSmart} data-testid="smart-clear-inline"
-                  className="text-[10px] uppercase tracking-wider text-[#0044FF] hover:underline">
-            Réinitialiser la recherche
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {smartResult && (
+            <button onClick={clearSmart} data-testid="smart-clear-inline"
+                    className="text-[10px] uppercase tracking-wider text-[#0044FF] hover:underline">
+              Réinitialiser la recherche
+            </button>
+          )}
+          {!smartResult && !mergeMode && (
+            <button onClick={() => setMergeMode(true)} data-testid="merge-mode-toggle"
+                    className="text-[10px] uppercase tracking-wider text-muted-foreground hover:text-[#0044FF] flex items-center gap-1">
+              <GitMerge size={12} /> Fusionner des fiches
+            </button>
+          )}
+          {!smartResult && !mergeMode && (
+            <button onClick={() => setCreateOpen(true)} data-testid="create-fiche-btn"
+                    className="text-[10px] uppercase tracking-wider text-muted-foreground hover:text-[#0044FF] flex items-center gap-1">
+              <Plus size={12} /> Créer une fiche
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* v3.18 · Fusion manuelle : plusieurs plaques lues différemment pour
+          le même véhicule (fourgon garé mal lu à chaque scan, par ex.) sans
+          rapport de texte assez proche pour la fusion automatique — un
+          opérateur choisit ici explicitement quoi regrouper. */}
+      {mergeMode && (
+        <div className="border border-[#0044FF] bg-[#0044FF]/5 p-3 mb-3 flex items-center justify-between flex-wrap gap-2" data-testid="merge-toolbar">
+          <span className="text-xs">
+            Sélectionnez au moins 2 fiches représentant le même véhicule (ex. une voiture garée lue différemment à chaque scan), puis fusionnez.
+            <span className="ml-2 font-medium">{selectedPlates.size} sélectionnée{selectedPlates.size > 1 ? "s" : ""}</span>
+          </span>
+          <div className="flex items-center gap-2">
+            <button onClick={cancelMerge} className="px-3 py-1.5 text-xs border border-border hover:bg-secondary">
+              Annuler
+            </button>
+            <button onClick={confirmMerge} disabled={selectedPlates.size < 2 || merging} data-testid="merge-confirm-btn"
+                    className="px-3 py-1.5 text-xs bg-[#0044FF] text-white flex items-center gap-2 disabled:opacity-40">
+              {merging ? <Loader2 size={13} className="animate-spin" /> : <GitMerge size={13} />}
+              Fusionner ({selectedPlates.size})
+            </button>
+          </div>
+        </div>
+      )}
+
+      <Dialog open={createOpen} onOpenChange={(o) => { setCreateOpen(o); if (!o) resetCreateForm(); }}>
+        <DialogContent className="rounded-none border-border max-w-md" data-testid="create-fiche-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-head flex items-center gap-2"><Plus size={18} /> Créer une fiche véhicule</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Plaque *</label>
+              <input
+                value={createForm.plate}
+                onChange={(e) => setCreateForm({ ...createForm, plate: e.target.value })}
+                data-testid="create-fiche-plate"
+                placeholder="AB123CD"
+                className="w-full px-2 py-1.5 bg-background border border-input outline-none mono uppercase"
+              />
+            </div>
+            <div>
+              <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Nom / repère (optionnel)</label>
+              <input
+                value={createForm.name}
+                onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+                placeholder="ex. Fourgon bleu Kangoo"
+                className="w-full px-2 py-1.5 bg-background border border-input outline-none"
+              />
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Marque</label>
+                <input value={createForm.vehicle_make} onChange={(e) => setCreateForm({ ...createForm, vehicle_make: e.target.value })}
+                       className="w-full px-2 py-1.5 bg-background border border-input outline-none" />
+              </div>
+              <div>
+                <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Couleur</label>
+                <input value={createForm.vehicle_color} onChange={(e) => setCreateForm({ ...createForm, vehicle_color: e.target.value })}
+                       className="w-full px-2 py-1.5 bg-background border border-input outline-none" />
+              </div>
+              <div>
+                <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Type</label>
+                <input value={createForm.vehicle_type} onChange={(e) => setCreateForm({ ...createForm, vehicle_type: e.target.value })}
+                       className="w-full px-2 py-1.5 bg-background border border-input outline-none" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Notes</label>
+              <textarea
+                value={createForm.notes}
+                onChange={(e) => setCreateForm({ ...createForm, notes: e.target.value })}
+                rows={2}
+                className="w-full px-2 py-1.5 bg-background border border-input outline-none resize-none"
+              />
+            </div>
+            <label className="flex items-center gap-2 text-sm border-t border-border pt-3 cursor-pointer">
+              <input type="checkbox" checked={createForm.blacklist}
+                     onChange={(e) => setCreateForm({ ...createForm, blacklist: e.target.checked })}
+                     data-testid="create-fiche-blacklist" />
+              <ShieldAlert size={14} className="text-red-500" />
+              Mettre en liste noire (véhicule signalé volé) — alerte + notification à la prochaine lecture
+            </label>
+            {createForm.blacklist && (
+              <div>
+                <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Motif</label>
+                <input value={createForm.reason} onChange={(e) => setCreateForm({ ...createForm, reason: e.target.value })}
+                       placeholder="ex. Vol signalé le 28/08/2026"
+                       className="w-full px-2 py-1.5 bg-background border border-input outline-none" />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <button onClick={() => setCreateOpen(false)} className="px-3 py-1.5 text-xs border border-border hover:bg-secondary">
+              Annuler
+            </button>
+            <button onClick={submitCreate} disabled={creating || !createForm.plate.trim()} data-testid="create-fiche-submit"
+                    className="px-3 py-1.5 text-xs bg-[#0044FF] text-white flex items-center gap-2 disabled:opacity-40">
+              {creating ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+              Créer la fiche
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {history.length > 0 && !smartResult && (
         <div className="mb-3 flex items-center gap-2 flex-wrap text-[11px]" data-testid="search-history">
@@ -293,7 +510,14 @@ export function VehiclesSection({ embedded = false }) {
       <div data-testid="vehicles-grid-root">
         <VirtualGrid
           items={smartResult ? (smartResult.vehicles || []) : items}
-          renderItem={(v) => <VehicleCard v={v} onOpen={() => setOpenPlate(v.plate)} />}
+          renderItem={(v) => (
+            <VehicleCard
+              v={v}
+              onOpen={mergeMode ? () => togglePlateSelection(v.plate) : () => setOpenPlate(v.plate)}
+              selectable={mergeMode}
+              selected={selectedPlates.has(v.plate)}
+            />
+          )}
           itemKey={(v) => v.plate}
           rowHeight={340}
           minColumnWidth={260}
@@ -302,6 +526,20 @@ export function VehiclesSection({ embedded = false }) {
           testid="vehicles-virtual-grid"
         />
       </div>
+
+      {/* v3.17 · Même principe que le menu Événements : la page ne charge
+          qu'un lot de PAGE_SIZE tuiles (limite la latence), avec un bouton
+          pour remonter plus loin dans le temps au lieu de tout charger
+          d'un coup. */}
+      {!smartResult && items.length < total && items.length > 0 && (
+        <div className="flex justify-center pt-2">
+          <button onClick={loadMore} disabled={loadingMore} data-testid="vehicles-load-more"
+                  className="flex items-center gap-2 px-4 py-2 border border-border text-xs uppercase tracking-wider text-muted-foreground hover:text-foreground hover:border-[#0044FF]/60 disabled:opacity-50">
+            {loadingMore ? <Loader2 size={13} className="animate-spin" /> : null}
+            {loadingMore ? "Chargement…" : `Charger plus (${items.length} / ${total})`}
+          </button>
+        </div>
+      )}
 
       {smartResult?.persons_count > 0 && (
         <PersonsSection persons={smartResult.persons || []} description={smartResult.filters?.object_description} />
@@ -321,7 +559,7 @@ export function VehiclesSection({ embedded = false }) {
 // ═══════════════════════════════════════════════════════════════════
 // VehicleCard — effet cascade + badge +N
 // ═══════════════════════════════════════════════════════════════════
-function VehicleCard({ v, onOpen }) {
+function VehicleCard({ v, onOpen, selectable = false, selected = false }) {
   const { t } = useApp();
   // v1.0-rc2 · Utilise le helper module `passageThumbUrl` qui appende ?token=
   // (les <img> HTML ne peuvent pas envoyer de Bearer header).
@@ -334,8 +572,23 @@ function VehicleCard({ v, onOpen }) {
     <button
       onClick={onOpen}
       data-testid={`vehicle-card-${v.plate}`}
-      className="text-left bg-card border border-border hover:border-[#0044FF] transition-all group p-3 flex flex-col gap-3"
+      className={`text-left bg-card border transition-all group p-3 flex flex-col gap-3 relative ${
+        selectable
+          ? selected ? "border-[#0044FF] ring-2 ring-[#0044FF]/40" : "border-border hover:border-[#0044FF]/50"
+          : "border-border hover:border-[#0044FF]"
+      }`}
     >
+      {/* v3.18 · Mode fusion : case à cocher visuelle par-dessus la carte */}
+      {selectable && (
+        <div
+          className={`absolute top-2 left-2 z-20 w-5 h-5 border-2 flex items-center justify-center ${
+            selected ? "bg-[#0044FF] border-[#0044FF]" : "bg-black/40 border-white"
+          }`}
+          data-testid={`vehicle-select-${v.plate}`}
+        >
+          {selected && <CheckCircle2 size={14} className="text-white" />}
+        </div>
+      )}
       {/* Effet cascade — 3 miniatures empilées */}
       <div className="relative h-40 mb-1">
         {previews.length === 0 && (
@@ -462,6 +715,7 @@ export function VehicleDrawer({ plate, onClose, onWatchChanged }) {
 
 // ─── Tabs contents ───────────────────────────────────────────────
 function TabOverview({ d, onWatchChanged }) {
+  const { t } = useApp();
   const [habits, setHabits] = useState(null);
   const [anomaly, setAnomaly] = useState(null);
   const [wlSaving, setWlSaving] = useState(false);
