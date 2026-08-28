@@ -140,10 +140,20 @@ class PaddleOCRPlugin(PlateRecognizer):
             if getattr(self, "_api_v3", False):
                 # PaddleOCR 3.x : predict() retourne des objets result avec
                 # rec_texts / rec_scores — normalisé vers le format 2.x.
+                #
+                # v3.19 · `p.get("rec_texts", [])` ne protège QUE l'absence de
+                # la clé — quand aucun texte n'est reconnu dans la région,
+                # PaddleOCR renvoie la clé présente mais avec la valeur None
+                # (pas une liste vide), donc le défaut de .get() ne s'applique
+                # jamais et `zip(None, ...)` lève "TypeError: 'NoneType'
+                # object is not iterable". Confirmé en conditions réelles :
+                # 2/2 appels réels en échec avec cette erreur exacte (analyse
+                # manuelle de plaque toujours KO). `or []` protège aussi le
+                # cas valeur-présente-mais-None, pas seulement clé-absente.
                 preds = self._ocr.predict(img) or []
                 result = [[
                     [None, (t, s)]
-                    for t, s in zip(p.get("rec_texts", []), p.get("rec_scores", []))
+                    for t, s in zip(p.get("rec_texts") or [], p.get("rec_scores") or [])
                 ] for p in preds]
             else:
                 result = self._ocr.ocr(img, cls=True) or []
