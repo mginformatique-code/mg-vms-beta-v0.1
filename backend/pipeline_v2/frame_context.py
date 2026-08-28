@@ -26,11 +26,28 @@ def encode_jpeg_data_uri(bgr_img, max_width: int = 1280, quality: int = 85):
 
 
 def dominant_color_fr(bgr_crop):
-    """Couleur dominante réelle (analyse HSV) — nommage français."""
+    """Couleur dominante réelle (analyse HSV) — nommage français.
+
+    v3.19 · La nuit (caméras en mode IR), le capteur produit une image
+    RÉELLEMENT monochrome (R=G=B exactement, pas juste sombre) — sans
+    détection explicite, `mean_v < 60` classait presque tout "Noir" la
+    nuit, quelle que soit la vraie couleur (aucune information de teinte
+    dans une image IR). Mesuré en conditions réelles : 4454 lectures
+    "Noir" sur la base, concentrées à 21h-04h (866 à minuit contre 7 à
+    midi) — un biais, pas une réalité. Un vrai véhicule noir en plein
+    jour montre toujours un écart entre canaux R/G/B (2.8 à 16.7 mesuré
+    sur 5 échantillons réels) ; une frame IR mesure exactement 0.00 sur
+    les 3 écarts (5/5 échantillons nocturnes réels) — signal fiable à
+    100% sur ces échantillons, sans dépendre de l'heure ni d'un flag
+    caméra. Sur IR, on retourne None (inconnue) plutôt que de deviner.
+    """
     import cv2
     import numpy as np
     if bgr_crop is None or bgr_crop.size == 0:
         return None
+    b, g, r = (bgr_crop[:, :, i].astype(np.float32) for i in range(3))
+    if (np.abs(r - g).mean() + np.abs(g - b).mean() + np.abs(r - b).mean()) < 3.0:
+        return None  # image monochrome (IR nocturne) — aucune couleur fiable à en tirer
     hsv = cv2.cvtColor(bgr_crop, cv2.COLOR_BGR2HSV)
     h, s, v = (hsv[:, :, i].astype(np.float32) for i in range(3))
     mean_s, mean_v = float(s.mean()), float(v.mean())
