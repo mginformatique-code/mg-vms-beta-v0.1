@@ -64,6 +64,7 @@ const NAV = [
     ]},
     { to: "/network", icon: Network, key: "nav.network", role: "client" },
     { to: "/plugins", icon: Puzzle, key: "nav.plugins", role: "admin" },
+    { to: "/llm-settings", icon: Brain, key: "nav.llm", role: "admin" },
   ]},
   { group: "nav.logs_reports", items: [
     { to: "/reports", icon: FileText, key: "nav.reports", role: "technician" },

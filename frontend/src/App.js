@@ -45,6 +45,7 @@ import CameraCenterDispatch from "@/pages/CameraCenterDispatch";
 import UsersPage from "@/pages/Users";
 import SettingsPage from "@/pages/Settings";
 import Notifications from "@/pages/Notifications";
+import LlmSettings from "@/pages/LlmSettings";
 import Plugins from "@/pages/PluginManagerNG";
 import PluginPage from "@/pages/PluginPage";
 import SmartZones from "@/pages/SmartZones";
@@ -107,6 +108,7 @@ function AppRoutes() {
       <Route path="/camera-center/:cameraId" element={<Protected><CameraCenter /></Protected>} />
       <Route path="/users" element={<Protected><UsersPage /></Protected>} />
       <Route path="/notifications" element={<Protected><Notifications /></Protected>} />
+      <Route path="/llm-settings" element={<Protected><LlmSettings /></Protected>} />
       <Route path="/plugins" element={<Protected><Plugins /></Protected>} />
       <Route path="/plugins/:pluginId" element={<Protected><PluginPage /></Protected>} />
       <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />

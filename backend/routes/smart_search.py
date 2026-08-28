@@ -12,8 +12,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -69,9 +67,14 @@ def _norm_plate(p: str) -> str:
 
 
 async def _parse_query_llm(query: str) -> dict:
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-    key = os.environ.get("EMERGENT_LLM_KEY")
-    if not key:
+    # v3.19 · Remplace la clé cloud EMERGENT_LLM_KEY par une instance Qwen
+    # auto-hébergée, configurée via le menu admin LLM (routes/llm_settings.py)
+    # plutôt qu'une variable d'env par site — objectif : déploiement client
+    # sans édition manuelle de fichier .env. Format d'appel OpenAI-compatible
+    # (chat completions), convention supportée par Ollama/Open WebUI.
+    from routes.llm_settings import get_active_llm_config
+    cfg = await get_active_llm_config()
+    if not cfg:
         # v1.0-rc4 · Code + message explicites pour le frontend (pas de
         # "Une erreur est survenue"). Le fallback UI côté Events.jsx doit
         # afficher ce message sans casser la vue.
@@ -79,13 +82,26 @@ async def _parse_query_llm(query: str) -> dict:
                             detail={"code": "SMART_SEARCH_LLM_NOT_CONFIGURED",
                                     "error": "no_llm_key",
                                     "message": "La recherche IA n'est pas configurée sur ce serveur. "
-                                               "Ajouter EMERGENT_LLM_KEY dans deploy-app/.env puis relancer "
-                                               "`docker compose up -d backend`."})
+                                               "Configurez-la dans Administration → LLM (MG-IA)."})
+    import httpx
+    headers = {"Content-Type": "application/json"}
+    if cfg.get("api_key"):
+        headers["Authorization"] = f"Bearer {cfg['api_key']}"
+    payload = {
+        "model": cfg["model"],
+        "messages": [
+            {"role": "system", "content": _system_prompt()},
+            {"role": "user", "content": query},
+        ],
+        "stream": False,
+    }
+    url = f"{cfg['base_url']}/v1/chat/completions"
     try:
-        chat = LlmChat(api_key=key,
-                        session_id=f"smart-{_uuid.uuid4().hex[:8]}",
-                        system_message=_system_prompt()).with_model("anthropic", "claude-sonnet-5")
-        raw = await chat.send_message(UserMessage(text=query))
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            body = resp.json()
+        raw = body["choices"][0]["message"]["content"]
     except Exception as e:
         logger.warning("smart-search LLM failed: %s", e)
         raise HTTPException(status_code=502,
