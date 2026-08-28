@@ -806,7 +806,7 @@ function TabOverview({ d, onWatchChanged }) {
       )}
 
       {/* Consensus multi-plugins & validation manuelle */}
-      <PlateConsensusBlock plate={d.plate} />
+      <PlateConsensusBlock plate={d.plate} onValidated={reload} />
 
       {/* Actions Watchlist */}
       <div className="border border-border p-3 space-y-2" data-testid="watchlist-actions">
@@ -1022,7 +1022,7 @@ function IdentitiesPanel({ identities, candidates, show, onToggle, onReload, onO
 // ═══════════════════════════════════════════════════════════════════
 // Consensus multi-plugins & Validation manuelle de la plaque (v0.7 preview)
 // ═══════════════════════════════════════════════════════════════════
-function PlateConsensusBlock({ plate }) {
+function PlateConsensusBlock({ plate, onValidated }) {
   const [data, setData] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -1054,6 +1054,7 @@ function PlateConsensusBlock({ plate }) {
       });
       toast.success(`Plaque « ${chosenCanonical} » validée · ${variantPlates.length} variante(s) liée(s)`);
       load();
+      onValidated && onValidated();  // v3.19 · rafraîchit le titre de la fiche (voir vehicle_detail)
     } catch { toast.error("Validation impossible"); }
     finally { setSaving(false); }
   };
@@ -1064,6 +1065,7 @@ function PlateConsensusBlock({ plate }) {
       await api.delete(`/vehicles/${encodeURIComponent(plate)}/validate`);
       toast.success("Validation retirée");
       load();
+      onValidated && onValidated();
     } catch { toast.error("Retrait impossible"); }
     finally { setSaving(false); }
   };

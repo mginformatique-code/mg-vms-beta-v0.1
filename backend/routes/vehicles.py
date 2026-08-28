@@ -757,8 +757,25 @@ async def vehicle_detail(plate: str,
             durations_min.append((b - a).total_seconds() / 60.0)
     avg_visit = int(round(mean(durations_min))) if durations_min else None
 
+    # v3.19 · La fiche affichait toujours la plaque demandée dans l'URL,
+    # jamais la plaque canonique validée via le bloc "Consensus
+    # multi-plugins" (POST /vehicles/{plate}/validate, table
+    # plate_validations) — le titre restait donc figé sur l'ancienne
+    # variante même après validation. `vehicle_validate_plate` prévoyait
+    # déjà explicitement ce raccordement ("les endpoints consommateurs
+    # peuvent l'utiliser pour ré-écrire la plaque affichée") mais rien ne
+    # le faisait. On résout ici la plaque canonique si la plaque demandée
+    # est elle-même canonique OU listée comme variante validée.
+    display_plate = d["_id"]
+    val_doc = await db.plate_validations.find_one(
+        {"$or": [{"canonical_plate": normalized}, {"variants": normalized}]},
+        {"_id": 0, "canonical_plate": 1},
+    )
+    if val_doc and val_doc.get("canonical_plate"):
+        display_plate = val_doc["canonical_plate"]
+
     return {
-        "plate": d["_id"],
+        "plate": display_plate,
         "passages_count": d["passages_count"],
         "first_seen": d.get("first_seen"),
         "last_seen": d.get("last_seen"),
