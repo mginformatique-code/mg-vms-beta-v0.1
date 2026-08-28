@@ -107,6 +107,12 @@ async def create_indexes():
     # ── Alertes ──
     await _safe_index(db.alerts, "timestamp")
     await _safe_index(db.alerts, "camera_id")
+    # v3.19 · Même cause que events (voir plus haut) : /alerts mesuré à
+    # 5.6s (tous) / 2.8s (non acquittées) sur 9 377 alertes — filtre
+    # `acknowledged` sans index adapté au tri par date qui suit. Ce composé
+    # sert le filtre ET le tri (id, timestamp DESC) en un seul index.
+    await _safe_index(db.alerts, [("acknowledged", 1), ("timestamp", -1)])
+    await _safe_index(db.alerts, [("timestamp", -1)])
 
     # Traçabilité moteurs (P8+, demande CEO Feb 2026) — backfill léger pour que le
     # frontend puisse afficher "reconnu par fast-alpr" sur toutes les plaques.

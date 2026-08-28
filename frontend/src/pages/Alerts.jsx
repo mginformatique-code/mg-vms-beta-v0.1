@@ -114,6 +114,8 @@ function AiRulesDialog({ open, onClose }) {
 export default function Alerts() {
   const { t, can, alertPing } = useApp();
   const [alerts, setAlerts] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [filter, setFilter] = useState("all");
   const [rulesOpen, setRulesOpen] = useState(false);
   // v3.1.8 · Suivi par id, pas par index — `alertPing` (websocket temps réel,
@@ -136,9 +138,29 @@ export default function Alerts() {
 
   const viewerIdx = viewerId !== null ? viewerItems.findIndex((x) => x.id === viewerId) : -1;
 
+  // v3.19 · Limite d'affichage — 9 377 alertes en base, tout remontait
+  // d'un coup sans pagination (limit=100 par défaut côté API, mais aucun
+  // bouton pour aller au-delà, et 100 lignes rendues à chaque nouvelle
+  // alerte via alertPing). Même principe que Événements/Véhicules/
+  // Enregistrements : petite page + "Charger plus".
+  const PAGE_SIZE = 30;
+  const buildQuery = (extra) => {
+    const params = new URLSearchParams({ limit: PAGE_SIZE, ...extra });
+    if (filter !== "all") params.set("acknowledged", filter === "acked");
+    return params.toString();
+  };
   const load = () => {
-    const q = filter === "all" ? "" : `?acknowledged=${filter === "acked"}`;
-    api.get(`/alerts${q}`).then((r) => setAlerts(r.data));
+    api.get(`/alerts?${buildQuery({ offset: 0 })}`).then((r) => {
+      setAlerts(r.data);
+      setTotal(parseInt(r.headers["x-total-count"] || r.data.length, 10));
+    });
+  };
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const r = await api.get(`/alerts?${buildQuery({ offset: alerts.length })}`);
+      setAlerts((prev) => [...prev, ...r.data]);
+    } finally { setLoadingMore(false); }
   };
   useEffect(load, [filter]);
   useEffect(() => { if (alertPing) load(); }, [alertPing]);
@@ -186,6 +208,15 @@ export default function Alerts() {
         })}
         {alerts.length === 0 && <div className="text-center text-muted-foreground py-12 text-sm">—</div>}
       </div>
+
+      {alerts.length < total && alerts.length > 0 && (
+        <div className="flex justify-center pt-3">
+          <button onClick={loadMore} disabled={loadingMore} data-testid="alerts-load-more"
+                  className="px-4 py-2 text-xs uppercase tracking-wider border border-border hover:bg-secondary disabled:opacity-40">
+            {loadingMore ? "Chargement…" : `Charger plus (${alerts.length} / ${total})`}
+          </button>
+        </div>
+      )}
 
       <AiRulesDialog open={rulesOpen} onClose={() => setRulesOpen(false)} />
       {viewerIdx >= 0 && (
