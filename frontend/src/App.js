@@ -26,7 +26,6 @@ import PipelineInspectorLive from "@/pages/PipelineInspectorLive";
 import MfaCenter from "@/pages/MfaCenter";
 import SessionsCenter from "@/pages/SessionsCenter";
 import RbacCenter from "@/pages/RbacCenter";
-import Anpr from "@/pages/Anpr";
 import Events from "@/pages/Events";
 import VehicleSearch from "@/pages/VehicleSearch";
 import Alerts from "@/pages/Alerts";
@@ -82,7 +81,6 @@ function AppRoutes() {
       <Route path="/security-center/sessions" element={<Protected><SessionsCenter /></Protected>} />
       <Route path="/security-center/rbac" element={<Protected><RbacCenter /></Protected>} />
       <Route path="/map-legacy" element={<Protected><MapView /></Protected>} />
-      <Route path="/anpr" element={<Protected><Anpr /></Protected>} />
       <Route path="/smart-zones" element={<Protected><SmartZones /></Protected>} />
       <Route path="/workflows" element={<Protected><Workflows /></Protected>} />
       <Route path="/timeline" element={<Protected><Timeline /></Protected>} />
