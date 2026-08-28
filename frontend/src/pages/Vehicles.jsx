@@ -1025,6 +1025,12 @@ function IdentitiesPanel({ identities, candidates, show, onToggle, onReload, onO
 function PlateConsensusBlock({ plate, onValidated }) {
   const [data, setData] = useState(null);
   const [saving, setSaving] = useState(false);
+  // v3.19 · Bypass manuel — quand aucune variante suggérée n'est la bonne
+  // plaque (cas réel : 19 variantes OCR autour de « E2222x », aucune ne
+  // correspondait au véhicule), l'opérateur doit pouvoir taper la plaque
+  // directement plutôt que de choisir uniquement parmi les candidats.
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualPlate, setManualPlate] = useState("");
 
   const load = useCallback(() => {
     api.get(`/vehicles/${encodeURIComponent(plate)}/consensus`)
@@ -1057,6 +1063,14 @@ function PlateConsensusBlock({ plate, onValidated }) {
       onValidated && onValidated();  // v3.19 · rafraîchit le titre de la fiche (voir vehicle_detail)
     } catch { toast.error("Validation impossible"); }
     finally { setSaving(false); }
+  };
+
+  const validateManual = async () => {
+    const p = manualPlate.trim().toUpperCase().replace(/\s|-/g, "");
+    if (!p) return;
+    await validate(p);
+    setManualOpen(false);
+    setManualPlate("");
   };
 
   const unvalidate = async () => {
@@ -1098,6 +1112,21 @@ function PlateConsensusBlock({ plate, onValidated }) {
                   data-testid="unvalidate-btn"
                   className="mt-1 text-[10px] uppercase tracking-wider px-2 py-1 border border-border hover:bg-secondary/60">
             {saving ? <Loader2 size={11} className="animate-spin" /> : "Retirer la validation"}
+          </button>
+        </div>
+      ) : manualOpen ? (
+        <div className="flex items-center gap-1.5 border-t border-border pt-2" data-testid="manual-plate-form">
+          <input value={manualPlate} onChange={(e) => setManualPlate(e.target.value)}
+                 onKeyDown={(e) => e.key === "Enter" && validateManual()}
+                 placeholder="Plaque correcte…" autoFocus data-testid="manual-plate-input"
+                 className="flex-1 px-2 py-1 bg-background border border-input outline-none mono uppercase text-xs" />
+          <button onClick={validateManual} disabled={saving || !manualPlate.trim()} data-testid="manual-plate-submit"
+                  className="text-[9px] uppercase tracking-wider px-2 py-1 border border-[#00E676] text-[#00E676] hover:bg-[#00E676]/10 disabled:opacity-40">
+            Valider
+          </button>
+          <button onClick={() => { setManualOpen(false); setManualPlate(""); }}
+                  className="text-[9px] uppercase tracking-wider px-2 py-1 border border-border hover:bg-secondary/60">
+            Annuler
           </button>
         </div>
       ) : (
@@ -1148,6 +1177,11 @@ function PlateConsensusBlock({ plate, onValidated }) {
               Valider cette plaque
             </button>
           )}
+
+          <button onClick={() => setManualOpen(true)} data-testid="manual-plate-open"
+                  className="w-full text-[10px] uppercase tracking-wider text-muted-foreground hover:text-[#0044FF] pt-1">
+            Aucune suggestion correcte ? Saisir la plaque manuellement
+          </button>
         </>
       )}
     </div>
