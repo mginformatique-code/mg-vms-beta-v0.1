@@ -47,7 +47,7 @@ function ActionBtn({ children, onClick, testid, title, active, busy }) {
   );
 }
 
-export default function CameraControlOverlay({ cam, footer = false }) {
+export default function CameraControlOverlay({ cam, footer = false, visible = true }) {
   const camId = cam?.id;
   const { caps } = useDeviceCapabilities(camId);
   const [busy, setBusy] = useState(null);
@@ -183,8 +183,16 @@ export default function CameraControlOverlay({ cam, footer = false }) {
     );
   }
 
+  // v3.19 · `visible` pilote l'OPACITÉ, pas le montage — le composant reste
+  // monté en continu. Avant, LiveView démontait/remontait ce composant à
+  // chaque hover in/out, ce qui réinitialisait lightOn/irOn/sirenOn à leur
+  // valeur par défaut (false) — un simple mouvement de souris hors de la
+  // tuile suffisait à faire "oublier" que la lumière était allumée, donc le
+  // bouton renvoyait toujours enabled:true au clic suivant (impossible
+  // d'éteindre). Signalé par l'utilisateur : "le bouton lumière ça
+  // fonctionne, mais pas possible de l'éteindre".
   return (
-    <div className="absolute bottom-2 left-2 opacity-70 hover:opacity-100 transition-opacity"
+    <div className={`absolute bottom-2 left-2 transition-opacity ${visible ? "opacity-70 hover:opacity-100" : "opacity-0 pointer-events-none"}`}
          data-testid={`camera-controls-${camId}`}>
       <div className="flex gap-0.5 bg-black/50 p-0.5 backdrop-blur-sm">{buttons}</div>
       {ttsOpen && (

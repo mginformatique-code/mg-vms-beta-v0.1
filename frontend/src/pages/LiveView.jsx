@@ -60,6 +60,7 @@ function OverlayCanvas({ cam, boxes, showOverlay }) {
 
 function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onToggleFocus }) {
   const [hover, setHover] = useState(false);
+  const [showPtz, setShowPtz] = useState(false);
   const online = cam?.status === "online";
   const ptz = async (command) => { try { await api.post(`/cameras/${cam.id}/ptz?command=${command}`); } catch (e) { /* ignore */ } };
 
@@ -122,56 +123,69 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
         <span className="text-[9px] mono text-white/70">{cam?.site_name || ""}</span>
         <span className="text-[9px] mono text-white/70">{new Date().toLocaleTimeString()}</span>
       </div>
-      {/* v0.4 · Overlay contrôles caméra (Projecteur, IR, Sirène, TTS, Reboot) */}
-      {online && cam?.id && hover && (
-        <CameraControlOverlay cam={cam} />
+      {/* v0.4 · Overlay contrôles caméra (Projecteur, IR, Sirène, TTS, Reboot)
+          v3.19 · Toujours monté (visible pilote l'opacité) — voir
+          CameraControlOverlay.jsx pour pourquoi le démontage sur hover
+          cassait le bouton lumière. */}
+      {online && cam?.id && (
+        <CameraControlOverlay cam={cam} visible={hover} />
       )}
-      {hover && online && cam?.ptz_enabled && canPtz && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/30" data-testid="ptz-controls">
-          <div className="flex items-center gap-3">
+      {/* v3.19 · PTZ déplacé du centre plein écran (gênait la vue) vers un
+          coin, avec un bouton dédié pour afficher/masquer le pavé — ne
+          s'ouvre plus automatiquement au survol. */}
+      {online && cam?.ptz_enabled && canPtz && (hover || showPtz) && (
+        <button data-ptz-btn onClick={(e) => { e.stopPropagation(); setShowPtz((v) => !v); }}
+                className={`absolute top-8 right-2 w-7 h-7 flex items-center justify-center text-white transition-colors ${showPtz ? "bg-[#0044FF]" : "bg-black/70 hover:bg-[#0044FF]"}`}
+                data-testid="ptz-toggle" title={showPtz ? "Masquer les contrôles PTZ" : "Afficher les contrôles PTZ"}>
+          <Move size={14} />
+        </button>
+      )}
+      {showPtz && online && cam?.ptz_enabled && canPtz && (
+        <div className="absolute top-16 right-2 bg-black/60 p-1.5" data-testid="ptz-controls">
+          <div className="flex items-center gap-1.5">
             {/* Pan/Tilt cross */}
             <div className="grid grid-cols-3 gap-0.5">
               <div />
               <button data-ptz-btn onClick={(e) => { e.stopPropagation(); ptz("tilt_up"); }}
-                      className="w-8 h-8 bg-black/70 hover:bg-[#0044FF] flex items-center justify-center text-white transition-colors"
+                      className="w-7 h-7 bg-black/70 hover:bg-[#0044FF] flex items-center justify-center text-white transition-colors"
                       data-testid="ptz-up" title="Tilt up">
-                <ArrowUp size={16} />
+                <ArrowUp size={14} />
               </button>
               <div />
               <button data-ptz-btn onClick={(e) => { e.stopPropagation(); ptz("pan_left"); }}
-                      className="w-8 h-8 bg-black/70 hover:bg-[#0044FF] flex items-center justify-center text-white transition-colors"
+                      className="w-7 h-7 bg-black/70 hover:bg-[#0044FF] flex items-center justify-center text-white transition-colors"
                       data-testid="ptz-left" title="Pan left">
-                <ArrowLeft size={16} />
+                <ArrowLeft size={14} />
               </button>
               <button data-ptz-btn onClick={(e) => { e.stopPropagation(); ptz("home"); }}
-                      className="w-8 h-8 bg-black/70 hover:bg-[#00E676] flex items-center justify-center text-white transition-colors"
+                      className="w-7 h-7 bg-black/70 hover:bg-[#00E676] flex items-center justify-center text-white transition-colors"
                       data-testid="ptz-home" title="Home preset">
-                <Home size={14} />
+                <Home size={12} />
               </button>
               <button data-ptz-btn onClick={(e) => { e.stopPropagation(); ptz("pan_right"); }}
-                      className="w-8 h-8 bg-black/70 hover:bg-[#0044FF] flex items-center justify-center text-white transition-colors"
+                      className="w-7 h-7 bg-black/70 hover:bg-[#0044FF] flex items-center justify-center text-white transition-colors"
                       data-testid="ptz-right" title="Pan right">
-                <ArrowRight size={16} />
+                <ArrowRight size={14} />
               </button>
               <div />
               <button data-ptz-btn onClick={(e) => { e.stopPropagation(); ptz("tilt_down"); }}
-                      className="w-8 h-8 bg-black/70 hover:bg-[#0044FF] flex items-center justify-center text-white transition-colors"
+                      className="w-7 h-7 bg-black/70 hover:bg-[#0044FF] flex items-center justify-center text-white transition-colors"
                       data-testid="ptz-down" title="Tilt down">
-                <ArrowDown size={16} />
+                <ArrowDown size={14} />
               </button>
               <div />
             </div>
             {/* Zoom column */}
             <div className="flex flex-col gap-0.5">
               <button data-ptz-btn onClick={(e) => { e.stopPropagation(); ptz("zoom_in"); }}
-                      className="w-8 h-8 bg-black/70 hover:bg-[#0044FF] flex items-center justify-center text-white transition-colors"
+                      className="w-7 h-7 bg-black/70 hover:bg-[#0044FF] flex items-center justify-center text-white transition-colors"
                       data-testid="ptz-zoom-in" title="Zoom in">
-                <ZoomIn size={16} />
+                <ZoomIn size={14} />
               </button>
               <button data-ptz-btn onClick={(e) => { e.stopPropagation(); ptz("zoom_out"); }}
-                      className="w-8 h-8 bg-black/70 hover:bg-[#0044FF] flex items-center justify-center text-white transition-colors"
+                      className="w-7 h-7 bg-black/70 hover:bg-[#0044FF] flex items-center justify-center text-white transition-colors"
                       data-testid="ptz-zoom-out" title="Zoom out">
-                <ZoomOut size={16} />
+                <ZoomOut size={14} />
               </button>
             </div>
           </div>
