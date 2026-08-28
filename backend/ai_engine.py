@@ -43,8 +43,19 @@ GO2RTC_URL = os.environ.get("GO2RTC_URL", "http://localhost:1984")
 # Ces locks *threading* sont acquis SYNC dans le thread où l'inférence
 # tourne (via `asyncio.to_thread`), donc ils ne bloquent PAS l'event loop
 # asyncio principal. Sérialisent uniquement les appels au modèle.
+#
+# v3.19 · ALPR_INFERENCE_LOCK pointait vers un second `threading.Lock()`
+# distinct : chaque moteur était bien sérialisé CONTRE LUI-MÊME, mais
+# YOLO (torch) et ALPR (fast-alpr, backend PaddleOCR) pouvaient toujours
+# tourner EN MÊME TEMPS sur le même GPU. À 14 caméras, ça a fini par
+# provoquer des "CUDA error: operation not permitted when stream is
+# capturing" suivis de segfaults fatals côté runtime C++ de Paddle
+# (process entier tué, conteneur redémarré — observé plusieurs fois/heure
+# en conditions réelles). Les deux noms restent distincts (contrat déjà
+# testé), mais pointent maintenant vers LE MÊME verrou : YOLO et ALPR ne
+# touchent plus jamais le GPU en même temps.
 YOLO_INFERENCE_LOCK = threading.Lock()
-ALPR_INFERENCE_LOCK = threading.Lock()
+ALPR_INFERENCE_LOCK = YOLO_INFERENCE_LOCK
 AI_INTERVAL = float(os.environ.get("AI_INTERVAL_SECONDS", "0.15"))  # v0.4.5.a · ~6-7 FPS/cam
 AI_CONFIDENCE = float(os.environ.get("AI_CONFIDENCE", "0.45"))
 AI_MIN_PLATE_PX = int(os.environ.get("AI_MIN_PLATE_PX", "24"))
@@ -223,6 +234,7 @@ VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle"}
 # ── Modèles + santé IA ──────────────────────────────────────────────
 _model = None
 _alpr = None
+_pose_model = None  # yolo11n-pose — chargé au 1er besoin (retail-suspicious-behavior)
 _ai_health: dict = {
     "yolo_loaded": False,
     "yolo_error": None,
@@ -365,6 +377,37 @@ def _load_models():
             _ai_health["alpr_error"] = f"{type(e).__name__}: {str(e)[:240]}"
             logger.exception("fast-alpr indisponible — LAPI désactivée (essai #%d)",
                              _ai_health["alpr_load_attempts"])
+
+
+def _load_pose_model():
+    """Chargement paresseux du modèle de pose (squelette Camera Center,
+    plugin retail-suspicious-behavior). Séparé de `_load_models()` : ne se
+    déclenche que si une caméra a réellement ce plugin actif — pas de coût
+    (VRAM/démarrage) pour une installation qui ne l'utilise pas.
+
+    `yolo11n-pose.pt` suit la même convention que `yolo11n.pt` (poids
+    vendorisés dans `backend/`, cf. AI_MODEL) — si absent, ultralytics tente
+    un téléchargement automatique depuis ses releases GitHub officielles
+    (nécessite un accès réseau sortant sur le serveur, à vérifier)."""
+    global _pose_model
+    if _pose_model is not None:
+        return _pose_model or None  # _pose_model peut être `False` (échec déjà tenté)
+    try:
+        from ultralytics import YOLO
+        model_path = os.environ.get("AI_POSE_MODEL", "yolo11n-pose.pt")
+        model = YOLO(model_path)
+        device = _detected_device()
+        try:
+            model.to(device)
+        except Exception as gpu_err:
+            logger.warning("YOLO-pose .to(%s) échec (%s) — fallback CPU", device, gpu_err)
+            model.to("cpu")
+        _pose_model = model
+        logger.info("Modèle pose chargé : %s", model_path)
+    except Exception as e:
+        _pose_model = False
+        logger.exception("Modèle pose indisponible — squelette overlay désactivé (%s)", e)
+    return _pose_model or None
 
 
 def get_ai_health() -> dict:
@@ -712,8 +755,20 @@ def _ensure_frame_source_running(cam: dict) -> None:
         logger.debug("frame-source warm-start failed for %s", cam.get("id"), exc_info=True)
 
 
-async def _process_camera(cam: dict) -> None:
-    """Phase A : acquisition + CameraWorker (pipeline v2) + broadcast overlay."""
+#: v3.14 · Horodatage de la dernière ligne de journal écrite par caméra
+#: (limitation de débit — voir plus bas dans `_process_camera`).
+_last_log_ts: dict = {}
+
+
+async def _process_camera(cam: dict, frame=None) -> None:
+    """Phase A : acquisition + CameraWorker (pipeline v2) + broadcast overlay.
+
+    v3.14 · `frame` peut être fourni par l'appelant. La boucle par caméra
+    (`_camera_loop`) a déjà attendu une image FRAÎCHE et non encore analysée ;
+    la re-demander ici rouvrirait la porte à l'analyse d'une image périmée.
+    Sans argument, le comportement historique (acquisition non bloquante) est
+    conservé pour les autres appelants.
+    """
     from pipeline_v2.camera_worker import runtime as _runtime
     from pipeline_v2.inspector import inspector as _inspector
 
@@ -724,7 +779,8 @@ async def _process_camera(cam: dict) -> None:
     # par cycle — 100% redondant (idempotent, même config).
 
     t_start = time.perf_counter()
-    frame = await _fetch_frame(cam["id"])
+    if frame is None:
+        frame = await _fetch_frame(cam["id"])
     if frame is None:
         logger.debug("IA · %s (%s) : frame indisponible (skip iteration)", cam["name"], cam["id"])
         return
@@ -742,12 +798,24 @@ async def _process_camera(cam: dict) -> None:
     t_ws = time.perf_counter()
     try:
         from realtime import broadcast_ai_detections
-        await broadcast_ai_detections(cam["id"], cam.get("site_id", ""), {
+        payload = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "boxes": result.get("overlay_boxes", []),
             "counts": result.get("counts", {}),
             "motion_pct": result.get("motion_pct", 0.0),
-        })
+        }
+        # État live du plugin retail (dwell-time/passages répétés par track) —
+        # injecté seulement si le plugin est chargé et actif sur cette caméra,
+        # pour ne pas payer le coût sur les caméras qui ne l'utilisent pas.
+        if "retail-suspicious-behavior" in _enabled:
+            try:
+                from plugin_manager.bus import bus as _plugin_bus
+                _entry = _plugin_bus._entries.get("retail-suspicious-behavior")
+                if _entry is not None and _entry.instance is not None:
+                    payload["retail"] = _entry.instance.live_state(cam["id"])
+            except Exception:
+                logger.exception("retail live_state error")
+        await broadcast_ai_detections(cam["id"], cam.get("site_id", ""), payload)
     except Exception:
         logger.exception("broadcast_ai_detections error")
     _inspector.record(cam["id"], "websocket", (time.perf_counter() - t_ws) * 1000)
@@ -758,16 +826,35 @@ async def _process_camera(cam: dict) -> None:
     pipeline_metrics.record_stage(cam["id"], "tracking_ms", tim.get("tracking_ms", 0))
     pipeline_metrics.record_stage(cam["id"], "alpr_ms", tim.get("alpr_ms", 0))
     pipeline_metrics.record_stage(cam["id"], "realtime_ms", t_frontier_ms)
+    # v3.12 · `total_ms` = durée mesurée DANS worker.analyze() (somme réelle
+    # de tous ses stages, y compris decode/motion/roi qui n'étaient chronométrés
+    # nulle part). L'écart entre `realtime_ms` et `total_ms` isole donc le temps
+    # passé HORS analyse — attente d'un thread du pool, ordonnancement, broadcast.
+    # Sans cette mesure, plusieurs secondes restaient inexpliquées entre la somme
+    # des étapes (~200 ms) et le total remonté (~5500 ms).
+    pipeline_metrics.record_stage(cam["id"], "total_ms", tim.get("total_ms", 0))
+    for _st in ("decode_ms", "motion_ms", "roi_ms"):
+        pipeline_metrics.record_stage(cam["id"], _st, tim.get(_st, 0))
 
-    logger.info(
-        "IA · %s (%s) : %d détection(s) [%s] · mouvement=%.1f%% · %d plaque(s) · "
-        "fetch=%.0fms yolo=%.0fms tracking=%.0fms alpr=%.0fms rt=%.0fms",
-        cam["name"], cam["id"], len(dets),
-        ",".join(f"{d['label']}:{d['confidence']}" for d in dets) or "aucune",
-        result.get("motion_pct", 0.0), len(plates),
-        t_fetch_ms, tim.get("yolo_ms", 0), tim.get("tracking_ms", 0),
-        tim.get("alpr_ms", 0), t_frontier_ms,
-    )
+    # v3.14 · Journal limité à 1 ligne par caméra et par seconde.
+    # Cette ligne était écrite à CHAQUE image. Tant que le pipeline plafonnait
+    # à 0,4 img/s c'était indolore ; avec une boucle par caméra à 10-15 img/s
+    # sur 6 caméras, ça ferait ~90 écritures/s — le journal deviendrait
+    # lui-même un goulot (I/O + GIL) sur le chemin critique vidéo.
+    # Une détection ou une plaque force l'écriture : on ne perd aucun
+    # événement réellement intéressant, seulement la répétition du ralenti.
+    _now_log = time.monotonic()
+    if dets or plates or (_now_log - _last_log_ts.get(cam["id"], 0.0)) >= 1.0:
+        _last_log_ts[cam["id"]] = _now_log
+        logger.info(
+            "IA · %s (%s) : %d détection(s) [%s] · mouvement=%.1f%% · %d plaque(s) · "
+            "fetch=%.0fms yolo=%.0fms tracking=%.0fms alpr=%.0fms rt=%.0fms",
+            cam["name"], cam["id"], len(dets),
+            ",".join(f"{d['label']}:{d['confidence']}" for d in dets) or "aucune",
+            result.get("motion_pct", 0.0), len(plates),
+            t_fetch_ms, tim.get("yolo_ms", 0), tim.get("tracking_ms", 0),
+            tim.get("alpr_ms", 0), t_frontier_ms,
+        )
 
     # Phase B : downstream fire-and-forget (backpressure)
     inflight = _downstream_inflight.get(cam["id"], 0)
@@ -799,8 +886,105 @@ async def _process_downstream(cam: dict, frame, result: dict) -> None:
         _downstream_inflight[cam["id"]] = max(0, _downstream_inflight.get(cam["id"], 1) - 1)
 
 
+# ══════════════════════════════════════════════════════════════════════
+# v3.14 · Une boucle INDÉPENDANTE par caméra
+# ══════════════════════════════════════════════════════════════════════
+# Avant, le cycle faisait `await asyncio.gather(*[_process_camera(c) ...])`
+# puis dormait `interval_seconds`. Le `gather` attend TOUTES les caméras :
+# la période du cycle valait donc celle de la caméra la plus lente, et toutes
+# les autres retombaient à ce débit-là.
+#
+# Symptôme qui l'a trahi : les 6 caméras affichaient EXACTEMENT 0,4 img/s,
+# y compris celle en 720p dont le chemin critique ne dure que 200 ms, pendant
+# que deux caméras 1080p étaient à 1734 et 1998 ms. Des charges très
+# différentes qui donnent le même chiffre, c'est un point de rendez-vous, pas
+# une saturation de calcul (le GPU était à 11 %).
+#
+# Désormais chaque caméra a sa propre tâche, cadencée par ses PROPRES images :
+# elle attend qu'une image fraîche arrive (`wait_for_new_frame`), l'analyse,
+# et repart. Aucune caméra n'attend une autre, aucune image n'est analysée
+# deux fois, et on n'analyse jamais une image périmée.
+_camera_tasks: dict = {}
+#: Dernier document caméra connu, relu par la boucle à chaque itération pour
+#: que les changements de config (plugins, résolution IA) s'appliquent sans
+#: redémarrer la tâche.
+_camera_specs: dict = {}
+
+#: Délai d'attente d'une image avant de reboucler. Ce n'est PAS une cadence :
+#: à son expiration on se contente de réessayer. Il sert à ne pas rester
+#: bloqué indéfiniment si le worker ffmpeg est en train de redémarrer.
+_FRAME_WAIT_TIMEOUT_S = 2.0
+
+#: Période du superviseur : relecture de la config et de la liste des caméras.
+#: 1 s suffit — l'analyse, elle, n'attend plus ce tour de boucle.
+_SUPERVISOR_PERIOD_S = 1.0
+
+
+async def _camera_loop(camera_id: str) -> None:
+    """Boucle d'analyse d'UNE caméra, cadencée par ses images."""
+    from frame_source import wait_for_new_frame
+
+    last_seq = -1
+    idle_logged = False
+    while True:
+        cam = _camera_specs.get(camera_id)
+        if cam is None:
+            return  # caméra retirée : la tâche s'arrête d'elle-même
+
+        frame, seq = await wait_for_new_frame(camera_id, last_seq,
+                                              timeout=_FRAME_WAIT_TIMEOUT_S)
+        if frame is None:
+            if not idle_logged:
+                logger.debug("IA · %s : aucune image depuis %.0fs — en attente",
+                             cam.get("name", camera_id), _FRAME_WAIT_TIMEOUT_S)
+                idle_logged = True
+            continue
+        idle_logged = False
+        last_seq = seq
+
+        try:
+            await _process_camera(cam, frame=frame)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            _ai_health["last_cycle_error"] = f"{type(e).__name__}: {str(e)[:200]}"
+            logger.exception("IA · %s : erreur d'analyse, reprise", cam.get("name", camera_id))
+            # Petit répit pour ne pas boucler à pleine vitesse sur une erreur
+            # permanente (modèle non chargé, caméra qui renvoie du corrompu…).
+            await asyncio.sleep(0.5)
+
+
+def _reconcile_camera_tasks(cams: list) -> None:
+    """Aligne l'ensemble des tâches sur la liste des caméras actives."""
+    active = set()
+    for cam in cams:
+        cid = cam.get("id")
+        if not cid:
+            continue
+        active.add(cid)
+        _camera_specs[cid] = cam          # config à jour, lue au tour suivant
+        task = _camera_tasks.get(cid)
+        if task is None or task.done():
+            _camera_tasks[cid] = asyncio.create_task(
+                _camera_loop(cid), name=f"ai-cam-{cid}")
+            logger.info("IA · boucle démarrée pour %s (%s)", cam.get("name"), cid)
+
+    for cid in list(_camera_tasks):
+        if cid in active:
+            continue
+        task = _camera_tasks.pop(cid, None)
+        _camera_specs.pop(cid, None)      # fait sortir la boucle proprement
+        if task is not None and not task.done():
+            task.cancel()
+        logger.info("IA · boucle arrêtée pour %s (caméra inactive)", cid)
+
+
 async def ai_loop() -> None:
-    """Boucle IA : un CameraWorker par caméra `detect_enabled`, en parallèle."""
+    """Superviseur IA : découverte des caméras + une boucle d'analyse par caméra.
+
+    Ne fait PLUS le travail d'analyse lui-même — il maintient les tâches et
+    recharge la configuration. Voir `_camera_loop` pour le pourquoi.
+    """
     await asyncio.sleep(15)
     _ai_health["loop_alive"] = True
     _ai_health["loop_disabled_reason"] = None
@@ -866,11 +1050,14 @@ async def ai_loop() -> None:
                 await _sync_frame_source_workers(cams)
                 _last_topology_sync_ts = _now
 
-            if cams:
-                logger.info("IA · cycle : %d caméra(s) réelle(s) en parallèle %s",
-                            len(cams), [c["name"] for c in cams])
-                await asyncio.gather(*[_process_camera(cam) for cam in cams], return_exceptions=True)
+            # v3.14 · Le superviseur ne bloque plus sur l'analyse : il se
+            # contente d'aligner les tâches par caméra, qui tournent chacune
+            # à leur propre rythme entre deux passages ici.
+            _reconcile_camera_tasks(cams)
         except Exception as e:
             _ai_health["last_cycle_error"] = f"{type(e).__name__}: {str(e)[:200]}"
             logger.exception("ai_loop : erreur, reprise")
-        await asyncio.sleep(float(_cfg("interval_seconds", AI_INTERVAL)))
+        # Cadence du SUPERVISEUR uniquement (relecture config / topologie).
+        # `interval_seconds` ne cadence plus l'analyse — chaque caméra suit
+        # désormais son propre flux d'images.
+        await asyncio.sleep(_SUPERVISOR_PERIOD_S)
