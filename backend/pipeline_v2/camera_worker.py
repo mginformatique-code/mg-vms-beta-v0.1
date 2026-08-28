@@ -44,33 +44,83 @@ def get_debug_snapshot(camera_id: str) -> dict:
 # déjà en pleine résolution pour une caméra donnée, ce grab HD via go2rtc
 # (frame.jpeg, même mécanisme que /api/stream/{id}/frame.jpeg) reste
 # disponible comme repli, déclenché uniquement au moment d'une détection.
+#: Cache court du grab HD + mémoire des échecs, par caméra.
+#: {camera_id: (timestamp, image_ou_None)}
+_HD_CACHE: dict[str, tuple[float, object]] = {}
+#: Durée de validité d'un grab HD réussi. Au-delà d'une seconde l'image
+#: n'est plus représentative de la scène pour un crop de plaque.
+_HD_CACHE_TTL_S = 1.0
+#: Après un échec, on n'insiste pas à chaque image : go2rtc ne sait pas
+#: produire de JPEG depuis une source HEVC (HTTP 500 constaté en prod), et
+#: réessayer en boucle coûtait plusieurs secondes PAR IMAGE.
+_HD_FAIL_BACKOFF_S = 30.0
+
+#: Largeur de travail pour la détection de mouvement. Le pourcentage de
+#: pixels modifiés ne demande pas la pleine résolution.
+_MOTION_MAX_W = 480
+
+#: Squelette overlay (retail-suspicious-behavior) — throttle indépendant de
+#: la cadence de détection principale. Le vrai goulot du pipeline est le
+#: CPU/GIL (process Python unique), pas la VRAM — un stage pose ajoute du
+#: post-traitement Python à chaque appel, donc on le limite explicitement
+#: plutôt que de le laisser tourner à la cadence IA complète.
+_POSE_INTERVAL_S = 0.3
+_POSE_MAX_PERSONS = 5
+
+
 def _fetch_hd_crop_source(camera_id: str):
     """Frame BGR (numpy) en résolution native via go2rtc, ou None si échec.
 
-    Synchrone : CameraWorker.analyze() tourne déjà hors boucle asyncio
-    (ai_engine.py l'appelle via asyncio.to_thread), donc un appel HTTP
-    bloquant ici ne gèle rien d'autre.
+    ⚠ Appel HTTP + décodage JPEG. Il était exécuté à CHAQUE image comportant
+    un véhicule, avec un timeout de 4 s essayé sur DEUX sources — soit
+    jusqu'à 8 s par image. Mesuré en production, c'était 97 % du temps de
+    pipeline : l'étape `roi` montait à 5,4 s par image sur les caméras
+    concernées, contre 0 ms sur celle restée en 720p (qui saute cet appel).
+    Résultat : 0,4 image/s analysée et 98 % des images jetées en
+    backpressure, alors que le décodage GPU en fournissait 11/s.
+
+    Deux garde-fous ajoutés (v3.12) :
+      - cache court (1 s) : plusieurs véhicules sur la même image, ou deux
+        images consécutives, ne déclenchent plus qu'un seul grab ;
+      - backoff après échec (30 s) : go2rtc ne sait pas extraire de JPEG
+        d'un flux HEVC (HTTP 500), inutile de réessayer 10 fois par seconde.
+
+    Synchrone : CameraWorker.analyze() tourne hors boucle asyncio.
     """
+    now = time.monotonic()
+    cached = _HD_CACHE.get(camera_id)
+    if cached is not None:
+        ts, img = cached
+        ttl = _HD_CACHE_TTL_S if img is not None else _HD_FAIL_BACKOFF_S
+        if now - ts < ttl:
+            return img
+
     try:
         import cv2
         import numpy as np
         import httpx
         from streaming import GO2RTC_URL, _stream_name
     except Exception:
+        _HD_CACHE[camera_id] = (now, None)
         return None
     name = _stream_name(camera_id)
+    result = None
     for src in (name, f"{name}_hd"):
         try:
-            with httpx.Client(timeout=4.0) as client:
+            # Timeout resserré : ce grab est un CONFORT (crop plus net), il ne
+            # doit jamais retarder le pipeline temps réel.
+            with httpx.Client(timeout=1.5) as client:
                 r = client.get(f"{GO2RTC_URL}/api/frame.jpeg", params={"src": src})
             if r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff":
                 arr = np.frombuffer(r.content, dtype=np.uint8)
                 img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                 if img is not None and img.size > 0:
-                    return img
+                    result = img
+                    break
         except Exception:
             continue
-    return None
+    _HD_CACHE[camera_id] = (now, result)
+    return result
 
 
 class CameraWorker:
@@ -85,6 +135,11 @@ class CameraWorker:
         # véhicule tracké (typique d'un véhicule stationné).
         self._crop_cache: dict[tuple, datetime] = {}
         self._last_ts: float = 0.0
+        # Squelette overlay (retail-suspicious-behavior) — throttle + cache
+        # du dernier résultat par track_id pour éviter un squelette qui
+        # clignote entre deux cycles throttlés (voir _stage_pose).
+        self._last_pose_ts: float = 0.0
+        self._last_pose_result: dict = {}
 
     # ── Stages ───────────────────────────────────────────────────────
 
@@ -110,10 +165,31 @@ class CameraWorker:
         return ctx.image is not None
 
     def _stage_motion(self, ctx: FrameContext) -> None:
+        """Pourcentage de pixels ayant changé depuis l'image précédente.
+
+        v3.12 · Calculé sur une image RÉDUITE. Le flou gaussien 21x21 sur une
+        frame 1080p/native coûtait ~18-20 ms par image et par caméra, pour une
+        mesure qui est un simple POURCENTAGE — donc invariante à l'échelle.
+
+        Le noyau de flou est réduit dans la même proportion que l'image
+        (21 -> 5 pour un facteur 4) afin de conserver le même lissage spatial
+        effectif : sans cela, un noyau 21x21 sur une image 4x plus petite
+        lisserait 4x plus fort et modifierait la sensibilité, donc le
+        déclenchement des enregistrements en mode "mouvement" et le seuil
+        MOTION_THRESHOLD_PCT.
+        """
         import cv2
         t0 = time.monotonic()
-        gray = cv2.cvtColor(ctx.image, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (21, 21), 0)
+        img = ctx.image
+        h, w = img.shape[:2]
+        k = 21
+        if w > _MOTION_MAX_W:
+            ratio = _MOTION_MAX_W / float(w)
+            img = cv2.resize(img, (_MOTION_MAX_W, max(1, int(round(h * ratio)))),
+                             interpolation=cv2.INTER_AREA)
+            k = max(3, int(round(21 * ratio)) | 1)   # impair, minimum 3
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (k, k), 0)
         prev = self._prev_gray
         self._prev_gray = gray
         if prev is not None and prev.shape == gray.shape:
@@ -233,7 +309,14 @@ class CameraWorker:
 
         hd_img, hd_scale = None, None
         ai_res = ((camera or {}).get("ai_resolution") or "720p").lower()
-        if ai_res != "720p":
+        # v3.12 · Le grab HD n'a de sens que si l'image de travail est
+        # RÉELLEMENT plus petite que ce qu'on veut pour les crops. Depuis que
+        # frame_source délivre la frame à `ai_resolution` (1080p/native), elle
+        # est déjà largement suffisante pour découper une plaque : refaire un
+        # aller-retour HTTP vers go2rtc n'apportait rien et coûtait des
+        # secondes par image. On ne conserve ce repli que pour une frame
+        # basse définition (< 1600 px de large), ce pour quoi il a été écrit.
+        if ai_res != "720p" and w < 1600:
             hd_img = _fetch_hd_crop_source(self.camera_id)
             if hd_img is not None and w > 0 and h > 0:
                 hd_h, hd_w = hd_img.shape[:2]
@@ -494,6 +577,71 @@ class CameraWorker:
             "frame_preview": ctx.jpeg_data_uri(640, 60),
         }
 
+    def _stage_pose(self, ctx: FrameContext, enabled_plugins: Optional[list]) -> None:
+        """Squelette par personne — overlay Camera Center, plugin
+        retail-suspicious-behavior UNIQUEMENT (pas de coût pour les autres
+        caméras). Top-down : inférence sur les crops des personnes déjà
+        détectées par `_stage_detection`, pas sur la frame entière.
+
+        Throttlée indépendamment de la cadence de détection principale — le
+        goulot documenté de ce pipeline est le CPU/GIL, pas la VRAM (voir
+        plan). Entre deux cycles throttlés, réutilise le dernier squelette
+        connu par track_id (évite un clignotement visuel) plutôt que de
+        l'omettre.
+        """
+        if "retail-suspicious-behavior" not in (enabled_plugins or []):
+            return
+        persons = [d for d in ctx.detections if d["class"] == "person"][:_POSE_MAX_PERSONS]
+        if not persons:
+            return
+
+        now = time.monotonic()
+        if now - self._last_pose_ts < _POSE_INTERVAL_S:
+            for d in persons:
+                kp = self._last_pose_result.get(d.get("track_id"))
+                if kp is not None:
+                    d["_keypoints_norm"] = kp
+            return
+
+        import ai_engine as _ae
+        t0 = time.monotonic()
+        model = _ae._load_pose_model()
+        if model is None:
+            return
+        img = ctx.image
+        w, h = ctx.width, ctx.height
+        for d in persons:
+            x1, y1, x2, y2 = d["_bbox"]
+            mx, my = int((x2 - x1) * 0.1), int((y2 - y1) * 0.1)
+            cx1, cy1 = max(0, x1 - mx), max(0, y1 - my)
+            cx2, cy2 = min(w, x2 + mx), min(h, y2 + my)
+            crop = img[cy1:cy2, cx1:cx2]
+            if crop.size == 0:
+                continue
+            try:
+                with _ae.YOLO_INFERENCE_LOCK:
+                    res = model.predict(crop, verbose=False)[0]
+            except Exception:
+                logger.exception("pose predict error (%s)", self.camera_id)
+                continue
+            kobj = getattr(res, "keypoints", None)
+            if kobj is None or kobj.xy is None or len(kobj.xy) == 0:
+                continue
+            kxy = kobj.xy[0].tolist()
+            kconf = kobj.conf[0].tolist() if kobj.conf is not None else [1.0] * len(kxy)
+            keypoints_norm = []
+            for (kx, ky), kc in zip(kxy, kconf):
+                fx = (cx1 + kx) / w if w else 0.0
+                fy = (cy1 + ky) / h if h else 0.0
+                keypoints_norm.append([round(fx, 4), round(fy, 4), round(float(kc), 2)])
+            d["_keypoints_norm"] = keypoints_norm
+            self._last_pose_result[d.get("track_id")] = keypoints_norm
+
+        self._last_pose_ts = now
+        ms = (time.monotonic() - t0) * 1000
+        ctx.timings["pose_ms"] = round(ms, 1)
+        inspector.record(self.camera_id, "pose", ms)
+
     # ── Entrée principale (sync, appelée via asyncio.to_thread) ─────
 
     def analyze(self, frame_input, enabled_plugins: Optional[list] = None,
@@ -534,18 +682,24 @@ class CameraWorker:
             self._stage_roi(ctx, camera)
         with _trace_stage(_trc, "anpr"):
             self._stage_anpr(ctx, enabled_plugins, camera)
+        with _trace_stage(_trc, "pose"):
+            self._stage_pose(ctx, enabled_plugins)
 
-        # Overlay LIVE : bboxes normalisées + track_id
+        # Overlay LIVE : bboxes normalisées + track_id (+ squelette pose si
+        # calculé par _stage_pose, retail-suspicious-behavior uniquement)
         w, h = ctx.width, ctx.height
         for d in ctx.detections:
             x1, y1, x2, y2 = d["_bbox"]
-            ctx.overlay_boxes.append({
+            box = {
                 "cls": d["class"], "label": d["label"], "confidence": d["confidence"],
                 "vehicle_color": d.get("vehicle_color"),
                 "track_id": d.get("track_id"),
                 "bbox_norm": [round(x1 / w, 4), round(y1 / h, 4),
                               round(x2 / w, 4), round(y2 / h, 4)],
-            })
+            }
+            if d.get("_keypoints_norm"):
+                box["keypoints_norm"] = d["_keypoints_norm"]
+            ctx.overlay_boxes.append(box)
             ctx.counts[d["label"]] = ctx.counts.get(d["label"], 0) + 1
 
         ctx.timings["total_ms"] = round((time.monotonic() - t_total) * 1000, 1)
