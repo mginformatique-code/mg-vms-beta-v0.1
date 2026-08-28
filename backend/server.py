@@ -51,7 +51,6 @@ from routes.vehicles import vehicles_router
 from routes.smart_search import smart_search_router
 from routes.llm_settings import llm_settings_router
 from routes.discovery import discovery_router
-from routes.mobile import mobile_router   # app iOS/Android · additif, ne modifie aucune route existante
 from wsdl_path import validate_wsdl_dir
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -130,7 +129,6 @@ app.include_router(vehicles_router)
 app.include_router(smart_search_router)
 app.include_router(llm_settings_router)
 app.include_router(discovery_router)
-app.include_router(mobile_router)   # /api/server/info + /api/mobile/bootstrap (alias /api/v1/*)
 app.include_router(api_router)
 app.include_router(notif_router)
 app.include_router(realtime_router)
