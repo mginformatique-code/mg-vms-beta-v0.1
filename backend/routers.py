@@ -5,6 +5,7 @@ import asyncio
 import io
 import csv
 import base64
+import logging
 from datetime import datetime, timezone, timedelta
 import time
 from typing import Optional, List, Dict
@@ -15,6 +16,11 @@ from pydantic import BaseModel, Field
 
 from database import db
 from auth import get_current_user, require_role, require_permission, has_permission, public_user, log_audit, hash_password, ROLES, PERMISSIONS, site_scope, allowed_sites
+
+# v3.17 · `logger` était utilisé (create_camera, update_camera) sans jamais
+# être défini dans ce module — un NameError latent, invisible tant que ces
+# branches `except` précises n'étaient pas déclenchées. Corrigé au passage.
+logger = logging.getLogger("mg-vms.routers")
 from notifications import send_notification
 from realtime import metrics_snapshot, broadcast_alert, broadcast_camera_status
 from plugins import is_enabled
@@ -695,8 +701,29 @@ async def list_events(response: Response, type: Optional[str] = None, types: Opt
     site_scope(q, user)
     total = await db.events.count_documents(q)
     response.headers["X-Total-Count"] = str(total)
-    events = await db.events.find(q, {"_id": 0}).sort("timestamp", -1).skip(offset).limit(limit).to_list(limit)
+    # v3.13 · Même correction que pour /plates, sur une collection 4x plus
+    # grosse. `thumbnail` est la scène en 1920px : 399 Ko en moyenne sur les
+    # 19 368 événements qui en portent une, soit ~20 Mo pour une seule page
+    # de 50. La galerie n'affiche QUE `thumbnail_sm` (17 Ko), et les 19 368
+    # événements concernés en ont un — vérifié, aucun ne perd sa vignette.
+    # La grande version est servie à la demande par `GET /events/{id}`.
+    events = await db.events.find(
+        q, {"_id": 0, "thumbnail": 0},
+    ).sort("timestamp", -1).skip(offset).limit(limit).to_list(limit)
     return events
+
+
+@api_router.get("/events/{event_id}")
+async def get_event(event_id: str, user: dict = Depends(get_current_user)):
+    """Fiche complète d'un événement, scène 1920px comprise.
+
+    Chargée à l'ouverture de la visionneuse — voir le commentaire de la
+    liste juste au-dessus.
+    """
+    ev = await db.events.find_one({"id": event_id}, {"_id": 0})
+    if not ev:
+        raise HTTPException(404, "Événement introuvable")
+    return ev
 
 
 @api_router.get("/events/{event_id}/recording")
@@ -754,11 +781,22 @@ async def _dispatch_all_plate_engines(numpy_bgr, camera_id: str, cam: Optional[d
     # utilisable dès que son modèle est réellement prêt.
     _bus.refresh_lazy_states()
     whitelist = set((cam or {}).get("enabled_plugins") or [])
-    # Fail-open MINIMAL pour cette action manuelle explicite : si la caméra
-    # n'a aucun moteur ANPR configuré, on tente quand même les moteurs OCR
-    # locaux "de base" — l'utilisateur vient de demander explicitement une
-    # lecture, ce n'est pas un déclenchement automatique silencieux.
-    if not whitelist:
+    # v3.17 · `if not whitelist` ne se déclenchait QUE si `enabled_plugins`
+    # était vide — mais une caméra de surveillance générale (personnes,
+    # véhicules, incendie...) a en général une LISTE NON VIDE de plugins,
+    # simplement sans AUCUN moteur ANPR dedans. Confirmé en conditions
+    # réelles : `enabled_plugins` contenait 19 plugins (occupancy,
+    # person-counting, fire-detection...), aucun n'étant un moteur de
+    # plaques — le fail-open ne se déclenchait jamais, l'analyse manuelle
+    # renvoyait systématiquement 0 candidat en silence. On vérifie
+    # maintenant une INTERSECTION avec les moteurs OCR connus, pas
+    # seulement que la liste soit vide.
+    _KNOWN_PLATE_ENGINES = {"fast-alpr", "easyocr", "opencv-ocr", "paddle-ocr",
+                            "tesseract", "anpr-eps", "plate-recognizer", "codeproject-ai"}
+    if not (whitelist & _KNOWN_PLATE_ENGINES):
+        # Fail-open MINIMAL pour cette action manuelle explicite : l'utilisateur
+        # vient de demander explicitement une lecture, ce n'est pas un
+        # déclenchement automatique silencieux.
         whitelist = {"fast-alpr", "easyocr", "opencv-ocr", "paddle-ocr", "tesseract"}
     entries = [e for e in _bus.active("PlateRecognizer") if e.name in whitelist]
     if not entries or numpy_bgr is None or getattr(numpy_bgr, "size", 0) == 0:
@@ -872,7 +910,10 @@ async def reanalyze_event(event_id: str, background: BackgroundTasks,
             "vehicle_type": "Inconnu", "country": "", "direction": "—",
             "lat": (cam or {}).get("lat", 0), "lng": (cam or {}).get("lng", 0),
             "list_status": wl["list_type"] if wl else "none",
-            "vehicle_crop": thumb,             # image complète de l'événement source
+            # v3.13 · On ne duplique PLUS l'image complète ici. Elle pesait
+            # ~750 Ko par plaque, alourdissait la liste Plaques et faisait
+            # doublon avec l'événement source, déjà référencé par `event_id`.
+            "vehicle_crop": "",
             "plate_crop": plate_crop_b64,      # crop serré de la plaque (zone tracée)
             "timestamp": ev.get("timestamp") or datetime.now(timezone.utc).isoformat(),
             "engine": engine,
@@ -958,11 +999,40 @@ async def _lookup_recording_for(ev: dict, user: dict) -> dict:
             except (ValueError, KeyError):
                 rec = None
     if not rec:
+        # v3.17 · Rattrapage à la demande, une seule fois. L'indexation des
+        # segments (recorder._index_segments) tourne toutes les 30 s en
+        # arrière-plan : un événement qui vient d'arriver peut légitimement
+        # tomber dans cette fenêtre, ou l'indexation peut avoir pris du
+        # retard sur une caméra précise (isolé désormais par caméra, mais
+        # un retard ponctuel reste possible). Plutôt que de faire attendre
+        # l'utilisateur jusqu'au prochain tick, on force le rattrapage pour
+        # CETTE caméra avant de répondre 404.
+        cam = await db.cameras.find_one({"id": ev.get("camera_id")}, {"_id": 0})
+        if cam:
+            try:
+                import recorder as _recorder
+                await _recorder._index_segments(cam)
+                rec = await db.recordings.find_one(
+                    {"camera_id": ev.get("camera_id"), "start": {"$lte": ts}, "end": {"$gte": ts}},
+                    {"_id": 0},
+                )
+            except Exception:
+                logger.exception("Rattrapage indexation à la demande échoué pour %s", ev.get("camera_id"))
+    if not rec:
         raise HTTPException(404, "Aucun enregistrement ne couvre cet événement")
     try:
         ev_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
         rec_start_dt = datetime.fromisoformat(rec["start"].replace("Z", "+00:00"))
         offset_sec = max(0, int((ev_dt - rec_start_dt).total_seconds()) - 5)  # 5 s avant
+        # v3.17 · Le repli (règle 2 ci-dessus) peut accrocher l'événement au
+        # segment PRÉCÉDENT quand le sien n'est pas encore indexé — l'écart
+        # calculé peut alors dépasser la durée réelle de CE segment-là (`-ss`
+        # au-delà de la fin du fichier → vidéo vide). On borne à la fin
+        # utile du segment, en gardant 2 s de marge pour que `-ss` reste sur
+        # du contenu réel.
+        duration = rec.get("duration_sec")
+        if isinstance(duration, (int, float)) and duration > 0:
+            offset_sec = min(offset_sec, max(0, int(duration) - 2))
     except (ValueError, KeyError):
         offset_sec = 0
     return {
@@ -980,7 +1050,8 @@ async def search_plates(response: Response, plate: Optional[str] = None, color: 
                         site_id: Optional[str] = None, camera_id: Optional[str] = None,
                         direction: Optional[str] = None, list_status: Optional[str] = None,
                         date_from: Optional[str] = None, date_to: Optional[str] = None,
-                        limit: int = 50, offset: int = 0, user: dict = Depends(require_permission("read_plates"))):
+                        limit: int = 50, offset: int = 0, with_images: bool = False,
+                        user: dict = Depends(require_permission("read_plates"))):
     q = {}
     if plate:
         q["plate"] = {"$regex": plate.upper().replace(" ", ""), "$options": "i"}
@@ -1009,23 +1080,67 @@ async def search_plates(response: Response, plate: Optional[str] = None, color: 
     site_scope(q, user)
     total = await db.plates.count_documents(q)
     response.headers["X-Total-Count"] = str(total)
-    plates = await db.plates.find(q, {"_id": 0}).sort("timestamp", -1).skip(offset).limit(limit).to_list(limit)
+    # v3.13 · `frame_thumb` (la scène HD complète) est EXCLUE de la liste.
+    # Elle pèse ~709 Ko par plaque en base : à 50 plaques par page, la réponse
+    # atteignait ~35 Mo et faisait tomber la page Plaques côté navigateur
+    # (ErrorBoundary). Mesuré : /plates?limit=5 renvoyait 3,5 Mo.
+    # `vehicle_crop` (~88 Ko) est exclu par défaut pour la même raison : ni le
+    # tableau Plaques ni la frise LiveView n'affichent d'image issue de la
+    # liste. La vignette « Recherche véhicule », elle, en a besoin pour ses
+    # cartes : elle passe `with_images=1`, ce qui réintègre `vehicle_crop`
+    # SEUL — jamais `frame_thumb`, qui reste réservé à `GET /plates/{id}`.
+    projection = {"_id": 0, "frame_thumb": 0}
+    if not with_images:
+        projection["vehicle_crop"] = 0
+    plates = await db.plates.find(
+        q, projection,
+    ).sort("timestamp", -1).skip(offset).limit(limit).to_list(limit)
     return plates
 
 
 @api_router.get("/plates/export")
 async def export_plates(user: dict = Depends(require_permission("export_files"))):
-    plates = await db.plates.find({}, {"_id": 0}).sort("timestamp", -1).to_list(2000)
+    # v3.13 · Ne charger QUE les colonnes écrites dans le CSV. Avant, les
+    # 2000 documents étaient chargés entiers, images comprises : à ~800 Ko
+    # d'images par plaque, l'export montait à plus d'1 Go en mémoire dans le
+    # process backend unique — pour un fichier texte qui n'utilise aucune
+    # de ces images.
+    plates = await db.plates.find({}, {
+        "_id": 0, "plate": 1, "timestamp": 1, "camera_name": 1, "site_name": 1,
+        "vehicle_color": 1, "vehicle_make": 1, "vehicle_model": 1,
+        "vehicle_type": 1, "direction": 1, "confidence": 1, "list_status": 1,
+    }).sort("timestamp", -1).to_list(2000)
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["Plaque", "Date", "Caméra", "Site", "Couleur", "Marque", "Modèle", "Type", "Direction", "Confiance", "Liste"])
     for p in plates:
-        writer.writerow([p["plate"], p["timestamp"], p["camera_name"], p["site_name"], p["vehicle_color"],
-                         p["vehicle_make"], p["vehicle_model"], p["vehicle_type"], p["direction"], p["confidence"], p["list_status"]])
+        # `.get()` et non `[...]` : une plaque créée à la main (crop ANPR)
+        # n'a pas forcément toutes les colonnes véhicule, et un seul document
+        # incomplet faisait échouer l'export entier en KeyError.
+        writer.writerow([p.get("plate", ""), p.get("timestamp", ""), p.get("camera_name", ""),
+                         p.get("site_name", ""), p.get("vehicle_color", ""), p.get("vehicle_make", ""),
+                         p.get("vehicle_model", ""), p.get("vehicle_type", ""), p.get("direction", ""),
+                         p.get("confidence", ""), p.get("list_status", "")])
     output.seek(0)
     await log_audit(user, "plates_exported", "CSV")
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": "attachment; filename=anpr_export.csv"})
+
+
+# ⚠ Cette route paramétrée doit rester APRÈS `/plates/export` : FastAPI
+# résout dans l'ordre de déclaration, et `/plates/{plate_id}` capturerait
+# sinon le mot « export » comme identifiant, cassant l'export CSV.
+@api_router.get("/plates/{plate_id}")
+async def get_plate(plate_id: str, user: dict = Depends(require_permission("read_plates"))):
+    """Fiche complète d'une plaque, images comprises (`frame_thumb`).
+
+    Séparée de la liste pour que celle-ci reste légère — voir le commentaire
+    de `search_plates`.
+    """
+    doc = await db.plates.find_one({"id": plate_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Plaque introuvable")
+    return doc
 
 
 # ============ WATCHLIST ============
@@ -1926,7 +2041,15 @@ async def list_alerts(response: Response, acknowledged: Optional[bool] = None, l
     if acknowledged is not None:
         q["acknowledged"] = acknowledged
     site_scope(q, user)
-    total = await db.alerts.count_documents(q)
+    # v3.19 · count_documents({}) fait un vrai scan (pas de raccourci
+    # metadata, contrairement à l'ancien .count() legacy) — mesuré à 2s sur
+    # 9 377 alertes même sans filtre. estimated_document_count() lit les
+    # métadonnées de la collection, quasi instantané ; utilisable seulement
+    # quand `q` est vide (aucun filtre réel appliqué).
+    if q:
+        total = await db.alerts.count_documents(q)
+    else:
+        total = await db.alerts.estimated_document_count()
     response.headers["X-Total-Count"] = str(total)
     return await db.alerts.find(q, {"_id": 0}).sort("timestamp", -1).skip(offset).limit(limit).to_list(limit)
 
