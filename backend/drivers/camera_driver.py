@@ -98,6 +98,22 @@ class CameraDriver(ABC):
         self._require("ir_control")
         await self._set_ir_mode(mode)
 
+    async def get_osd(self) -> dict:
+        """Position actuelle de l'incrustation caméra (date/heure, nom).
+
+        Retourne ``{"name_pos": str|None, "name_enabled": bool,
+        "date_pos": str|None, "date_enabled": bool, "positions": [str]}`` —
+        ``positions`` liste les valeurs acceptées par ``set_osd`` pour ce
+        driver (vide si le driver ne peut pas les énumérer)."""
+        self._require("osd")
+        return await self._get_osd()
+
+    async def set_osd(self, name_pos: Optional[str] = None,
+                       date_pos: Optional[str] = None) -> None:
+        """Repositionne ou désactive (``"Off"``) l'incrustation caméra."""
+        self._require("osd")
+        await self._set_osd(name_pos, date_pos)
+
     async def set_siren(self, enabled: bool, duration: Optional[int] = None) -> None:
         """Déclenchement sirène (optionnel: durée en secondes)."""
         self._require("siren")
@@ -182,6 +198,12 @@ class CameraDriver(ABC):
 
     async def _set_ir_mode(self, mode: IRMode) -> None:
         raise UnsupportedCapabilityError("Contrôle IR non implémenté par ce driver")
+
+    async def _get_osd(self) -> dict:
+        raise UnsupportedCapabilityError("Incrustation (OSD) non implémentée par ce driver")
+
+    async def _set_osd(self, name_pos: Optional[str], date_pos: Optional[str]) -> None:
+        raise UnsupportedCapabilityError("Incrustation (OSD) non implémentée par ce driver")
 
     async def _set_siren(self, enabled: bool, duration: Optional[int]) -> None:
         raise UnsupportedCapabilityError("Sirène non implémentée par ce driver")

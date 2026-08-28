@@ -54,6 +54,9 @@ class CameraCapabilities:
     ir_control: bool = False        # IR LEDs contrôlables
     ir_cut_filter: bool = False     # bascule couleur/N&B
 
+    # Incrustation (OSD — date/heure, nom caméra)
+    osd: bool = False               # position/désactivation de l'incrustation caméra
+
     # Alarmes physiques
     siren: bool = False
     alarm_output: bool = False      # sortie relais 0/12V

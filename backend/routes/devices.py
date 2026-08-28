@@ -65,6 +65,11 @@ class IRBody(BaseModel):
     mode: IRMode
 
 
+class OSDBody(BaseModel):
+    name_pos: Optional[str] = None
+    date_pos: Optional[str] = None
+
+
 class SirenBody(BaseModel):
     enabled: bool
     duration: Optional[int] = Field(default=None, ge=1, le=600)
@@ -240,6 +245,31 @@ async def device_ir(camera_id: str, body: IRBody,
     try:
         drv = await svc.get_driver(camera_id)
         await drv.set_ir_mode(body.mode)
+        return {"success": True}
+    except CameraDriverError as e:
+        raise _driver_error_response(e)
+
+
+@devices_router.get("/{camera_id}/osd")
+async def device_osd_get(camera_id: str, user: dict = Depends(require_permission("view_live"))):
+    """Position actuelle de l'incrustation caméra (date/heure, nom).
+
+    v3.19 · La caméra grave elle-même cette incrustation dans l'image —
+    ce n'est PAS un overlay applicatif, donc pas déplaçable autrement que
+    via ce réglage caméra (reolink-aio SetOsd/GetOsd)."""
+    try:
+        drv = await svc.get_driver(camera_id)
+        return await drv.get_osd()
+    except CameraDriverError as e:
+        raise _driver_error_response(e)
+
+
+@devices_router.post("/{camera_id}/osd")
+async def device_osd_set(camera_id: str, body: OSDBody,
+                          user: dict = Depends(require_permission("manage_cameras"))):
+    try:
+        drv = await svc.get_driver(camera_id)
+        await drv.set_osd(name_pos=body.name_pos, date_pos=body.date_pos)
         return {"success": True}
     except CameraDriverError as e:
         raise _driver_error_response(e)

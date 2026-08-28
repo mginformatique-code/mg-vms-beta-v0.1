@@ -32,8 +32,8 @@ from typing import Optional
 
 from reolink_aio.api import Host
 from reolink_aio.exceptions import (
-    ApiError, CredentialsInvalidError, LoginError, ReolinkConnectionError,
-    ReolinkError, ReolinkTimeoutError,
+    ApiError, CredentialsInvalidError, InvalidParameterError, LoginError,
+    ReolinkConnectionError, ReolinkError, ReolinkTimeoutError,
 )
 
 from .camera_models import (
@@ -133,6 +133,11 @@ class ReolinkDriver(ONVIFDriver):
         # — la détection ONVIF standard (IrCutFilter) est peu fiable sur
         # ces caméras et laissait ir_control à False.
         caps.ir_control = True
+        # SetOsd/GetOsd est également universel sur les caméras Reolink
+        # (reolink-aio expose set_osd/validate_osd_pos) — permet de
+        # repositionner ou désactiver l'incrustation date/heure/nom que la
+        # caméra grave elle-même dans l'image.
+        caps.osd = True
 
         chn_caps: set = set()
         if self._host_api is not None:
@@ -236,6 +241,31 @@ class ReolinkDriver(ONVIFDriver):
                 await self._host_api.set_ir_lights(_CHANNEL, mode == IRMode.ON)
         except ApiError as e:
             raise CameraDriverError(f"Reolink SetIrLights → {e}", code="device_error") from e
+
+    # ── OSD (incrustation date/heure/nom) ───────────────────────
+    async def _get_osd(self) -> dict:
+        try:
+            await self._host_api.get_state("GetOsd")
+            settings = (self._host_api._osd_settings or {}).get(_CHANNEL) or {}
+            osd = settings.get("Osd", {})
+            name = osd.get("osdChannel", {})
+            date = osd.get("osdTime", {})
+            return {
+                "name_pos": name.get("pos") if name.get("enable") else None,
+                "name_enabled": bool(name.get("enable")),
+                "date_pos": date.get("pos") if date.get("enable") else None,
+                "date_enabled": bool(date.get("enable")),
+                "positions": ["Upper Left", "Upper Right", "Top Center",
+                              "Bottom Center", "Lower Left", "Lower Right"],
+            }
+        except ApiError as e:
+            raise CameraDriverError(f"Reolink GetOsd → {e}", code="device_error") from e
+
+    async def _set_osd(self, name_pos: Optional[str], date_pos: Optional[str]) -> None:
+        try:
+            await self._host_api.set_osd(_CHANNEL, namePos=name_pos, datePos=date_pos)
+        except (ApiError, InvalidParameterError) as e:
+            raise CameraDriverError(f"Reolink SetOsd → {e}", code="device_error") from e
 
     # ── Audio (talkback nécessite un flux temps réel séparé) ─────
     async def _start_audio(self) -> None:
