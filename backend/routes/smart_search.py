@@ -95,7 +95,11 @@ async def _parse_query_llm(query: str) -> dict:
         ],
         "stream": False,
     }
-    url = f"{cfg['base_url']}/v1/chat/completions"
+    # v3.19 · Open WebUI expose son API native sous /api/chat/completions
+    # (vérifié en direct : /v1/chat/completions -> 405, /api/chat/completions
+    # -> 401 sans clé, donc bien le bon endpoint) — pas le chemin
+    # OpenAI-compat standard /v1/... sur cette instance.
+    url = f"{cfg['base_url']}/api/chat/completions"
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(url, json=payload, headers=headers)
