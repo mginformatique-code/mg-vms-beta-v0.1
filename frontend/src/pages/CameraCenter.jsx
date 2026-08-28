@@ -25,11 +25,12 @@ import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import useDeviceCapabilities from "@/hooks/useDeviceCapabilities";
 import LivePlayer from "@/components/video/LivePlayer";
+import RetailTrackingOverlay from "@/components/video/RetailTrackingOverlay";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import {
   Camera, Wifi, Video, Layers, Cpu, Volume2, Sun, Bell, Move3d, Wrench,
   ScanLine, RefreshCw, AlertCircle, CircleCheck, ChevronLeft, ChevronRight,
-  ArrowLeft, HardDrive, Activity, Download,
+  ArrowLeft, HardDrive, Activity, Download, Type,
 } from "lucide-react";
 
 const TABS = [
@@ -42,6 +43,7 @@ const TABS = [
   { id: "events",       label: "Events",       icon: Activity },
   { id: "audio",        label: "Audio",        icon: Volume2 },
   { id: "lighting",     label: "Lighting",     icon: Sun },
+  { id: "osd",          label: "Incrustation", icon: Type },
   { id: "alarm",        label: "Alarm",        icon: Bell },
   { id: "sdcard",       label: "Carte SD",     icon: HardDrive },
   { id: "ptz",          label: "PTZ",          icon: Move3d },
@@ -210,6 +212,7 @@ export default function CameraCenter() {
         <TabsContent value="events"><EventsTab cameraId={cameraId} /></TabsContent>
         <TabsContent value="audio"><AudioTab cameraId={cameraId} caps={caps} /></TabsContent>
         <TabsContent value="lighting"><LightingTab cameraId={cameraId} caps={caps} /></TabsContent>
+        <TabsContent value="osd"><OsdTab cameraId={cameraId} caps={caps} /></TabsContent>
         <TabsContent value="alarm"><AlarmTab cameraId={cameraId} caps={caps} /></TabsContent>
         <TabsContent value="sdcard"><SdCardTab cameraId={cameraId} caps={caps} /></TabsContent>
         <TabsContent value="ptz"><PTZTab cameraId={cameraId} caps={caps} /></TabsContent>
@@ -314,7 +317,7 @@ function OverviewTab({ info, caps, cameraId }) {
 }
 
 function LiveTab({ cameraId }) {
-  const { t } = useApp();
+  const { t, aiDetections } = useApp();
   // video-pipeline-v2 · UN SEUL choix de pipeline par caméra :
   //   ○ Direct RTSP  ○ MJPEG  ○ MediaMTX
   // + bandeau statut (Pipeline / État / FPS / latence) via /video-status.
@@ -357,6 +360,15 @@ function LiveTab({ cameraId }) {
           <>
             <LivePlayer key={`${cameraId}-${reloadKey}`} camera={cam} hd={true}
                         className="w-full h-full" dataTestId="center-player" />
+            {/* Tracking anti-vol — uniquement si le plugin retail est actif sur
+                cette caméra (plan Phase 1, léger : réutilise le flux WS
+                ai_detections déjà diffusé, pas de requête supplémentaire). */}
+            {(cam.enabled_plugins || []).includes("retail-suspicious-behavior") && (
+              <RetailTrackingOverlay
+                boxes={aiDetections[cameraId]?.boxes}
+                retail={aiDetections[cameraId]?.retail}
+              />
+            )}
             {/* v3.6 · Overlay pied de visualisation — lumière/IR/sirène pilotées
                 par les capacités réelles de la caméra (device layer), peu
                 importe le constructeur. Voir CameraControlOverlay.jsx. */}
@@ -672,6 +684,62 @@ function LightingTab({ cameraId, caps }) {
         <Button onClick={() => toggle(true)} data-testid="light-on">Allumer</Button>
         <Button variant="outline" onClick={() => toggle(false)} data-testid="light-off">{t("camc.turn_off")}</Button>
       </div>
+    </Card>
+  );
+}
+
+// ─── Incrustation caméra (OSD — date/heure, nom) ───
+// v3.19 · La caméra grave elle-même cette incrustation dans l'image —
+// ce n'est PAS un overlay applicatif, donc jamais déplaçable depuis
+// l'écran seul. Répond au signalement "informations superposées en
+// haut de l'image" (l'incrustation caméra chevauchait nos propres infos).
+const OSD_POSITIONS = ["Upper Left", "Upper Right", "Top Center", "Bottom Center", "Lower Left", "Lower Right"];
+function OsdTab({ cameraId, caps }) {
+  const [osd, setOsd] = useState(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!caps?.osd) return;
+    api.get(`/devices/${cameraId}/osd`).then((r) => setOsd(r.data)).catch(() => setOsd(false));
+  }, [cameraId, caps?.osd]);
+
+  if (!caps?.osd) return <NotSupported what="Incrustation (OSD)" />;
+  if (osd === null) return <Card className="p-4 text-sm text-muted-foreground">Chargement…</Card>;
+  if (osd === false) return <Card className="p-4 text-sm text-muted-foreground">Lecture impossible sur cette caméra.</Card>;
+
+  const save = (patch) => {
+    const next = { ...osd, ...patch };
+    setOsd(next);
+    setSaving(true);
+    api.post(`/devices/${cameraId}/osd`, {
+      name_pos: next.name_enabled ? next.name_pos : "Off",
+      date_pos: next.date_enabled ? next.date_pos : "Off",
+    }).then(() => toast.success("Incrustation mise à jour"))
+      .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"))
+      .finally(() => setSaving(false));
+  };
+
+  const Row = ({ label, enabled, pos, onEnabled, onPos }) => (
+    <div className="flex items-center gap-3">
+      <label className="flex items-center gap-2 text-sm w-32 shrink-0">
+        <input type="checkbox" checked={enabled} onChange={(e) => onEnabled(e.target.checked)} disabled={saving} />
+        {label}
+      </label>
+      <select value={pos || "Upper Left"} onChange={(e) => onPos(e.target.value)} disabled={!enabled || saving}
+              className="border border-border bg-card text-sm px-2 py-1.5 outline-none disabled:opacity-40">
+        {OSD_POSITIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+      </select>
+    </div>
+  );
+
+  return (
+    <Card className="p-4 space-y-4" data-testid="cam-osd">
+      <p className="text-xs text-muted-foreground">
+        Position (ou désactivation) de la date/heure et du nom que la caméra grave elle-même dans l'image.
+      </p>
+      <Row label="Nom caméra" enabled={osd.name_enabled} pos={osd.name_pos}
+           onEnabled={(v) => save({ name_enabled: v })} onPos={(v) => save({ name_pos: v })} />
+      <Row label="Date / heure" enabled={osd.date_enabled} pos={osd.date_pos}
+           onEnabled={(v) => save({ date_enabled: v })} onPos={(v) => save({ date_pos: v })} />
     </Card>
   );
 }
