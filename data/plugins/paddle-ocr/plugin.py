@@ -150,10 +150,17 @@ class PaddleOCRPlugin(PlateRecognizer):
                 # 2/2 appels réels en échec avec cette erreur exacte (analyse
                 # manuelle de plaque toujours KO). `or []` protège aussi le
                 # cas valeur-présente-mais-None, pas seulement clé-absente.
+                # v3.19 · Le `[None, (t, s)]` d'origine ne remontait AUCUNE
+                # boîte réelle — `rec_polys` (polygone détecté) est disponible
+                # sur l'objet retourné et donne la vraie position de la
+                # plaque dans le crop (vérifié : présent aux côtés de
+                # rec_texts/rec_scores). Repli sur `None` uniquement si la
+                # liste manque/désaligne (voir garde `box is None` plus bas).
                 preds = self._ocr.predict(img) or []
                 result = [[
-                    [None, (t, s)]
-                    for t, s in zip(p.get("rec_texts") or [], p.get("rec_scores") or [])
+                    [poly, (t, s)]
+                    for t, s, poly in zip(p.get("rec_texts") or [], p.get("rec_scores") or [],
+                                           p.get("rec_polys") or [None] * len(p.get("rec_texts") or []))
                 ] for p in preds]
             else:
                 result = self._ocr.ocr(img, cls=True) or []
@@ -174,15 +181,29 @@ class PaddleOCRPlugin(PlateRecognizer):
                     continue
                 if score < min_conf:
                     continue
-                cleaned = str(text).upper().replace(" ", "")
+                # v3.19 · Sur les plaques FR, PaddleOCR lit parfois le point
+                # séparateur physique comme "·" (interpunct) plutôt qu'un
+                # tiret — non couvert par PLATE_RX, ce qui tronquait le
+                # texte au premier point rencontré (ex: "GS-550·PX" ->
+                # seulement "GS-550", "PX" perdu). Vérifié sur un cas réel.
+                cleaned = str(text).upper().replace(" ", "").replace("·", "").replace("•", "")
                 m = PLATE_RX.search(cleaned)
                 if not m:
                     continue
                 plate = m.group(0)
                 if not (any(c.isalpha() for c in plate) and any(c.isdigit() for c in plate)):
                     continue
-                xs = [p[0] for p in box]
-                ys = [p[1] for p in box]
+                # v3.19 · `box` peut rester None (polygone manquant/désaligné,
+                # voir ci-dessus) — c'était la cause exacte du crash "analyse
+                # manuelle KO" (TypeError: 'NoneType' object is not
+                # iterable). Repli sur le crop entier plutôt que planter :
+                # la position exacte est secondaire, le texte/la confiance
+                # restent corrects.
+                if box is None:
+                    xs, ys = [0, img.shape[1]], [0, img.shape[0]]
+                else:
+                    xs = [p[0] for p in box]
+                    ys = [p[1] for p in box]
                 out.append(PlateResult(
                     text=plate,
                     confidence=float(score),
