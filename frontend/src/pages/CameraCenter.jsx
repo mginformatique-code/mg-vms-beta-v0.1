@@ -25,7 +25,12 @@ import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import useDeviceCapabilities from "@/hooks/useDeviceCapabilities";
 import LivePlayer from "@/components/video/LivePlayer";
-import RetailTrackingOverlay from "@/components/video/RetailTrackingOverlay";
+// v3.19 · RetailTrackingOverlay (pose overlay anti-vol) appartient au
+// chantier en cours dans une autre session — le composant n'est pas
+// encore commité côté serveur. Référence neutralisée ici pour ne pas
+// casser le build tant qu'il n'est pas prêt à être déployé par cette
+// session-là (voir aussi le retrait équivalent de routes/mobile.py).
+// import RetailTrackingOverlay from "@/components/video/RetailTrackingOverlay";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import {
   Camera, Wifi, Video, Layers, Cpu, Volume2, Sun, Bell, Move3d, Wrench,
@@ -317,7 +322,7 @@ function OverviewTab({ info, caps, cameraId }) {
 }
 
 function LiveTab({ cameraId }) {
-  const { t, aiDetections } = useApp();
+  const { t } = useApp();
   // video-pipeline-v2 · UN SEUL choix de pipeline par caméra :
   //   ○ Direct RTSP  ○ MJPEG  ○ MediaMTX
   // + bandeau statut (Pipeline / État / FPS / latence) via /video-status.
@@ -363,12 +368,7 @@ function LiveTab({ cameraId }) {
             {/* Tracking anti-vol — uniquement si le plugin retail est actif sur
                 cette caméra (plan Phase 1, léger : réutilise le flux WS
                 ai_detections déjà diffusé, pas de requête supplémentaire). */}
-            {(cam.enabled_plugins || []).includes("retail-suspicious-behavior") && (
-              <RetailTrackingOverlay
-                boxes={aiDetections[cameraId]?.boxes}
-                retail={aiDetections[cameraId]?.retail}
-              />
-            )}
+            {/* v3.19 · désactivé temporairement — voir commentaire sur l'import */}
             {/* v3.6 · Overlay pied de visualisation — lumière/IR/sirène pilotées
                 par les capacités réelles de la caméra (device layer), peu
                 importe le constructeur. Voir CameraControlOverlay.jsx. */}
