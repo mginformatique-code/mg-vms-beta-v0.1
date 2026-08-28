@@ -700,7 +700,7 @@ export function VehicleDrawer({ plate, onClose, onWatchChanged }) {
               <TabsTrigger value="journey"   className="rounded-none text-xs py-2" data-testid="tab-journey">Parcours</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="overview" className="mt-4"><TabOverview d={detail} onWatchChanged={handleWatchChanged} /></TabsContent>
+            <TabsContent value="overview" className="mt-4"><TabOverview d={detail} onWatchChanged={handleWatchChanged} onReload={reload} /></TabsContent>
             <TabsContent value="gallery"  className="mt-4"><TabGallery plate={plate} /></TabsContent>
             <TabsContent value="timeline" className="mt-4"><TabTimeline plate={plate} /></TabsContent>
             <TabsContent value="heatmap"  className="mt-4"><TabHeatmap plate={plate} /></TabsContent>
@@ -714,7 +714,7 @@ export function VehicleDrawer({ plate, onClose, onWatchChanged }) {
 }
 
 // ─── Tabs contents ───────────────────────────────────────────────
-function TabOverview({ d, onWatchChanged }) {
+function TabOverview({ d, onWatchChanged, onReload }) {
   const { t } = useApp();
   const [habits, setHabits] = useState(null);
   const [anomaly, setAnomaly] = useState(null);
@@ -806,7 +806,7 @@ function TabOverview({ d, onWatchChanged }) {
       )}
 
       {/* Consensus multi-plugins & validation manuelle */}
-      <PlateConsensusBlock plate={d.plate} onValidated={reload} />
+      <PlateConsensusBlock plate={d.plate} onValidated={onReload} />
 
       {/* Actions Watchlist */}
       <div className="border border-border p-3 space-y-2" data-testid="watchlist-actions">
