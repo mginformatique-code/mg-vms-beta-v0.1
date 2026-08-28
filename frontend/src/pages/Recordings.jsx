@@ -4,6 +4,7 @@ import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import { Film, Play, Calendar, Clock, HardDrive, Activity, Cctv, AlertTriangle, Circle, Scissors, Download, FileArchive, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
+import VirtualGrid from "@/components/VirtualGrid";
 
 const MODE_COLORS = { continuous: "#0044FF", motion: "#FFB800", ai: "#00E676" };
 const DAY_SEC = 86400;
@@ -401,26 +402,47 @@ export default function Recordings() {
               <div className="px-3 py-2 border-b border-border text-xs uppercase tracking-wider text-muted-foreground font-medium">
                 {t("rec.segments")} · {segments.length}
               </div>
-              <div className="flex-1 overflow-y-auto divide-y divide-border">
+              <div className="flex-1 overflow-hidden">
                 {loading ? (
                   <div className="p-4 text-sm text-muted-foreground">{t("common.loading")}</div>
                 ) : segments.length === 0 ? (
                   <div className="p-4 text-sm text-muted-foreground">{t("rec.no_segments")}</div>
-                ) : segments.map((seg) => (
-                  <button key={seg.id} data-testid={`rec-listitem-${seg.id}`} onClick={() => play(seg)}
-                    className={`w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-secondary transition-colors ${selected?.id === seg.id ? "bg-secondary" : ""}`}>
-                    <div className="w-14 h-9 bg-black shrink-0 flex items-center justify-center"><Film size={14} className="text-white/40" /></div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-xs mono">{fmtTime(seg.start)} – {fmtTime(seg.end)}</div>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-[9px] uppercase tracking-wider px-1 py-0.5" style={{ color: MODE_COLORS[seg.mode] }}>{t(`rec.mode.${seg.mode}`)}</span>
-                        <span className="text-[10px] text-muted-foreground mono">{seg.size_mb} MB</span>
-                        {seg.has_event && <AlertTriangle size={11} className="text-[#FF3333]" />}
-                      </div>
-                    </div>
-                    <Play size={14} className="text-muted-foreground shrink-0" />
-                  </button>
-                ))}
+                ) : (
+                  // v3.19 · 501 segments rendus d'un coup ici (+ 501 dans la
+                  // frise ci-dessus) sans virtualisation ni pagination —
+                  // c'était la cause plausible du menu Enregistrements
+                  // "long à charger" (mesuré : API rapide, donc le coût
+                  // était bien le rendu écran). Même composant que la page
+                  // Véhicules (VirtualGrid, déjà éprouvé) en mode liste à
+                  // 1 colonne — ne rend que les lignes visibles ± overscan.
+                  <VirtualGrid
+                    items={segments}
+                    itemKey={(seg) => seg.id}
+                    rowHeight={52}
+                    minColumnWidth={99999}
+                    maxColumns={1}
+                    height={504}
+                    gap={0}
+                    threshold={80}
+                    testid="rec-segment-list-virtual"
+                    fallbackClassName="divide-y divide-border"
+                    renderItem={(seg) => (
+                      <button data-testid={`rec-listitem-${seg.id}`} onClick={() => play(seg)}
+                        className={`w-full h-full flex items-center gap-3 px-3 py-2 text-left hover:bg-secondary transition-colors border-b border-border ${selected?.id === seg.id ? "bg-secondary" : ""}`}>
+                        <div className="w-14 h-9 bg-black shrink-0 flex items-center justify-center"><Film size={14} className="text-white/40" /></div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs mono">{fmtTime(seg.start)} – {fmtTime(seg.end)}</div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-[9px] uppercase tracking-wider px-1 py-0.5" style={{ color: MODE_COLORS[seg.mode] }}>{t(`rec.mode.${seg.mode}`)}</span>
+                            <span className="text-[10px] text-muted-foreground mono">{seg.size_mb} MB</span>
+                            {seg.has_event && <AlertTriangle size={11} className="text-[#FF3333]" />}
+                          </div>
+                        </div>
+                        <Play size={14} className="text-muted-foreground shrink-0" />
+                      </button>
+                    )}
+                  />
+                )}
               </div>
             </div>
           </div>
