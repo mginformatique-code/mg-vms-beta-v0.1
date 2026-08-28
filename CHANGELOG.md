@@ -2,6 +2,379 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.19-stabilisation-14-cameras] — 2026-08 — Passage à 14 caméras : crash GPU, plaques muettes, lenteurs UI
+
+### Fixed — Critique
+- **Le backend segfaultait toutes les 70-90 s.** `YOLO_INFERENCE_LOCK` et
+  `ALPR_INFERENCE_LOCK` étaient deux verrous *distincts* : chaque moteur
+  était bien sérialisé contre lui-même, mais rien n'empêchait YOLO (torch)
+  et l'OCR plaques (fast-alpr, backend PaddleOCR) de tourner en même temps
+  sur le même GPU. À 14 caméras, la collision — jusque-là un warning
+  occasionnel — devenait régulièrement fatale (`CUDA error: operation not
+  permitted when stream is capturing` puis segfault). Les deux noms
+  restent distincts (contrat déjà testé), mais partagent désormais le même
+  verrou. **3 crashs en 8 min avant, 0 en 5+ min de vérification après.**
+- **Les plaques ANPR ont cessé de remonter pendant ~43 min** sur les 5
+  caméras dédiées — cause : le tri des plugins ci-dessous avait retiré
+  `fast-alpr` de `enabled_plugins`, or `_stage_anpr` s'en sert comme
+  garde-fou strict pour activer le moteur de lecture *principal* (pas
+  seulement le bonus Consensus). `fast-alpr` réintégré aux 5 listes.
+- **Analyse manuelle d'une plaque toujours en échec.** Deux bugs empilés
+  dans le plugin PaddleOCR : (1) accès à une clé JSON présente mais
+  valant `None` au lieu d'une liste vide (`.get(k, [])` ne protège que
+  l'absence de clé) ; (2) construction de la position de la plaque à
+  partir d'un polygone toujours `None` pour l'API v3 — le vrai crash.
+  Utilise maintenant `rec_polys`, réellement renvoyé par PaddleOCR.
+  Testé de bout en bout : GS-550-PX lue à 94,6 % de confiance.
+
+### Fixed — Performance
+- **Menu Plaques : ~1 s par page, y compris chaque « Charger plus ».**
+  Le regroupement de plaques était entièrement recalculé à chaque
+  requête. Cache serveur 8 s + pagination 20/page.
+  `1er chargement : ~0.4s → pages suivantes : ~15ms`
+- **Sous-menus Événements (Personnes, Bus, Camions...) : jusqu'à 9,4 s.**
+  105 910 événements ; l'index simple sur `type` trouvait les documents
+  vite, mais le tri par date qui suivait se faisait ensuite en mémoire
+  (stage SORT). Index composé `{type, timestamp}` ajouté.
+  `Bus : 9.47s → 0.023s · Personnes : 4.25s → 0.068s`
+- **Centre d'alertes : 5,6 s (tout), 2,8 s (non-acquittées).** Même cause
+  (9 377 alertes, index manquant) + `count_documents({})` qui reste un
+  vrai scan même sans filtre — remplacé par `estimated_document_count()`
+  quand aucun filtre réel n'est appliqué. Pagination ajoutée (30 + « Charger
+  plus »), jusqu'ici tout remontait d'un coup sans limite.
+  `Toutes : 5.6s → 0.3s · Non-acquittées : 2.8s → 0.27s`
+- **Menu Enregistrements : 501 segments rendus d'un coup**, sans
+  virtualisation, dans une liste défilante. Reprend `VirtualGrid` (déjà
+  éprouvé sur Véhicules) en mode liste à 1 colonne.
+- **Charge GPU redondante sur 8 caméras.** Aucune n'avait jamais eu sa
+  sélection de plugins ajustée : 5 caméras ANPR faisaient tourner 5 à 12
+  moteurs OCR en séquence par plaque, 2 caméras faisaient tourner 4
+  détecteurs YOLO différents sur la même image. Trié à 2 moteurs OCR
+  (paddle-ocr, easyocr + fast-alpr en garde-fou) et 1 détecteur (yolov8).
+  `ALPR mesuré après tri : 39-914ms (contre 1500-1642ms avant)`
+
+### Fixed — Vision / IA
+- **Couleur véhicule biaisée la nuit.** Les caméras en mode IR produisent
+  une image réellement monochrome (R=G=B exact) — sans détection,
+  `mean_v<60` classait presque tout « Noir » quelle que soit la vraie
+  couleur. 4454 lectures « Noir » en base, concentrées à 21h-04h (866 à
+  minuit contre 7 à midi). Vérifié sur crops réels : écart de canaux
+  R/G/B exactement 0.00 sur IR (5/5), 2.8 à 16.7 sur un vrai véhicule noir
+  de jour (5/5) — signal fiable, aucun faux positif possible. Renvoie
+  « inconnue » plutôt que deviner sur IR.
+- **Titre de la fiche véhicule non synchronisé après validation
+  « Consensus multi-plugins ».** `vehicle_detail()` ne consultait jamais
+  la table de validation manuelle — corrigé côté backend (résolution de
+  la plaque canonique) et frontend (le bloc Consensus ne rafraîchissait
+  que lui-même, pas le titre du tiroir parent).
+
+### Added
+- **Bouton « Créer une fiche »** (véhicule signalé volé) — plaque +
+  marque/couleur/type/notes, case liste noire qui déclenche l'alerte +
+  notification existantes dès la prochaine lecture de cette plaque.
+- **Saisie manuelle de plaque dans le bloc Consensus** — bypass quand
+  aucune variante OCR suggérée n'est la bonne (cas réel : 19 variantes
+  autour de « E2222x », aucune ne correspondait au véhicule).
+- **Menu Admin → LLM (MG-IA).** La recherche IA avancée dépendait d'une
+  clé cloud (`EMERGENT_LLM_KEY`) à éditer manuellement par site.
+  Remplacée par un Qwen auto-hébergé configurable depuis l'interface
+  (URL, modèle, clé API, switch actif/inactif) — objectif : déploiement
+  client sans toucher au serveur.
+- **PTZ déplacé du centre plein écran vers un coin**, derrière un bouton
+  dédié afficher/masquer.
+
+### Fixed — UI
+- **Bouton lumière caméra : impossible à l'éteindre.** Le composant de
+  contrôles se démontait/remontait à chaque survol de la tuile, ce qui
+  réinitialisait son état interne (`lightOn`/`irOn`/`sirenOn`) à chaque
+  fois. Reste monté en continu désormais, seule l'opacité suit le survol.
+
+### Removed
+- **Page `/anpr`** — doublon orphelin de `/events?filtre=plaques`, aucun
+  lien menu, aucune autre page n'en dépendait.
+
+### Reste à traiter
+- Lecture ANPR en biais/angle prononcé : cause architecturale identifiée
+  (la correction de perspective tourne *après* l'OCR principal, jamais
+  avant) — corriger proprement double le coût OCR sur le chemin chaud,
+  pas engagé sans arbitrage explicite.
+- Confusion gris/bleu de jour sur les couleurs : testé sur crops réels,
+  pas de bug confirmé sur le code actuel (voir détail) — probablement des
+  fiches anciennes plutôt qu'un bug vivant.
+- IR caméra / TTS : bouton IR bénéficie probablement du même correctif
+  que la lumière (à retester de nuit, l'effet est invisible de jour) ;
+  TTS explicitement non implémenté pour les caméras Reolink dans le code.
+
+## [v3.15-charge-mongo] — 2026-08 — La base relisait la config à chaque image
+
+### Fixed
+- **226 requêtes/s vers MongoDB pour 23 images analysées.** `run_downstream`
+  s'exécute à chaque image et y relisait trois documents de `settings` —
+  `face_recognition_config`, `plugin_manager_pipeline` et `anpr_config` —
+  soit des réglages d'administration modifiés au mieux une fois par jour.
+  Ils sont désormais mémorisés 5 s (une modification faite dans l'interface
+  reste donc appliquée en moins de 5 s, sans câbler un signal
+  d'invalidation dans chaque route qui écrit un réglage).
+
+  | Mesure | Avant | Après |
+  |---|---:|---:|
+  | Requêtes MongoDB/s | 226,6 | **137,6** |
+  | CPU de `mongod` | 60 % | **15 %** |
+
+### Constaté — et ce que ça règle définitivement
+- **Le débit IA n'a PAS bougé** : 22,8 → 23,6 analyses/s, dans le bruit.
+  C'est une expérience naturelle qui tranche la question « faut-il ajouter
+  du CPU / déporter MongoDB sur une autre VM ? » : on vient de libérer
+  ~45 % d'un cœur, et l'IA ne l'a pas pris. Elle n'est pas privée de CPU —
+  le processus Python unique plafonne à ~1,5 cœur à cause du GIL **alors
+  que des cœurs sont déjà inoccupés** (21-42 % de repos sur 6 cœurs).
+
+  Conséquence pratique : ni un CPU plus gros, ni le déport de MongoDB ne
+  feront gagner d'images/s tant que le pipeline IA tient dans un seul
+  processus Python. Le seul levier est le **multi-process**.
+
+### Reste à traiter
+- Le cache WiredTiger est à **2 Go pour une base de 15,4 Go** : 33 Go
+  relus depuis le disque en 2 h 42. L'hôte a 28 Go disponibles — relever ce
+  cache ne coûte rien et supprimerait le reste de la pression disque.
+- La base pèse 15,4 Go parce que les images sont stockées en base64 **dans**
+  les documents. Déporter MongoDB ailleurs déplacerait ce problème sans le
+  résoudre.
+
+## [v3.14-boucle-par-camera] — 2026-08 — Fin de la barrière : chaque caméra à son propre rythme
+
+### Fixed
+- **Les 6 caméras étaient bloquées à 0,4 img/s, toutes au même chiffre.**
+  `ai_loop` faisait `await asyncio.gather(*[_process_camera(c) …])` puis
+  dormait `interval_seconds` : le `gather` attend **toutes** les caméras,
+  donc la période du cycle valait celle de la plus lente et toutes les
+  autres y retombaient. Le signe qui l'a trahi : la caméra 720p, dont le
+  chemin critique ne dure que 200 ms, affichait exactement le même 0,4 que
+  deux caméras 1080p à 1734 et 1998 ms — des charges très différentes qui
+  donnent le même chiffre, c'est un point de rendez-vous, pas une
+  saturation de calcul (le GPU était à 11 %).
+
+  Chaque caméra a désormais **sa propre tâche**, cadencée par ses propres
+  images. `frame_source` numérote chaque image publiée et réveille les
+  boucles en attente via `loop.call_soon_threadsafe` : aucun sondage,
+  aucune image analysée deux fois, aucune image périmée analysée.
+  `interval_seconds` ne cadence plus l'analyse.
+
+  Mesuré sur 30 s en régime établi (débits soutenus, pas des pics) :
+
+  | Caméra | Plugins | Rés. IA | Avant | Après |
+  |---|---:|---|---:|---:|
+  | test_bureau | 6 | 720p | 0,4 | **7,3** |
+  | rue_vers_centre | 19 | 1080p | 0,4 | **3,6** |
+  | portail_villeparisis | 8 | 1080p | 0,4 | **3,8** |
+  | rue_vers_centre_telephoto | 8 | 1080p | 0,4 | **3,5** |
+  | rue_vers_villers | 20 | 1080p | 0,4 | **2,7** |
+  | rue_vers_villers_telephoto | 12 | 1080p | 0,4 | **1,9** |
+  | **Total analyses/s** | | | **2,4** | **22,8** |
+
+- **Latence de bout en bout.** Le chemin critique passe de ~6000 ms à
+  **100-300 ms**, et `realtime_ms` colle maintenant à `total_ms`
+  (141,7 contre 140,1) — autrement dit il n'y a **plus aucune attente de
+  file** entre l'arrivée de l'image et son analyse. Âge de l'image servie
+  à l'IA : **1 à 83 ms** en régime établi. C'est ce qui rend l'overlay
+  ByteTrack synchrone avec la vue WebRTC.
+
+- **Le correctif ROI de la v3.12 avait été perdu.** Il avait été injecté
+  dans le conteneur (`docker cp`) et vérifié en direct, mais jamais écrit
+  dans le dépôt du serveur : le rebuild suivant l'a effacé sans erreur.
+  Le serveur tournait en réalité 4 commits en arrière, sans
+  `batch_infer.py`, avec `AI_INTERVAL_SECONDS` à 0,15 et l'ancien `_STAGES`
+  — donc `decode_ms` / `motion_ms` / `roi_ms` / `total_ms` renvoyaient 0 et
+  masquaient le vrai coût. Le dépôt serveur est désormais synchronisé sur
+  le commit exact (`git archive` + extraction), pas fichier par fichier.
+
+- **Le déploiement pouvait échouer en silence.** `git archive` livrait les
+  scripts en CRLF : le noyau lisait le shebang comme `/usr/bin/env bash\r`,
+  `install.sh` s'arrêtait immédiatement **en code 0** et laissait les
+  conteneurs sur l'ancienne image. Un `.gitattributes` force maintenant LF
+  sur tout ce que lisent Linux, Docker et les interpréteurs.
+
+### Changed
+- **Regroupement d'inférence GPU enfin efficace** : 1,74 image par appel
+  (11 557 images en 6 652 appels, 0 repli). C'était impossible avant — la
+  barrière faisait arriver les images en lock-step. Le gain jugé
+  « négligeable » en v3.12 l'était pour cette raison.
+- **Journal d'analyse limité à 1 ligne par caméra et par seconde.** Il
+  était écrit à chaque image : indolore à 0,4 img/s, il serait devenu un
+  goulot (I/O + GIL) sur le chemin critique à 10 img/s sur 6 caméras. Une
+  détection ou une plaque force l'écriture — aucun événement réel n'est
+  perdu, seule la répétition du ralenti disparaît.
+
+### Limites connues (mesurées, pas estimées)
+- **L'objectif de 15 img/s par caméra n'est pas atteint** : on est à 1,9-7,3
+  selon la caméra. Deux plafonds durs subsistent :
+  1. **La sortie ffmpeg est bridée à 10 img/s** (`MGVMS_AI_OUTPUT_FPS`).
+     Aucune caméra ne peut dépasser ce chiffre, quel que soit le reste.
+     Le relever n'a d'intérêt qu'une fois le point 2 levé.
+  2. **Le processus Python unique (`--workers 1`)** : le GIL empêche
+     d'exploiter les 6 cœurs — le conteneur plafonne à ~300 % de CPU sur
+     600 % disponibles, GPU à 31 %. Le coût par image (YOLO 90-134 ms,
+     ALPR 90-113 ms quand actif) impose de descendre sous 67 ms par image
+     pour tenir 15 img/s, ce qui n'est pas atteignable ainsi.
+
+  Le vrai levier restant est un **pipeline IA multi-process**. Deux
+  réglages donnent un gain immédiat sans refonte : passer les caméras en
+  720p (mesuré : ~2× face au 1080p) et alléger les caméras à 19-20 plugins.
+
+## [v3.13-plaques-allegees] — 2026-08 — Page Plaques : plus de plantage
+
+### Fixed
+- **La page « Plaques » tombait dans l'ErrorBoundary.** La liste renvoyait
+  l'intégralité des images stockées en base pour chaque plaque. Mesuré :
+  `frame_thumb` (la scène HD complète) pèse **709 Ko en moyenne** sur les
+  1531 plaques automatiques, et `vehicle_crop` 88 Ko — soit **~35 Mo de
+  JSON** pour les 50 plaques d'une page, que le navigateur n'encaissait pas.
+  Ces deux champs sont désormais exclus de la liste ; le tableau n'affiche
+  d'ailleurs aucune image. Mesures avant / après :
+  | Requête | Avant | Après |
+  |---|---:|---:|
+  | `/plates?limit=5` | 3,5 Mo | 24,6 Ko |
+  | `/plates?limit=50` (page par défaut) | ~35 Mo | 266 Ko |
+- **Le crop manuel ANPR dupliquait l'image source.** `reanalyze_event`
+  recopiait la photo entière de l'événement dans `vehicle_crop`
+  (~750 Ko par plaque créée à la main), alors que l'événement d'origine
+  est déjà référencé par `event_id`. Seul le crop serré de la plaque est
+  conservé.
+
+### Added
+- **`GET /api/plates/{id}`** — fiche complète d'une plaque, images
+  comprises. La visionneuse la charge à la demande, une seule fois par
+  plaque : l'affichage reste identique pour l'utilisateur (scène HD
+  complète + insets), sans peser sur la liste.
+  ⚠ Cette route est déclarée **après** `/plates/export`, sinon FastAPI
+  ferait passer le mot « export » pour un identifiant et casserait
+  l'export CSV. Vérifié : `/plates/export` → 200 CSV,
+  `/plates/{inconnu}` → 404.
+- **`GET /api/events/{id}`** — même principe pour la visionneuse
+  d'événements. Vérifié que `/events/{id}/recording` n'est pas masquée.
+
+### Fixed (suite — trouvés en auditant la même classe de défaut)
+- **La page « Événements » transportait 20 Mo par page.** Le champ
+  `thumbnail` est la scène en 1920px : **399 Ko de moyenne** sur les
+  19 368 événements qui en portent une. Or la galerie n'affiche que
+  `thumbnail_sm` (17 Ko), et **les 19 368 en ont un** — vérifié, aucune
+  vignette perdue. Mesuré : `/events?limit=50` **~20 Mo → 3,2 Mo**.
+- **L'export CSV chargeait plus d'1 Go en mémoire.** `/plates/export`
+  rapatriait 2000 documents entiers, images comprises, pour écrire un
+  fichier texte qui n'en utilise aucune. Seules les 11 colonnes du CSV
+  sont désormais lues. Au passage, l'écriture passe de `p["champ"]` à
+  `p.get("champ", "")` : une seule plaque incomplète (créée par crop
+  manuel) faisait échouer l'export entier en `KeyError`.
+- **`/vehicles/{plaque}/passages` téléchargeait les images pour les
+  ignorer.** Cette liste ne renvoie que des booléens `has_frame` /
+  `has_vehicle` / `has_plate` ; elle rapatriait ~800 Ko d'images par
+  document juste pour tester s'ils étaient vides. MongoDB calcule
+  maintenant le booléen côté serveur.
+- **La grille « Recherche véhicule » affiche bien ses vignettes.** C'est
+  la seule liste qui a réellement besoin de `vehicle_crop` : elle le
+  demande explicitement via `with_images=1`. La scène complète y est
+  aussi chargée à l'ouverture de la fiche.
+
+### Non corrigé — à décider
+- **La base pèse ~15,4 Go** (`events` 12,8 Go, `plates` 1,2 Go,
+  `alerts` 1,4 Go) pour ~35 700 documents. Les corrections ci-dessus
+  allègent le **transport** ; elles ne réduisent pas le **stockage**.
+  La cause de fond est que les images sont stockées en base64 **dans les
+  documents Mongo** plutôt que sur disque. Deux pistes non engagées :
+  purge/rétention des scènes 1920px anciennes, ou déport des images vers
+  des fichiers avec une simple référence en base.
+
+## [v3.12-pipeline-ia-performance] — 2026-08 — Pipeline IA : le vrai goulot
+
+### Fixed
+- **Le pipeline IA plafonnait à 0,4 image/s par caméra.** La cause n'était
+  ni le GPU ni YOLO (deux hypothèses testées puis **écartées par la
+  mesure** : le décodage 4K HEVC tournait déjà sur GPU à 10-12 img/s, et
+  le regroupement d'inférence n'a donné qu'un gain négligeable). Le
+  coupable était l'étape `roi`, jusque-là **non chronométrée** : elle
+  lançait un appel HTTP **bloquant** vers go2rtc pour récupérer une image
+  HD, à chaque image analysée, jusqu'à 8 s d'attente. Résultat mesuré sur
+  6 caméras :
+  | Mesure | Avant | Après |
+  |---|---:|---:|
+  | étape `roi` | 5415 ms | ~0 ms |
+  | analyse complète | 5565 ms | ~150 ms |
+  | images/s par caméra | 0,4 | 5,6 |
+- **ByteTrack affichait la scène avec 20 à 30 s de retard** pendant que la
+  vue WebRTC était bien en direct. Le lecteur ffmpeg consommait les images
+  une par une sans jamais rattraper le tampon accumulé quand l'analyse
+  prenait du retard. Il purge maintenant les images périmées déjà en
+  mémoire (jusqu'à 8 par cycle, sans jamais bloquer). Mesuré :
+  **âge de l'image 14 000 ms → 92 ms** (20 à 182 ms selon la caméra).
+
+### Changed
+- `AI_INTERVAL_SECONDS` passe de 0,15 à **0,03 s**. À 0,15 s le pipeline
+  était plafonné *mathématiquement* à 6,7 img/s quel que soit le matériel.
+  Cette valeur avait été relevée pour contenir une saturation dont la
+  cause réelle est corrigée ci-dessus ; une nouvelle installation doit être
+  performante sans réglage manuel.
+- **Détection de mouvement sur image réduite** (max 480 px de large, noyau
+  de flou proportionnel) : le flou gaussien 21×21 sur une image 4K coûtait
+  bien plus cher que l'information qu'il apportait.
+- **Cache + backoff sur la récupération d'image HD** (1 s de cache, 30 s de
+  mise à l'écart après échec) et grab HD désactivé quand l'image de
+  travail fait déjà 1600 px ou plus.
+
+### Added
+- `backend/pipeline_v2/batch_infer.py` — regroupement des appels YOLO
+  (fenêtre 8 ms, lot max 12, repli individuel en cas d'échec). Vérifié :
+  6 threads → 1 seul appel de 6 images. Gain réel modeste, conservé car
+  il ne coûte rien.
+- Chronométrage des étapes `decode`, `motion`, `roi` et `total` dans les
+  métriques — c'est précisément leur absence qui avait masqué le goulot
+  pendant deux diagnostics erronés.
+
+### Limites connues (mesurées, pas estimées)
+- **30 images/s est hors de portée du matériel en place** : les caméras
+  livrent 20 img/s sur le flux principal et 15 img/s sur le téléobjectif.
+  On ne peut pas analyser plus d'images que la caméra n'en produit.
+- Au-delà d'environ 5,6 img/s × 6 caméras, le plafond est le **GIL** du
+  process Python unique (`--workers 1`), qui sert aussi l'API HTTP.
+  Mesure à l'appui : `detect()` prend 24,6 ms dans un process isolé contre
+  130 ms dans le backend en charge. Passer outre demande un pipeline IA
+  **multi-process** — non fait à ce stade.
+
+## [v3.11-diagnostic-pipeline] — 2026-08 — Pipeline Center : dire pourquoi ça plafonne
+
+### Fixed
+- **La page « Pipeline Center » ne récupérait plus les bonnes informations.**
+
+### Added
+- **Budget IA par caméra** exposé par le backend et affiché sur la page :
+  résolution d'analyse, nombre de pixels, plugins actifs, **goulot
+  identifié** et conseil associé. Répond à la question posée pour une
+  caméra dédiée ANPR : quel est le maximum atteignable en images/s et en
+  qualité, et qu'est-ce qui l'en empêche.
+- Statistiques du regroupement d'inférence (`batch_infer`) dans le bloc
+  runtime.
+
+## [v3.10-codec-langues-licences] — 2026-08 — Bascule H265/H264, traductions, licences
+
+### Added
+- **Interrupteur H265 | H264 dans la liste des appareils** (pas dans les
+  réglages de la caméra, comme demandé). La compatibilité n'est vérifiée
+  qu'au clic ; si le firmware refuse, un cadenas s'affiche avec le motif.
+  Vérifié sur matériel réel : certaines caméras ont ce réglage **verrouillé
+  par leur firmware** — le bouton le dit au lieu d'échouer en silence.
+- **Menu « À propos »** : licence d'utilisation / clé de licence MG-VMS, et
+  section **« Licences open source »** listant les composants réellement
+  utilisés avec leur version et leur licence. L'AGPL-3.0 d'Ultralytics y
+  est mise en évidence — c'est la seule à contrainte forte pour une
+  distribution commerciale.
+- Les liens « documentation » pointent désormais vers le wiki.
+
+### Fixed
+- **Traductions incomplètes.** 123 clés ajoutées, parité FR/EN vérifiée
+  (479 clés de chaque côté). Au passage, une classe de bug invisible au
+  contrôle de syntaxe a été corrigée : une vingtaine de fonctions
+  utilisaient `t(...)` sans que `t` soit dans leur portée — JSX
+  parfaitement valide, plantage garanti à l'exécution.
+
 ## [v3.9.2-apercu-fiabilite] — 2026-08 — Fiabilité de l'aperçu, moins de sessions caméra
 
 ### Fixed
