@@ -423,6 +423,22 @@ class CameraWorker:
                         plate_debug.append({"plate": plate_text, "skipped": "trop petit",
                                              "size": f"{pw}x{ph}"})
                         continue
+                    # v3.19 · Plaque vue sous un angle trop prononcé (quasi de
+                    # face-plongée) — le rectangle détecté devient presque
+                    # carré au lieu du ratio ~2-4:1 attendu, et le texte lu
+                    # dessus n'est plus fiable (ex réel : "722562" au lieu de
+                    # la vraie plaque, confiance 0.55 malgré tout). Mesuré sur
+                    # 25 lectures fiables (conf≥0.70) : ratio largeur/hauteur
+                    # de 2.08 à 4.31 — jamais en dessous. Testé : ni la
+                    # correction de perspective existante (crop_premium) ni
+                    # un minAreaRect ne récupèrent une lecture correcte sur ce
+                    # type de crop (trop peu de pixels réels sur la plaque) —
+                    # mieux vaut ne rien stocker qu'une plaque confiante mais
+                    # fausse. Seuil 1.8 : marge sous le minimum observé (2.08).
+                    if ph > 0 and (pw / ph) < 1.8:
+                        plate_debug.append({"plate": plate_text, "skipped": "angle trop prononcé",
+                                             "size": f"{pw}x{ph}", "ratio": round(pw / ph, 2)})
+                        continue
                     cx_n, cy_n = ((abs_x1 + abs_x2) / 2) / w, ((abs_y1 + abs_y2) / 2) / h
                     if roi_poly and not point_in_polygon(cx_n, cy_n, roi_poly):
                         plate_debug.append({"plate": plate_text, "skipped": "hors ROI",
