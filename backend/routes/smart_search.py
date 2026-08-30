@@ -63,6 +63,39 @@ def _system_prompt() -> str:
     )
 
 
+# v3.19 · Schéma JSON strict passé en "format" à Ollama (décodage
+# contraint, GBNF sous le capot) — au-delà du simple "format": "json"
+# (garantit une sortie syntaxiquement valide, mais pas les BONNES
+# valeurs), les enum ci-dessous rendent structurellement impossible pour
+# le modèle de générer une valeur hors vocabulaire (ex: "types": ["vehicle"]
+# observé en test réel avec qwen3:1.7b — "vehicle" n'existe dans aucun
+# mapping FR de smart_search.py, donnait 0 résultat silencieusement).
+_QUERY_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "target": {"type": "string", "enum": ["vehicles", "persons", "both"]},
+        "plate": {"type": ["string", "null"]},
+        "colors": {"type": "array", "items": {"type": "string"}},
+        "makes": {"type": "array", "items": {"type": "string"}},
+        "types": {
+            "type": "array",
+            "items": {"type": "string", "enum": [
+                "voiture", "camion", "moto", "vélo", "bus", "personne",
+            ]},
+        },
+        "date_from": {"type": ["string", "null"]},
+        "date_to": {"type": ["string", "null"]},
+        "time_from": {"type": ["string", "null"]},
+        "time_to": {"type": ["string", "null"]},
+        "camera_hint": {"type": ["string", "null"]},
+        "object_description": {"type": ["string", "null"]},
+    },
+    "required": ["target", "plate", "colors", "makes", "types",
+                 "date_from", "date_to", "time_from", "time_to",
+                 "camera_hint", "object_description"],
+}
+
+
 def _norm_plate(p: str) -> str:
     return (p or "").upper().replace(" ", "").replace("-", "")
 
@@ -101,6 +134,12 @@ async def _parse_query_llm(query: str) -> dict:
             {"role": "user", "content": query},
         ],
         "think": False,
+        # v3.19 · "format": "json" seul (1er essai) a réglé la troncature
+        # (126-587 tokens observés pour un JSON qui tient en 50-100) mais
+        # pas le contenu — "types": ["vehicle"] halluciné en test réel (hors
+        # vocabulaire, 0 résultat silencieux). Le schéma complet avec enum
+        # (_QUERY_JSON_SCHEMA) rend cette valeur structurellement impossible.
+        "format": _QUERY_JSON_SCHEMA,
         "stream": False,
     }
     # v3.19 · Open WebUI expose son API native sous /api/chat/completions
@@ -116,6 +155,13 @@ async def _parse_query_llm(query: str) -> dict:
         # d'exception explicite dans le message pour ne plus deviner.
         async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(url, json=payload, headers=headers)
+            if resp.status_code >= 400:
+                # v3.19 · resp.raise_for_status() seul ne donne que "400 Bad
+                # Request" — le corps de la réponse (souvent le vrai message
+                # de validation d'Open WebUI/Ollama) était perdu, rendant le
+                # diagnostic impossible à distance. Capturé explicitement.
+                logger.warning("smart-search LLM HTTP %s — body: %s",
+                                resp.status_code, resp.text[:500])
             resp.raise_for_status()
             body = resp.json()
         raw = body["choices"][0]["message"]["content"]
