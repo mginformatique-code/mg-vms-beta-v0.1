@@ -105,6 +105,10 @@ export default function Events() {
   const [smart, setSmart] = useState("");
   const [smartLoading, setSmartLoading] = useState(false);
   const [smartResult, setSmartResult] = useState(null);
+  // v3.19 · Voir le commentaire sur VehiclesSection/initialQuery — relie la
+  // recherche IA générale au chip Plaques quand la requête cible des
+  // véhicules.
+  const [plaquesQuery, setPlaquesQuery] = useState("");
 
   const activeFilter = FILTERS.find((f) => f.id === filtre) || FILTERS[0];
   const isPlaques = filtre === "plaques";
@@ -129,11 +133,33 @@ export default function Events() {
   const clearSmart = () => { setSmart(""); setSmartResult(null); };
 
   // Source affichée : résultats IA si une recherche est active, sinon flux normal
-  const shown = smartResult ? (smartResult.events || []) : events;
+  // v3.17 · `qos_alert` (pipeline_v2/qos_alerts.py) est une alerte système
+  // texte (latence, drops...) SANS caméra ni image par conception — elle
+  // s'affichait ici comme une carte photo cassée (« Aucune image
+  // disponible »), indiscernable d'un vrai bug de chargement. Cette galerie
+  // est une vue de détections visuelles ; les alertes système restent en
+  // base (consultables ailleurs) mais n'y apparaissent plus.
+  const shown = (smartResult ? (smartResult.events || []) : events)
+    .filter((e) => e.type !== "qos_alert");
   // Position courante de l'id suivi dans `shown` — recalculée à chaque
   // render, donc toujours correcte même si `shown`/`events` a été reconstruit
   // entre-temps (poll, recherche IA qui change la source, etc.).
   const viewerIdx = viewerId !== null ? shown.findIndex((x) => x.id === viewerId) : -1;
+
+  // v3.13 · La liste /events ne renvoie plus la scène 1920px (`thumbnail`,
+  // ~400 Ko par événement) : la galerie n'affiche que `thumbnail_sm` (17 Ko).
+  // La grande version est chargée à la demande, une seule fois par
+  // événement, quand la visionneuse s'ouvre.
+  const [eventDetails, setEventDetails] = useState({});
+  useEffect(() => {
+    if (!viewerId || eventDetails[viewerId]) return undefined;
+    let cancelled = false;
+    api.get(`/events/${viewerId}`)
+      .then((r) => { if (!cancelled) setEventDetails((prev) => ({ ...prev, [viewerId]: r.data })); })
+      .catch(() => { /* la petite vignette reste affichée */ });
+    return () => { cancelled = true; };
+  }, [viewerId, eventDetails]);
+  const viewerItems = shown.map((e) => (eventDetails[e.id] ? { ...e, ...eventDetails[e.id] } : e));
 
   const setFiltre = (id) => {
     const next = new URLSearchParams(searchParams);
@@ -274,6 +300,25 @@ export default function Events() {
         </div>
       )}
 
+      {/* v3.19 · La galerie Événements n'affiche que smartResult.events —
+          une requête classée target:vehicles (ex: "voiture", "voiture
+          rouge") peut trouver de vrais véhicules sans qu'aucun ne
+          s'affiche ici, sans indication d'où chercher. Signalé : "toujours
+          rien" alors que l'API renvoyait bien des résultats. */}
+      {!isPlaques && smartResult && (smartResult.vehicles || []).length > 0 && (
+        <div className="border border-[#00E676]/40 bg-[#00E676]/5 p-2 text-[11px] flex items-center gap-2" data-testid="events-smart-vehicles-hint">
+          <CreditCard size={13} className="text-[#00E676] shrink-0" />
+          <span>{smartResult.vehicles.length} véhicule(s) correspondent à « {smartResult.query} » — pas affichés ici (galerie événements).</span>
+          <button
+            onClick={() => { setPlaquesQuery(smartResult.query); setFiltre("plaques"); }}
+            data-testid="events-smart-goto-plaques"
+            className="ml-auto text-[10px] uppercase tracking-wider text-[#00E676] hover:underline shrink-0"
+          >
+            Voir dans Plaques
+          </button>
+        </div>
+      )}
+
 
       {/* Chips de filtre — vue unifiée */}
       <div className="flex items-center gap-1.5 flex-wrap" data-testid="events-filter-chips">
@@ -298,7 +343,7 @@ export default function Events() {
       </div>
 
       {isPlaques ? (
-        <VehiclesSection embedded />
+        <VehiclesSection embedded initialQuery={plaquesQuery} />
       ) : shown.length === 0 ? (
         <div className="text-muted-foreground text-sm py-20 text-center" data-testid="events-empty">
           {smartResult ? "Aucun événement ne correspond à cette recherche IA." : "Aucun événement détecté pour ces filtres."}
@@ -311,7 +356,7 @@ export default function Events() {
             return (
               <button key={e.id} onClick={() => setViewerId(e.id)} className="border border-border bg-card overflow-hidden text-left hover:border-[#0044FF] transition-colors" data-testid="event-card">
                 <div className="relative bg-black aspect-video cursor-zoom-in">
-                  {e.thumbnail ? (
+                  {(e.thumbnail_sm || e.thumbnail) ? (
                     <img src={e.thumbnail_sm || e.thumbnail} alt={e.type} className="w-full h-full object-cover"
                          loading="lazy" />
                   ) : (
@@ -357,7 +402,7 @@ export default function Events() {
 
       {viewerIdx >= 0 && (
         <EventViewer
-          items={shown}
+          items={viewerItems}
           index={viewerIdx}
           onIndex={(i) => setViewerId(shown[i]?.id ?? null)}
           onClose={() => setViewerId(null)}

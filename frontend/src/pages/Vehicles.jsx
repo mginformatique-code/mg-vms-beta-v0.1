@@ -36,7 +36,7 @@ function passageThumbUrl(passageId, kind = "vehicle") {
  * fiche véhicule complète : galerie, timeline, heatmap, caméras visitées,
  * parcours, habitudes.
  */
-export function VehiclesSection({ embedded = false }) {
+export function VehiclesSection({ embedded = false, initialQuery = "" }) {
   const { t } = useApp();
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
@@ -230,6 +230,16 @@ export function VehiclesSection({ embedded = false }) {
 
   // Chargement initial + refresh 30 s (pausé si le drawer est ouvert)
   useEffect(() => { load(""); loadAnomalies(); loadIdentities(); }, [load, loadAnomalies, loadIdentities]);
+  // v3.19 · Relie la recherche IA générale (menu Événements → "Tous") à
+  // celle-ci : "voiture"/"voiture rouge" y sont classés target:vehicles
+  // avec de vrais résultats, mais la galerie Événements n'affiche que son
+  // propre tableau "events" (jamais "vehicles") — rien ne s'affichait,
+  // sans indication d'où chercher. Le bouton "Voir dans Plaques" bascule
+  // ici et relance la MÊME requête pour éviter de la retaper.
+  useEffect(() => {
+    if (initialQuery) { setSmart(initialQuery); runSmartSearch(initialQuery); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialQuery]);
   useEffect(() => {
     if (openPlate) return; // pause pendant l'ouverture du drawer
     const iv = setInterval(() => { load(q); loadAnomalies(); }, 30000);
