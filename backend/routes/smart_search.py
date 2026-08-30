@@ -181,13 +181,52 @@ async def _parse_query_llm(query: str) -> dict:
         txt = txt.strip("`")
         if txt.startswith("json"): txt = txt[4:].strip()
     try:
-        return json.loads(txt)
+        parsed = json.loads(txt)
     except Exception:
         raise HTTPException(status_code=502,
                             detail={"code": "SMART_SEARCH_LLM_PARSE_ERROR",
                                     "error": "llm_parse_error",
                                     "message": "Réponse LLM invalide (JSON attendu).",
                                     "raw": txt[:300]})
+    return _strip_hallucinated_time(query, parsed)
+
+
+# v3.19 · Le schéma JSON (enum) empêche les valeurs hors vocabulaire mais
+# date_from/date_to/time_from/time_to restent du texte libre, non
+# contraignable par enum — observé en conditions réelles : qwen3:1.7b
+# invente régulièrement "aujourd'hui 06:00-12:00" même sur une requête
+# sans aucune référence temporelle ("voiture" seul), ce qui rétrécit
+# silencieusement la recherche à une fenêtre où il n'y a peut-être aucune
+# correspondance — exactement le "0 résultat" signalé par l'utilisateur
+# sur une requête qui n'avait pourtant rien d'ambigu. Filet déterministe,
+# indépendant de la fiabilité du modèle : si la requête ne contient
+# AUCUN indice temporel reconnaissable, on efface toute date/heure
+# renvoyée par le LLM plutôt que de lui faire confiance.
+_TIME_HINT_WORDS = (
+    "hier", "aujourd'hui", "aujourdhui", "matin", "soir", "nuit",
+    "après-midi", "apres-midi", "semaine", "mois", "année", "annee",
+    "maintenant", "récemment", "recemment", "dernier", "dernière", "derniere",
+    "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche",
+    "janvier", "février", "fevrier", "mars", "avril", "mai", "juin",
+    "juillet", "août", "aout", "septembre", "octobre", "novembre", "décembre", "decembre",
+)
+_TIME_HINT_PATTERN = re.compile(
+    r"\b\d{1,2}\s*[h:]\s*\d{0,2}\b"       # "12h", "12h30", "12:30"
+    r"|\b\d{4}-\d{2}-\d{2}\b"             # "2026-08-30"
+    r"|\b\d{1,2}/\d{1,2}(/\d{2,4})?\b"    # "30/08" ou "30/08/2026"
+)
+
+
+def _strip_hallucinated_time(query: str, filters: dict) -> dict:
+    ql = query.lower()
+    has_hint = any(w in ql for w in _TIME_HINT_WORDS) or bool(_TIME_HINT_PATTERN.search(ql))
+    if not has_hint:
+        for k in ("date_from", "date_to", "time_from", "time_to"):
+            if filters.get(k):
+                logger.info("smart-search: date/heure ignorée (aucun indice temporel dans %r) — %s=%r",
+                            query, k, filters[k])
+            filters[k] = None
+    return filters
 
 
 # ────────────────────────────────────────────────────────────────
