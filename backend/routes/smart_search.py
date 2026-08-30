@@ -101,17 +101,23 @@ async def _parse_query_llm(query: str) -> dict:
     # OpenAI-compat standard /v1/... sur cette instance.
     url = f"{cfg['base_url']}/api/chat/completions"
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        # v3.19 · 30s était trop court et produisait un message d'erreur VIDE
+        # (str() d'un httpx.TimeoutException ne contient rien) — indiscernable
+        # d'une vraie panne. Un modèle 14B auto-hébergé peut légitimement
+        # prendre plus de temps qu'un appel API cloud habituel. 120s + type
+        # d'exception explicite dans le message pour ne plus deviner.
+        async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             body = resp.json()
         raw = body["choices"][0]["message"]["content"]
     except Exception as e:
-        logger.warning("smart-search LLM failed: %s", e)
+        logger.warning("smart-search LLM failed: %s: %s", type(e).__name__, e)
+        detail_msg = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__} (voir logs backend)"
         raise HTTPException(status_code=502,
                             detail={"code": "SMART_SEARCH_LLM_ERROR",
                                     "error": "llm_error",
-                                    "message": f"Le service LLM a échoué : {str(e)[:150]}"})
+                                    "message": f"Le service LLM a échoué : {detail_msg[:150]}"})
     txt = (raw or "").strip()
     if txt.startswith("```"):
         txt = txt.strip("`")
