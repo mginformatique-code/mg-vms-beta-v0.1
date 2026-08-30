@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -87,12 +88,18 @@ async def _parse_query_llm(query: str) -> dict:
     headers = {"Content-Type": "application/json"}
     if cfg.get("api_key"):
         headers["Authorization"] = f"Bearer {cfg['api_key']}"
+    # v3.19 · Qwen3 "réfléchit" par défaut (chain-of-thought), même sur une
+    # tâche aussi simple que ce parsing JSON — latence ajoutée pour rien ici.
+    # `/no_think` (convention Qwen3, fonctionne au niveau du prompt donc
+    # indépendamment de l'API utilisée) + `think: false` (au cas où Open
+    # WebUI le relaie à Ollama) coupent le raisonnement visible.
     payload = {
         "model": cfg["model"],
         "messages": [
             {"role": "system", "content": _system_prompt()},
-            {"role": "user", "content": query},
+            {"role": "user", "content": f"/no_think\n{query}"},
         ],
+        "think": False,
         "stream": False,
     }
     # v3.19 · Open WebUI expose son API native sous /api/chat/completions
@@ -119,6 +126,10 @@ async def _parse_query_llm(query: str) -> dict:
                                     "error": "llm_error",
                                     "message": f"Le service LLM a échoué : {detail_msg[:150]}"})
     txt = (raw or "").strip()
+    # Filet de sécurité : certains déploiements Qwen3 émettent un bloc
+    # <think>...</think> (même vide) malgré /no_think + think:false.
+    if "<think>" in txt:
+        txt = re.sub(r"<think>.*?</think>", "", txt, flags=re.DOTALL).strip()
     if txt.startswith("```"):
         txt = txt.strip("`")
         if txt.startswith("json"): txt = txt[4:].strip()
