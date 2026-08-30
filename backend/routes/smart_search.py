@@ -89,15 +89,16 @@ async def _parse_query_llm(query: str) -> dict:
     if cfg.get("api_key"):
         headers["Authorization"] = f"Bearer {cfg['api_key']}"
     # v3.19 · Qwen3 "réfléchit" par défaut (chain-of-thought), même sur une
-    # tâche aussi simple que ce parsing JSON — latence ajoutée pour rien ici.
-    # `/no_think` (convention Qwen3, fonctionne au niveau du prompt donc
-    # indépendamment de l'API utilisée) + `think: false` (au cas où Open
-    # WebUI le relaie à Ollama) coupent le raisonnement visible.
+    # tâche aussi simple que ce parsing JSON. Le préfixe `/no_think` dans le
+    # prompt ne le désactive PAS de façon fiable (confirmé par la session
+    # "Local AI Qwen GPU setup" — thinking complet malgré le préfixe) ; seul
+    # le paramètre d'API `think: false` fonctionne réellement (confirmé :
+    # 0.557s de bout en bout, modèle chaud, contre 2min19 sans).
     payload = {
         "model": cfg["model"],
         "messages": [
             {"role": "system", "content": _system_prompt()},
-            {"role": "user", "content": f"/no_think\n{query}"},
+            {"role": "user", "content": query},
         ],
         "think": False,
         "stream": False,
