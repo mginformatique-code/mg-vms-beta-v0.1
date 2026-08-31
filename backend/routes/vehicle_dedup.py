@@ -271,7 +271,7 @@ async def _ask_qwen_same_vehicle(a: dict, b: dict) -> dict:
 async def _run_dedup_batch(limit: int = _MAX_CANDIDATES_PER_RUN) -> int:
     candidates = await _find_candidates(limit)
     created = 0
-    for plate_a, plate_b, _weight in candidates:
+    for plate_a, plate_b, _weight, _source in candidates:
         try:
             a = await _plate_stats(plate_a)
             b = await _plate_stats(plate_b)
