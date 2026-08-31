@@ -993,7 +993,7 @@ async def vehicle_identity(plate: str,
 # ═══════════════════════════════════════════════════════════════════
 # 8b. Anomalies (Habitudes → Alertes) — v0.6b
 # ═══════════════════════════════════════════════════════════════════
-async def _compute_anomaly(plate: str, user: dict) -> dict:
+async def _compute_anomaly(plate: str, user: dict, exact: bool = False) -> dict:
     """Calcule un rapport d'anomalie pour la **dernière** passe d'un véhicule.
 
     Compare le dernier timestamp aux habitudes calculées (arrivée typique,
@@ -1007,10 +1007,19 @@ async def _compute_anomaly(plate: str, user: dict) -> dict:
           "message": "phrase explicative",
           "habits": {typical_arrival, typical_departure, typical_days, ...},
         }
+
+    v3.20 · `exact=True` (utilisé par `vehicles_anomalies_recent`, qui
+    appelle cette fonction jusqu'à 300 fois par requête) — la plaque vient
+    déjà normalisée d'un `$group` Mongo, donc une égalité exacte suffit et
+    peut utiliser l'index composé `{plate:1, timestamp:-1}`. Le `$regex`
+    (nécessaire pour une saisie utilisateur libre, cf. appels ailleurs)
+    ne peut pas l'utiliser efficacement — mesuré en réel : 300 appels
+    regex séquentiels saturaient MongoDB à 432% CPU, ralentissant tout le
+    reste (dashboard, recherche) pendant plusieurs minutes.
     """
     normalized = plate.upper().replace(" ", "").replace("-", "")
     q = await _base_match(user)
-    q["plate"] = {"$regex": normalized, "$options": "i"}
+    q["plate"] = normalized if exact else {"$regex": normalized, "$options": "i"}
 
     docs = await db.plates.find(
         q, {"_id": 0, "timestamp": 1, "camera_name": 1}
@@ -1141,7 +1150,7 @@ async def vehicles_anomalies_recent(
         if not last or last.timestamp() < since_dt:
             continue
         try:
-            report = await _compute_anomaly(row["_id"], user)
+            report = await _compute_anomaly(row["_id"], user, exact=True)
         except Exception:
             continue
         if report.get("severity") in ("warning", "high"):
