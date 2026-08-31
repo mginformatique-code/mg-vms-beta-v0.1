@@ -131,10 +131,11 @@ async def _find_time_proximity_candidates(counts: dict[str, int], linked: set[st
     qu'une comparaison de texte seule ne peut pas voir. Confirmé sur un
     cas réel (crops identiques, plaques "TR1351G" vs "CG16598", 17s
     d'écart, même caméra)."""
-    rows = []
-    async for row in db.plates.find(
+    all_rows = await db.plates.find(
         {}, {"_id": 0, "plate": 1, "camera_id": 1, "timestamp": 1}
-    ).sort([("camera_id", 1), ("timestamp", 1)]).to_list(20000):
+    ).sort([("camera_id", 1), ("timestamp", 1)]).to_list(20000)
+    rows = []
+    for row in all_rows:
         if row.get("plate") in linked:
             continue
         rows.append(row)
