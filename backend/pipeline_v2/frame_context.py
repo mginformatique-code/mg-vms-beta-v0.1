@@ -53,7 +53,13 @@ def dominant_color_fr(bgr_crop):
     mean_s, mean_v = float(s.mean()), float(v.mean())
     if mean_v < 60:
         return "Noir"
-    if mean_s < 45:
+    # v3.20 · Seuil relevé de 45 à 65 — signalé en réel : deux carrosseries
+    # gris/argent métallisées, en plein jour, mesurées à mean_s=57.4 et 60.0
+    # (reflets du ciel sur la peinture réfléchissante), classées "Bleu" à
+    # tort. Comparé à deux lectures réelles d'un véhicule bleu-ardoise
+    # confirmé (mean_s=74.2 et 109.1) — marge nette entre les deux groupes,
+    # 65 les sépare proprement sans re-créer le biais inverse.
+    if mean_s < 65:
         if mean_v > 170:
             return "Blanc"
         return "Gris"
