@@ -27,6 +27,7 @@ system_admin_router = APIRouter(prefix="/api/system", tags=["system-admin"])
 logger = logging.getLogger("mg-vms")
 
 _REBOOT_FLAG_PATH = "/logs/host-reboot-requested"
+_NTP_UPSTREAM_FLAG_PATH = "/logs/host-ntp-upstream-requested"
 _WEEKDAY_NAMES = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 _DAY_CHOICES = _WEEKDAY_NAMES + ("daily",)
 
@@ -88,6 +89,36 @@ async def put_auto_reboot(data: AutoRebootIn, user: dict = Depends(require_role(
     await db.settings.update_one({"key": "auto_reboot"}, {"$set": {"key": "auto_reboot", "value": value}}, upsert=True)
     await log_audit(user, "auto_reboot_updated", str(value))
     return value
+
+
+class NtpUpstreamIn(BaseModel):
+    upstream: str = ""
+
+
+async def _load_ntp_upstream() -> str:
+    doc = await db.settings.find_one({"key": "ntp_upstream"}, {"_id": 0})
+    return (doc or {}).get("value") or ""
+
+
+@system_admin_router.get("/ntp-upstream")
+async def get_ntp_upstream(user: dict = Depends(require_role("admin"))):
+    return {"upstream": await _load_ntp_upstream()}
+
+
+@system_admin_router.put("/ntp-upstream")
+async def put_ntp_upstream(data: NtpUpstreamIn, user: dict = Depends(require_role("admin"))):
+    """v3.19 · Serveur NTP amont utilisé par chrony (l'hôte) pour se
+    synchroniser avant de diffuser l'heure aux caméras — vide = pool Debian
+    par défaut. Le conteneur backend n'édite jamais /etc/chrony directement
+    (pas d'accès hôte) : il dépose un fichier marqueur dans /logs, repris
+    par le même timer hôte que le reboot (reboot-watch.sh)."""
+    value = data.upstream.strip()
+    await db.settings.update_one({"key": "ntp_upstream"}, {"$set": {"key": "ntp_upstream", "value": value}}, upsert=True)
+    os.makedirs(os.path.dirname(_NTP_UPSTREAM_FLAG_PATH), exist_ok=True)
+    with open(_NTP_UPSTREAM_FLAG_PATH, "w") as f:
+        f.write(value + "\n")
+    await log_audit(user, "ntp_upstream_updated", value or "(défaut)")
+    return {"upstream": value}
 
 
 async def ntp_resync_loop() -> None:

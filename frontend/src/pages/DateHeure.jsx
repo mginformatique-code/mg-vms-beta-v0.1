@@ -23,7 +23,26 @@ export default function DateHeurePage() {
       </div>
 
       <SystemClockCard admin={user?.role === "admin"} />
-      <NtpCard />
+      <NtpCard admin={user?.role === "admin"} />
+      <LiveClockCard />
+    </div>
+  );
+}
+
+// v3.19 · Horloge en temps réel, purement client (tick local, pas d'appel
+// serveur à chaque seconde) — distincte de la "Date & heure serveur"
+// ci-dessus qui ne se rafraîchit que toutes les 30s.
+function LiveClockCard() {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const iv = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(iv);
+  }, []);
+  return (
+    <div className="bg-card border border-border p-5 text-center" data-testid="live-clock">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Heure en temps réel (navigateur)</div>
+      <div className="mono text-3xl font-bold tabular-nums">{now.toLocaleTimeString("fr-FR")}</div>
+      <div className="text-xs text-muted-foreground mt-1">{now.toLocaleDateString("fr-FR", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</div>
     </div>
   );
 }
@@ -143,12 +162,24 @@ function SystemClockCard({ admin }) {
 // par caméra ("Définir comme serveur de temps") reste dans Appareils →
 // modifier, à côté des autres réglages de cette caméra ; pas dupliqué ici,
 // juste un décompte.
-function NtpCard() {
+function NtpCard({ admin }) {
   const [cams, setCams] = useState(null);
+  const [upstream, setUpstream] = useState(null);
+  const [savingUpstream, setSavingUpstream] = useState(false);
 
   useEffect(() => {
     api.get("/cameras").then((r) => setCams(r.data || [])).catch(() => setCams([]));
-  }, []);
+    if (admin) api.get("/system/ntp-upstream").then((r) => setUpstream(r.data.upstream || "")).catch(() => setUpstream(""));
+  }, [admin]);
+
+  const saveUpstream = async () => {
+    setSavingUpstream(true);
+    try {
+      await api.put("/system/ntp-upstream", { upstream });
+      toast.success("Serveur NTP amont mis à jour — MG-VMS s'y synchronisera avant de diffuser l'heure aux caméras.");
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+    finally { setSavingUpstream(false); }
+  };
 
   if (cams === null) return null;
   const onvifCams = cams.filter((c) => c.mode === "onvif");
@@ -167,9 +198,25 @@ function NtpCard() {
           ))}
         </div>
       )}
-      <p className="text-[11px] text-muted-foreground leading-relaxed">
+      <p className="text-[11px] text-muted-foreground leading-relaxed mb-4">
         Pour activer une caméra : Appareils → modifier la caméra (mode ONVIF) → "Définir comme serveur de temps".
       </p>
+
+      {admin && upstream !== null && (
+        <div className="border-t border-border pt-4">
+          <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Serveur NTP amont</label>
+          <p className="text-[11px] text-muted-foreground leading-relaxed mb-2">
+            MG-VMS se synchronise sur ce serveur avant de diffuser l'heure aux caméras. Vide = pool Debian par défaut.
+          </p>
+          <div className="flex gap-2">
+            <input value={upstream} onChange={(e) => setUpstream(e.target.value)} placeholder="ex. pool.ntp.org ou 192.168.1.1" data-testid="ntp-upstream-input"
+                   className="flex-1 px-3 py-2 bg-background border border-input outline-none mono text-sm focus:border-[#0044FF]" />
+            <button onClick={saveUpstream} disabled={savingUpstream} data-testid="ntp-upstream-save" className="flex items-center gap-2 px-4 py-2 bg-[#0044FF] text-white text-sm shrink-0">
+              {savingUpstream && <Loader2 size={14} className="animate-spin" />}<Save size={14} /> Enregistrer
+            </button>
+          </div>
+        </div>
+      )}
     </SectionCard>
   );
 }
