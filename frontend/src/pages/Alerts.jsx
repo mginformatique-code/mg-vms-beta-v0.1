@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
-import { Bell, Check, AlertTriangle, Info, ShieldAlert, BrainCircuit, Eye } from "lucide-react";
+import { Bell, Check, CheckCheck, AlertTriangle, Info, ShieldAlert, BrainCircuit, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import EventViewer from "@/components/EventViewer";
@@ -166,6 +166,16 @@ export default function Alerts() {
   useEffect(() => { if (alertPing) load(); }, [alertPing]);
 
   const ack = async (id) => { try { await api.post(`/alerts/${id}/ack`); toast.success(t("alerts.acked")); load(); } catch (e) { toast.error("Erreur"); } };
+  const [ackingAll, setAckingAll] = useState(false);
+  const ackAll = async () => {
+    setAckingAll(true);
+    try {
+      const r = await api.post("/alerts/ack-all");
+      const n = r.data.acknowledged || 0;
+      toast.success(n > 0 ? `${n} ${t("alerts.ack_all_done")}` : t("alerts.ack_all_none"));
+      load();
+    } catch (e) { toast.error("Erreur"); } finally { setAckingAll(false); }
+  };
 
   return (
     <div className="p-4">
@@ -173,6 +183,7 @@ export default function Alerts() {
         <h1 className="font-head font-bold text-2xl tracking-tight flex items-center gap-2"><Bell size={22} /> {t("alerts.title")}</h1>
         <div className="flex items-center gap-2">
           {can("technician") && <button onClick={() => setRulesOpen(true)} data-testid="ai-rules-btn" className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border hover:bg-secondary"><BrainCircuit size={14} /> {t("alr.ai_rules_short")}</button>}
+          {can("client") && <button onClick={ackAll} disabled={ackingAll} data-testid="alerts-ack-all-btn" className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border hover:bg-secondary disabled:opacity-40"><CheckCheck size={14} /> {t("alerts.ack_all")}</button>}
           <div className="flex border border-border">
             {[["all", t("common.all")], ["unacked", t("alerts.unacked")], ["acked", t("alerts.acked")]].map(([k, lbl]) => (
               <button key={k} onClick={() => setFilter(k)} data-testid={`alert-filter-${k}`}

@@ -2063,6 +2063,15 @@ async def ack_alert(alert_id: str, user: dict = Depends(require_role("client")))
     return {"ok": True}
 
 
+@api_router.post("/alerts/ack-all")
+async def ack_all_alerts(user: dict = Depends(require_role("client"))):
+    q = {"acknowledged": False}
+    site_scope(q, user)
+    res = await db.alerts.update_many(q, {"$set": {"acknowledged": True}})
+    await log_audit(user, "alert_acknowledged_bulk", str(res.modified_count))
+    return {"ok": True, "acknowledged": res.modified_count}
+
+
 class EventFeedback(BaseModel):
     verdict: str  # "true_positive" | "false_positive"
 
