@@ -53,6 +53,7 @@ from routes.llm_settings import llm_settings_router
 from routes.discovery import discovery_router
 from routes.system_admin import system_admin_router, auto_reboot_loop, ntp_resync_loop
 from routes.vehicle_dedup import vehicle_dedup_router, dedup_batch_loop
+from routes.anpr_tuning import anpr_tuning_router, anpr_tuning_loop
 from wsdl_path import validate_wsdl_dir
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -145,6 +146,7 @@ app.include_router(security_router)
 app.include_router(tls_router)   # v0.7.f · Wave G · sous-menu HTTPS/TLS
 app.include_router(system_admin_router)  # v3.19 · Paramètres système (date/heure, reboot)
 app.include_router(vehicle_dedup_router)  # v3.20 · Doublons véhicule assistés par Qwen
+app.include_router(anpr_tuning_router)  # v3.20 · Seuil confiance ANPR auto-réglé par Qwen
 
 app.add_middleware(SecurityMiddleware)
 
@@ -223,6 +225,7 @@ async def on_startup():
     asyncio.create_task(auto_reboot_loop())
     asyncio.create_task(ntp_resync_loop())
     asyncio.create_task(dedup_batch_loop())
+    asyncio.create_task(anpr_tuning_loop())
     logger.info("MG-VMS API démarré - données initialisées + broadcaster temps réel actif")
     # v3.1.7 · SUPPRIMÉ : l'auto-start `VideoCoreManager.ensure_camera()` pour
     # chaque caméra ici ouvrait une 2e connexion RTSP DIRECTE vers la caméra
