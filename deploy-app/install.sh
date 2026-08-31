@@ -387,6 +387,22 @@ do
   mkdir -p "$d" && ok "dossier : $d"
 done
 
+# v3.19 · Timer systemd hôte pour le redémarrage machine déclenché depuis
+# le menu Paramètres → Système. Le backend n'a jamais accès à Docker ni à
+# l'hôte (pas de socket Docker monté) — il dépose juste un fichier marqueur
+# dans /logs ; ce timer (hors conteneur) le surveille chaque minute et
+# exécute lui-même `systemctl reboot`. Idempotent — sans effet sur une
+# install déjà à jour.
+if command -v systemctl >/dev/null 2>&1; then
+  install -m 0755 reboot-watch.sh /opt/mg-vms-beta-v0.1/deploy-app/reboot-watch.sh
+  cp mgvms-reboot-watch.service mgvms-reboot-watch.timer /etc/systemd/system/
+  systemctl daemon-reload
+  systemctl enable --now mgvms-reboot-watch.timer >/dev/null 2>&1
+  ok "timer mgvms-reboot-watch.timer actif (reboot machine piloté depuis l'UI)"
+else
+  warn "systemctl introuvable — le reboot machine depuis l'UI (Paramètres → Système) ne fonctionnera pas"
+fi
+
 # ══════════════════════════════════════════════════════════════════════
 # 6. Build & démarrage
 # ══════════════════════════════════════════════════════════════════════

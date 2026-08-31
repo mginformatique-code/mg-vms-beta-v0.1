@@ -1,0 +1,10 @@
+[Unit]
+Description=MG-VMS - controle la demande de redemarrage toutes les minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Unit=mgvms-reboot-watch.service
+
+[Install]
+WantedBy=timers.target

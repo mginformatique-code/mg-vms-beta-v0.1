@@ -1,0 +1,6 @@
+[Unit]
+Description=MG-VMS - verifie la demande de redemarrage depuis l'interface
+
+[Service]
+Type=oneshot
+ExecStart=/opt/mg-vms-beta-v0.1/deploy-app/reboot-watch.sh
