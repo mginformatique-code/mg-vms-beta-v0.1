@@ -135,15 +135,28 @@ async def _ask_qwen_same_vehicle(a: dict, b: dict) -> dict:
         raise HTTPException(status_code=503, detail={"code": "DEDUP_LLM_NOT_CONFIGURED",
                                                         "message": "LLM non configuré (Administration → LLM)."})
     import httpx
+    # v3.20 · Constaté en test réel : un schéma avec un champ `boolean` et
+    # aucun message système laisse qwen3:1.7b répondre en PROSE LIBRE malgré
+    # `"format"` (contrairement à smart_search.py, qui s'appuie sur des
+    # `enum` stricts + un message système explicite). Reproduit le même
+    # remède ici : enum string au lieu de boolean, message système qui
+    # épelle le schéma en clair EN PLUS du paramètre `format` — confirmé en
+    # test direct, réponse JSON conforme à chaque essai après ce changement.
     schema = {
         "type": "object",
         "properties": {
-            "same_vehicle": {"type": "boolean"},
+            "same_vehicle": {"type": "string", "enum": ["oui", "non"]},
             "confidence": {"type": "number"},
             "reason": {"type": "string"},
         },
         "required": ["same_vehicle", "confidence", "reason"],
     }
+    system = (
+        "Tu es un comparateur de plaques ANPR. Réponds UNIQUEMENT avec un objet "
+        "JSON valide respectant EXACTEMENT ce schéma : "
+        '{"same_vehicle": "oui"|"non", "confidence": nombre entre 0 et 1, '
+        '"reason": texte court}. Aucun texte hors JSON.'
+    )
     prompt = (
         "Deux plaques lues par un système ANPR pourraient être le MÊME véhicule "
         "mal lu deux fois (confusions OCR courantes : 0/O, 1/I, 5/S, 8/B, 2/Z). "
@@ -161,13 +174,16 @@ async def _ask_qwen_same_vehicle(a: dict, b: dict) -> dict:
         headers["Authorization"] = f"Bearer {cfg['api_key']}"
     payload = {
         "model": cfg["model"],
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
         "think": False,
         "format": schema,
         "stream": False,
     }
     url = f"{cfg['base_url']}/api/chat/completions"
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with httpx.AsyncClient(timeout=25.0) as client:
         resp = await client.post(url, json=payload, headers=headers)
         resp.raise_for_status()
         body = resp.json()
@@ -176,7 +192,12 @@ async def _ask_qwen_same_vehicle(a: dict, b: dict) -> dict:
         raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
     if raw.startswith("```"):
         raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw).strip()
-    return json.loads(raw)
+    parsed = json.loads(raw)
+    return {
+        "same_vehicle": parsed.get("same_vehicle") == "oui",
+        "confidence": parsed.get("confidence"),
+        "reason": parsed.get("reason", ""),
+    }
 
 
 async def _run_dedup_batch(limit: int = _MAX_CANDIDATES_PER_RUN) -> int:
