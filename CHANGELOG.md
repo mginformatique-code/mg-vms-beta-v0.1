@@ -2,6 +2,78 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.20-parametres-systeme-ntp] — 2026-08-31 — Paramètres système, serveur NTP caméras, chantier TTS
+
+### Added
+- **Menu "Date et heure"** (séparé de Paramètres/Stockage) : horloge
+  serveur temps réel, redémarrage machine programmable (jour/heure) ou
+  immédiat — déclenché via un fichier marqueur surveillé par un timer
+  systemd côté hôte, le conteneur backend n'a jamais accès à Docker ni à
+  l'hôte (décision explicite, pas de socket Docker monté).
+- **MG-VMS comme serveur NTP pour les caméras.** `chrony` installé et
+  configuré côté hôte, sert le réseau caméras — les caméras dérivent ou
+  perdent l'heure après un reboot sans ça. Bouton "Définir comme serveur
+  de temps" par caméra (Appareils → modifier, mode ONVIF) : API native
+  `reolink-aio` pour Reolink (plus fiable), ONVIF générique pour le reste
+  (Hikvision compris — pas d'ISAPI natif intégré). Resynchronisation
+  automatique programmable (24h conseillé / 48h / 72h / personnalisé).
+  Case à cocher "Tester l'API NTP" ajoutée au test de connexion
+  pré-ajout caméra (lecture seule).
+- **Son caméra en direct.** Vérifié par ffprobe direct que plusieurs
+  Reolink de ce parc diffusent une vraie piste audio AAC, alors que le
+  flux WebRTC ne demandait que la vidéo par défaut. Corrigé côté sous-flux
+  uniquement (`#video=copy#audio=opus` sur la variante `_preview` de
+  go2rtc) — le flux principal, partagé avec le recorder et l'IA, reste
+  inchangé. Bouton haut-parleur sur le lecteur vidéo.
+- **Centre caméras** (`/camera-center`) : était un lien mort (redirection
+  silencieuse vers Appareils). Remplacé par une grille technique — statut,
+  site, plugins IA actifs par caméra (seul champ non dupliqué avec
+  Appareils/Live/tableau de bord santé/Dashboard après audit des écrans
+  existants) — clic → panneau technique complet par caméra.
+- **Bouton "Tout acquitter"** sur le Centre d'alertes (en plus du bouton
+  ligne par ligne existant).
+- **Renommage de site** : propagé aux caméras existantes (`PUT
+  /sites/{id}` ne touchait que la table des sites, jamais les caméras qui
+  en dépendent) — 11 caméras déjà désynchronisées ("Site principal"
+  résiduel) rattrapées ponctuellement en base.
+
+### Fixed
+- **Notification toast qui ne se fermait pas au clic**, bloquant en
+  arrière-plan quand plusieurs s'empilaient — clic n'importe où sur une
+  notification (sonner) la ferme désormais, en plus du bouton croix.
+- **`index.html` sans en-tête no-cache** : après un déploiement, un
+  navigateur pouvait garder l'ancien `index.html` en cache et continuer à
+  pointer vers un bundle JS périmé — un correctif livré pouvait sembler
+  ne jamais arriver côté client alors qu'il était bien présent côté
+  serveur. `Cache-Control: no-cache` explicite sur `index.html`
+  uniquement (les assets hashés dans `/static/` restent en cache 1 an).
+
+### Investigated — TTS caméra (texte libre vers le haut-parleur Reolink)
+Recherche en plusieurs passes, dont une fausse conclusion corrigée en
+cours de route :
+- ONVIF standard (`GetAudioOutputs`) : liste vide sur tous les modèles
+  testés (RLC-81MA, RLC-820A, RLC-830A, RLC-1224A, E1 Outdoor Pro).
+- API publique `reolink-aio` (278 méthodes) : aucune méthode d'envoi
+  audio vers la caméra ; `play_quick_reply` ne joue qu'un message déjà
+  enregistré SUR la caméra (aucun message configuré sur ce parc — appli
+  Reolink jamais utilisée pour ça), aucune méthode d'upload audio.
+- Protocole propriétaire Reolink (Baichuan) : premier test sur le
+  booléen `two_way_audio` de la librairie → négatif, **conclusion
+  fausse** — la réponse XML brute de la caméra (non filtrée par la
+  librairie) montre en fait `<TalkAbility><duplex>FDX</duplex>` (vrai
+  support bidirectionnel) avec le codec exact attendu : **ADPCM, 16000
+  Hz, 16 bits, mono**. Le parseur de reolink-aio ne reconnaît que le
+  mode `"mixAudioStream"` ; ce parc répond `"followVideoStream"`, un
+  mode différent, non reconnu — d'où le faux négatif initial.
+- Ce qui bloque réellement : la commande d'ENVOI de l'audio (pas juste
+  sa détection) n'est implémentée nulle part dans le code disponible.
+  Seule piste restante : capturer le trafic réseau réel de l'appli
+  Reolink pendant un appel bidirectionnel (Wireshark/mitmproxy) —
+  nécessite une capture manuelle, mis en pause en attendant.
+- Trouvé au passage : sirène d'alarme fonctionnelle (`siren`/
+  `siren_play`) — pas de la parole, mais un signal sonore dissuasif déjà
+  exploitable.
+
 ## [v3.19-stabilisation-14-cameras] — 2026-08 — Passage à 14 caméras : crash GPU, plaques muettes, lenteurs UI
 
 ### Fixed — Critique
