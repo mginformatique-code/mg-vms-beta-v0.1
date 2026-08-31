@@ -548,6 +548,17 @@ async def delete_camera(camera_id: str, user: dict = Depends(require_role("techn
         signal_camera_topology_changed(camera_id, removed=True)
     except Exception:
         pass
+    # v3.20 · La suppression ne coupait ni go2rtc ni recorder.py, mais
+    # oubliait `video_core` (session WebRTC live) — constaté en réel : une
+    # caméra supprimée depuis plus d'une heure continuait de spammer les
+    # logs toutes les 30s (`rtsp[...::webrtc]: session error → retry in
+    # 30.0s`), sans jamais s'arrêter, car rien ne lui signalait la
+    # suppression.
+    try:
+        from video_core import VideoCoreManager
+        await VideoCoreManager.instance().stop_camera(camera_id)
+    except Exception:
+        pass
     await log_audit(user, "camera_deleted", cam["name"] if cam else camera_id)
     return {"ok": True}
 
