@@ -37,13 +37,15 @@ function passageThumbUrl(passageId, kind = "vehicle") {
  * parcours, habitudes.
  */
 export function VehiclesSection({ embedded = false, initialQuery = "" }) {
-  const { t } = useApp();
+  const { t, user } = useApp();
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
   const [openPlate, setOpenPlate] = useState(null);
   const [anomalies, setAnomalies] = useState([]);
+  const [dedupSuggestions, setDedupSuggestions] = useState([]);
+  const [dedupRunning, setDedupRunning] = useState(false);
   // v3.20 · Affichage tuiles (miniatures, plus lourd à charger) vs liste
   // compacte (façon ancien menu Plaques) — demandé pour alléger l'interface.
   // Préférence mémorisée par navigateur, pas envoyée au serveur.
@@ -148,6 +150,33 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
     } catch { /* silent */ }
   }, []);
 
+  // v3.20 · Suggestions de fusion (même véhicule lu différemment) —
+  // générées en tâche de fond par Qwen, jamais fusionnées automatiquement.
+  const loadDedup = useCallback(async () => {
+    try {
+      const { data } = await api.get("/vehicles/dedup/suggestions", { params: { status: "pending" } });
+      setDedupSuggestions(data.items || []);
+    } catch { /* silent */ }
+  }, []);
+
+  const runDedupNow = async () => {
+    setDedupRunning(true);
+    try {
+      const { data } = await api.post("/vehicles/dedup/run");
+      toast.success(`${data.created} suggestion(s) générée(s)`);
+      loadDedup();
+    } catch (e) { toast.error("Échec de la recherche de doublons"); }
+    finally { setDedupRunning(false); }
+  };
+
+  const decideDedup = async (id, accept) => {
+    try {
+      await api.post(`/vehicles/dedup/suggestions/${id}/${accept ? "accept" : "reject"}`);
+      setDedupSuggestions((prev) => prev.filter((s) => s.id !== id));
+      if (accept) { toast.success("Fiches fusionnées"); load(q); }
+    } catch { toast.error("Échec"); }
+  };
+
   const loadIdentities = useCallback(async () => {
     try {
       const [{ data: list }, { data: cand }] = await Promise.all([
@@ -235,7 +264,7 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
   }, [q, items.length]);
 
   // Chargement initial + refresh 30 s (pausé si le drawer est ouvert)
-  useEffect(() => { load(""); loadAnomalies(); loadIdentities(); }, [load, loadAnomalies, loadIdentities]);
+  useEffect(() => { load(""); loadAnomalies(); loadIdentities(); loadDedup(); }, [load, loadAnomalies, loadIdentities, loadDedup]);
   // v3.19 · Relie la recherche IA générale (menu Événements → "Tous") à
   // celle-ci : "voiture"/"voiture rouge" y sont classés target:vehicles
   // avec de vrais résultats, mais la galerie Événements n'affiche que son
@@ -526,6 +555,17 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
 
       {anomalies.length > 0 && (
         <AnomaliesBanner items={anomalies} onOpen={(p) => setOpenPlate(p)} onDismiss={() => setAnomalies([])} />
+      )}
+
+      {(dedupSuggestions.length > 0 || user?.role === "admin") && (
+        <DedupBanner
+          items={dedupSuggestions}
+          admin={user?.role === "admin"}
+          running={dedupRunning}
+          onRunNow={runDedupNow}
+          onAccept={(id) => decideDedup(id, true)}
+          onReject={(id) => decideDedup(id, false)}
+        />
       )}
 
       {items.length === 0 && !loading && (
@@ -1270,6 +1310,64 @@ function AnomaliesBanner({ items, onOpen, onDismiss }) {
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+// v3.20 · Suggestions de fusion générées par Qwen (tâche de fond,
+// comparaison des attributs déjà extraits — pas de vision, le modèle
+// configuré est texte seul). Jamais de fusion automatique : chaque
+// suggestion attend une décision manuelle, même mécanisme de fusion que
+// "Fusionner des fiches" (POST /vehicles/identities).
+function DedupBanner({ items, admin, running, onRunNow, onAccept, onReject }) {
+  return (
+    <div className="border border-[#0044FF]/40 bg-[#0044FF]/5 p-3 mb-4" data-testid="dedup-banner">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-1.5 text-[#0044FF] text-xs uppercase tracking-wider font-medium">
+          <Sparkles size={14} /> Doublons suggérés (IA) {items.length > 0 && `(${items.length})`}
+        </div>
+        {admin && (
+          <button onClick={onRunNow} disabled={running} data-testid="dedup-run-now"
+                  className="text-[10px] uppercase tracking-wider text-[#0044FF] hover:underline disabled:opacity-50 flex items-center gap-1">
+            {running && <Loader2 size={11} className="animate-spin" />}
+            {running ? "Recherche…" : "Rechercher maintenant"}
+          </button>
+        )}
+      </div>
+      {items.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground">
+          Aucune suggestion en attente — tâche automatique une fois par jour, ou lance-la manuellement.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {items.map((s) => (
+            <div key={s.id} className="flex items-center gap-3 border border-border bg-card px-3 py-2 text-xs" data-testid={`dedup-item-${s.id}`}>
+              <div className="flex-1 min-w-0">
+                <span className="mono font-semibold">{s.plate_a}</span>
+                <span className="text-muted-foreground mx-1">↔</span>
+                <span className="mono font-semibold">{s.plate_b}</span>
+                <span className="text-muted-foreground ml-2">
+                  ({s.stats_a?.count} + {s.stats_b?.count} lectures)
+                </span>
+                {s.reason && <div className="text-[10px] text-muted-foreground mt-0.5 truncate">{s.reason}</div>}
+              </div>
+              {s.confidence != null && (
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">
+                  confiance {Math.round(s.confidence * 100)}%
+                </span>
+              )}
+              <button onClick={() => onAccept(s.id)} data-testid={`dedup-accept-${s.id}`}
+                      className="px-2 py-1 border border-[#00E676] text-[#00E676] hover:bg-[#00E676]/10 shrink-0 uppercase tracking-wider text-[10px]">
+                Fusionner
+              </button>
+              <button onClick={() => onReject(s.id)} data-testid={`dedup-reject-${s.id}`}
+                      className="px-2 py-1 border border-border text-muted-foreground hover:text-foreground shrink-0 uppercase tracking-wider text-[10px]">
+                Ignorer
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
