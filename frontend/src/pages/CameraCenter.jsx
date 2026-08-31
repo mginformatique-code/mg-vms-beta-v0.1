@@ -56,43 +56,6 @@ const TABS = [
 ];
 
 // v0.5.0.b · Bandeau santé global (GPU/CPU/RAM/VRAM/Mongo/go2rtc/Capture/Pipeline)
-function HealthBanner() {
-  const [h, setH] = useState({});
-  useEffect(() => {
-    const load = async () => {
-      const [sys, cap] = await Promise.all([
-        api.get("/system-health").catch(() => ({ data: {} })),
-        api.get("/diagnostics/capture/stats").catch(() => ({ data: {} })),
-      ]);
-      setH({ ...(sys.data || {}), capture: cap.data || {} });
-    };
-    load();
-    const iv = setInterval(load, 8000);
-    return () => clearInterval(iv);
-  }, []);
-  const items = [
-    { label: "CPU", value: h.cpu_percent != null ? `${h.cpu_percent}%` : "—" },
-    { label: "RAM", value: h.ram_percent != null ? `${h.ram_percent}%` : "—" },
-    { label: "GPU", value: h.gpu_percent != null ? `${h.gpu_percent}%` : "—" },
-    { label: "VRAM", value: h.vram_percent != null ? `${h.vram_percent}%` : "—" },
-    { label: "Mongo", value: h.mongo_ok ? "OK" : (h.mongo_ok === false ? "KO" : "—") },
-    { label: "go2rtc", value: h.go2rtc_ok ? "OK" : (h.go2rtc_ok === false ? "KO" : "—") },
-    { label: "Capture", value: h.capture?.cuvid_available ? "NVDEC" : (h.capture?.mode || "—") },
-    { label: "Pipeline", value: h.pipeline_ok ? "OK" : "—" },
-  ];
-  return (
-    <div className="flex flex-wrap gap-2 py-2 px-3 border-b border-border bg-secondary/30 text-xs"
-         data-testid="health-banner">
-      {items.map((it) => (
-        <div key={it.label} className="flex gap-1 items-center">
-          <span className="text-muted-foreground">{it.label}</span>
-          <span className="font-mono">{it.value}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export default function CameraCenter() {
   const { t } = useApp();
   const { cameraId } = useParams();
@@ -119,7 +82,6 @@ export default function CameraCenter() {
 
   return (
     <div data-testid="camera-center">
-      <HealthBanner />
       <div className="p-6 space-y-4">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
