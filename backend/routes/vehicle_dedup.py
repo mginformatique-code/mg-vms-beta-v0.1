@@ -41,6 +41,16 @@ vehicle_dedup_router = APIRouter(prefix="/api/vehicles/dedup", tags=["vehicle-de
 _MAX_DISTANCE = 3
 _MAX_CANDIDATES_PER_RUN = 25
 _BATCH_INTERVAL_HOURS = 24
+# v3.20 · Constaté en réel : deux lectures du MÊME véhicule réel (même
+# caméra, 17s d'écart, crops visuellement identiques confirmés) donnaient
+# "TR1351G" et "CG16598" — textuellement sans aucun rapport (l'OCR a
+# complètement raté, pas une simple confusion de caractère). La
+# comparaison par distance d'édition seule ne peut structurellement pas
+# capter ce cas. Fenêtre de proximité temporelle, même caméra, réutilise
+# le seuil déjà établi ailleurs (`_PLATE_MERGE_WINDOW_SEC` dans
+# vehicles.py) pour rester cohérent avec la notion existante de "même
+# passage".
+_TIME_PROXIMITY_WINDOW_SEC = 120
 
 
 def _levenshtein(a: str, b: str) -> int:
@@ -93,24 +103,11 @@ async def _already_suggested_pairs() -> set[tuple[str, str]]:
     return pairs
 
 
-async def _find_candidates(limit: int = _MAX_CANDIDATES_PER_RUN) -> list[tuple[str, str, int]]:
-    """Paires (plate_a, plate_b, poids) triées par poids décroissant
-    (poids = lectures cumulées des deux plaques — priorise les fragments
-    les plus significatifs, pas les plaques vues 1-2 fois par hasard)."""
-    counts: dict[str, int] = {}
-    async for row in db.plates.aggregate([{"$group": {"_id": "$plate", "n": {"$sum": 1}}},
-                                            {"$match": {"n": {"$gte": 2}}}]):
-        counts[row["_id"]] = row["n"]
-
-    linked = await _already_linked_plates()
-    seen_pairs = await _already_suggested_pairs()
-    plates = [p for p in counts if p not in linked]
-
-    index: dict[str, list[str]] = {}
-    for p in plates:
-        index.setdefault(p, []).append(p)
-
-    candidates: list[tuple[str, str, int]] = []
+async def _find_text_similarity_candidates(counts: dict[str, int], plates: list[str],
+                                             seen_pairs: set[tuple[str, str]]) -> list[tuple[str, str, int, str]]:
+    """Source 1 : plaques textuellement proches (confusion OCR sur un
+    caractère ou deux — le cas le plus fréquent)."""
+    candidates: list[tuple[str, str, int, str]] = []
     seen_this_run: set[tuple[str, str]] = set()
     for i, p1 in enumerate(plates):
         for p2 in plates[i + 1:]:
@@ -122,8 +119,78 @@ async def _find_candidates(limit: int = _MAX_CANDIDATES_PER_RUN) -> list[tuple[s
             d = _levenshtein(p1, p2)
             if 1 <= d <= _MAX_DISTANCE:
                 seen_this_run.add(key)
-                candidates.append((p1, p2, counts[p1] + counts[p2]))
+                candidates.append((p1, p2, counts[p1] + counts[p2], "texte proche"))
+    return candidates
 
+
+async def _find_time_proximity_candidates(counts: dict[str, int], linked: set[str],
+                                            seen_pairs: set[tuple[str, str]]) -> list[tuple[str, str, int, str]]:
+    """Source 2 · v3.20 : plaques vues sur la MÊME caméra à quelques
+    secondes/minutes d'écart, quel que soit le texte — capte les échecs
+    OCR sévères (lecture totalement différente, pas juste un caractère)
+    qu'une comparaison de texte seule ne peut pas voir. Confirmé sur un
+    cas réel (crops identiques, plaques "TR1351G" vs "CG16598", 17s
+    d'écart, même caméra)."""
+    rows = []
+    async for row in db.plates.find(
+        {}, {"_id": 0, "plate": 1, "camera_id": 1, "timestamp": 1}
+    ).sort([("camera_id", 1), ("timestamp", 1)]).to_list(20000):
+        if row.get("plate") in linked:
+            continue
+        rows.append(row)
+
+    candidates: list[tuple[str, str, int, str]] = []
+    seen_this_run: set[tuple[str, str]] = set()
+    for i, r1 in enumerate(rows):
+        t1 = _iso_to_ts(r1.get("timestamp"))
+        if t1 is None:
+            continue
+        for r2 in rows[i + 1:]:
+            if r2["camera_id"] != r1["camera_id"]:
+                break  # trié par caméra puis temps — plus rien à voir sur cette caméra
+            t2 = _iso_to_ts(r2.get("timestamp"))
+            if t2 is None or (t2 - t1) > _TIME_PROXIMITY_WINDOW_SEC:
+                break  # trié par temps — au-delà de la fenêtre, inutile de continuer
+            if r1["plate"] == r2["plate"]:
+                continue
+            key = tuple(sorted((r1["plate"], r2["plate"])))
+            if key in seen_pairs or key in seen_this_run:
+                continue
+            seen_this_run.add(key)
+            candidates.append((r1["plate"], r2["plate"],
+                                counts.get(r1["plate"], 1) + counts.get(r2["plate"], 1),
+                                "même caméra, quelques secondes d'écart"))
+    return candidates
+
+
+def _iso_to_ts(iso: str | None) -> float | None:
+    if not iso:
+        return None
+    try:
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+async def _find_candidates(limit: int = _MAX_CANDIDATES_PER_RUN) -> list[tuple[str, str, int, str]]:
+    """Paires (plate_a, plate_b, poids, origine) triées par poids
+    décroissant (poids = lectures cumulées des deux plaques — priorise
+    les fragments les plus significatifs). Deux sources combinées : texte
+    proche (OCR légèrement faux) + même caméra/moment (OCR très faux)."""
+    counts: dict[str, int] = {}
+    async for row in db.plates.aggregate([{"$group": {"_id": "$plate", "n": {"$sum": 1}}},
+                                            {"$match": {"n": {"$gte": 2}}}]):
+        counts[row["_id"]] = row["n"]
+
+    linked = await _already_linked_plates()
+    seen_pairs = await _already_suggested_pairs()
+    plates = [p for p in counts if p not in linked]
+
+    text_candidates = await _find_text_similarity_candidates(counts, plates, seen_pairs)
+    seen_pairs = seen_pairs | {tuple(sorted((c[0], c[1]))) for c in text_candidates}
+    time_candidates = await _find_time_proximity_candidates(counts, linked, seen_pairs)
+
+    candidates = text_candidates + time_candidates
     candidates.sort(key=lambda c: -c[2])
     return candidates[:limit]
 
@@ -267,7 +334,7 @@ class SuggestionDecision(BaseModel):
 
 
 @vehicle_dedup_router.post("/suggestions/{suggestion_id}/accept")
-async def accept_suggestion(suggestion_id: str, body: SuggestionDecision,
+async def accept_suggestion(suggestion_id: str, body: SuggestionDecision = SuggestionDecision(),
                              user: dict = Depends(require_permission("read_plates"))):
     sugg = await db.dedup_suggestions.find_one({"id": suggestion_id}, {"_id": 0})
     if not sugg:
