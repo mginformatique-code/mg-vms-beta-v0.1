@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { Volume2, VolumeX } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL || ""}/api`;
 const WHEP_TIMEOUT_MS = 8000;
@@ -26,6 +27,13 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
   const [errorMsg, setErrorMsg] = useState("");
   // Codec du flux principal quand le HD demandé a dû être refusé (ex. "hevc")
   const [qualityNote, setQualityNote] = useState("");
+  // v3.19 · Son caméra (micro) — autoplay navigateur exige muted=true par
+  // défaut, l'utilisateur active le son explicitement via le bouton
+  // haut-parleur (voir #audio=opus côté go2rtc, streaming.py). Caméras
+  // sans piste audio : la case reste sans effet audible, mais le bouton
+  // ne gêne pas — pas de détection de piste côté navigateur ici (surcoût
+  // inutile pour un simple toggle).
+  const [muted, setMuted] = useState(true);
 
   useEffect(() => {
     if (!camera?.id) return;
@@ -171,7 +179,7 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
         <img src={mjpegUrl(camera.id, hd)} alt="Live" className="w-full h-full object-contain"
              data-testid={`${dataTestId}-img`} />
       ) : (
-        <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-contain"
+        <video ref={videoRef} autoPlay playsInline muted={muted} className="w-full h-full object-contain"
                data-testid={`${dataTestId}-video`} />
       )}
       {mode === "connecting" && (
@@ -208,6 +216,16 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
       >
         {badge.txt}
       </span>
+      {mode === "webrtc" && (
+        <button
+          onClick={(e) => { e.stopPropagation(); setMuted((m) => !m); }}
+          className="absolute bottom-2 right-2 z-10 p-1 bg-black/60 hover:bg-black/80 text-white/90 border border-white/20"
+          title={muted ? "Activer le son" : "Couper le son"}
+          data-testid={`${dataTestId}-mute-btn`}
+        >
+          {muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+        </button>
+      )}
     </div>
   );
 }

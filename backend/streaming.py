@@ -414,6 +414,10 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
     # Préfixer la source RTSP par `ffmpeg:` fait donc pull la caméra en TCP
     # forcé, sans toucher au reste de la chaîne (recorder/IA/WebRTC continuent
     # de consommer le flux RE-SERVI par go2rtc en RTSP natif, inchangé).
+    #
+    # v3.19 · Ce flux `name` alimente AUSSI le recorder + l'IA (pas que le
+    # live) — l'audio n'est PAS demandé ici pour ne rien changer à leur
+    # comportement. Voir plus bas (`{name}_preview`) pour l'audio du live.
     rtsp_source = f"ffmpeg:{rtsp_url}"
 
     # Résolution du pipeline effectif (auto/GPU/CPU) — construit les filtres ffmpeg optimisés
@@ -444,7 +448,18 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
         preview_url = build_preview_rtsp_url(cam)
         if preview_url and preview_url != rtsp_url:
             preview_source_name = f"{name}_preview"
-            desired[preview_source_name] = f"ffmpeg:{preview_url}"
+            # v3.19 · Audio caméra → navigateur, sur le sous-flux SEULEMENT
+            # (le flux `name` ci-dessus reste inchangé, il alimente aussi le
+            # recorder + l'IA). Sans `#audio=opus`, go2rtc pull uniquement
+            # la vidéo par défaut, même si la caméra diffuse un flux audio
+            # réel (constaté via ffprobe direct : plusieurs Reolink de ce
+            # parc ont une piste AAC active). `#video=copy` : vidéo inchangée
+            # (aucun ré-encodage, même coût CPU) ; seul l'audio est
+            # transcodé AAC→Opus (WebRTC exige Opus, n'accepte pas AAC),
+            # transcodage audio léger. Caméras sans micro/piste audio (ex.
+            # le Hikvision de ce parc) : go2rtc ignore silencieusement le
+            # fragment #audio, aucun impact.
+            desired[preview_source_name] = f"ffmpeg:{preview_url}#video=copy#audio=opus"
             dims = (f"{preview.get('width')}x{preview.get('height')}"
                     if preview.get("width") else "résolution inconnue")
             logger.info("register_camera_stream %s → aperçu via sous-flux %s (%s)",
