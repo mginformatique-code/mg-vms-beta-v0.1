@@ -20,6 +20,19 @@ async def seed():
     # ---- Comptes ----
     admin_email = os.environ["ADMIN_EMAIL"].lower()
     admin_password = os.environ["ADMIN_PASSWORD"]
+    # v3.20 · BUG DE SÉCURITÉ CORRIGÉ (signalé par l'utilisateur, 31/08) :
+    # cette fonction tourne à CHAQUE démarrage du backend (server.py,
+    # startup event), pas seulement à la toute première installation.
+    # L'ancien code, dans la branche `else`, comparait le mot de passe
+    # ADMIN_PASSWORD de .env au hash réellement en base et RÉÉCRASAIT le
+    # hash dès qu'ils ne correspondaient plus — donc à chaque fois que
+    # l'admin changeait son mot de passe depuis l'interface (le rendant
+    # différent de .env par construction), le redémarrage suivant du
+    # backend l'annulait silencieusement et revenait à Admin@2026. Aucune
+    # trace, aucun avertissement — juste un mot de passe qui "revenait
+    # tout seul". Le compte admin ne doit être initialisé qu'UNE FOIS, à
+    # la création : ensuite le mot de passe appartient à l'utilisateur,
+    # jamais reconstruit depuis .env.
     existing = await db.users.find_one({"email": admin_email})
     if not existing:
         await db.users.insert_one({
@@ -27,10 +40,6 @@ async def seed():
             "name": "Administrateur", "role": "admin", "twofa_enabled": False, "twofa_secret": None,
             "active": True, "site_ids": [], "created_at": now,
         })
-    else:
-        from auth import verify_password
-        if not verify_password(admin_password, existing["password_hash"]):
-            await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password)}})
 
     demo_users = [
         ("tech@mg-vms.com", "Tech@2026", "Thomas Technicien", "technician"),
