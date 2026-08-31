@@ -148,12 +148,15 @@ async def _parse_query_llm(query: str) -> dict:
     # OpenAI-compat standard /v1/... sur cette instance.
     url = f"{cfg['base_url']}/api/chat/completions"
     try:
-        # v3.19 · 30s était trop court et produisait un message d'erreur VIDE
-        # (str() d'un httpx.TimeoutException ne contient rien) — indiscernable
-        # d'une vraie panne. Un modèle 14B auto-hébergé peut légitimement
-        # prendre plus de temps qu'un appel API cloud habituel. 120s + type
-        # d'exception explicite dans le message pour ne plus deviner.
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        # v3.19 · 120s (retenu après le premier signalement, quand qwen3:14b
+        # tournait encore sur CPU par erreur — voir CHANGELOG) s'est avéré
+        # dangereux une fois qwen3:1.7b + GPU en place : un appel resté
+        # bloqué en file d'attente (avant le fix OLLAMA_NUM_PARALLEL côté
+        # infra) a gelé TOUT le backend pendant plusieurs minutes — un seul
+        # worker uvicorn, une requête qui traîne peut affamer les autres.
+        # Ramené à 25s : large marge sur la latence réelle observée
+        # (2.5-8s typique) sans pouvoir geler l'appli aussi longtemps.
+        async with httpx.AsyncClient(timeout=25.0) as client:
             resp = await client.post(url, json=payload, headers=headers)
             if resp.status_code >= 400:
                 # v3.19 · resp.raise_for_status() seul ne donne que "400 Bad
