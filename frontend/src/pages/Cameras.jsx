@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import CameraPluginsConfig from "@/pages/CameraPluginsConfig";
 import {
   Plus, Wifi, WifiOff, Camera as CamIcon, Trash2, Activity, Loader2, Radar,
-  CheckCircle2, XCircle, AlertTriangle, Pencil, Wand2, ChevronRight, BrainCircuit,
+  CheckCircle2, XCircle, AlertTriangle, Pencil, Wand2, ChevronRight,
   Stethoscope, Clock,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -59,7 +59,6 @@ export default function Cameras() {
   const [testNtp, setTestNtp] = useState(false);
   const [testing, setTesting] = useState(null);
   const [snap, setSnap] = useState(null);
-  const [debugSnap, setDebugSnap] = useState(null);
   const [diagState, setDiagState] = useState(null);
   const [discOpen, setDiscOpen] = useState(false);
   const [connCheck, setConnCheck] = useState(null);
@@ -316,14 +315,6 @@ export default function Cameras() {
   };
   const del = async (c) => { if (!window.confirm(`Supprimer ${c.name} ?`)) return; await api.delete(`/cameras/${c.id}`); toast.success("Supprimée"); load(); };
 
-  const openDebug = async (c) => {
-    try {
-      const { data } = await api.get(`/ai/debug/${c.id}`);
-      if (!data.available) return toast.error(data.message || "Aucune analyse IA disponible — activez la détection IA sur cette caméra");
-      setDebugSnap({ ...data, cam_name: c.name });
-    } catch (e) { toast.error("Debug IA indisponible"); }
-  };
-
   const openDiagnostic = async (c) => {
     setDiagState({ loading: true, cam: c });
     try {
@@ -416,9 +407,8 @@ export default function Cameras() {
                   <button onClick={() => test(c)} disabled={testing === c.id} data-testid="test-camera-btn" title="Tester la connexion" className="p-1.5 hover:bg-secondary">
                     {testing === c.id ? <Loader2 size={15} className="animate-spin" /> : <Activity size={15} />}
                   </button>
-                  <button onClick={() => openDiagnostic(c)} data-testid="diagnostic-camera-btn" title="Diagnostic complet" className="p-1.5 hover:bg-secondary text-[#00E676]"><Radar size={15} /></button>
+                  <button onClick={() => openDiagnostic(c)} data-testid="diagnostic-camera-btn" title="Diagnostic" className="p-1.5 hover:bg-secondary text-[#00E676]"><Radar size={15} /></button>
                   <button onClick={() => snapshot(c)} data-testid="snapshot-camera-btn" title="Snapshot" className="p-1.5 hover:bg-secondary"><CamIcon size={15} /></button>
-                  <button onClick={() => openDebug(c)} data-testid="debug-ia-camera-btn" title={t("cam.ai_debug_title")} className="p-1.5 hover:bg-secondary text-[#0044FF]"><BrainCircuit size={15} /></button>
                   {can("technician") && <button onClick={() => openEdit(c)} data-testid="edit-camera-btn" title="Modifier" className="p-1.5 hover:bg-secondary"><Pencil size={15} /></button>}
                   {can("technician") && <button onClick={() => del(c)} data-testid="delete-camera-btn" title="Supprimer" className="p-1.5 hover:bg-secondary text-[#FF3333]"><Trash2 size={15} /></button>}
                 </div></td>
@@ -765,49 +755,6 @@ export default function Cameras() {
           <DialogContent className="rounded-none border-border max-w-2xl p-0">
             <DialogHeader className="px-3 py-2 border-b border-border"><DialogTitle className="text-sm mono">{snap.name} — snapshot</DialogTitle></DialogHeader>
             <img src={snap.snapshot_url} alt="snapshot" className="w-full" data-testid="snapshot-image" />
-          </DialogContent>
-        </Dialog>
-      )}
-
-      {debugSnap && (
-        <Dialog open={!!debugSnap} onOpenChange={(o) => !o && setDebugSnap(null)}>
-          <DialogContent className="rounded-none border-border max-w-3xl max-h-[92vh] overflow-y-auto" data-testid="debug-ia-dialog">
-            <DialogHeader><DialogTitle className="font-head flex items-center gap-2"><BrainCircuit size={18} /> Debug IA — {debugSnap.cam_name}</DialogTitle></DialogHeader>
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="col-span-2 border border-border p-2 mono">
-                <div>{t("cam.analyzed_res")}<b>{debugSnap.resolution}</b> · Device : <b>{debugSnap.device}</b> · Timestamp : {new Date(debugSnap.timestamp).toLocaleString()}</div>
-                <div className="mt-1">
-                  Timings : YOLO <b>{debugSnap.timings?.yolo_ms}ms</b> · ALPR <b>{debugSnap.timings?.alpr_ms}ms</b>
-                  · décodage {debugSnap.timings?.decode_ms}ms · mouvement {debugSnap.timings?.motion_ms}ms · <b>total {debugSnap.timings?.total_ms}ms</b>
-                </div>
-                <div className="mt-1">Mouvement : <b>{debugSnap.motion_pct}%</b></div>
-              </div>
-              <div className="col-span-2">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("cam.analyzed_image")}</div>
-                {debugSnap.frame_preview && <img src={debugSnap.frame_preview} alt="frame" className="w-full border border-border" />}
-              </div>
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Véhicules détectés ({debugSnap.vehicles?.length || 0})</div>
-                {(debugSnap.vehicles || []).map((v, i) => (
-                  <div key={i} className="mono text-[11px] border border-border p-1.5 mb-1">
-                    {v.label} · conf {v.confidence} · couleur {v.vehicle_color || "—"}
-                  </div>
-                ))}
-                {(!debugSnap.vehicles || !debugSnap.vehicles.length) && <p className="text-[11px] text-muted-foreground">(aucun)</p>}
-              </div>
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Plaques OCR ({debugSnap.plate_attempts?.length || 0} tentatives)</div>
-                {(debugSnap.plate_attempts || []).map((p, i) => (
-                  <div key={i} className="mono text-[11px] border border-border p-1.5 mb-1" style={{ color: p.kept ? "#00E676" : "#FFB800" }}>
-                    <b>{p.plate}</b> {p.size && <span>({p.size})</span>}
-                    {p.confidence !== undefined && <span> · conf {p.confidence}</span>}
-                    {p.skipped && <span className="text-[#FFB800]"> · ignoré : {p.skipped}</span>}
-                    {p.expires_in !== undefined && <span> ({p.expires_in}s)</span>}
-                  </div>
-                ))}
-                {(!debugSnap.plate_attempts || !debugSnap.plate_attempts.length) && <p className="text-[11px] text-muted-foreground">{t("cam.no_attempt")}</p>}
-              </div>
-            </div>
           </DialogContent>
         </Dialog>
       )}
