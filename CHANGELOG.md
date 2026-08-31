@@ -2,6 +2,87 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.21-anti-doublons-ia-securite] — 2026-08-31 — Anti-doublons véhicule IA, réglage ANPR auto, faille mot de passe
+
+### Fixed — Critique / sécurité
+- **Faille de sécurité : le mot de passe admin revenait tout seul à sa
+  valeur par défaut.** `seed()` (backend/seed.py) s'exécute à CHAQUE
+  démarrage du backend, pas seulement à l'installation. Sa branche `else`
+  comparait le mot de passe `ADMIN_PASSWORD` de `.env` au hash réellement
+  en base, et RÉÉCRASAIT ce hash dès qu'ils ne correspondaient plus —
+  donc à chaque fois qu'un admin changeait son mot de passe depuis
+  l'interface (le rendant différent de `.env` par construction), le
+  redémarrage suivant du backend l'annulait silencieusement et revenait
+  à `Admin@2026`. Aucune trace, aucun avertissement. Signalé par
+  l'utilisateur après un redémarrage de routine. Le compte admin n'est
+  désormais initialisé qu'une seule fois, à la création — le mot de passe
+  n'est plus jamais reconstruit depuis `.env` ensuite.
+
+### Added
+- **Doublons véhicule assistés par Qwen.** Chiffré avant de coder :
+  24 830 paires de plaques à distance d'édition 2-3 jamais fusionnées par
+  le clustering existant (seuil trop strict : distance ≤1, même caméra,
+  2 min). Tâche périodique (1×/jour) + validation manuelle obligatoire —
+  compare les attributs déjà extraits (marque/modèle/couleur/type, le
+  modèle configuré est texte seul, pas vision) via deux sources de
+  candidats : texte proche (confusion OCR légère) ET même caméra/moment
+  quel que soit le texte (ajoutée après qu'un même véhicule ait été lu
+  "TR1351G" puis "CG16598" à 17s d'écart — textuellement sans aucun
+  rapport). Section "Doublons suggérés" dans Plaques, boutons
+  Fusionner/Ignorer.
+- **Seuil de confiance ANPR auto-réglé par caméra (Qwen).** Le seuil
+  `anpr_config.min_confidence` existait déjà dans le pipeline mais
+  n'était exposé ni réglé nulle part (0.0 partout = aucun filtre). Un
+  seuil global fixe aurait été dangereux (45% de toutes les lectures de
+  la flotte sont sous 0.7 de confiance) : tâche hebdomadaire où Qwen
+  analyse la distribution de confiance des 14 derniers jours de CHAQUE
+  caméra et lui recommande un seuil propre, garde-fous stricts (jamais
+  >85%, jamais <0%), historique journalisé. Découvert en creusant : une
+  caméra PTZ générait 73% de lectures sous 0.7 (contre 45% flotte), un
+  même camion lu 7 fois différemment en 19 secondes, et un tas de
+  matériel de jardin faussement détecté comme "Camion" avec plaque
+  hallucinée à chaque passage — traité par ce réglage, pas par le
+  dedup (cause différente : lecture peu fiable à la source).
+- **Suppression définitive de fiches (sélection multiple).** Bouton
+  "Supprimer des fiches" dans Plaques, même mécanique de sélection que
+  "Fusionner des fiches" — admin uniquement, confirmation explicite
+  obligatoire (nombre de fiches + total de lectures affiché, action
+  irréversible). Supprime les lectures ANPR (miniatures incluses,
+  stockées en base64 dans les mêmes documents) et nettoie les références
+  dans identités fusionnées / validations / suggestions de doublon.
+- **Affichage tuiles/liste sur Plaques.** Bouton "Affichage" — bascule
+  entre les tuiles+miniatures existantes et une vue liste compacte façon
+  ancien menu (une ligne par plaque, sans miniature à charger).
+  Préférence mémorisée par navigateur.
+
+### Fixed
+- **Bouton "Continuer" de l'alerte d'expiration de session ne faisait
+  rien.** Deux bugs : (1) le refresh token doit être envoyé en Bearer
+  (aucun cookie n'est jamais posé côté backend) — l'appel n'envoyait
+  rien, 401 systématique et silencieux ; (2) le nouveau token reçu était
+  sauvé sous la clé `access_token`, jamais lue nulle part ailleurs (même
+  défaut déjà corrigé pour la LECTURE du token, oublié pour l'ÉCRITURE
+  après refresh). Le décompte réel en secondes ne s'affichait jamais non
+  plus — `t()` ne supporte aucune interpolation, le paramètre était
+  silencieusement ignoré. Décompte réel affiché désormais.
+- **Logo MG-VMS dans un bloc blanc/noir rectangulaire.** Fond retiré par
+  flood-fill (vérifié sur damier avant déploiement, les blancs internes
+  au dessin — écran du moniteur — restent intacts). Appliqué partout
+  (sidebar, écran de connexion, gros logo dans le menu À propos).
+- **Bouton "Debug IA" inutile sur Appareils** — supprimé entièrement
+  (bouton, état, gestionnaire, dialog), pas seulement caché. "Diagnostic
+  complet" renommé en "Diagnostic".
+- **Centre caméras** : le clic sur une carte renvoyait vers Appareils au
+  lieu du panneau technique complet par caméra — inversé par erreur à la
+  livraison initiale, corrigé. Bandeau de santé système (CPU/RAM/GPU...)
+  supprimé du panneau caméra — sans rapport avec la caméra affichée,
+  doublonnait le tableau de bord santé.
+- **Licences open source** : Qwen3 (Apache-2.0) et chrony (GPL-2.0,
+  v4.6.1 réellement installée) ajoutés — composants introduits cette
+  session, absents de la liste.
+- **Badge OFFLINE sur l'écran de connexion** — le pied de page affichait
+  déjà "X ONLINE", ajout du nombre de caméras hors-ligne à côté.
+
 ## [v3.20-parametres-systeme-ntp] — 2026-08-31 — Paramètres système, serveur NTP caméras, chantier TTS
 
 ### Added
