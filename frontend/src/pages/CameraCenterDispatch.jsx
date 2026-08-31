@@ -14,7 +14,9 @@
  *   - compteurs total/en ligne/hors ligne → déjà sur le Dashboard
  * Reste : quels plugins IA tournent réellement sur chaque caméra (ANPR
  * actif ou non, nombre de plugins) — champ jamais affiché ailleurs sous
- * cette forme. Clic sur une carte → Appareils (édition/gestion complète).
+ * cette forme. Clic sur une carte → /camera-center/:id (le panneau
+ * technique complet par caméra, déjà existant : réseau, flux, IA,
+ * capacités…) — corrigé le 31/08 (renvoyait vers Appareils par erreur).
  */
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -41,7 +43,7 @@ export default function CameraCenterDispatch() {
       <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Centre caméras</h1>
-          <p className="text-sm text-muted-foreground mt-1">Vue technique rapide — cliquez une caméra pour l'ouvrir dans Appareils.</p>
+          <p className="text-sm text-muted-foreground mt-1">Vue technique rapide — cliquez une caméra pour ouvrir son panneau complet.</p>
         </div>
         <div className="relative">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -55,7 +57,7 @@ export default function CameraCenterDispatch() {
           const pluginCount = (c.enabled_plugins || []).length;
           const anprActive = (c.enabled_plugins || []).includes("fast-alpr");
           return (
-            <button key={c.id} onClick={() => navigate("/cameras")} data-testid="camera-center-card"
+            <button key={c.id} onClick={() => navigate(`/camera-center/${c.id}`)} data-testid="camera-center-card"
                     className="text-left bg-card border border-border p-3 hover:border-[#0044FF] transition-colors">
               <div className="flex items-center justify-between gap-2 mb-1.5">
                 <span className="font-medium text-sm truncate">{c.name}</span>
