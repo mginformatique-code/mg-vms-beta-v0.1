@@ -34,7 +34,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from auth import require_permission
+from auth import require_permission, require_role, log_audit
 from database import db
 
 logger = logging.getLogger("routes.vehicles")
@@ -532,6 +532,49 @@ async def delete_identity(identity_id: str,
                            user: dict = Depends(require_permission("read_plates"))):
     res = await db.vehicle_identities.delete_one({"id": identity_id})
     return {"ok": True, "deleted": res.deleted_count}
+
+
+class BulkDeleteBody(BaseModel):
+    plates: list[str]
+    confirm: bool = False
+
+
+@vehicles_router.post("/bulk-delete")
+async def bulk_delete_vehicles(body: BulkDeleteBody,
+                                user: dict = Depends(require_role("admin"))):
+    """v3.20 · Suppression définitive d'une ou plusieurs fiches véhicule —
+    lectures ANPR (les images sont stockées en base64 DANS ces documents,
+    voir CHANGELOG v3.15 : les supprimer supprime aussi les miniatures,
+    pas de fichier séparé à nettoyer), plus toute référence dans les
+    identités fusionnées / validations / suggestions de doublon. Admin
+    uniquement + confirmation explicite requise (irréversible)."""
+    plates = sorted({(_norm_plate(p) if p else "") for p in body.plates if p})
+    if not plates:
+        raise HTTPException(400, "Au moins une plaque est requise")
+    if not body.confirm:
+        raise HTTPException(400, {"code": "CONFIRM_REQUIRED",
+                                    "message": "Confirmation requise (confirm: true) — suppression définitive."})
+
+    plates_result = await db.plates.delete_many({"plate": {"$in": plates}})
+
+    # Retire ces plaques des identités fusionnées existantes ; supprime
+    # l'identité entière si elle ne contient plus aucune plaque restante.
+    async for ident in db.vehicle_identities.find({"plates": {"$in": plates}}, {"_id": 0, "id": 1, "plates": 1}):
+        remaining = [p for p in ident["plates"] if p not in plates]
+        if remaining:
+            await db.vehicle_identities.update_one({"id": ident["id"]}, {"$set": {"plates": remaining}})
+        else:
+            await db.vehicle_identities.delete_one({"id": ident["id"]})
+
+    await db.plate_validations.delete_many(
+        {"$or": [{"canonical_plate": {"$in": plates}}, {"variants": {"$in": plates}}]}
+    )
+    await db.dedup_suggestions.delete_many(
+        {"$or": [{"plate_a": {"$in": plates}}, {"plate_b": {"$in": plates}}]}
+    )
+    _list_cache.clear()
+    await log_audit(user, "vehicle_bulk_deleted", ", ".join(plates), str(plates_result.deleted_count))
+    return {"ok": True, "plates": plates, "reads_deleted": plates_result.deleted_count}
 
 
 # ═══════════════════════════════════════════════════════════════════

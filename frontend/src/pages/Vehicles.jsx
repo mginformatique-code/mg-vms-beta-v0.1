@@ -65,6 +65,33 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
     });
   };
   const cancelMerge = () => { setMergeMode(false); setSelectedPlates(new Set()); };
+
+  // v3.20 · Suppression définitive d'une ou plusieurs fiches (lectures ANPR
+  // + miniatures embarquées, voir bulk_delete_vehicles côté backend) — même
+  // mécanisme de sélection que la fusion, mode mutuellement exclusif.
+  const [deleteMode, setDeleteMode] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const cancelDelete = () => { setDeleteMode(false); setSelectedPlates(new Set()); };
+  const confirmDelete = async () => {
+    if (selectedPlates.size < 1) return;
+    const plates = items.filter((it) => selectedPlates.has(it.plate));
+    const totalReads = plates.reduce((sum, it) => sum + (it.passages_count || 0), 0);
+    if (!window.confirm(
+      `Supprimer définitivement ${plates.length} fiche${plates.length > 1 ? "s" : ""} `
+      + `(${totalReads} lecture${totalReads > 1 ? "s" : ""} ANPR + miniatures) ? `
+      + `Cette action est IRRÉVERSIBLE.`
+    )) return;
+    setDeleting(true);
+    try {
+      const allPlates = plates.flatMap((it) => [it.plate, ...(it.plate_variants || [])]);
+      const { data } = await api.post("/vehicles/bulk-delete", { plates: allPlates, confirm: true });
+      toast.success(`${data.reads_deleted} lecture(s) supprimée(s) définitivement`);
+      cancelDelete();
+      load(q);
+      loadIdentities();
+    } catch (e) { toast.error(e.response?.data?.detail?.message || "Échec de la suppression"); }
+    finally { setDeleting(false); }
+  };
   // v3.19 · Créer une fiche véhicule manuellement — ex. véhicule signalé
   // volé : on connaît la plaque avant toute lecture ANPR. Compose deux
   // endpoints déjà en place et testés (pas de nouveau code backend) :
@@ -390,13 +417,19 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
               Réinitialiser la recherche
             </button>
           )}
-          {!smartResult && !mergeMode && (
+          {!smartResult && !mergeMode && !deleteMode && (
             <button onClick={() => setMergeMode(true)} data-testid="merge-mode-toggle"
                     className="text-[10px] uppercase tracking-wider text-muted-foreground hover:text-[#0044FF] flex items-center gap-1">
               <GitMerge size={12} /> Fusionner des fiches
             </button>
           )}
-          {!smartResult && !mergeMode && (
+          {!smartResult && !mergeMode && !deleteMode && (
+            <button onClick={() => setDeleteMode(true)} data-testid="delete-mode-toggle"
+                    className="text-[10px] uppercase tracking-wider text-muted-foreground hover:text-[#FF3333] flex items-center gap-1">
+              <XIcon size={12} /> Supprimer des fiches
+            </button>
+          )}
+          {!smartResult && !mergeMode && !deleteMode && (
             <button onClick={() => setCreateOpen(true)} data-testid="create-fiche-btn"
                     className="text-[10px] uppercase tracking-wider text-muted-foreground hover:text-[#0044FF] flex items-center gap-1">
               <Plus size={12} /> Créer une fiche
@@ -423,6 +456,30 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
                     className="px-3 py-1.5 text-xs bg-[#0044FF] text-white flex items-center gap-2 disabled:opacity-40">
               {merging ? <Loader2 size={13} className="animate-spin" /> : <GitMerge size={13} />}
               Fusionner ({selectedPlates.size})
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* v3.20 · Suppression définitive — même mécanique de sélection que
+          la fusion, pour nettoyer les faux positifs (objet fixe détecté à
+          tort comme véhicule, plaque totalement hallucinée...) qu'aucune
+          fusion automatique ne peut résoudre puisque ce n'est pas un
+          doublon d'un vrai véhicule. */}
+      {deleteMode && (
+        <div className="border border-[#FF3333] bg-[#FF3333]/5 p-3 mb-3 flex items-center justify-between flex-wrap gap-2" data-testid="delete-toolbar">
+          <span className="text-xs">
+            Sélectionnez les fiches à supprimer définitivement (lectures ANPR + miniatures — irréversible).
+            <span className="ml-2 font-medium">{selectedPlates.size} sélectionnée{selectedPlates.size > 1 ? "s" : ""}</span>
+          </span>
+          <div className="flex items-center gap-2">
+            <button onClick={cancelDelete} className="px-3 py-1.5 text-xs border border-border hover:bg-secondary">
+              Annuler
+            </button>
+            <button onClick={confirmDelete} disabled={selectedPlates.size < 1 || deleting} data-testid="delete-confirm-btn"
+                    className="px-3 py-1.5 text-xs bg-[#FF3333] text-white flex items-center gap-2 disabled:opacity-40">
+              {deleting ? <Loader2 size={13} className="animate-spin" /> : <XIcon size={13} />}
+              Supprimer ({selectedPlates.size})
             </button>
           </div>
         </div>
@@ -582,8 +639,8 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
             renderItem={(v) => (
               <VehicleCard
                 v={v}
-                onOpen={mergeMode ? () => togglePlateSelection(v.plate) : () => setOpenPlate(v.plate)}
-                selectable={mergeMode}
+                onOpen={(mergeMode || deleteMode) ? () => togglePlateSelection(v.plate) : () => setOpenPlate(v.plate)}
+                selectable={mergeMode || deleteMode}
                 selected={selectedPlates.has(v.plate)}
               />
             )}
@@ -600,8 +657,8 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
             renderItem={(v) => (
               <VehicleListRow
                 v={v}
-                onOpen={mergeMode ? () => togglePlateSelection(v.plate) : () => setOpenPlate(v.plate)}
-                selectable={mergeMode}
+                onOpen={(mergeMode || deleteMode) ? () => togglePlateSelection(v.plate) : () => setOpenPlate(v.plate)}
+                selectable={mergeMode || deleteMode}
                 selected={selectedPlates.has(v.plate)}
               />
             )}
