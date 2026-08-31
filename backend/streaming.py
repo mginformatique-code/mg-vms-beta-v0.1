@@ -1160,7 +1160,23 @@ def needs_transcode_for_browser(path: str) -> bool:
     return (details or {}).get("codec", "") in ("HEVC", "H265")
 
 
-async def transcode_to_temp_mp4(path: str, start_sec: float = 0.0) -> str:
+#: v3.17 · Fenêtre transcodée par défaut. Le bouton dit « Lire la vidéo
+#: AUTOUR de cet événement » — transcoder le segment entier (jusqu'à
+#: 2 min) n'a jamais correspondu à cette promesse, et son coût grandit
+#: avec la durée du segment quel que soit le moteur (GPU ou logiciel).
+#: Mesuré en conditions réelles avant ce changement, segment de 2 min :
+#:   caméra 3840×2160 (GPU nvenc)      : ~38 s d'attente
+#:   caméra 4512×2512 (repli logiciel) : ~138 s d'attente
+#: Une fenêtre de 30 s (déjà calée 5 s avant l'événement par l'appelant,
+#: donc ~25 s après) couvre le contexte utile sans faire attendre
+#: l'utilisateur la durée d'un segment qu'il n'a pas demandé à voir en
+#: entier. Abaissé de 60 à 30 s (retour utilisateur) — coupe encore le
+#: temps d'attente en deux par rapport à la version précédente.
+DEFAULT_CLIP_DURATION_SEC = 30.0
+
+
+async def transcode_to_temp_mp4(path: str, start_sec: float = 0.0,
+                                 duration_sec: Optional[float] = DEFAULT_CLIP_DURATION_SEC) -> str:
     """Transcode HEVC→H264 vers un fichier temporaire COMPLET, pas un flux
     streamé en direct.
 
@@ -1193,33 +1209,69 @@ async def transcode_to_temp_mp4(path: str, start_sec: float = 0.0) -> str:
     fd, out_path = tempfile.mkstemp(suffix=".mp4", prefix="mgvms_transcode_")
     os.close(fd)
 
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "warning", "-nostdin"]
-    if start_sec > 0:
-        cmd += ["-ss", str(max(0.0, start_sec))]
-    if use_gpu_decode:
-        cmd += ["-hwaccel", "cuda", "-c:v", "hevc_cuvid"]
-    cmd += ["-i", path]
-    if use_gpu_encode:
-        cmd += ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "23"]
-    else:
-        cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]
-    # +faststart : réordonne le moov en tête de fichier une fois l'encodage
-    # terminé — démarrage rapide côté lecteur, mais fichier COMPLET normal
-    # (à ne pas confondre avec le MP4 fragmenté abandonné ci-dessus).
-    cmd += ["-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-f", "mp4", out_path]
+    def _build_cmd(gpu_encode: bool) -> list[str]:
+        cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "warning", "-nostdin"]
+        if start_sec > 0:
+            cmd += ["-ss", str(max(0.0, start_sec))]
+        if use_gpu_decode:
+            cmd += ["-hwaccel", "cuda", "-c:v", "hevc_cuvid"]
+        cmd += ["-i", path]
+        if duration_sec and duration_sec > 0:
+            # APRÈS -i (et non avant, comme -ss) : borne la durée de SORTIE,
+            # pas une position de lecture. Combiné à -ss ci-dessus, ne
+            # décode/encode que la fenêtre demandée — pas le reste du
+            # segment, potentiellement 2 min que personne ne consultera.
+            cmd += ["-t", str(duration_sec)]
+        if gpu_encode:
+            cmd += ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "23"]
+        else:
+            cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]
+        # +faststart : réordonne le moov en tête de fichier une fois l'encodage
+        # terminé — démarrage rapide côté lecteur, mais fichier COMPLET normal
+        # (à ne pas confondre avec le MP4 fragmenté abandonné ci-dessus).
+        cmd += ["-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-f", "mp4", out_path]
+        return cmd
 
-    logger.info("recording-transcode: start (gpu_decode=%s gpu_encode=%s ss=%s) %s → %s",
-                use_gpu_decode, use_gpu_encode, start_sec, os.path.basename(path), out_path)
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-    )
-    _, stderr = await proc.communicate()
-    if proc.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
+    async def _run(gpu_encode: bool):
+        cmd = _build_cmd(gpu_encode)
+        logger.info("recording-transcode: start (gpu_decode=%s gpu_encode=%s ss=%s) %s → %s",
+                    use_gpu_decode, gpu_encode, start_sec, os.path.basename(path), out_path)
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        ok = proc.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 0
+        return ok, proc.returncode, stderr
+
+    ok, rc, stderr = await _run(use_gpu_encode)
+    if not ok and use_gpu_encode:
+        # v3.17 · Repli logiciel automatique. Constaté en production :
+        # h264_nvenc (encodeur MATÉRIEL) refuse toute image de plus de
+        # 4096 px de large — limite documentée du chip, pas de la caméra
+        # ni de MG-VMS. Une caméra enregistrant en 4512px natif (native,
+        # au-dessus de 4K) faisait donc échouer TOUT transcodage,
+        # systématiquement, sans que rien ne l'indique à l'utilisateur
+        # (« Transcodage HEVC→H264 échoué », générique). libx264 (logiciel)
+        # n'a pas cette limite — plus lent, mais fiable quelle que soit la
+        # résolution source. On y bascule sur tout échec d'encodage GPU,
+        # pas seulement ce cas précis : plus robuste face à d'autres
+        # limites NVENC non répertoriées (débit, profil, etc.).
         try:
             os.unlink(out_path)
         except OSError:
             pass
-        logger.warning("recording-transcode: échec (rc=%s) %s", proc.returncode,
+        fd, out_path = tempfile.mkstemp(suffix=".mp4", prefix="mgvms_transcode_")
+        os.close(fd)
+        logger.warning("recording-transcode: encodage GPU échoué (rc=%s) %s — repli logiciel (libx264)",
+                        rc, (stderr or b"")[:300].decode(errors="replace"))
+        ok, rc, stderr = await _run(False)
+
+    if not ok:
+        try:
+            os.unlink(out_path)
+        except OSError:
+            pass
+        logger.warning("recording-transcode: échec (rc=%s) %s", rc,
                         (stderr or b"")[:300].decode(errors="replace"))
         raise RuntimeError("transcodage HEVC→H264 échoué")
     logger.info("recording-transcode: terminé (%d octets) %s",
@@ -1275,6 +1327,7 @@ class ConnectivityTestInput(BaseModel):
     rtsp_transport: str = "tcp"      # tcp | udp
     preferred_codec: str = "auto"    # auto | h264 | h265
     profile_token: str = ""          # profil ONVIF explicite (main/sub) — pas de substitution de variante si fourni
+    test_ntp: bool = False           # v3.19 · coché explicitement — teste l'API NTP (bonne API selon constructeur)
 
 
 async def test_connectivity(data: ConnectivityTestInput) -> dict:
@@ -1334,6 +1387,34 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
                     f"Auth ONVIF refusée — {type(e).__name__}: {str(e)[:160]}")
         else:
             add("onvif_auth", "skip", "Ignoré (port ONVIF fermé)")
+
+        # 3b) Test API NTP — optionnel, coché explicitement par l'utilisateur.
+        # v3.19 · vérifie que la BONNE API répond avant l'ajout de la caméra :
+        # reolink-aio (natif, plus fiable) pour Reolink, ONVIF générique sinon
+        # (Hikvision compris — pas d'ISAPI natif dans MG-VMS). Lecture seule
+        # (GetNTP / get_host_data), aucune valeur n'est modifiée sur la caméra.
+        if data.test_ntp:
+            if onvif_info:
+                manufacturer = (onvif_info.get("manufacturer") or "").lower()
+                try:
+                    if "reolink" in manufacturer:
+                        from reolink_aio.api import Host
+                        host_api = Host(ip, data.username, data.password)
+                        try:
+                            await host_api.get_host_data()
+                        finally:
+                            await host_api.logout()
+                        add("ntp_api", "ok", "API Reolink native (reolink-aio) confirmée disponible")
+                    else:
+                        from wsdl_path import onvif_camera
+                        cam = await asyncio.to_thread(onvif_camera, ip, int(data.onvif_port), data.username, data.password)
+                        dev = cam.create_devicemgmt_service()
+                        await asyncio.to_thread(dev.GetNTP)
+                        add("ntp_api", "ok", f"API ONVIF GetNTP confirmée disponible ({onvif_info.get('manufacturer','?')})")
+                except Exception as e:
+                    add("ntp_api", "warn", f"API NTP non confirmée — {type(e).__name__}: {str(e)[:160]}")
+            else:
+                add("ntp_api", "skip", "Ignoré (authentification ONVIF échouée)")
 
         # 4) Port RTSP (déduction de l'URI RTSP découverte)
         # Si l'utilisateur a explicitement choisi un profil, on utilise SON URL (pas la première).

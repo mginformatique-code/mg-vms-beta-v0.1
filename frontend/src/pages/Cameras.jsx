@@ -56,6 +56,7 @@ export default function Cameras() {
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [settingNtp, setSettingNtp] = useState(false);
+  const [testNtp, setTestNtp] = useState(false);
   const [testing, setTesting] = useState(null);
   const [snap, setSnap] = useState(null);
   const [debugSnap, setDebugSnap] = useState(null);
@@ -137,6 +138,7 @@ export default function Cameras() {
         preferred_codec: form.preferred_codec || "auto",
         stream_mode: form.stream_mode || "auto",
         profile_token: form.mode === "onvif" ? (form.profile_token || "") : "",
+        test_ntp: form.mode === "onvif" ? testNtp : false,
       });
       setConnCheck(data);
       if (data.profiles && data.profiles.length) {
@@ -673,6 +675,12 @@ export default function Cameras() {
                   {checking && <Loader2 size={12} className="animate-spin" />} Tester la connexion
                 </button>
               </div>
+              {form.mode === "onvif" && (
+                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <input type="checkbox" checked={testNtp} onChange={(e) => setTestNtp(e.target.checked)} data-testid="conn-test-ntp-checkbox" />
+                  Tester aussi l'API NTP (vérifie la bonne API selon le constructeur — Reolink natif / ONVIF)
+                </label>
+              )}
               {!connCheck && <p className="text-muted-foreground text-[11px]">{t("cam.test_hint")}</p>}
               {connCheck && (
                 <div className="space-y-1" data-testid="conn-test-result">

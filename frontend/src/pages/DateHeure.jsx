@@ -162,14 +162,26 @@ function SystemClockCard({ admin }) {
 // par caméra ("Définir comme serveur de temps") reste dans Appareils →
 // modifier, à côté des autres réglages de cette caméra ; pas dupliqué ici,
 // juste un décompte.
+const RESYNC_PRESETS = [24, 48, 72];
+
 function NtpCard({ admin }) {
   const [cams, setCams] = useState(null);
   const [upstream, setUpstream] = useState(null);
   const [savingUpstream, setSavingUpstream] = useState(false);
+  const [resyncHours, setResyncHours] = useState(null);
+  const [resyncCustom, setResyncCustom] = useState(false);
+  const [savingResync, setSavingResync] = useState(false);
 
   useEffect(() => {
     api.get("/cameras").then((r) => setCams(r.data || [])).catch(() => setCams([]));
-    if (admin) api.get("/system/ntp-upstream").then((r) => setUpstream(r.data.upstream || "")).catch(() => setUpstream(""));
+    if (admin) {
+      api.get("/system/ntp-upstream").then((r) => setUpstream(r.data.upstream || "")).catch(() => setUpstream(""));
+      api.get("/system/ntp-resync-interval").then((r) => {
+        const h = r.data.hours || 24;
+        setResyncHours(h);
+        setResyncCustom(!RESYNC_PRESETS.includes(h));
+      }).catch(() => setResyncHours(24));
+    }
   }, [admin]);
 
   const saveUpstream = async () => {
@@ -181,6 +193,16 @@ function NtpCard({ admin }) {
     finally { setSavingUpstream(false); }
   };
 
+  const saveResync = async (hours) => {
+    setSavingResync(true);
+    try {
+      const { data } = await api.put("/system/ntp-resync-interval", { hours });
+      setResyncHours(data.hours);
+      toast.success(`Resynchronisation programmée toutes les ${data.hours}h`);
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+    finally { setSavingResync(false); }
+  };
+
   if (cams === null) return null;
   const onvifCams = cams.filter((c) => c.mode === "onvif");
   const managed = cams.filter((c) => c.ntp_managed);
@@ -189,7 +211,34 @@ function NtpCard({ admin }) {
     <SectionCard title="Serveur de temps (NTP)" subtitle="MG-VMS sert l'heure aux caméras du réseau — évite les horloges qui dérivent ou se perdent après un reboot caméra." icon={Radio}>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
         <StatBox label="Caméras synchronisées" value={`${managed.length} / ${onvifCams.length} (ONVIF)`} />
-        <StatBox label="Resynchronisation" value="Auto — toutes les 24h" />
+        <div className="border border-border p-2 text-center">
+          <div className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Resynchronisation</div>
+          {admin && resyncHours !== null ? (
+            <div className="flex items-center gap-1 justify-center">
+              <select
+                value={resyncCustom ? "custom" : resyncHours}
+                onChange={(e) => {
+                  if (e.target.value === "custom") { setResyncCustom(true); return; }
+                  setResyncCustom(false);
+                  saveResync(Number(e.target.value));
+                }}
+                disabled={savingResync} data-testid="ntp-resync-select"
+                className="mono text-xs bg-background border border-input outline-none px-1.5 py-1 focus:border-[#0044FF]">
+                <option value={24}>24h (conseillé)</option>
+                <option value={48}>48h</option>
+                <option value={72}>72h</option>
+                <option value="custom">Personnalisé…</option>
+              </select>
+              {resyncCustom && (
+                <input type="number" min="1" max="720" defaultValue={resyncHours} data-testid="ntp-resync-custom"
+                       onBlur={(e) => { const h = Number(e.target.value); if (h > 0) saveResync(h); }}
+                       className="mono text-xs bg-background border border-input outline-none px-1.5 py-1 w-14 focus:border-[#0044FF]" />
+              )}
+            </div>
+          ) : (
+            <div className="mono text-lg font-bold mt-0.5">Auto — 24h</div>
+          )}
+        </div>
       </div>
       {managed.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-3">

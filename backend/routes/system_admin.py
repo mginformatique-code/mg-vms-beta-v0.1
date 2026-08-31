@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -121,25 +122,62 @@ async def put_ntp_upstream(data: NtpUpstreamIn, user: dict = Depends(require_rol
     return {"upstream": value}
 
 
+class NtpResyncIntervalIn(BaseModel):
+    hours: int = 24
+
+
+async def _load_ntp_resync_hours() -> int:
+    doc = await db.settings.find_one({"key": "ntp_resync_interval"}, {"_id": 0})
+    val = (doc or {}).get("value") or {}
+    try:
+        h = int(val.get("hours", 24))
+        return h if h > 0 else 24
+    except Exception:
+        return 24
+
+
+@system_admin_router.get("/ntp-resync-interval")
+async def get_ntp_resync_interval(user: dict = Depends(require_role("admin"))):
+    return {"hours": await _load_ntp_resync_hours()}
+
+
+@system_admin_router.put("/ntp-resync-interval")
+async def put_ntp_resync_interval(data: NtpResyncIntervalIn, user: dict = Depends(require_role("admin"))):
+    hours = max(1, min(int(data.hours), 24 * 30))  # garde-fou : 1h à 30j
+    await db.settings.update_one({"key": "ntp_resync_interval"}, {"$set": {"key": "ntp_resync_interval", "value": {"hours": hours}}}, upsert=True)
+    await log_audit(user, "ntp_resync_interval_updated", f"{hours}h")
+    return {"hours": hours}
+
+
+_NTP_RESYNC_CHECK_EVERY_S = 1800  # vérifie l'intervalle configuré toutes les 30 min
+
+
 async def ntp_resync_loop() -> None:
-    """v3.19 · Repousse périodiquement (toutes les 24h) le serveur NTP MG-VMS
-    aux caméras marquées `ntp_managed` (voir POST /cameras/{id}/ntp) — les
-    caméras dérivent avec le temps ou perdent l'heure après un reboot, un
-    "set" ponctuel ne suffit pas dans la durée."""
-    from routes.camera_control import _onvif_set_ntp, _get_cam_credentials
+    """v3.19 · Repousse périodiquement le serveur NTP MG-VMS aux caméras
+    marquées `ntp_managed` (voir POST /cameras/{id}/ntp) — les caméras
+    dérivent avec le temps ou perdent l'heure après un reboot, un "set"
+    ponctuel ne suffit pas dans la durée. Intervalle configurable depuis
+    Date et heure → Serveur de temps (24h/48h/72h/personnalisé), relu à
+    chaque vérification pour qu'un changement s'applique sans redémarrage."""
+    from routes.camera_control import dispatch_set_ntp, _get_cam_credentials
+    last_resync = 0.0
     while True:
-        await asyncio.sleep(24 * 3600)
+        await asyncio.sleep(_NTP_RESYNC_CHECK_EVERY_S)
         try:
+            hours = await _load_ntp_resync_hours()
+            if time.monotonic() - last_resync < hours * 3600:
+                continue
             async for cam in db.cameras.find({"ntp_managed": True}, {"_id": 0, "id": 1, "name": 1}):
                 try:
                     _cam, ip, port, u, pwd = await _get_cam_credentials(cam["id"])
                     server = (_cam.get("ntp_server") or "").strip()
                     if not server:
                         continue
-                    await asyncio.to_thread(_onvif_set_ntp, ip, port, u, pwd, server)
+                    await dispatch_set_ntp(_cam, ip, port, u, pwd, server)
                     logger.info("system_admin · NTP resynchronisé : %s", cam.get("name", cam["id"]))
                 except Exception:
                     logger.exception("system_admin · échec resync NTP caméra %s", cam.get("name", cam["id"]))
+            last_resync = time.monotonic()
         except Exception:
             logger.exception("system_admin · erreur boucle ntp_resync_loop")
 

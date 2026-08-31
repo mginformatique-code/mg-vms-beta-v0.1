@@ -97,9 +97,9 @@ def _onvif_reboot(ip, port, user, pwd) -> dict:
 
 def _onvif_set_ntp(ip, port, user, pwd, ntp_server: str) -> dict:
     """v3.19 · Pousse le serveur MG-VMS comme source de temps NTP sur la
-    caméra — beaucoup de caméras IP dérivent ou perdent l'heure après un
-    reboot. Opération ONVIF standard (même WSDL devicemgmt que
-    GetDeviceInformation/SystemReboot ci-dessus)."""
+    caméra via ONVIF générique (WSDL devicemgmt standard) — utilisé pour
+    tout ce qui n'est pas Reolink (Hikvision compris : ISAPI natif non
+    intégré à MG-VMS, ONVIF est la seule voie disponible ici)."""
     from wsdl_path import onvif_camera
     cam = onvif_camera(ip, port, user, pwd)
     dev = cam.create_devicemgmt_service()
@@ -108,6 +108,39 @@ def _onvif_set_ntp(ip, port, user, pwd, ntp_server: str) -> dict:
     ntp.NTPManual = [{"Type": "IPv4", "IPv4Address": ntp_server}]
     dev.SetNTP(ntp)
     return {"ok": True, "ntp_server": ntp_server}
+
+
+async def _reolink_set_ntp(ip: str, user: str, pwd: str, ntp_server: str) -> dict:
+    """v3.19 · Reolink expose son propre réglage NTP via l'API JSON native
+    (librairie ``reolink-aio``, déjà une dépendance — voir
+    drivers/reolink_driver.py) : `Host.set_ntp` + `Host.sync_ntp`. Constaté
+    en creusant la demande "vérifie que ça passe par la bonne API" : l'ONVIF
+    générique (`_onvif_set_ntp` ci-dessus) répond correctement sur les
+    caméras Reolink testées, mais reolink-aio est la voie que MG-VMS utilise
+    déjà pour tout le reste (OSD, IR, éclairage) car plus fiable dans la
+    durée sur ce constructeur — même logique appliquée ici."""
+    from reolink_aio.api import Host
+    host_api = Host(ip, user, pwd)
+    try:
+        await host_api.get_host_data()
+        await host_api.set_ntp(enable=True, server=ntp_server, port=123, interval=60)
+        await host_api.sync_ntp()
+    finally:
+        await host_api.logout()
+    return {"ok": True, "ntp_server": ntp_server}
+
+
+async def dispatch_set_ntp(cam: dict, ip: str, port: int, user: str, pwd: str, ntp_server: str) -> dict:
+    """Choisit la bonne API selon le constructeur — reolink-aio (natif) pour
+    Reolink, ONVIF générique sinon (Hikvision compris). Point d'entrée
+    unique utilisé par la route ci-dessous ET par `ntp_resync_loop`
+    (system_admin.py) pour ne jamais diverger entre le 1er réglage et les
+    resynchronisations automatiques."""
+    manufacturer = (cam.get("manufacturer") or "").lower()
+    if "reolink" in manufacturer:
+        return await _reolink_set_ntp(ip, user, pwd, ntp_server)
+    r = await asyncio.wait_for(asyncio.to_thread(_onvif_set_ntp, ip, port, user, pwd, ntp_server), timeout=15)
+    return r
 
 
 def _onvif_set_relay(ip, port, user, pwd, relay_token: str, state: bool) -> dict:
@@ -230,8 +263,7 @@ async def set_camera_ntp(camera_id: str,
         raise HTTPException(400, "ntp_server requis")
     cam, ip, port, u, pwd = await _get_cam_credentials(camera_id)
     try:
-        r = await asyncio.wait_for(
-            asyncio.to_thread(_onvif_set_ntp, ip, port, u, pwd, ntp_server), timeout=15)
+        r = await dispatch_set_ntp(cam, ip, port, u, pwd, ntp_server)
     except Exception as e:
         raise HTTPException(502, f"NTP error: {type(e).__name__}: {str(e)[:200]}")
     await db.cameras.update_one({"id": camera_id}, {"$set": {"ntp_managed": True, "ntp_server": ntp_server}})
