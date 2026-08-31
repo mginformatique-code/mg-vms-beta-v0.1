@@ -90,6 +90,29 @@ async def put_auto_reboot(data: AutoRebootIn, user: dict = Depends(require_role(
     return value
 
 
+async def ntp_resync_loop() -> None:
+    """v3.19 · Repousse périodiquement (toutes les 24h) le serveur NTP MG-VMS
+    aux caméras marquées `ntp_managed` (voir POST /cameras/{id}/ntp) — les
+    caméras dérivent avec le temps ou perdent l'heure après un reboot, un
+    "set" ponctuel ne suffit pas dans la durée."""
+    from routes.camera_control import _onvif_set_ntp, _get_cam_credentials
+    while True:
+        await asyncio.sleep(24 * 3600)
+        try:
+            async for cam in db.cameras.find({"ntp_managed": True}, {"_id": 0, "id": 1, "name": 1}):
+                try:
+                    _cam, ip, port, u, pwd = await _get_cam_credentials(cam["id"])
+                    server = (_cam.get("ntp_server") or "").strip()
+                    if not server:
+                        continue
+                    await asyncio.to_thread(_onvif_set_ntp, ip, port, u, pwd, server)
+                    logger.info("system_admin · NTP resynchronisé : %s", cam.get("name", cam["id"]))
+                except Exception:
+                    logger.exception("system_admin · échec resync NTP caméra %s", cam.get("name", cam["id"]))
+        except Exception:
+            logger.exception("system_admin · erreur boucle ntp_resync_loop")
+
+
 async def auto_reboot_loop() -> None:
     """Vérifie chaque minute si l'heure programmée du reboot auto est atteinte."""
     last_triggered_date = None

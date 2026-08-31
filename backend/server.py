@@ -51,7 +51,7 @@ from routes.vehicles import vehicles_router
 from routes.smart_search import smart_search_router
 from routes.llm_settings import llm_settings_router
 from routes.discovery import discovery_router
-from routes.system_admin import system_admin_router, auto_reboot_loop
+from routes.system_admin import system_admin_router, auto_reboot_loop, ntp_resync_loop
 from wsdl_path import validate_wsdl_dir
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -219,6 +219,7 @@ async def on_startup():
     from pipeline_v2.stability_watcher import watcher as _stability_watcher
     _stability_watcher.start()
     asyncio.create_task(auto_reboot_loop())
+    asyncio.create_task(ntp_resync_loop())
     logger.info("MG-VMS API démarré - données initialisées + broadcaster temps réel actif")
     # v3.1.7 · SUPPRIMÉ : l'auto-start `VideoCoreManager.ensure_camera()` pour
     # chaque caméra ici ouvrait une 2e connexion RTSP DIRECTE vers la caméra

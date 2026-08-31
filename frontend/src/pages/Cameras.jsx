@@ -7,7 +7,7 @@ import CameraPluginsConfig from "@/pages/CameraPluginsConfig";
 import {
   Plus, Wifi, WifiOff, Camera as CamIcon, Trash2, Activity, Loader2, Radar,
   CheckCircle2, XCircle, AlertTriangle, Pencil, Wand2, ChevronRight, BrainCircuit,
-  Stethoscope,
+  Stethoscope, Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -55,6 +55,7 @@ export default function Cameras() {
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [settingNtp, setSettingNtp] = useState(false);
   const [testing, setTesting] = useState(null);
   const [snap, setSnap] = useState(null);
   const [debugSnap, setDebugSnap] = useState(null);
@@ -619,78 +620,6 @@ export default function Cameras() {
                   `stream_mode` reste envoyé à "auto" par défaut, et le backend
                   continue d'honorer "direct_rtsp" pour les caméras existantes
                   qui l'auraient déjà en base (aucune migration nécessaire). */}
-              <div className="col-span-2">
-                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                  URL RTSP WebRTC (H264) — optionnel
-                </label>
-                {profiles.length > 0 && (
-                  <select
-                    className="inp mb-1.5"
-                    data-testid="webrtc-profile-select"
-                    value=""
-                    onChange={(e) => {
-                      const p = profiles.find((pp) => (pp.token || pp.rtsp_url) === e.target.value);
-                      if (!p) return;
-                      // v3.1.3 · En édition, le mot de passe n'est jamais renvoyé par le
-                      // backend (vide tant qu'il n'est pas retapé) — prévenir plutôt que
-                      // générer silencieusement une URL sans identifiants.
-                      if (editingId && !form.password) {
-                        toast.warning("Retapez le mot de passe caméra ci-dessus avant de choisir un profil — sinon l'URL générée sera incomplète.");
-                      }
-                      setForm({
-                        ...form,
-                        webrtc_rtsp_url: withRtspCredentials(p.rtsp_url, form.username, form.password),
-                      });
-                    }}
-                  >
-                    <option value="">{t("cam.choose_profile")}</option>
-                    {profiles.map((p, i) => {
-                      const codec = (p.codec || "").toUpperCase().replace("VIDEO", "").trim();
-                      const compatible = codec === "H264" || codec === "";
-                      return (
-                        <option key={p.token || i} value={p.token || p.rtsp_url}>
-                          {p.name || `Profil ${i + 1}`} — {p.resolution || "?"} {codec || "codec inconnu"}
-                          {compatible ? " ✓ compatible WebRTC" : " ✗ incompatible (pas H264)"}
-                        </option>
-                      );
-                    })}
-                  </select>
-                )}
-                <input
-                  value={form.webrtc_rtsp_url}
-                  onChange={(e) => setForm({ ...form, webrtc_rtsp_url: e.target.value })}
-                  placeholder="rtsp://…/h264Preview_01_sub (obligatoire si votre flux principal est H265)"
-                  className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
-                  data-testid="webrtc-rtsp-url-input"
-                />
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  Les navigateurs ne lisent pas le H265 en WebRTC. Si votre flux principal est H265
-                  (ex. Reolink 4K), choisissez ci-dessus le sous-flux H264 détecté automatiquement
-                  (ou saisissez l&apos;URL manuellement) : il sera utilisé UNIQUEMENT pour la lecture
-                  navigateur — enregistrement et IA restent sur le flux natif.
-                </p>
-              </div>
-              <div className="col-span-2">
-                {/* v3.1.1 · Champ existant côté backend (ai_rtsp_url) mais jamais
-                    exposé en UI jusqu'ici. */}
-                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                  URL RTSP dédiée IA / ANPR — optionnel
-                </label>
-                <input
-                  value={form.ai_rtsp_url}
-                  onChange={(e) => setForm({ ...form, ai_rtsp_url: e.target.value })}
-                  placeholder="rtsp://…/h264Preview_01_sub (laisser vide = flux principal utilisé)"
-                  className="w-full bg-secondary border border-border px-2 py-1.5 text-sm mono"
-                  data-testid="ai-rtsp-url-input"
-                />
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  Vide = l&apos;IA/ANPR analyse le flux principal (`rtsp_url`), quel que soit son codec.
-                  Renseignez un flux différent ici seulement si votre caméra expose un second profil
-                  utile pour l&apos;analyse — attention : un sub-stream est souvent aussi en résolution
-                  réduite, ce qui peut nuire à la lecture de plaque à distance malgré le gain en
-                  légèreté. À réserver aux caméras où le profil alternatif reste en bonne résolution.
-                </p>
-              </div>
             </div>
 
             {/* Config enregistrement avancée : mode + canal ONVIF + disque cible */}
@@ -790,6 +719,22 @@ export default function Cameras() {
 
           <DialogFooter>
             <button onClick={closeDialog} className="px-4 py-2 border border-border text-sm hover:bg-secondary">Annuler</button>
+            {editingId && form.mode === "onvif" && (
+              <button
+                onClick={async () => {
+                  setSettingNtp(true);
+                  try {
+                    await api.post(`/cameras/${editingId}/ntp`, { ntp_server: window.location.hostname });
+                    toast.success("Serveur de temps défini — MG-VMS resynchronisera cette caméra automatiquement toutes les 24h");
+                  } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+                  finally { setSettingNtp(false); }
+                }}
+                disabled={settingNtp} data-testid="cam-form-set-ntp"
+                title="Définit MG-VMS comme source d'heure (NTP) de cette caméra"
+                className="px-4 py-2 border border-border text-sm hover:bg-secondary flex items-center gap-2">
+                {settingNtp ? <Loader2 size={15} className="animate-spin" /> : <Clock size={15} />} Définir comme serveur de temps
+              </button>
+            )}
             {(() => {
               const onvifOk = connCheck?.steps?.find((s) => s.name === "onvif_auth")?.status === "ok";
               const rtspOk = connCheck?.steps?.find((s) => s.name === "rtsp_open")?.status === "ok";

@@ -403,6 +403,34 @@ else
   warn "systemctl introuvable — le reboot machine depuis l'UI (Paramètres → Système) ne fonctionnera pas"
 fi
 
+# v3.19 · MG-VMS comme serveur NTP pour le réseau caméras — beaucoup de
+# caméras IP ne savent pas maintenir l'heure seules ou la perdent après un
+# reboot. chrony tourne sur l'HÔTE (jamais dans un conteneur — service
+# réseau/temps système, même logique que le reboot ci-dessus), sert le
+# sous-réseau caméras, et coexiste avec la synchro sortante existante
+# (installer chrony désactive proprement systemd-timesyncd sur Debian).
+# Idempotent — sans effet sur une install déjà à jour.
+CAMERA_LAN="${CAMERA_LAN_CIDR:-192.168.1.0/24}"
+if command -v apt-get >/dev/null 2>&1; then
+  if ! command -v chronyd >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y chrony >/dev/null 2>&1
+  fi
+  if command -v chronyd >/dev/null 2>&1; then
+    cat > /etc/chrony/conf.d/mgvms-camera-lan.conf << EOF
+# MG-VMS - sert l'heure au reseau cameras (${CAMERA_LAN})
+allow ${CAMERA_LAN}
+local stratum 10
+EOF
+    systemctl enable --now chrony >/dev/null 2>&1
+    systemctl restart chrony
+    ok "chrony actif — MG-VMS sert l'heure (NTP) au réseau ${CAMERA_LAN}"
+  else
+    warn "installation de chrony échouée — serveur NTP caméras indisponible"
+  fi
+else
+  warn "apt-get introuvable — serveur NTP caméras (chrony) non installé, à faire manuellement"
+fi
+
 # ══════════════════════════════════════════════════════════════════════
 # 6. Build & démarrage
 # ══════════════════════════════════════════════════════════════════════

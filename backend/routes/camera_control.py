@@ -95,6 +95,21 @@ def _onvif_reboot(ip, port, user, pwd) -> dict:
     return {"ok": True, "message": str(result)}
 
 
+def _onvif_set_ntp(ip, port, user, pwd, ntp_server: str) -> dict:
+    """v3.19 · Pousse le serveur MG-VMS comme source de temps NTP sur la
+    caméra — beaucoup de caméras IP dérivent ou perdent l'heure après un
+    reboot. Opération ONVIF standard (même WSDL devicemgmt que
+    GetDeviceInformation/SystemReboot ci-dessus)."""
+    from wsdl_path import onvif_camera
+    cam = onvif_camera(ip, port, user, pwd)
+    dev = cam.create_devicemgmt_service()
+    ntp = dev.create_type("SetNTP")
+    ntp.FromDHCP = False
+    ntp.NTPManual = [{"Type": "IPv4", "IPv4Address": ntp_server}]
+    dev.SetNTP(ntp)
+    return {"ok": True, "ntp_server": ntp_server}
+
+
 def _onvif_set_relay(ip, port, user, pwd, relay_token: str, state: bool) -> dict:
     """Active/désactive un relais ONVIF (projecteur, sirène, gyrophare, GPIO…)."""
     from wsdl_path import onvif_camera
@@ -199,6 +214,28 @@ async def reboot_camera(camera_id: str,
     except Exception as e:
         raise HTTPException(502, f"Reboot error: {type(e).__name__}: {str(e)[:200]}")
     await log_audit(user, "camera_reboot", cam.get("name", camera_id))
+    return r
+
+
+@camera_control_router.post("/cameras/{camera_id}/ntp")
+async def set_camera_ntp(camera_id: str,
+                          body: dict = Body(...),
+                          user: dict = Depends(require_permission("admin"))):
+    """v3.19 · "Définir comme serveur de temps" — pousse l'IP du serveur
+    MG-VMS (fournie par le frontend, qui la connaît déjà via l'URL utilisée
+    pour s'y connecter) comme source NTP de la caméra, et marque la caméra
+    pour la resynchronisation automatique toutes les 24h (auto_ntp_loop)."""
+    ntp_server = (body or {}).get("ntp_server", "").strip()
+    if not ntp_server:
+        raise HTTPException(400, "ntp_server requis")
+    cam, ip, port, u, pwd = await _get_cam_credentials(camera_id)
+    try:
+        r = await asyncio.wait_for(
+            asyncio.to_thread(_onvif_set_ntp, ip, port, u, pwd, ntp_server), timeout=15)
+    except Exception as e:
+        raise HTTPException(502, f"NTP error: {type(e).__name__}: {str(e)[:200]}")
+    await db.cameras.update_one({"id": camera_id}, {"$set": {"ntp_managed": True, "ntp_server": ntp_server}})
+    await log_audit(user, "camera_ntp_set", cam.get("name", camera_id), ntp_server)
     return r
 
 
