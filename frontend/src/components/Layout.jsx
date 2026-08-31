@@ -219,6 +219,9 @@ function AboutDialog({ open, onOpenChange, t, isAdmin, lang }) {
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 text-sm">
+          <div className="flex justify-center py-2">
+            <Logo size={160} className="w-40 h-40" data-testid="about-logo-large" />
+          </div>
           <div className="font-head font-bold text-base">{t("about.company")}</div>
           <div className="border border-border p-3">
             <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-2">

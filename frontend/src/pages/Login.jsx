@@ -85,6 +85,12 @@ export default function Login() {
               <span className={pub?.cameras_online > 0 ? "mg-online" : "mg-error"}>●</span>{" "}
               {pub === null ? "…" : `${pub.cameras_online} ONLINE`}
             </span>
+            {pub?.cameras_offline > 0 && (
+              <span data-testid="badge-offline">
+                <span className="mg-error">●</span>{" "}
+                {pub.cameras_offline} OFFLINE
+              </span>
+            )}
             <span data-testid="badge-anpr">
               <span className={pub?.anpr_active ? "mg-online" : "mg-error"}>●</span>{" "}
               ANPR {pub?.anpr_active ? "ACTIVE" : "OFF"}

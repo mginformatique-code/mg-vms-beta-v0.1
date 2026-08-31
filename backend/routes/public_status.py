@@ -15,13 +15,16 @@ async def public_status():
     """Retourne un snapshot public agrégé pour l'écran de login.
 
     - `cameras_online` : nombre de caméras dont `status == "online"`
+    - `cameras_offline` : nombre de caméras dont `status != "online"`
     - `anpr_active` : au moins un plugin ANPR est dispatchable
     - `ai_engine` : au moins un FrameAnalyzer est dispatchable
     """
     try:
         online = await db.cameras.count_documents({"status": "online"})
+        offline = await db.cameras.count_documents({"status": {"$ne": "online"}})
     except Exception:
         online = 0
+        offline = 0
 
     anpr_active = False
     ai_engine = False
@@ -34,6 +37,7 @@ async def public_status():
 
     return {
         "cameras_online": int(online),
+        "cameras_offline": int(offline),
         "anpr_active": bool(anpr_active),
         "ai_engine": bool(ai_engine),
     }
