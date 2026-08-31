@@ -3,7 +3,7 @@ import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import {
   Loader2, HardDrive, Save, Trash2, PlayCircle, Database, RefreshCw,
-  CheckCircle2, XCircle, AlertTriangle, Server, Film, Info, Clock, Power,
+  CheckCircle2, XCircle, AlertTriangle, Server, Film, Info,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -30,7 +30,6 @@ export default function SettingsPage() {
       <Tip text={t("storage.tip")} />
 
       <VMSDiskCard />
-      {user?.role === "admin" && <SystemCard />}
       {user?.role === "admin" && <DatabaseCard />}
       {user?.role === "admin" && <RetentionCard />}
       {user?.role === "admin" && <VideoPoolsCard />}
@@ -370,90 +369,6 @@ function DatabaseCard() {
 // ═══════════════════════════════════════════════════════════════════
 // 3a. Rétention vidéo (seuils + purge)
 // ═══════════════════════════════════════════════════════════════════
-const AUTO_REBOOT_DAYS = [
-  ["daily", "Tous les jours"], ["monday", "Lundi"], ["tuesday", "Mardi"], ["wednesday", "Mercredi"],
-  ["thursday", "Jeudi"], ["friday", "Vendredi"], ["saturday", "Samedi"], ["sunday", "Dimanche"],
-];
-
-// v3.19 · Périmètre volontairement réduit à un reboot complet de la
-// machine hôte (pas de gestion fine des conteneurs) — décision du 31 août
-// pour éviter d'exposer le socket Docker ou d'élever les privilèges du
-// conteneur backend. CPU/RAM/disque/uptime existent déjà dans le tableau
-// de bord santé — pas dupliqués ici, uniquement date/heure + reboot.
-function SystemCard() {
-  const [info, setInfo] = useState(null);
-  const [autoReboot, setAutoReboot] = useState(null);
-  const [savingAuto, setSavingAuto] = useState(false);
-  const [rebooting, setRebooting] = useState(false);
-
-  const load = () => {
-    api.get("/system/info").then((r) => setInfo(r.data)).catch(() => {});
-    api.get("/system/auto-reboot").then((r) => setAutoReboot(r.data)).catch(() => {});
-  };
-  useEffect(() => { load(); const iv = setInterval(load, 30000); return () => clearInterval(iv); }, []);
-
-  const rebootNow = async () => {
-    if (!window.confirm("Redémarrer la machine maintenant ? Toutes les caméras et le service seront coupés le temps du redémarrage.")) return;
-    setRebooting(true);
-    try {
-      await api.post("/system/reboot");
-      toast.success("Redémarrage programmé — la machine va redémarrer sous peu.");
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
-    finally { setRebooting(false); }
-  };
-
-  const saveAutoReboot = async () => {
-    setSavingAuto(true);
-    try {
-      const { data } = await api.put("/system/auto-reboot", autoReboot);
-      setAutoReboot(data);
-      toast.success("Reboot automatique mis à jour");
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
-    finally { setSavingAuto(false); }
-  };
-
-  if (!info || !autoReboot) return null;
-
-  return (
-    <SectionCard id="system" title="Système" subtitle="Date/heure serveur et redémarrage de la machine." icon={Clock}>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4">
-        <StatBox label="Date & heure serveur" value={new Date(info.server_time).toLocaleString("fr-FR")} />
-        <StatBox label="Fuseau horaire" value={`${info.timezone} (UTC${info.utc_offset})`} />
-      </div>
-
-      <div className="border-t border-border pt-4 mb-4">
-        <label className="flex items-center gap-2 text-sm mb-3">
-          <input type="checkbox" checked={autoReboot.enabled} onChange={(e) => setAutoReboot({ ...autoReboot, enabled: e.target.checked })} data-testid="auto-reboot-enabled" />
-          Redémarrage automatique programmé
-        </label>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-          <div>
-            <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Fréquence</label>
-            <select value={autoReboot.day} onChange={(e) => setAutoReboot({ ...autoReboot, day: e.target.value })} data-testid="auto-reboot-day"
-                    className="w-full px-3 py-2 bg-background border border-input outline-none text-sm focus:border-[#0044FF]">
-              {AUTO_REBOOT_DAYS.map(([k, lbl]) => <option key={k} value={k}>{lbl}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Heure</label>
-            <input type="time" value={autoReboot.time} onChange={(e) => setAutoReboot({ ...autoReboot, time: e.target.value })} data-testid="auto-reboot-time"
-                   className="w-full px-3 py-2 bg-background border border-input outline-none mono focus:border-[#0044FF]" />
-          </div>
-        </div>
-        <button onClick={saveAutoReboot} disabled={savingAuto} data-testid="auto-reboot-save" className="flex items-center gap-2 px-4 py-2 bg-[#0044FF] text-white text-sm">
-          {savingAuto && <Loader2 size={14} className="animate-spin" />}<Save size={14} /> Enregistrer
-        </button>
-      </div>
-
-      <div className="border-t border-border pt-4">
-        <button onClick={rebootNow} disabled={rebooting} data-testid="system-reboot-btn" className="flex items-center gap-2 px-4 py-2 border border-[#FF3333] text-[#FF3333] text-sm hover:bg-[#FF3333]/10">
-          {rebooting ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />} Redémarrer la machine maintenant
-        </button>
-      </div>
-    </SectionCard>
-  );
-}
-
 function RetentionCard() {
   const { t } = useApp();
   const [state, setState] = useState(null);

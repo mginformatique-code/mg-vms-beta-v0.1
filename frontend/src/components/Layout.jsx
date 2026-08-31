@@ -73,6 +73,7 @@ const NAV = [
   ]},
   { group: "nav.settings_group", items: [
     { to: "/storage", icon: HardDrive, key: "nav.storage" },
+    { to: "/date-heure", icon: Clock, key: "nav.datetime" },
     { to: "/notifications", icon: BellRing, key: "nav.notifications", role: "technician" },
   ]},
 ];

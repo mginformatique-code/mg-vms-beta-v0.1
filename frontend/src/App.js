@@ -43,6 +43,7 @@ import CameraCenter from "@/pages/CameraCenter";
 import CameraCenterDispatch from "@/pages/CameraCenterDispatch";
 import UsersPage from "@/pages/Users";
 import SettingsPage from "@/pages/Settings";
+import DateHeurePage from "@/pages/DateHeure";
 import Notifications from "@/pages/Notifications";
 import LlmSettings from "@/pages/LlmSettings";
 import Plugins from "@/pages/PluginManagerNG";
@@ -111,6 +112,7 @@ function AppRoutes() {
       <Route path="/plugins/:pluginId" element={<Protected><PluginPage /></Protected>} />
       <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
       <Route path="/storage" element={<Protected><SettingsPage /></Protected>} />
+      <Route path="/date-heure" element={<Protected><DateHeurePage /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
