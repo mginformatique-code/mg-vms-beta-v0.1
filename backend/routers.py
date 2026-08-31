@@ -71,6 +71,13 @@ async def update_site(site_id: str, data: SiteInput, user: dict = Depends(requir
     res = await db.sites.update_one({"id": site_id}, {"$set": data.model_dump()})
     if res.matched_count == 0:
         raise HTTPException(404, "Site introuvable")
+    # v3.19 · site_name est recopié sur la caméra à sa création (voir
+    # create_camera) puis plus jamais relu depuis `sites` — sans cascade ici,
+    # un renommage de site reste invisible sur les caméras déjà créées.
+    # Volontairement limité aux caméras (affichage courant) : les
+    # événements/alertes/plaques déjà enregistrés gardent le nom du site tel
+    # qu'il était au moment de l'ingestion, comme un historique figé.
+    await db.cameras.update_many({"site_id": site_id}, {"$set": {"site_name": data.name}})
     await log_audit(user, "site_updated", data.name)
     return await db.sites.find_one({"id": site_id}, {"_id": 0})
 
