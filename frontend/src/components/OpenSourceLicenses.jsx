@@ -66,6 +66,22 @@ const GROUPS = [
       { name: "EasyOCR", version: "1.7.2", license: "Apache-2.0", url: "https://github.com/JaidedAI/EasyOCR" },
       { name: "PaddleOCR", version: "3.7.0", license: "Apache-2.0", url: "https://github.com/PaddlePaddle/PaddleOCR" },
       { name: "InsightFace", version: "1.0.1", license: "— non déclarée par le paquet", url: "https://github.com/deepinsight/insightface" },
+      // v3.20 · Modèle auto-hébergé (Admin → LLM), pas un paquet pip local —
+      // pas de métadonnées importlib.metadata à relever ici comme pour le
+      // reste de cette liste. Version réellement configurée sur ce serveur
+      // (routes/llm_settings.py) : qwen3:1.7b. Licence Apache-2.0, publiée
+      // par Alibaba/Qwen Team pour toute la série Qwen3.
+      { name: "Qwen3 (LLM)", version: "1.7b", license: "Apache-2.0", url: "https://github.com/QwenLM/Qwen3" },
+    ],
+  },
+  {
+    key: "system",
+    label: { fr: "Système hôte", en: "Host system" },
+    items: [
+      // v3.20 · Serveur NTP embarqué (Date et heure → Serveur de temps) —
+      // paquet Debian réellement installé sur l'hôte (dpkg -l), pas une image
+      // conteneur.
+      { name: "chrony", version: "4.6.1", license: "GPL-2.0", url: "https://chrony-project.org" },
     ],
   },
   {
