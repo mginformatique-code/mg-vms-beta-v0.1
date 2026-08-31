@@ -515,6 +515,8 @@ function CapabilitiesTab({ caps }) {
 function AITab({ caps, cameraId }) {
   const { t } = useApp();
   const [ai, setAi] = useState({});
+  const [tuning, setTuning] = useState(null);
+  const [tuningRunning, setTuningRunning] = useState(false);
   useEffect(() => {
     const load = async () => {
       const [cam, insp] = await Promise.all([
@@ -528,6 +530,19 @@ function AITab({ caps, cameraId }) {
     const iv = setInterval(load, 4000);
     return () => clearInterval(iv);
   }, [cameraId]);
+  useEffect(() => {
+    api.get(`/cameras/${cameraId}/anpr-tuning/history`).then((r) => setTuning(r.data)).catch(() => setTuning(null));
+  }, [cameraId]);
+  const runTuningNow = async () => {
+    setTuningRunning(true);
+    try {
+      await api.post(`/cameras/${cameraId}/anpr-tuning/run`);
+      const r = await api.get(`/cameras/${cameraId}/anpr-tuning/history`);
+      setTuning(r.data);
+      toast.success("Seuil ANPR réévalué");
+    } catch (e) { toast.error(e.response?.data?.detail?.message || "Échec — pas assez de lectures récentes ?"); }
+    finally { setTuningRunning(false); }
+  };
   const plugins = ai.cam?.enabled_plugins || [];
   const stages = ai.stages || {};
   return (
@@ -555,6 +570,29 @@ function AITab({ caps, cameraId }) {
           <div>Total</div><div className="font-mono">{fmtMs(stages.total)}</div>
         </div>
       </Card>
+      {tuning && (
+        <Card className="p-4 space-y-2 md:col-span-2" data-testid="cam-anpr-tuning">
+          <div className="flex items-center justify-between">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground">
+              Seuil de confiance ANPR (auto-réglé par IA)
+            </div>
+            <Button size="sm" variant="outline" onClick={runTuningNow} disabled={tuningRunning} data-testid="anpr-tuning-run">
+              {tuningRunning ? "Analyse…" : "Réévaluer maintenant"}
+            </Button>
+          </div>
+          <div className="text-2xl font-mono">{Math.round(tuning.current_min_confidence * 100)}%</div>
+          <p className="text-xs text-muted-foreground">
+            Les lectures de plaque sous ce seuil sont ignorées (pas stockées). Réévalué automatiquement une fois par semaine
+            à partir des 14 derniers jours de lectures de cette caméra.
+          </p>
+          {tuning.history?.length > 0 && (
+            <div className="text-xs text-muted-foreground border-t border-border pt-2 mt-1">
+              Dernier ajustement : {Math.round(tuning.history[0].previous * 100)}% → {Math.round(tuning.history[0].new * 100)}%
+              — {tuning.history[0].reason}
+            </div>
+          )}
+        </Card>
+      )}
     </div>
   );
 }
