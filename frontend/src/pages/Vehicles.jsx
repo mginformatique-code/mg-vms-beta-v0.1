@@ -11,7 +11,7 @@ import {
   Search, Car, Camera as CameraIcon, Clock, Route as RouteIcon,
   Activity, BarChart3, Loader2, Info, ChevronDown, ChevronRight,
   AlertTriangle, ShieldAlert, ShieldCheck, Shield, Bell, X as XIcon,
-  CheckCircle2, GitMerge, Sparkles, Users, Link2, Plus,
+  CheckCircle2, GitMerge, Sparkles, Users, Link2, Plus, LayoutGrid, List,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -44,6 +44,12 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
   const [loading, setLoading] = useState(false);
   const [openPlate, setOpenPlate] = useState(null);
   const [anomalies, setAnomalies] = useState([]);
+  // v3.20 · Affichage tuiles (miniatures, plus lourd à charger) vs liste
+  // compacte (façon ancien menu Plaques) — demandé pour alléger l'interface.
+  // Préférence mémorisée par navigateur, pas envoyée au serveur.
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem("vehicles_view_mode") || "tiles");
+  useEffect(() => { localStorage.setItem("vehicles_view_mode", viewMode); }, [viewMode]);
+
   // v3.18 · Fusion manuelle de fiches — sélection explicite par l'opérateur,
   // pas de calcul automatique (voir _merge_by_identity côté backend).
   const [mergeMode, setMergeMode] = useState(false);
@@ -337,6 +343,18 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
             : `${items.length} véhicule${items.length > 1 ? "s" : ""} affiché${items.length > 1 ? "s" : ""} sur ${total}`}
         </span>
         <div className="flex items-center gap-3">
+          <div className="flex border border-border" data-testid="vehicles-view-toggle">
+            <button onClick={() => setViewMode("tiles")} title="Affichage tuiles"
+                    className={`p-1.5 ${viewMode === "tiles" ? "bg-[#0044FF] text-white" : "text-muted-foreground hover:text-foreground"}`}
+                    data-testid="vehicles-view-tiles">
+              <LayoutGrid size={13} />
+            </button>
+            <button onClick={() => setViewMode("list")} title="Affichage liste"
+                    className={`p-1.5 border-l border-border ${viewMode === "list" ? "bg-[#0044FF] text-white" : "text-muted-foreground hover:text-foreground"}`}
+                    data-testid="vehicles-view-list">
+              <List size={13} />
+            </button>
+          </div>
           {smartResult && (
             <button onClick={clearSmart} data-testid="smart-clear-inline"
                     className="text-[10px] uppercase tracking-wider text-[#0044FF] hover:underline">
@@ -518,23 +536,43 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
       )}
 
       <div data-testid="vehicles-grid-root">
-        <VirtualGrid
-          items={smartResult ? (smartResult.vehicles || []) : items}
-          renderItem={(v) => (
-            <VehicleCard
-              v={v}
-              onOpen={mergeMode ? () => togglePlateSelection(v.plate) : () => setOpenPlate(v.plate)}
-              selectable={mergeMode}
-              selected={selectedPlates.has(v.plate)}
-            />
-          )}
-          itemKey={(v) => v.plate}
-          rowHeight={340}
-          minColumnWidth={260}
-          maxColumns={4}
-          threshold={200}
-          testid="vehicles-virtual-grid"
-        />
+        {viewMode === "tiles" ? (
+          <VirtualGrid
+            items={smartResult ? (smartResult.vehicles || []) : items}
+            renderItem={(v) => (
+              <VehicleCard
+                v={v}
+                onOpen={mergeMode ? () => togglePlateSelection(v.plate) : () => setOpenPlate(v.plate)}
+                selectable={mergeMode}
+                selected={selectedPlates.has(v.plate)}
+              />
+            )}
+            itemKey={(v) => v.plate}
+            rowHeight={340}
+            minColumnWidth={260}
+            maxColumns={4}
+            threshold={200}
+            testid="vehicles-virtual-grid"
+          />
+        ) : (
+          <VirtualGrid
+            items={smartResult ? (smartResult.vehicles || []) : items}
+            renderItem={(v) => (
+              <VehicleListRow
+                v={v}
+                onOpen={mergeMode ? () => togglePlateSelection(v.plate) : () => setOpenPlate(v.plate)}
+                selectable={mergeMode}
+                selected={selectedPlates.has(v.plate)}
+              />
+            )}
+            itemKey={(v) => v.plate}
+            rowHeight={52}
+            minColumnWidth={99999}
+            maxColumns={1}
+            threshold={200}
+            testid="vehicles-virtual-list"
+          />
+        )}
       </div>
 
       {/* v3.17 · Même principe que le menu Événements : la page ne charge
@@ -1477,6 +1515,42 @@ function Stat({ label, value }) {
       <div className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className="mono mt-0.5">{value}</div>
     </div>
+  );
+}
+
+// v3.20 · Affichage liste — vue compacte façon ancien menu Plaques, en
+// alternative aux tuiles avec miniatures (demandé : plus léger/rapide,
+// pas de chargement d'image par ligne).
+function VehicleListRow({ v, onOpen, selectable = false, selected = false }) {
+  return (
+    <button
+      onClick={onOpen}
+      data-testid={`vehicle-row-${v.plate}`}
+      className={`w-full text-left bg-card border-b border-border hover:bg-secondary/40 transition-colors flex items-center gap-4 px-3 py-2 ${
+        selectable && selected ? "bg-[#0044FF]/10" : ""
+      }`}
+    >
+      {selectable && (
+        <div
+          className={`w-4 h-4 shrink-0 border-2 flex items-center justify-center ${
+            selected ? "bg-[#0044FF] border-[#0044FF]" : "border-muted-foreground"
+          }`}
+          data-testid={`vehicle-row-select-${v.plate}`}
+        >
+          {selected && <CheckCircle2 size={11} className="text-white" />}
+        </div>
+      )}
+      <div className="shrink-0 w-28">
+        <PlateBadge value={v.plate} status={v.list_status} />
+      </div>
+      <div className="w-20 text-[11px] uppercase tracking-wider text-muted-foreground shrink-0">{v.vehicle_color || "—"}</div>
+      <div className="flex-1 text-sm truncate min-w-0">
+        {[v.vehicle_make, v.vehicle_model].filter(Boolean).join(" ") || <span className="text-muted-foreground">—</span>}
+      </div>
+      <div className="w-24 text-[11px] text-muted-foreground shrink-0 flex items-center gap-1"><Activity size={11} /> {v.passages_count}</div>
+      <div className="w-24 text-[11px] text-muted-foreground shrink-0 flex items-center gap-1"><CameraIcon size={11} /> {v.cameras_count}</div>
+      <div className="w-36 text-[11px] text-muted-foreground shrink-0 flex items-center gap-1"><Clock size={11} /> {fmtRelative(v.last_seen)}</div>
+    </button>
   );
 }
 
