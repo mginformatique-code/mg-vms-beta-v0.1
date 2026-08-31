@@ -220,11 +220,17 @@ async def _run_dedup_batch(limit: int = _MAX_CANDIDATES_PER_RUN) -> int:
             "same_vehicle": bool(verdict.get("same_vehicle")),
             "confidence": verdict.get("confidence"),
             "reason": verdict.get("reason", ""),
-            "status": "pending",
+            # v3.20 · Toute paire comparée est enregistrée (pour ne jamais la
+            # redemander à Qwen le lendemain), mais seules celles jugées
+            # "même véhicule" passent en "pending" — visibles pour révision.
+            # Sinon l'interface proposerait de fusionner des paires que le
+            # modèle vient lui-même de juger différentes.
+            "status": "pending" if verdict.get("same_vehicle") else "auto_rejected",
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         await db.dedup_suggestions.insert_one(doc)
-        created += 1
+        if doc["status"] == "pending":
+            created += 1
     return created
 
 
