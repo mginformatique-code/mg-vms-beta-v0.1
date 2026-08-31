@@ -123,7 +123,7 @@ export default function CameraCenter() {
       <div className="p-6 space-y-4">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" onClick={() => navigate("/cameras")}
+            <Button variant="ghost" size="sm" onClick={() => navigate("/camera-center")}
                     data-testid="back-to-cameras">
               <ArrowLeft className="w-4 h-4 mr-1" />Liste
             </Button>
