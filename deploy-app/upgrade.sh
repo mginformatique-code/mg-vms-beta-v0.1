@@ -14,17 +14,25 @@
 #     Utilisateurs, mots de passe, MFA, permissions, caméras, événements,
 #     plaques, alertes, réglages : intouchés.
 #   - Ne supprime AUCUN fichier d'enregistrement vidéo.
-#   - Ne modifie JAMAIS .env ni go2rtc.yaml.
+#   - Ne modifie JAMAIS go2rtc.yaml. Ne touche à AUCUN réglage applicatif
+#     existant dans .env — seule exception, une ligne ajoutée/mise à jour
+#     une fois (UPGRADE_BACKUP_PATH, voir étape 1 ci-dessous).
 #   - Aucun menu de purge (paliers A/B/C) — ça n'existe volontairement pas
 #     ici. Pour repartir propre ou tout réinitialiser : `install.sh`.
-#   - Aucun choix de disque, aucune configuration système (timer reboot,
-#     chrony NTP) — ce sont des étapes de première installation, pas de
-#     mise à jour de version. Si l'une d'elles manque sur ce serveur,
-#     relancer install.sh une fois suffit (idempotent, aucune donnée
+#   - Le seul choix de disque possible ici concerne la SAUVEGARDE de
+#     précaution (étape 1) — un scan des disques montés recommande le plus
+#     d'espace libre, demandé une seule fois puis mémorisé dans .env
+#     (UPGRADE_BACKUP_PATH). Rien à voir avec les chemins Mongo/
+#     enregistrements, qui restent le rôle exclusif d'install.sh, ni avec
+#     la configuration système (timer reboot, chrony NTP) — étapes de
+#     première installation, pas de mise à jour de version. Si l'une
+#     d'elles manque sur ce serveur, relancer install.sh une fois suffit
+#     (idempotent, aucune donnée
 #     touchée non plus).
 #
 # Ce que fait upgrade.sh, dans l'ordre :
-#   1. Sauvegarde MongoDB (mongodump) avant toute chose      [--no-backup]
+#   1. Sauvegarde MongoDB (mongodump) avant toute chose — disque choisi une
+#      fois via scan local, mémorisé ensuite       [--no-backup]
 #   2. git fetch + merge --ff-only (échoue fort si divergence, jamais de
 #      résolution automatique — jamais de force/reset)        [--no-pull]
 #   3. Validation des fichiers de build (mêmes contrôles qu'install.sh)
@@ -90,12 +98,39 @@ if [ "$NO_BACKUP" = 1 ]; then
 elif [ -z "$(docker compose ps -q mongo 2>/dev/null)" ]; then
   warn "Conteneur mongo non démarré — sauvegarde ignorée (rien à sauvegarder pour l'instant)"
 else
-  # v3.21 · /mnt/storage (disque système, 118 Go) est trop petit pour un
-  # mongodump de cette base (>90 Go et en croissance) — testé en prod,
-  # échec par manque d'espace. En dur sur /mnt/video-datastore, le plus
-  # gros disque du serveur (3 To) et celui qui a le plus d'espace libre
-  # réellement disponible aujourd'hui, malgré son pourcentage d'usage élevé.
-  BACKUP_DIR="/mnt/video-datastore/mgvms-backups/upgrade-$(date +%Y%m%d-%H%M%S)"
+  # v3.21 · /mnt/storage (disque système) s'est révélé trop petit pour un
+  # mongodump de cette base (>90 Go et en croissance) — testé en prod, échec
+  # par manque d'espace. Demandé UNE SEULE FOIS (comme les chemins Mongo/
+  # enregistrements d'install.sh) : scan des disques montés, triés par
+  # espace libre réel décroissant, recommandation = le plus gros. Réponse
+  # mémorisée dans .env (UPGRADE_BACKUP_PATH) — plus jamais redemandé après.
+  BACKUP_BASE=$(grep -E '^UPGRADE_BACKUP_PATH=' .env 2>/dev/null | tail -1 | cut -d= -f2-)
+  if [ -z "$BACKUP_BASE" ]; then
+    mapfile -t DISK_LINES < <(df -h --output=target,avail -x tmpfs -x overlay -x devtmpfs -x efivarfs 2>/dev/null \
+                                 | tail -n +2 | grep -vE '^/boot' | sort -k2 -h -r)
+    RECOMMENDED=""
+    [ "${#DISK_LINES[@]}" -gt 0 ] && RECOMMENDED=$(awk '{print $1}' <<< "${DISK_LINES[0]}")
+    if [ -n "$RECOMMENDED" ] && [ -t 0 ]; then
+      echo -e "${BLEU}  Disques disponibles (triés par espace libre) :${NC}"
+      for line in "${DISK_LINES[@]}"; do echo "    - $line"; done
+      echo -ne "${JAUNE}  Sauvegarde MongoDB — Entrée pour $RECOMMENDED (recommandé, le plus d'espace libre), ou chemin complet : ${NC}"
+      read -r BACKUP_CHOICE || BACKUP_CHOICE=""
+      BACKUP_BASE="${BACKUP_CHOICE:-$RECOMMENDED}"
+    elif [ -n "$RECOMMENDED" ]; then
+      BACKUP_BASE="$RECOMMENDED"
+      warn "non-interactif : disque de sauvegarde auto-sélectionné (le plus d'espace libre) → $BACKUP_BASE"
+    else
+      BACKUP_BASE="/mnt/storage"
+      warn "scan des disques impossible (df indisponible ?) — repli sur $BACKUP_BASE"
+    fi
+    if grep -q '^UPGRADE_BACKUP_PATH=' .env 2>/dev/null; then
+      sed -i "s#^UPGRADE_BACKUP_PATH=.*#UPGRADE_BACKUP_PATH=$BACKUP_BASE#" .env
+    else
+      echo "UPGRADE_BACKUP_PATH=$BACKUP_BASE" >> .env
+    fi
+    ok "disque de sauvegarde : $BACKUP_BASE (mémorisé dans .env, ne sera plus redemandé)"
+  fi
+  BACKUP_DIR="$BACKUP_BASE/mgvms-backups/upgrade-$(date +%Y%m%d-%H%M%S)"
   mkdir -p "$BACKUP_DIR" 2>/dev/null || true
   if docker compose exec -T mongo mongodump --db mgvms --archive 2>/dev/null > "$BACKUP_DIR/mgvms.archive"; then
     TAILLE=$(du -h "$BACKUP_DIR/mgvms.archive" 2>/dev/null | cut -f1)
