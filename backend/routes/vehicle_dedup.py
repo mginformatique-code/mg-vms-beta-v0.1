@@ -305,8 +305,11 @@ async def _run_dedup_batch(limit: int = _MAX_CANDIDATES_PER_RUN) -> int:
 async def dedup_batch_loop() -> None:
     """Tourne une fois toutes les `_BATCH_INTERVAL_HOURS` — jamais dans le
     chemin chaud de l'IA, purement en tâche de fond."""
+    from routes.llm_settings import is_feature_enabled
     while True:
         await asyncio.sleep(_BATCH_INTERVAL_HOURS * 3600)
+        if not await is_feature_enabled("dedup_enabled"):
+            continue
         try:
             n = await _run_dedup_batch()
             if n:
@@ -317,9 +320,31 @@ async def dedup_batch_loop() -> None:
 
 @vehicle_dedup_router.post("/run")
 async def run_now(user: dict = Depends(require_role("admin"))):
-    n = await _run_dedup_batch()
-    await log_audit(user, "vehicle_dedup_run", f"{n} suggestion(s)")
-    return {"created": n}
+    """v3.21 · Mesuré en prod : recherche de candidats ~36s (2101 plaques
+    distinctes, comparaison O(n²) + fetch de 20k lectures) + jusqu'à 25
+    appels Qwen séquentiels, chacun mesuré entre 4s et 77s selon la charge
+    GPU partagée — jusqu'à plusieurs minutes en tout. Attendre ça dans une
+    seule requête HTTP synchrone donnait l'impression que "ça n'aboutit
+    jamais" alors que ça finissait juste très lentement. Lancé en tâche de
+    fond désormais : la requête répond immédiatement, les suggestions
+    apparaissent au fil de l'eau via GET /suggestions (déjà interrogé
+    périodiquement par le frontend)."""
+    from routes.llm_settings import is_feature_enabled
+    if not await is_feature_enabled("dedup_enabled"):
+        raise HTTPException(status_code=400, detail={
+            "code": "DEDUP_DISABLED",
+            "message": "Dédoublonnage IA désactivé — Administration → LLM (MG-IA).",
+        })
+
+    async def _run_bg():
+        try:
+            n = await _run_dedup_batch()
+            logger.info("vehicle_dedup: recherche manuelle terminée, %s suggestion(s)", n)
+        except Exception:
+            logger.exception("vehicle_dedup: erreur pendant la recherche manuelle en arrière-plan")
+    asyncio.create_task(_run_bg())
+    await log_audit(user, "vehicle_dedup_run_started", "lancée en arrière-plan")
+    return {"started": True}
 
 
 @vehicle_dedup_router.get("/suggestions")

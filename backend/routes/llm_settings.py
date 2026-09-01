@@ -31,6 +31,14 @@ class LlmConfigIn(BaseModel):
     base_url: str = _DEFAULT_BASE_URL
     model: str = _DEFAULT_MODEL
     api_key: str = ""
+    # v3.21 · La même connexion Qwen alimente 3 fonctionnalités distinctes
+    # (recherche IA, dédoublonnage véhicule, réglage ANPR auto) mais
+    # jusqu'ici une seule d'entre elles était visible/pilotable depuis ce
+    # menu — les deux autres tournaient silencieusement dès que `enabled`
+    # était actif, sans réglage propre. Deux interrupteurs dédiés, chacun
+    # nécessitant en plus que `enabled` (la connexion elle-même) le soit.
+    dedup_enabled: bool = False
+    anpr_tuning_enabled: bool = False
 
 
 async def _load_raw() -> dict:
@@ -47,6 +55,8 @@ def _mask(v: dict) -> dict:
         "model": v.get("model") or _DEFAULT_MODEL,
         "api_key": "",
         "has_api_key": bool(v.get("api_key")),
+        "dedup_enabled": bool(v.get("dedup_enabled", False)),
+        "anpr_tuning_enabled": bool(v.get("anpr_tuning_enabled", False)),
     }
 
 
@@ -66,10 +76,20 @@ async def put_llm_config(data: LlmConfigIn, user: dict = Depends(require_role("a
         "base_url": (data.base_url or "").strip().rstrip("/") or _DEFAULT_BASE_URL,
         "model": (data.model or "").strip() or _DEFAULT_MODEL,
         "api_key": api_key_enc,
+        "dedup_enabled": data.dedup_enabled,
+        "anpr_tuning_enabled": data.anpr_tuning_enabled,
     }
     await db.settings.update_one({"key": "llm_config"}, {"$set": {"key": "llm_config", "value": value}}, upsert=True)
     await log_audit(user, "llm_config_updated", value["base_url"])
     return _mask(value)
+
+
+async def is_feature_enabled(feature: str) -> bool:
+    """v3.21 · Utilisé par vehicle_dedup.py et anpr_tuning.py — `feature`
+    vaut "dedup_enabled" ou "anpr_tuning_enabled". Exige la connexion LLM
+    globale ET l'interrupteur dédié à la fonctionnalité, tous les deux actifs."""
+    v = await _load_raw()
+    return bool(v.get("enabled")) and bool(v.get(feature))
 
 
 async def get_active_llm_config() -> Optional[dict]:

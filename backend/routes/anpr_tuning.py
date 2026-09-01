@@ -160,8 +160,11 @@ async def _tune_camera(camera_id: str, actor: str = "system") -> dict | None:
 
 async def anpr_tuning_loop() -> None:
     """Tourne une fois par semaine — jamais dans le chemin chaud de l'IA."""
+    from routes.llm_settings import is_feature_enabled
     while True:
         await asyncio.sleep(_TUNING_INTERVAL_HOURS * 3600)
+        if not await is_feature_enabled("anpr_tuning_enabled"):
+            continue
         try:
             cams = await db.cameras.find({"detect_enabled": True}, {"_id": 0, "id": 1}).to_list(500)
             for cam in cams:
@@ -175,6 +178,12 @@ async def anpr_tuning_loop() -> None:
 
 @anpr_tuning_router.post("/{camera_id}/anpr-tuning/run")
 async def run_tuning_now(camera_id: str, user: dict = Depends(require_role("admin"))):
+    from routes.llm_settings import is_feature_enabled
+    if not await is_feature_enabled("anpr_tuning_enabled"):
+        raise HTTPException(status_code=400, detail={
+            "code": "ANPR_TUNING_DISABLED",
+            "message": "Réglage ANPR IA désactivé — Administration → LLM (MG-IA).",
+        })
     result = await _tune_camera(camera_id, actor=user.get("email", "admin"))
     if result is None:
         raise HTTPException(400, {"code": "NOT_ENOUGH_DATA",

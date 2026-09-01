@@ -186,13 +186,25 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
     } catch { /* silent */ }
   }, []);
 
+  // v3.21 · La recherche complète (candidats + jusqu'à 25 appels Qwen
+  // séquentiels) prend plusieurs minutes en réel — le backend la lance
+  // maintenant en tâche de fond et répond immédiatement (voir
+  // vehicle_dedup.py). On reflète ça ici : la requête elle-même est
+  // rapide, puis on raffraîchit périodiquement la liste pendant quelques
+  // minutes pour faire apparaître les suggestions au fil de l'eau, sans
+  // que le bouton reste bloqué en "en cours" pendant tout ce temps.
   const runDedupNow = async () => {
     setDedupRunning(true);
     try {
-      const { data } = await api.post("/vehicles/dedup/run");
-      toast.success(`${data.created} suggestion(s) générée(s)`);
-      loadDedup();
-    } catch (e) { toast.error("Échec de la recherche de doublons"); }
+      await api.post("/vehicles/dedup/run");
+      toast.success("Recherche de doublons lancée en arrière-plan — les suggestions apparaîtront ici automatiquement (peut prendre plusieurs minutes)");
+      let tries = 0;
+      const poll = setInterval(() => {
+        tries += 1;
+        loadDedup();
+        if (tries >= 18) clearInterval(poll); // ~3 min à 10s d'intervalle
+      }, 10000);
+    } catch (e) { toast.error("Échec du lancement de la recherche de doublons"); }
     finally { setDedupRunning(false); }
   };
 
@@ -646,9 +658,10 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
             )}
             itemKey={(v) => v.plate}
             rowHeight={340}
-            minColumnWidth={260}
-            maxColumns={4}
+            minColumnWidth={220}
+            maxColumns={6}
             threshold={200}
+            fallbackClassName="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6"
             testid="vehicles-virtual-grid"
           />
         ) : (
@@ -1099,6 +1112,8 @@ function IdentitiesPanel({ identities, candidates, show, onToggle, onReload, onO
           <Users size={13} className="text-[#0044FF]" />
           Identités véhicule
           <span className="mono">{identities.length}</span>
+          <Info size={12} className="opacity-50 cursor-help"
+                title="Regroupe plusieurs plaques (variantes OCR d'une même lecture, ou même véhicule vu différemment) sous une seule fiche véhicule. « candidats » = regroupements détectés automatiquement (marque/couleur/type + plaques proches), pas encore confirmés — cliquez « Créer l'identité » pour les valider." />
           {candidates.length > 0 && (
             <span className="text-[#FFB800] ml-2 flex items-center gap-1">
               <Link2 size={11} /> {candidates.length} candidat{candidates.length > 1 ? "s" : ""}
