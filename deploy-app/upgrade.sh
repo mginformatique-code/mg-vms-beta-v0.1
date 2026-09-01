@@ -90,7 +90,12 @@ if [ "$NO_BACKUP" = 1 ]; then
 elif [ -z "$(docker compose ps -q mongo 2>/dev/null)" ]; then
   warn "Conteneur mongo non démarré — sauvegarde ignorée (rien à sauvegarder pour l'instant)"
 else
-  BACKUP_DIR="/mnt/storage/backups/upgrade-$(date +%Y%m%d-%H%M%S)"
+  # v3.21 · /mnt/storage (disque système, 118 Go) est trop petit pour un
+  # mongodump de cette base (>90 Go et en croissance) — testé en prod,
+  # échec par manque d'espace. En dur sur /mnt/video-datastore, le plus
+  # gros disque du serveur (3 To) et celui qui a le plus d'espace libre
+  # réellement disponible aujourd'hui, malgré son pourcentage d'usage élevé.
+  BACKUP_DIR="/mnt/video-datastore/mgvms-backups/upgrade-$(date +%Y%m%d-%H%M%S)"
   mkdir -p "$BACKUP_DIR" 2>/dev/null || true
   if docker compose exec -T mongo mongodump --db mgvms --archive 2>/dev/null > "$BACKUP_DIR/mgvms.archive"; then
     TAILLE=$(du -h "$BACKUP_DIR/mgvms.archive" 2>/dev/null | cut -f1)
