@@ -61,8 +61,17 @@ async def dashboard_timeseries(user: dict = Depends(get_current_user)):
             "plates": pl.get(key, 0),
             "alerts": al.get(key, 0),
         })
+    # v3.21 · Sans $match, ce group scannait TOUTE la collection events (243k+
+    # documents et en croissance continue) à chaque chargement du dashboard —
+    # mesuré en prod : 508s. Le reste de cet endpoint est explicitement borné
+    # aux dernières 24h (voir docstring) ; le breakdown ne l'était pas, seul
+    # oubli. Borné à `since` comme le reste : utilise l'index composé
+    # {type:1, timestamp:-1} déjà en place, retombe à quelques ms.
     breakdown = []
-    cursor = db.events.aggregate([{"$group": {"_id": "$type", "count": {"$sum": 1}}}])
+    cursor = db.events.aggregate([
+        {"$match": {"timestamp": {"$gte": since}}},
+        {"$group": {"_id": "$type", "count": {"$sum": 1}}},
+    ])
     async for row in cursor:
         breakdown.append({"name": row["_id"], "value": row["count"]})
     return {"hourly": points, "breakdown": breakdown}
