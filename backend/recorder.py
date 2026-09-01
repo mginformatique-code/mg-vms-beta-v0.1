@@ -11,10 +11,25 @@ import os
 import shutil
 import subprocess
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from database import db
+
+# v3.17 · Pool de threads dédié pour `_probe_duration` (ffprobe, appelé
+# depuis `_index_segments`). Cette fonction utilisait `asyncio.to_thread`,
+# qui partage le pool PAR DÉFAUT de l'event loop — le MÊME que
+# `ai_engine._process_camera` (`asyncio.to_thread(worker.analyze, ...)`).
+# Depuis que chaque caméra a sa propre boucle d'analyse (v3.14), ce pool
+# par défaut (10 threads sur cette machine à 6 cœurs) est presque en
+# permanence occupé par les 6 analyses IA concurrentes. Constaté en
+# production : l'enregistrement d'UNE caméra a pris 6 minutes de retard à
+# apparaître dans l'index (le fix d'isolation par caméra ne suffisait pas —
+# la boucle tournait bien, mais `_probe_duration` restait en attente d'un
+# thread libre). Un pool séparé, réservé au recorder, ne dépend plus jamais
+# de la charge du pipeline IA.
+_recorder_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="recorder")
 
 logger = logging.getLogger("recorder")
 
@@ -175,20 +190,54 @@ async def _event_flags(camera_id: str, start_iso: str, end_iso: str) -> dict:
     }
 
 
+#: v3.17 · Curseur en mémoire : dernier nom de fichier (`YYYYMMDD_HHMMSS`,
+#: donc trié lexicographiquement = trié chronologiquement) déjà traité par
+#: caméra. Sans lui, `_index_segments` listait ET requêtait Mongo pour
+#: CHAQUE fichier .mp4 jamais enregistré — mesuré en production : jusqu'à
+#: 5249 fichiers pour une seule caméra, ré-examinés en ENTIER à CHAQUE appel
+#: (recorder_loop toutes les 30 s, plus le rattrapage à la demande de
+#: `_lookup_recording_for`). Conséquence directe observée : un simple
+#: lookup vidéo a mis 108 s à répondre (404 — l'appel a quand même dû
+#: traverser tout l'historique avant de conclure), et le retard
+#: d'enregistrement de plusieurs caméras qui n'a jamais pu être rattrapé de
+#: toute la soirée malgré plusieurs correctifs de robustesse. Avec le
+#: curseur, seuls les fichiers réellement NOUVEAUX depuis le dernier appel
+#: sont considérés — le coût devient O(nouveaux fichiers), pas O(historique).
+_indexed_cursor: dict[str, str] = {}
+
+
 async def _index_segments(cam: dict) -> None:
     """Indexe en base les segments MP4 clos (fichiers réels sur disque).
     Cherche dans tous les répertoires connus pour cette caméra (pool actif + fallback)."""
+    cam_id = cam["id"]
+    cursor = _indexed_cursor.get(cam_id)
+    if cursor is None:
+        # Premier appel pour cette caméra depuis le démarrage du process :
+        # initialise le curseur depuis le dernier enregistrement CONNU en
+        # base, plutôt que de tout réexaminer depuis le tout premier fichier
+        # jamais écrit par cette caméra.
+        last = await db.recordings.find_one(
+            {"camera_id": cam_id}, {"_id": 0, "file_path": 1}, sort=[("start", -1)],
+        )
+        cursor = Path(last["file_path"]).stem if last and last.get("file_path") else ""
+        _indexed_cursor[cam_id] = cursor
+
     all_files: list[Path] = []
-    for d in await _cam_all_dirs(cam["id"]):
-        all_files.extend(sorted(d.glob("*.mp4")))
+    for d in await _cam_all_dirs(cam_id):
+        all_files.extend(d.glob("*.mp4"))
     if not all_files:
         return
     all_files.sort(key=lambda p: p.name)
     newest = all_files[-1]
-    for f in all_files:
-        if f == newest and _processes.get(cam["id"]) and _processes[cam["id"]].returncode is None:
-            continue  # segment en cours d'écriture
+    # Ne considère que les fichiers strictement postérieurs au curseur — les
+    # plus anciens sont soit déjà indexés, soit déjà purgés par la
+    # rétention ; dans les deux cas inutile de les revisiter.
+    candidates = [f for f in all_files if f.stem > cursor]
+    for f in candidates:
+        if f == newest and _processes.get(cam_id) and _processes[cam_id].returncode is None:
+            continue  # segment en cours d'écriture — laisse le curseur AVANT lui, on le reprendra une fois clos
         if await db.recordings.find_one({"file_path": str(f)}):
+            _indexed_cursor[cam_id] = f.stem
             continue
         try:
             # v3.1.9 · Bug de fuseau horaire confirmé en direct sur le serveur
@@ -209,9 +258,11 @@ async def _index_segments(cam: dict) -> None:
             # fuseau système (c'est le cas : tous deux dans le même conteneur).
             start = datetime.strptime(f.stem, "%Y%m%d_%H%M%S").astimezone(timezone.utc)
         except ValueError:
+            _indexed_cursor[cam_id] = f.stem  # nom illisible : jamais indexable, ne pas le réexaminer
             continue
-        duration = await asyncio.to_thread(_probe_duration, f)
+        duration = await asyncio.get_running_loop().run_in_executor(_recorder_executor, _probe_duration, f)
         if duration <= 0:
+            _indexed_cursor[cam_id] = f.stem  # segment illisible : idem
             continue
         # v3.1.4 · Un segment `-c copy` nourri par un flux go2rtc avec des
         # discontinuités de timestamps peut produire un MP4 dont les
@@ -236,10 +287,12 @@ async def _index_segments(cam: dict) -> None:
         if mode == "motion" and not flags["has_event"]:
             try: f.unlink(missing_ok=True)
             except OSError: pass
+            _indexed_cursor[cam_id] = f.stem  # purgé (pas d'événement) : ne jamais réexaminer
             continue
         if mode == "ai" and flags["mode"] != "ai":
             try: f.unlink(missing_ok=True)
             except OSError: pass
+            _indexed_cursor[cam_id] = f.stem
             continue
         size_mb = round(f.stat().st_size / 1e6, 1)
         await db.recordings.insert_one({
@@ -255,6 +308,7 @@ async def _index_segments(cam: dict) -> None:
             "storage_pool_id": cam.get("storage_pool_id", ""),
             **flags,
         })
+        _indexed_cursor[cam_id] = f.stem
 
 
 async def _refresh_recent_flags() -> None:
@@ -564,34 +618,48 @@ async def recorder_loop() -> None:
             active_ids = set()
             for cam in cams:
                 active_ids.add(cam["id"])
-                proc = _processes.get(cam["id"])
-                if proc is None or proc.returncode is not None:
-                    # Watchdog FFmpeg (P1) — trace la reprise dans diagnostics_events
-                    if proc is not None and proc.returncode is not None:
-                        stderr_tail = ""
-                        log_path = _stderr_logs.get(cam["id"])
-                        if log_path is not None:
-                            try:
-                                stderr_tail = log_path.read_text(errors="replace")[-2000:].strip()
-                            except OSError:
-                                pass
-                        logger.warning(
-                            "recorder.watchdog : ffmpeg mort pour %s (rc=%s) — relance auto%s",
-                            cam["id"], proc.returncode,
-                            f" — stderr: {stderr_tail}" if stderr_tail else " (stderr vide)",
-                        )
-                        try:
-                            from diagnostics import record_disconnect
-                            await record_disconnect(
-                                cam,
-                                f"ffmpeg process died (rc={proc.returncode}) — restart auto",
-                                {"pid": getattr(proc, "pid", None), "returncode": proc.returncode,
-                                 "source": "recorder.watchdog", "stderr_tail": stderr_tail},
+                # v3.17 · Isolation par caméra. Auparavant, un seul try/except
+                # entourait TOUTE la boucle : si `_index_segments` levait pour
+                # UNE caméra, les caméras suivantes de `cams` étaient sautées
+                # pour tout le tick (30s), sans aucune trace dans les logs
+                # (le handler externe se contente de journaliser et
+                # `continue` au tick d'après). Constaté en direct : un trou
+                # de 6 min sur une caméra pendant que les 5 autres
+                # continuaient de s'indexer normalement — exactement la
+                # signature de ce défaut. Chaque caméra a maintenant son
+                # propre filet : une erreur ne prive plus les autres de
+                # leur passage de ce tick.
+                try:
+                    proc = _processes.get(cam["id"])
+                    if proc is None or proc.returncode is not None:
+                        # Watchdog FFmpeg (P1) — trace la reprise dans diagnostics_events
+                        if proc is not None and proc.returncode is not None:
+                            stderr_tail = ""
+                            log_path = _stderr_logs.get(cam["id"])
+                            if log_path is not None:
+                                try:
+                                    stderr_tail = log_path.read_text(errors="replace")[-2000:].strip()
+                                except OSError:
+                                    pass
+                            logger.warning(
+                                "recorder.watchdog : ffmpeg mort pour %s (rc=%s) — relance auto%s",
+                                cam["id"], proc.returncode,
+                                f" — stderr: {stderr_tail}" if stderr_tail else " (stderr vide)",
                             )
-                        except Exception:
-                            logger.exception("recorder.watchdog record_disconnect failed")
-                    await _start_ffmpeg(cam)
-                await _index_segments(cam)
+                            try:
+                                from diagnostics import record_disconnect
+                                await record_disconnect(
+                                    cam,
+                                    f"ffmpeg process died (rc={proc.returncode}) — restart auto",
+                                    {"pid": getattr(proc, "pid", None), "returncode": proc.returncode,
+                                     "source": "recorder.watchdog", "stderr_tail": stderr_tail},
+                                )
+                            except Exception:
+                                logger.exception("recorder.watchdog record_disconnect failed")
+                        await _start_ffmpeg(cam)
+                    await _index_segments(cam)
+                except Exception:
+                    logger.exception("recorder_loop : erreur isolée sur %s — les autres caméras continuent", cam.get("name", cam["id"]))
             # stoppe les enregistreurs des caméras désactivées/supprimées
             for cam_id, proc in list(_processes.items()):
                 if cam_id not in active_ids and proc.returncode is None:

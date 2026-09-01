@@ -839,7 +839,6 @@ export function VehicleDrawer({ plate, onClose, onWatchChanged }) {
             <TabsList className="grid grid-cols-6 rounded-none bg-secondary/40 border border-border h-auto p-0">
               <TabsTrigger value="overview"  className="rounded-none text-xs py-2" data-testid="tab-overview">Vue</TabsTrigger>
               <TabsTrigger value="gallery"   className="rounded-none text-xs py-2" data-testid="tab-gallery">Galerie</TabsTrigger>
-              <TabsTrigger value="timeline"  className="rounded-none text-xs py-2" data-testid="tab-timeline">Timeline</TabsTrigger>
               <TabsTrigger value="heatmap"   className="rounded-none text-xs py-2" data-testid="tab-heatmap">Heatmap</TabsTrigger>
               <TabsTrigger value="cameras"   className="rounded-none text-xs py-2" data-testid="tab-cameras">{t("veh.cameras")}</TabsTrigger>
               <TabsTrigger value="journey"   className="rounded-none text-xs py-2" data-testid="tab-journey">Parcours</TabsTrigger>
@@ -847,7 +846,6 @@ export function VehicleDrawer({ plate, onClose, onWatchChanged }) {
 
             <TabsContent value="overview" className="mt-4"><TabOverview d={detail} onWatchChanged={handleWatchChanged} onReload={reload} /></TabsContent>
             <TabsContent value="gallery"  className="mt-4"><TabGallery plate={plate} /></TabsContent>
-            <TabsContent value="timeline" className="mt-4"><TabTimeline plate={plate} /></TabsContent>
             <TabsContent value="heatmap"  className="mt-4"><TabHeatmap plate={plate} /></TabsContent>
             <TabsContent value="cameras"  className="mt-4"><TabCameras plate={plate} /></TabsContent>
             <TabsContent value="journey"  className="mt-4"><TabJourney plate={plate} /></TabsContent>
@@ -1511,47 +1509,6 @@ function TabGallery({ plate }) {
           {loading ? <Loader2 size={14} className="animate-spin" /> : "Charger plus"}
         </button>
       )}
-    </div>
-  );
-}
-
-function TabTimeline({ plate }) {
-  const [items, setItems] = useState([]);
-  useEffect(() => {
-    api.get(`/vehicles/${encodeURIComponent(plate)}/passages`, { params: { limit: 200 } })
-       .then(({ data }) => setItems(data.items || []));
-  }, [plate]);
-
-  const groups = useMemo(() => {
-    const out = new Map();
-    for (const p of items) {
-      const dt = new Date(p.timestamp);
-      const key = dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
-      if (!out.has(key)) out.set(key, []);
-      out.get(key).push(p);
-    }
-    return Array.from(out.entries());
-  }, [items]);
-
-  return (
-    <div className="space-y-4" data-testid="drawer-timeline">
-      {groups.map(([day, rows]) => (
-        <div key={day}>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 sticky top-0 bg-card py-1">{day} · {rows.length} passage{rows.length > 1 ? "s" : ""}</div>
-          <div className="border-l-2 border-[#0044FF]/40 pl-3 space-y-2">
-            {rows.map((p) => (
-              <div key={p.id} className="flex items-center gap-3 text-xs" data-testid={`timeline-item-${p.id}`}>
-                <span className="mono text-[#0044FF] w-14">{new Date(p.timestamp).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span>
-                <img src={passageThumbUrl(p.id, "vehicle")} alt="" loading="lazy"
-                     className="w-10 h-10 object-cover border border-border"
-                     onError={(e) => { e.target.style.display = "none"; }} />
-                <span className="text-muted-foreground truncate flex-1">{p.camera_name}</span>
-                <span className="mono" style={{ color: p.confidence > 0.9 ? "#00E676" : "#FFB800" }}>{(p.confidence * 100).toFixed(0)}%</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
     </div>
   );
 }

@@ -111,6 +111,7 @@ export function AppProvider({ children }) {
                 ts: nowTs,
                 _rx_at: Date.now(),   // timestamp local pour pruning TTL
                 motion_pct: msg.data.motion_pct,
+                retail: msg.data.retail || null,  // état plugin anti-vol (dwell/visites), par track_id
               };
               // Skip si les données sont identiques (même ts + mêmes boxes count)
               if (existing && existing.ts === nowTs &&

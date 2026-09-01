@@ -181,12 +181,25 @@ export default function VehicleSearch() {
   useEffect(() => { api.get("/sites").then((r) => setSites(r.data)); }, []);
   useEffect(() => { const id = setTimeout(search, 300); return () => clearTimeout(id); }, [f]); // recherche auto à chaque filtre
 
+  // v3.13 · `with_images=1` : cette page-ci EST une grille de vignettes, elle
+  // a donc besoin de `vehicle_crop`. La scène complète (`frame_thumb`,
+  // ~700 Ko par plaque) n'est jamais renvoyée par la liste — elle est
+  // chargée à la demande à l'ouverture de la fiche, ci-dessous.
   const search = () => {
     const params = new URLSearchParams();
     Object.entries(f).forEach(([k, v]) => { if (v) params.append(k, v); });
+    params.append("with_images", "1");
     api.get(`/plates?${params.toString()}`).then((r) => setResults(r.data));
   };
-  const reset = () => { setF({ plate: "", color: "", make: "", vtype: "", site_id: "", direction: "", date_from: "", date_to: "" }); api.get("/plates").then((r) => setResults(r.data)); };
+  const reset = () => { setF({ plate: "", color: "", make: "", vtype: "", site_id: "", direction: "", date_from: "", date_to: "" }); api.get("/plates?with_images=1").then((r) => setResults(r.data)); };
+
+  // Fiche détail : on complète l'élément sélectionné avec sa scène complète.
+  const openDetail = (p) => {
+    setSelected(p);
+    api.get(`/plates/${p.id}`)
+      .then((r) => setSelected((cur) => (cur && cur.id === p.id ? { ...cur, ...r.data } : cur)))
+      .catch(() => { /* la fiche reste affichée avec les crops déjà chargés */ });
+  };
 
   const sel = "w-full px-2.5 py-2 bg-card border border-input outline-none text-sm focus:border-[#0044FF]";
 
@@ -215,7 +228,7 @@ export default function VehicleSearch() {
         {results.map((p) => (
           <button
             key={p.id}
-            onClick={() => setSelected(p)}
+            onClick={() => openDetail(p)}
             className="bg-card border border-border overflow-hidden hover:border-[#0044FF] transition-colors text-left"
             data-testid="veh-result-card"
           >
