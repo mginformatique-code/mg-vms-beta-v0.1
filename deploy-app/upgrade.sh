@@ -48,6 +48,13 @@ set -euo pipefail
 
 # ─── Couleurs / helpers (identiques à install.sh) ─────────────────────
 ROUGE='\033[0;31m'; VERT='\033[0;32m'; JAUNE='\033[1;33m'; BLEU='\033[0;34m'; NC='\033[0m'
+echo -e "${BLEU}╔════════════════════════════════════════╗"
+echo -e "║                                        ║"
+echo -e "║              M G - V M S               ║"
+echo -e "║     Vidéosurveillance intelligente     ║"
+echo -e "║                                        ║"
+echo -e "╚════════════════════════════════════════╝${NC}"
+echo
 ok()   { echo -e "${VERT}  ✔${NC} $*"; }
 warn() { echo -e "${JAUNE}  ⚠${NC} $*"; }
 err()  { echo -e "${ROUGE}  ✘ $*${NC}"; }
