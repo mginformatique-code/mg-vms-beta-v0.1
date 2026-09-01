@@ -5,6 +5,7 @@ import api, { formatApiErrorDetail } from "@/lib/api";
 import { Loader2, Moon, Sun, Languages, Clock } from "lucide-react";
 import { toast } from "sonner";
 import Logo from "@/components/Logo";
+import HoldToRevealInput from "@/components/ui/hold-to-reveal-input";
 
 export default function Login() {
   const { login, t, theme, toggleTheme, lang, toggleLang, user } = useApp();
@@ -149,7 +150,7 @@ export default function Login() {
                 <input data-testid="login-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="off"
                   className="w-full mb-4 px-3 py-2.5 bg-card border border-input focus:border-[#0044FF] outline-none text-sm" />
                 <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">{t("common.password")}</label>
-                <input data-testid="login-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="new-password"
+                <HoldToRevealInput data-testid="login-password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="new-password"
                   className="w-full mb-2 px-3 py-2.5 bg-card border border-input focus:border-[#0044FF] outline-none text-sm" />
                 <button type="button" onClick={() => { setForgotMode(true); setForgotEmail(email); setError(""); }} data-testid="forgot-link"
                   className="text-[11px] text-[#0044FF] hover:underline mb-2">{t("auth.forgot_title")} ?</button>

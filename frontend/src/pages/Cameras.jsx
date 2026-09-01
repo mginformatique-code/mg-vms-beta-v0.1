@@ -10,6 +10,7 @@ import {
   Stethoscope, Clock,
 } from "lucide-react";
 import { toast } from "sonner";
+import HoldToRevealInput from "@/components/ui/hold-to-reveal-input";
 
 // v3.1.3 · Injecte user:pass dans une URL RTSP nue (profils ONVIF renvoyés
 // sans identifiants) — webrtc_rtsp_url est utilisée telle quelle côté
@@ -454,7 +455,7 @@ export default function Cameras() {
                 className="inp mono" />
             </Field>
             <Field label={form.mode === "onvif" ? "Identifiant ONVIF" : "Identifiant (optionnel)"}><input data-testid="cam-form-username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} className="inp" autoComplete="off" /></Field>
-            <Field label={form.mode === "onvif" ? "Mot de passe ONVIF" : "Mot de passe (optionnel)"}><input data-testid="cam-form-password" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="inp" autoComplete="new-password" placeholder={editingId ? "(inchangé si vide)" : ""} /></Field>
+            <Field label={form.mode === "onvif" ? "Mot de passe ONVIF" : "Mot de passe (optionnel)"}><HoldToRevealInput data-testid="cam-form-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="inp" autoComplete="new-password" placeholder={editingId ? "(inchangé si vide)" : ""} /></Field>
 
             {/* --- Bloc ONVIF : auto-détect + profils --- */}
             {form.mode === "onvif" && (
