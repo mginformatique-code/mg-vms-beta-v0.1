@@ -2,7 +2,12 @@
 # ==============================================================================
 # MG-VMS · install.sh · v1.0-rc4.5
 # ==============================================================================
-# Installation/mise à jour complète en UNE commande depuis la racine du repo :
+# Première installation, OU remise à zéro volontaire (c'est le seul des deux
+# scripts qui propose de purger des données — étape 8, toujours interactive,
+# jamais par défaut). Pour une mise à jour de version courante sur une
+# installation déjà en production, préférez upgrade.sh : plus court, jamais
+# de menu de purge, sauvegarde MongoDB automatique avant de toucher au code.
+# Voir le wiki du dépôt — "Installation vs mise à jour".
 #
 #   cd deploy-app && sudo ./install.sh
 #
