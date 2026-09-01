@@ -111,12 +111,14 @@ else
   # enregistrements d'install.sh) : scan des disques montés, triés par
   # espace libre réel décroissant, recommandation = le plus gros. Réponse
   # mémorisée dans .env (UPGRADE_BACKUP_PATH) — plus jamais redemandé après.
-  BACKUP_BASE=$(grep -E '^UPGRADE_BACKUP_PATH=' .env 2>/dev/null | tail -1 | cut -d= -f2-)
+  BACKUP_BASE=$(grep -E '^UPGRADE_BACKUP_PATH=' .env 2>/dev/null | tail -1 | cut -d= -f2- || true)
   if [ -z "$BACKUP_BASE" ]; then
     mapfile -t DISK_LINES < <(df -h --output=target,avail -x tmpfs -x overlay -x devtmpfs -x efivarfs 2>/dev/null \
                                  | tail -n +2 | grep -vE '^/boot' | sort -k2 -h -r)
     RECOMMENDED=""
-    [ "${#DISK_LINES[@]}" -gt 0 ] && RECOMMENDED=$(awk '{print $1}' <<< "${DISK_LINES[0]}")
+    if [ "${#DISK_LINES[@]}" -gt 0 ]; then
+      RECOMMENDED=$(awk '{print $1}' <<< "${DISK_LINES[0]}")
+    fi
     if [ -n "$RECOMMENDED" ] && [ -t 0 ]; then
       echo -e "${BLEU}  Disques disponibles (triés par espace libre) :${NC}"
       for line in "${DISK_LINES[@]}"; do echo "    - $line"; done
