@@ -15,6 +15,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useApp } from "@/context/AppContext";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -47,15 +48,16 @@ const TABS = [
 ];
 
 export default function PipelineCenter() {
+  const { t } = useApp();
   const [params, setParams] = useSearchParams();
   const tab = params.get("tab") || "overview";
-  const setTab = (t) => setParams({ tab: t });
+  const setTab = (v) => setParams({ tab: v });
 
   return (
     <div className="p-6 space-y-6" data-testid="pipeline-center">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Pipeline Center</h1>
+          <h1 className="text-3xl font-bold tracking-tight">{t("nav.pipeline_center")}</h1>
           <p className="text-sm text-muted-foreground">
             Diagnostic complet du pipeline temps réel — capture, IA, tracking, plugins.
           </p>

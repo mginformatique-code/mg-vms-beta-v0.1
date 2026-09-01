@@ -1403,7 +1403,42 @@ async def test_connectivity(data: ConnectivityTestInput) -> dict:
         else:
             add("onvif_auth", "skip", "Ignoré (port ONVIF fermé)")
 
-        # 3b) Test API NTP — optionnel, coché explicitement par l'utilisateur.
+        # 3b) Horloge caméra — OBLIGATOIRE, générique quel que soit le
+        # constructeur (ONVIF GetSystemDateAndTime fait partie du socle ONVIF
+        # de base, contrairement à GetNTP/l'API NTP ci-dessous qui varie
+        # selon la marque et n'est testée que sur demande explicite). Une
+        # horloge caméra décalée fausse l'horodatage des lectures ANPR et des
+        # événements — mieux vaut le savoir dès l'ajout plutôt qu'après coup.
+        if onvif_info:
+            from datetime import datetime, timezone
+            from wsdl_path import onvif_camera
+            try:
+                cam = await asyncio.to_thread(onvif_camera, ip, int(data.onvif_port), data.username, data.password)
+                dev = cam.create_devicemgmt_service()
+                dt_resp = await asyncio.to_thread(dev.GetSystemDateAndTime)
+                utc = getattr(dt_resp, "UTCDateTime", None)
+                if utc and utc.Date and utc.Time:
+                    cam_dt = datetime(
+                        utc.Date.Year, utc.Date.Month, utc.Date.Day,
+                        utc.Time.Hour, utc.Time.Minute, utc.Time.Second,
+                        tzinfo=timezone.utc,
+                    )
+                    drift_s = (cam_dt - datetime.now(timezone.utc)).total_seconds()
+                    if abs(drift_s) < 60:
+                        add("datetime_check", "ok", f"Horloge caméra synchronisée (écart {drift_s:+.0f}s)")
+                    else:
+                        add("datetime_check", "warn",
+                            f"Horloge caméra décalée de {drift_s/60:+.1f} min — "
+                            f"configurez le serveur NTP (onglet Date et heure)")
+                else:
+                    add("datetime_check", "warn", "Horloge caméra illisible (réponse ONVIF incomplète)")
+            except Exception as e:
+                add("datetime_check", "warn",
+                    f"Horloge caméra non vérifiable — {type(e).__name__}: {str(e)[:160]}")
+        else:
+            add("datetime_check", "skip", "Ignoré (authentification ONVIF échouée)")
+
+        # 3c) Test API NTP — optionnel, coché explicitement par l'utilisateur.
         # v3.19 · vérifie que la BONNE API répond avant l'ajout de la caméra :
         # reolink-aio (natif, plus fiable) pour Reolink, ONVIF générique sinon
         # (Hikvision compris — pas d'ISAPI natif dans MG-VMS). Lecture seule

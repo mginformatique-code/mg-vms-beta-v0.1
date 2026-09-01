@@ -34,12 +34,35 @@ export function AppProvider({ children }) {
   useEffect(() => { localStorage.setItem("mg_lang", lang); }, [lang]);
 
   useEffect(() => {
-    const token = localStorage.getItem("mg_token");
-    if (!token) { setUser(false); return; }
-    api.get("/auth/me").then((r) => setUser(r.data)).catch(() => {
-      localStorage.removeItem("mg_token");
-      setUser(false);
-    });
+    // v1.0-rc4.6 · Un JWT valide (jusqu'à 8h/7j) survivait à un rebuild —
+    // après une mise à jour, F5 restaurait la session au lieu de forcer un
+    // nouveau login. build_id.txt est régénéré à chaque build (Dockerfile) ;
+    // s'il diffère de ce qu'on a stocké au dernier login, la session locale
+    // est purgée avant même de tenter /auth/me. Échec réseau = on ignore le
+    // check (pas de faux déconnexion sur un hoquet réseau) plutôt que d'en
+    // bloquer le boot.
+    const checkBuildAndRestore = async () => {
+      try {
+        const r = await fetch("/build_id.txt", { cache: "no-store" });
+        if (r.ok) {
+          const buildId = (await r.text()).trim();
+          const known = localStorage.getItem("mg_build_id");
+          if (known && buildId && known !== buildId) {
+            localStorage.removeItem("mg_token");
+            localStorage.removeItem("mg_refresh");
+          }
+          if (buildId) localStorage.setItem("mg_build_id", buildId);
+        }
+      } catch (e) { /* pas de build_id.txt (dev) ou réseau — on ignore */ }
+
+      const token = localStorage.getItem("mg_token");
+      if (!token) { setUser(false); return; }
+      api.get("/auth/me").then((r) => setUser(r.data)).catch(() => {
+        localStorage.removeItem("mg_token");
+        setUser(false);
+      });
+    };
+    checkBuildAndRestore();
   }, []);
 
   const login = async (email, password, totp_code) => {

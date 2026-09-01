@@ -58,6 +58,7 @@ export default function Cameras() {
   const [saving, setSaving] = useState(false);
   const [settingNtp, setSettingNtp] = useState(false);
   const [testNtp, setTestNtp] = useState(false);
+  const [camTab, setCamTab] = useState("general");
   const [testing, setTesting] = useState(null);
   const [snap, setSnap] = useState(null);
   const [diagState, setDiagState] = useState(null);
@@ -80,8 +81,8 @@ export default function Cameras() {
   useEffect(load, [filterSite]);
   useEffect(() => { const iv = setInterval(load, 15000); return () => clearInterval(iv); }, [filterSite]);
 
-  const closeDialog = () => { setOpen(false); setEditingId(null); setForm(EMPTY_FORM); setConnCheck(null); setProfiles([]); };
-  const openCreate = () => { setEditingId(null); setForm(EMPTY_FORM); setConnCheck(null); setProfiles([]); setOpen(true); };
+  const closeDialog = () => { setOpen(false); setEditingId(null); setForm(EMPTY_FORM); setConnCheck(null); setProfiles([]); setCamTab("general"); };
+  const openCreate = () => { setEditingId(null); setForm(EMPTY_FORM); setConnCheck(null); setProfiles([]); setCamTab("general"); setOpen(true); };
   const openEdit = (c) => {
     setEditingId(c.id);
     setForm({
@@ -115,7 +116,7 @@ export default function Cameras() {
       api_password: "",     // jamais renvoyé par le backend, à re-saisir si changé
       api_provider: c.api_provider || "",
     });
-    setConnCheck(null); setProfiles([]); setOpen(true);
+    setConnCheck(null); setProfiles([]); setCamTab("general"); setOpen(true);
     // Charge assignation de stockage existante
     api.get(`/storage/cameras/${c.id}/assignment`).then((r) => {
       setForm((f) => ({ ...f, record_mode: r.data.record_mode || "continuous",
@@ -440,6 +441,20 @@ export default function Cameras() {
             </span>
           </div>
 
+          <div className="flex items-center gap-2 mb-2" data-testid="cam-form-tabs">
+            {[
+              { v: "general", label: "Général" },
+              { v: "datetime", label: "Date et heure" },
+            ].map((tb) => (
+              <button key={tb.v} type="button" onClick={() => setCamTab(tb.v)}
+                data-testid={`cam-form-tab-${tb.v}`}
+                className={`px-3 py-1.5 text-xs uppercase tracking-wider border ${camTab === tb.v ? "bg-[#0044FF] text-white border-[#0044FF]" : "border-border hover:bg-secondary"}`}>
+                {tb.label}
+              </button>
+            ))}
+          </div>
+
+          {camTab === "general" && (
           <div className="grid grid-cols-2 gap-3">
             <Field label="Nom"><input data-testid="cam-form-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="inp" /></Field>
             <Field label="Site">
@@ -666,12 +681,6 @@ export default function Cameras() {
                   {checking && <Loader2 size={12} className="animate-spin" />} Tester la connexion
                 </button>
               </div>
-              {form.mode === "onvif" && (
-                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <input type="checkbox" checked={testNtp} onChange={(e) => setTestNtp(e.target.checked)} data-testid="conn-test-ntp-checkbox" />
-                  Tester aussi l'API NTP (vérifie la bonne API selon le constructeur — Reolink natif / ONVIF)
-                </label>
-              )}
               {!connCheck && <p className="text-muted-foreground text-[11px]">{t("cam.test_hint")}</p>}
               {connCheck && (
                 <div className="space-y-1" data-testid="conn-test-result">
@@ -715,25 +724,58 @@ export default function Cameras() {
               )}
             </div>
           </div>
+          )}
+
+          {camTab === "datetime" && (
+            <div className="space-y-3" data-testid="cam-form-datetime-tab">
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                L'horloge de la caméra est vérifiée automatiquement (obligatoire) à chaque
+                « Tester la connexion » dans l'onglet Général. Ici : forcer MG-VMS comme
+                serveur de temps (NTP) pour cette caméra, et approfondir le diagnostic si besoin.
+              </p>
+
+              {connCheck && (
+                <div className="space-y-1 border border-border p-3">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Dernier test</div>
+                  {connCheck.steps.filter((s) => s.name === "datetime_check" || s.name === "ntp_api").map((s, i) => <StepRow key={i} step={s} />)}
+                  {!connCheck.steps.find((s) => s.name === "datetime_check") && (
+                    <p className="text-muted-foreground text-[11px]">Relancez « Tester la connexion » (onglet Général) pour voir l'état de l'horloge.</p>
+                  )}
+                </div>
+              )}
+
+              {form.mode === "onvif" && (
+                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <input type="checkbox" checked={testNtp} onChange={(e) => setTestNtp(e.target.checked)} data-testid="conn-test-ntp-checkbox" />
+                  Tester aussi l'API NTP (vérifie la bonne API selon le constructeur — Reolink natif / ONVIF) au prochain test
+                </label>
+              )}
+
+              {editingId && form.mode === "onvif" && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setSettingNtp(true);
+                    try {
+                      await api.post(`/cameras/${editingId}/ntp`, { ntp_server: window.location.hostname });
+                      toast.success("Serveur de temps défini — MG-VMS resynchronisera cette caméra automatiquement toutes les 24h");
+                    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+                    finally { setSettingNtp(false); }
+                  }}
+                  disabled={settingNtp} data-testid="cam-form-set-ntp"
+                  title="Définit MG-VMS comme source d'heure (NTP) de cette caméra"
+                  className="px-4 py-2 border border-border text-sm hover:bg-secondary flex items-center gap-2">
+                  {settingNtp ? <Loader2 size={15} className="animate-spin" /> : <Clock size={15} />} Définir comme serveur de temps
+                </button>
+              )}
+              {!editingId && (
+                <p className="text-[11px] text-muted-foreground">Disponible après la création de la caméra.</p>
+              )}
+            </div>
+          )}
 
           <DialogFooter>
             <button onClick={closeDialog} className="px-4 py-2 border border-border text-sm hover:bg-secondary">Annuler</button>
-            {editingId && form.mode === "onvif" && (
-              <button
-                onClick={async () => {
-                  setSettingNtp(true);
-                  try {
-                    await api.post(`/cameras/${editingId}/ntp`, { ntp_server: window.location.hostname });
-                    toast.success("Serveur de temps défini — MG-VMS resynchronisera cette caméra automatiquement toutes les 24h");
-                  } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
-                  finally { setSettingNtp(false); }
-                }}
-                disabled={settingNtp} data-testid="cam-form-set-ntp"
-                title="Définit MG-VMS comme source d'heure (NTP) de cette caméra"
-                className="px-4 py-2 border border-border text-sm hover:bg-secondary flex items-center gap-2">
-                {settingNtp ? <Loader2 size={15} className="animate-spin" /> : <Clock size={15} />} Définir comme serveur de temps
-              </button>
-            )}
             {(() => {
               const onvifOk = connCheck?.steps?.find((s) => s.name === "onvif_auth")?.status === "ok";
               const rtspOk = connCheck?.steps?.find((s) => s.name === "rtsp_open")?.status === "ok";

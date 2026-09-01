@@ -84,6 +84,16 @@ RUN if [ -n "$REACT_APP_BACKEND_URL" ]; then \
 # "/api/..." (URL relative) dans le bundle final.
 ENV REACT_APP_BACKEND_URL=""
 
+# ─── Identifiant de build (force le relogin après un rebuild) ────────
+# v1.0-rc4.6 · Un token JWT valide (jusqu'à 8h/7j) survit à un rebuild —
+# après une mise à jour, F5 restaure la session au lieu de forcer un
+# nouveau login. Fichier statique horodaté à chaque build, servi tel
+# quel par nginx (pas bakée dans le bundle JS, pas de rebuild du bundle
+# nécessaire pour que ça change) : le frontend le compare à la valeur
+# qu'il a stockée localement au dernier login et purge la session locale
+# si elle diffère, avant même de tenter /auth/me.
+RUN date +%s%N > public/build_id.txt
+
 RUN yarn build
 
 # ─── Garde 2 : scan post-build du bundle ──────────────────────────────
