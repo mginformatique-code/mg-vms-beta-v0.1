@@ -8,8 +8,8 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
-  Search, Car, Camera as CameraIcon, Clock, Route as RouteIcon,
-  Activity, BarChart3, Loader2, Info, ChevronDown, ChevronRight,
+  Search, Car, Camera as CameraIcon, Clock,
+  Activity, BarChart3, Loader2, Info, ChevronRight,
   AlertTriangle, ShieldAlert, ShieldCheck, Shield, Bell, X as XIcon,
   CheckCircle2, GitMerge, Sparkles, Users, Link2, Plus, LayoutGrid, List,
 } from "lucide-react";
@@ -836,19 +836,19 @@ export function VehicleDrawer({ plate, onClose, onWatchChanged }) {
 
         {detail && (
           <Tabs defaultValue="overview" className="p-4">
-            <TabsList className="grid grid-cols-6 rounded-none bg-secondary/40 border border-border h-auto p-0">
+            <TabsList className="grid grid-cols-5 rounded-none bg-secondary/40 border border-border h-auto p-0">
               <TabsTrigger value="overview"  className="rounded-none text-xs py-2" data-testid="tab-overview">Vue</TabsTrigger>
               <TabsTrigger value="gallery"   className="rounded-none text-xs py-2" data-testid="tab-gallery">Galerie</TabsTrigger>
+              <TabsTrigger value="timeline"  className="rounded-none text-xs py-2" data-testid="tab-timeline">Timeline</TabsTrigger>
               <TabsTrigger value="heatmap"   className="rounded-none text-xs py-2" data-testid="tab-heatmap">Heatmap</TabsTrigger>
               <TabsTrigger value="cameras"   className="rounded-none text-xs py-2" data-testid="tab-cameras">{t("veh.cameras")}</TabsTrigger>
-              <TabsTrigger value="journey"   className="rounded-none text-xs py-2" data-testid="tab-journey">Parcours</TabsTrigger>
             </TabsList>
 
             <TabsContent value="overview" className="mt-4"><TabOverview d={detail} onWatchChanged={handleWatchChanged} onReload={reload} /></TabsContent>
             <TabsContent value="gallery"  className="mt-4"><TabGallery plate={plate} /></TabsContent>
+            <TabsContent value="timeline" className="mt-4"><TabTimeline plate={plate} /></TabsContent>
             <TabsContent value="heatmap"  className="mt-4"><TabHeatmap plate={plate} /></TabsContent>
             <TabsContent value="cameras"  className="mt-4"><TabCameras plate={plate} /></TabsContent>
-            <TabsContent value="journey"  className="mt-4"><TabJourney plate={plate} /></TabsContent>
           </Tabs>
         )}
       </SheetContent>
@@ -1513,6 +1513,47 @@ function TabGallery({ plate }) {
   );
 }
 
+function TabTimeline({ plate }) {
+  const [items, setItems] = useState([]);
+  useEffect(() => {
+    api.get(`/vehicles/${encodeURIComponent(plate)}/passages`, { params: { limit: 200 } })
+       .then(({ data }) => setItems(data.items || []));
+  }, [plate]);
+
+  const groups = useMemo(() => {
+    const out = new Map();
+    for (const p of items) {
+      const dt = new Date(p.timestamp);
+      const key = dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+      if (!out.has(key)) out.set(key, []);
+      out.get(key).push(p);
+    }
+    return Array.from(out.entries());
+  }, [items]);
+
+  return (
+    <div className="space-y-4" data-testid="drawer-timeline">
+      {groups.map(([day, rows]) => (
+        <div key={day}>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 sticky top-0 bg-card py-1">{day} · {rows.length} passage{rows.length > 1 ? "s" : ""}</div>
+          <div className="border-l-2 border-[#0044FF]/40 pl-3 space-y-2">
+            {rows.map((p) => (
+              <div key={p.id} className="flex items-center gap-3 text-xs" data-testid={`timeline-item-${p.id}`}>
+                <span className="mono text-[#0044FF] w-14">{new Date(p.timestamp).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span>
+                <img src={passageThumbUrl(p.id, "vehicle")} alt="" loading="lazy"
+                     className="w-10 h-10 object-cover border border-border"
+                     onError={(e) => { e.target.style.display = "none"; }} />
+                <span className="text-muted-foreground truncate flex-1">{p.camera_name}</span>
+                <span className="mono" style={{ color: p.confidence > 0.9 ? "#00E676" : "#FFB800" }}>{(p.confidence * 100).toFixed(0)}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TabHeatmap({ plate }) {
   const { t } = useApp();
   const [d, setD] = useState(null);
@@ -1585,35 +1626,6 @@ function TabCameras({ plate }) {
         </div>
       ))}
       {items.length === 0 && <div className="text-xs text-muted-foreground">{t("veh.no_camera")}</div>}
-    </div>
-  );
-}
-
-function TabJourney({ plate }) {
-  const { t } = useApp();
-  const [items, setItems] = useState([]);
-  useEffect(() => {
-    api.get(`/vehicles/${encodeURIComponent(plate)}/journey`).then(({ data }) => setItems(data.items || []));
-  }, [plate]);
-  const chrono = [...items].reverse(); // du + ancien au + récent
-  return (
-    <div className="space-y-2" data-testid="drawer-journey">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-        <RouteIcon size={11} /> Ordre chronologique
-      </div>
-      {chrono.map((p, i) => (
-        <div key={`${p.timestamp}-${i}`} className="flex items-center gap-3" data-testid={`journey-${i}`}>
-          <div className="text-[11px] mono text-[#0044FF] w-24">
-            {new Date(p.timestamp).toLocaleString("fr-FR", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}
-          </div>
-          <div className="flex-1 border border-border px-3 py-1.5 text-xs">
-            {p.camera_name || p.camera_id}
-            {p.direction && <span className="ml-2 text-muted-foreground">· {p.direction}</span>}
-          </div>
-          {i < chrono.length - 1 && <ChevronDown size={12} className="text-muted-foreground rotate-[-90deg] hidden" />}
-        </div>
-      ))}
-      {chrono.length === 0 && <div className="text-xs text-muted-foreground">{t("veh.no_journey")}</div>}
     </div>
   );
 }
