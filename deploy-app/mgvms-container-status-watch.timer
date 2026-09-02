@@ -1,0 +1,10 @@
+[Unit]
+Description=MG-VMS - instantane de l'etat des conteneurs Docker toutes les 10s
+
+[Timer]
+OnBootSec=10s
+OnUnitActiveSec=10s
+Unit=mgvms-container-status-watch.service
+
+[Install]
+WantedBy=timers.target

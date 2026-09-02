@@ -1,0 +1,6 @@
+[Unit]
+Description=MG-VMS - ecrit un instantane JSON de l'etat des conteneurs Docker
+
+[Service]
+Type=oneshot
+ExecStart=/opt/mg-vms-beta-v0.1/deploy-app/container-status-watch.sh

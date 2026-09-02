@@ -111,6 +111,14 @@ services:
     container_name: mgvms-backend
     restart: unless-stopped
     runtime: nvidia
+    # v3.22 · Console shell hôte (Debug) — le conteneur backend ouvre une
+    # connexion SSH SORTANTE vers l'hôte via ce nom (mécanisme Docker
+    # standard, disponible sur Linux depuis Docker 20.10 — pas de socket
+    # Docker, pas de privilège supplémentaire). L'authentification reste
+    # entièrement déléguée à sshd/PAM côté hôte, avec les identifiants
+    # Linux réels saisis par l'utilisateur à chaque session.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       mongo:
         condition: service_healthy

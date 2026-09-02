@@ -31,6 +31,8 @@ import PipelineDesigner from "./PipelineDesigner";
 import AIPipelineMonitor from "./AIPipelineMonitor";
 import Hardware from "./Hardware";
 import GPUStatus from "./GPUStatus";
+import ContainerStatusPanel from "./ContainerStatusPanel";
+import SshConsolePanel from "./SshConsolePanel";
 
 const TABS = [
   { id: "overview",    label: "Overview",    icon: Layers },
@@ -383,16 +385,22 @@ function DebugPanel() {
   }, []);
   useEffect(() => { load(); }, [load]);
   return (
-    <Card className="p-4 space-y-3" data-testid="debug-panel">
-      <div className="flex justify-between items-center">
-      <div className="text-sm text-muted-foreground">Logs récents (tail 200)</div>
-        <Button size="sm" variant="ghost" onClick={load}>
-          <RefreshCw className="w-4 h-4 mr-2" />Rafraîchir
-        </Button>
-      </div>
-      <pre className="text-xs font-mono bg-black/40 p-3 rounded max-h-96 overflow-auto">
-        {logs || "…"}
-      </pre>
-    </Card>
+    <div className="space-y-4" data-testid="debug-panel">
+      <ContainerStatusPanel />
+
+      <Card className="p-4 space-y-3">
+        <div className="flex justify-between items-center">
+        <div className="text-sm text-muted-foreground">Logs récents (tail 200)</div>
+          <Button size="sm" variant="ghost" onClick={load}>
+            <RefreshCw className="w-4 h-4 mr-2" />Rafraîchir
+          </Button>
+        </div>
+        <pre className="text-xs font-mono bg-black/40 p-3 rounded max-h-96 overflow-auto">
+          {logs || "…"}
+        </pre>
+      </Card>
+
+      <SshConsolePanel />
+    </div>
   );
 }

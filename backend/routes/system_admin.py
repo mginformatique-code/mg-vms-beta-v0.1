@@ -13,6 +13,7 @@ côté hôte (hors conteneur, voir install.sh) le surveille et exécute
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -46,6 +47,37 @@ async def system_info(user: dict = Depends(get_current_user)):
         "server_time": now.isoformat(),
         "timezone": str(now.tzinfo),
         "utc_offset": now.strftime("%z"),
+    }
+
+
+_CONTAINER_STATUS_PATH = "/logs/container_status.json"
+_CONTAINER_STATUS_STALE_AFTER_S = 30  # timer hôte tourne toutes les 10s (voir install.sh)
+
+
+@system_admin_router.get("/containers")
+async def get_container_status(user: dict = Depends(require_role("admin"))):
+    """v3.22 · État des conteneurs Docker MG-VMS (panneau Debug, Suivi des
+    performances). Même principe que le reboot ci-dessous : le conteneur
+    backend n'a jamais d'accès direct à Docker (pas de socket monté) — un
+    script hôte (container-status-watch.sh, timer systemd toutes les 10s,
+    voir install.sh) écrit un instantané JSON dans /logs ; on se contente
+    de le relire."""
+    try:
+        stat = os.stat(_CONTAINER_STATUS_PATH)
+    except FileNotFoundError:
+        return {"containers": [], "stale": True,
+                "error": "Aucun instantané disponible — le timer hôte "
+                         "mgvms-container-status-watch a-t-il été installé ?"}
+    age_s = time.time() - stat.st_mtime
+    try:
+        with open(_CONTAINER_STATUS_PATH) as f:
+            containers = json.load(f)
+    except Exception:
+        return {"containers": [], "stale": True, "error": "Instantané illisible (JSON invalide)"}
+    return {
+        "containers": containers,
+        "stale": age_s > _CONTAINER_STATUS_STALE_AFTER_S,
+        "age_seconds": round(age_s, 1),
     }
 
 

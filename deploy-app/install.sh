@@ -415,6 +415,25 @@ else
   warn "systemctl introuvable — le reboot machine depuis l'UI (Paramètres → Système) ne fonctionnera pas"
 fi
 
+# v3.22 · Timer systemd hôte pour le panneau "État des conteneurs"
+# (Suivi des performances → Debug). Même principe que le reboot ci-dessus :
+# le backend n'a jamais d'accès direct à Docker (pas de socket monté) —
+# ce timer (hors conteneur) interroge Docker toutes les 10s et écrit un
+# instantané JSON dans /logs, que le backend se contente de relire.
+# Nécessite jq (déjà présent sur la plupart des distributions serveur ;
+# sinon `apt-get install -y jq`).
+if command -v systemctl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  install -m 0755 container-status-watch.sh /opt/mg-vms-beta-v0.1/deploy-app/container-status-watch.sh
+  cp mgvms-container-status-watch.service mgvms-container-status-watch.timer /etc/systemd/system/
+  systemctl daemon-reload
+  systemctl enable --now mgvms-container-status-watch.timer >/dev/null 2>&1
+  ok "timer mgvms-container-status-watch.timer actif (état des conteneurs dans Debug)"
+elif ! command -v jq >/dev/null 2>&1; then
+  warn "jq introuvable — le panneau « État des conteneurs » (Debug) restera vide. Installez jq puis relancez install.sh."
+else
+  warn "systemctl introuvable — le panneau « État des conteneurs » (Debug) restera vide"
+fi
+
 # v3.19 · MG-VMS comme serveur NTP pour le réseau caméras — beaucoup de
 # caméras IP ne savent pas maintenir l'heure seules ou la perdent après un
 # reboot. chrony tourne sur l'HÔTE (jamais dans un conteneur — service
