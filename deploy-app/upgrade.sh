@@ -31,8 +31,12 @@
 #     touchée non plus).
 #
 # Ce que fait upgrade.sh, dans l'ordre :
-#   1. Sauvegarde MongoDB (mongodump) avant toute chose — disque choisi une
-#      fois via scan local, mémorisé ensuite       [--no-backup]
+#   1. Sauvegarde MongoDB (mongodump) — DÉSACTIVÉE PAR DÉFAUT depuis le
+#      02/09 (décision explicite) : les archives (~100-120 Go chacune,
+#      jamais purgées automatiquement) se sont accumulées sur le disque
+#      vidéo jusqu'à le mettre à 93% plein — risque réel pour les
+#      enregistrements. Solution de sauvegarde dédiée (Veeam) prévue plus
+#      tard ; en attendant, réactivable au coup par coup avec [--backup].
 #   2. git fetch + merge --ff-only (échoue fort si divergence, jamais de
 #      résolution automatique — jamais de force/reset)        [--no-pull]
 #   3. Validation des fichiers de build (mêmes contrôles qu'install.sh)
@@ -41,7 +45,8 @@
 #
 # Options :
 #   --no-pull      ne pas tirer le dernier commit GitHub (rebuild sur place)
-#   --no-backup    ne pas faire de mongodump avant la mise à jour
+#   --backup       fait quand même un mongodump avant la mise à jour
+#                  (désactivé par défaut depuis le 02/09 — voir ci-dessus)
 #   --no-cache     build avec --no-cache
 # ==============================================================================
 set -euo pipefail
@@ -62,11 +67,12 @@ titre(){ echo -e "\n${BLEU}━━━ $* ━━━${NC}"; }
 ERREURS=0
 ko()   { err "$*"; ERREURS=$((ERREURS+1)); }
 
-NO_PULL=0; NO_BACKUP=0; NO_CACHE=""
+NO_PULL=0; NO_BACKUP=1; NO_CACHE=""
 for arg in "$@"; do
   case "$arg" in
     --no-pull)    NO_PULL=1 ;;
-    --no-backup)  NO_BACKUP=1 ;;
+    --backup)     NO_BACKUP=0 ;;
+    --no-backup)  NO_BACKUP=1 ;;  # déjà le défaut — accepté pour compatibilité
     --no-cache)   NO_CACHE="--no-cache" ;;
     *) err "Option inconnue : $arg (upgrade.sh n'a pas de menu de purge — voir install.sh)"; exit 2 ;;
   esac
@@ -99,9 +105,10 @@ fi
 # ══════════════════════════════════════════════════════════════════════
 titre "1/5 · Sauvegarde MongoDB"
 if [ "$NO_BACKUP" = 1 ]; then
-  warn "--no-backup : sauvegarde ignorée (les données ne sont de toute façon jamais"
-  warn "  touchées par ce script — le backup est une précaution supplémentaire, pas"
-  warn "  une nécessité pour la mise à jour elle-même)"
+  warn "sauvegarde désactivée par défaut (décision du 02/09 — archives non purgées"
+  warn "  automatiquement, avaient rempli le disque vidéo à 93%). Les données ne sont"
+  warn "  de toute façon jamais touchées par ce script — relancez avec --backup pour"
+  warn "  forcer un mongodump ponctuel si besoin."
 elif [ -z "$(docker compose ps -q mongo 2>/dev/null)" ]; then
   warn "Conteneur mongo non démarré — sauvegarde ignorée (rien à sauvegarder pour l'instant)"
 else
