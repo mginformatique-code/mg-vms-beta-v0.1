@@ -22,12 +22,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import api from "@/lib/api";
 import {
-  Activity, Camera, Cpu, GitBranch, Layers, LineChart, Puzzle,
+  Activity, Camera, GitBranch, Layers, LineChart, Puzzle,
   ScrollText, Server, Terminal, Workflow, RefreshCw, Zap,
 } from "lucide-react";
 
 import PipelineInspector from "./PipelineInspector";
-import PipelineDesigner from "./PipelineDesigner";
 import AIPipelineMonitor from "./AIPipelineMonitor";
 import Hardware from "./Hardware";
 import GPUStatus from "./GPUStatus";
@@ -37,11 +36,9 @@ import SshConsolePanel from "./SshConsolePanel";
 const TABS = [
   { id: "overview",    label: "Overview",    icon: Layers },
   { id: "capture",     label: "Capture",     icon: Camera },
-  { id: "ai",          label: "AI",          icon: Cpu },
   { id: "tracking",    label: "Tracking",    icon: GitBranch },
   { id: "plugins",     label: "Plugins",     icon: Puzzle },
   { id: "workflows",   label: "Workflows",   icon: Workflow },
-  { id: "designer",    label: "Designer",    icon: GitBranch },
   { id: "inspector",   label: "Inspector",   icon: Activity },
   { id: "performance", label: "Performance", icon: LineChart },
   { id: "hardware",    label: "Hardware",    icon: Server },
@@ -80,15 +77,13 @@ export default function PipelineCenter() {
 
         <TabsContent value="overview"><OverviewPanel /></TabsContent>
         <TabsContent value="capture"><CapturePanel /></TabsContent>
-        <TabsContent value="ai"><AIPanel /></TabsContent>
         <TabsContent value="tracking"><TrackingPanel /></TabsContent>
         <TabsContent value="plugins"><PluginsPanel /></TabsContent>
         <TabsContent value="workflows"><WorkflowsPanel /></TabsContent>
-        <TabsContent value="designer"><PipelineDesigner /></TabsContent>
         <TabsContent value="inspector"><PipelineInspector /></TabsContent>
         <TabsContent value="performance"><AIPipelineMonitor /></TabsContent>
         <TabsContent value="hardware"><Hardware /></TabsContent>
-        <TabsContent value="gpu"><GPUStatus /></TabsContent>
+        <TabsContent value="gpu"><GPUStatus embedded /></TabsContent>
         <TabsContent value="debug"><DebugPanel /></TabsContent>
       </Tabs>
     </div>
@@ -239,38 +234,6 @@ function CapturePanel() {
 }
 
 // ───────── AI, Tracking, Workflows, Plugins, Debug (panneaux légers) ─────────
-function AIPanel() {
-  const [snap, setSnap] = useState(null);
-  useEffect(() => {
-    const load = async () => {
-      const r = await api.get("/diagnostics/pipeline-inspector").catch(() => ({ data: {} }));
-      setSnap(r.data || {});
-    };
-    load();
-    const iv = setInterval(load, 5000);
-    return () => clearInterval(iv);
-  }, []);
-  if (!snap) return <Card className="p-6 text-sm">Chargement…</Card>;
-  const runtime = snap.runtime || {};
-  const sys = snap.system || {};
-  return (
-    <div className="grid gap-3 md:grid-cols-2" data-testid="ai-panel">
-      <Card className="p-4 space-y-2">
-        <div className="text-sm text-muted-foreground">Modèle · Device</div>
-        <div className="font-mono text-lg">{sys.device || "auto"}</div>
-        <Stat label="Workers actifs" value={runtime.workers?.length ?? 0} />
-      </Card>
-      <Card className="p-4 space-y-2">
-        <div className="text-sm text-muted-foreground">Système</div>
-        <Stat label="CPU %" value={sys.cpu_percent ?? "—"} />
-        <Stat label="RAM %" value={sys.ram_percent ?? "—"} />
-        <Stat label="GPU %" value={sys.gpu_percent ?? "—"} />
-        <Stat label="VRAM %" value={sys.vram_percent ?? "—"} />
-      </Card>
-    </div>
-  );
-}
-
 function TrackingPanel() {
   const [snap, setSnap] = useState(null);
   useEffect(() => {

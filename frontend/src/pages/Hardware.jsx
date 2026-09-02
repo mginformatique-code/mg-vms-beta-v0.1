@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import {
-  Server, Cpu, MemoryStick, HardDrive, Gauge, Zap, Activity, Thermometer,
+  Cpu, MemoryStick, HardDrive, Gauge, Zap, Activity, Thermometer,
   Save, Loader2, Cctv, Brain, Film,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -70,13 +70,6 @@ export default function Hardware() {
 
   return (
     <div className="p-4 md:p-6 space-y-4" data-testid="hardware-page">
-      <div className="flex items-start justify-between flex-wrap gap-2">
-        <div>
-          <h1 className="font-head font-bold text-2xl tracking-tight flex items-center gap-2"><Server size={22} className="text-[#0044FF]" /> {t("hw.title")}</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{t("hw.subtitle")}</p>
-        </div>
-      </div>
-
       <div className="flex items-center gap-1 border-b border-border flex-wrap">
         {TABS.map(([k, lbl]) => (
           <button key={k} onClick={() => setTab(k)} data-testid={`hw-tab-${k}`}

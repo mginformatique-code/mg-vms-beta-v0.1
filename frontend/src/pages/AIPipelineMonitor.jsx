@@ -15,7 +15,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import api from "@/lib/api";
-import { Activity, Cpu, Zap, RefreshCw, Save, AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Boxes, Radar } from "lucide-react";
+import { Cpu, Zap, RefreshCw, Save, AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Boxes, Radar } from "lucide-react";
 
 const STAGE_META = {
   fetch_ms:       { label: "Fetch frame",  color: "#00B0FF", target: 100, hint: "Récupération frame (go2rtc / frame_source GPU)" },
@@ -298,15 +298,7 @@ export default function AIPipelineMonitor() {
 
   return (
     <div className="p-4" data-testid="ai-pipeline-monitor">
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <div>
-          <h1 className="font-head font-bold text-2xl tracking-tight flex items-center gap-2">
-            <Activity size={22} className="text-[#00E676]" /> Pipeline IA · Monitoring temps réel
-          </h1>
-          <div className="text-[11px] text-muted-foreground mt-0.5">
-            Frame → YOLO → ByteTrack → Broadcast · Downstream: ANPR/Zones/Workflows/Plugins en workers séparés
-          </div>
-        </div>
+      <div className="flex items-center justify-end mb-4 flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-1.5 text-[11px] cursor-pointer">
             <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} data-testid="auto-refresh" />

@@ -10,7 +10,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import api from "@/lib/api";
 import { toast } from "sonner";
-import { Activity, Cpu, MemoryStick, Zap, RefreshCw, Gauge, AlertTriangle } from "lucide-react";
+import { Activity, Cpu, MemoryStick, Zap, RefreshCw, AlertTriangle } from "lucide-react";
 
 const STAGE_LABELS = {
   fetch: "Fetch RTSP", decode: "Decode", motion: "Motion", yolo: "YOLO",
@@ -78,15 +78,7 @@ export default function PipelineInspector() {
 
   return (
     <div className="p-6 space-y-6" data-testid="pipeline-inspector-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold flex items-center gap-2">
-            <Gauge size={20} className="text-primary" /> Pipeline Inspector
-          </h1>
-          <p className="text-xs text-muted-foreground mt-1">
-            Pipeline v2 — CameraWorker → FrameContext → Stages → PluginBus · rafraîchi toutes les 5 s
-          </p>
-        </div>
+      <div className="flex items-center justify-end">
         <button onClick={load} data-testid="inspector-refresh-btn"
           className="flex items-center gap-2 px-3 py-1.5 border border-border text-xs hover:bg-accent transition-colors">
           <RefreshCw size={13} /> Rafraîchir

@@ -40,7 +40,7 @@ function RuntimeRow({ label, runtime, gpuKey = "available" }) {
   );
 }
 
-export default function GPUStatus() {
+export default function GPUStatus({ embedded = false }) {
   const { t } = useApp();
   const [full, setFull] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -72,10 +72,12 @@ export default function GPUStatus() {
   return (
     <div className="p-4">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <h1 className="font-head font-bold text-2xl tracking-tight flex items-center gap-2">
-          <Zap size={22} className={isActive ? "text-[#00E676]" : "text-[#FF3333]"} /> Accélération GPU
-        </h1>
-        <div className="flex items-center gap-2">
+        {!embedded && (
+          <h1 className="font-head font-bold text-2xl tracking-tight flex items-center gap-2">
+            <Zap size={22} className={isActive ? "text-[#00E676]" : "text-[#FF3333]"} /> Accélération GPU
+          </h1>
+        )}
+        <div className="flex items-center gap-2 ml-auto">
           <button onClick={() => setAutoRefresh((v) => !v)} className={`px-2.5 py-1.5 text-xs border ${autoRefresh ? "bg-[#0044FF] text-white border-[#0044FF]" : "border-border"}`}>
             Auto-refresh {autoRefresh ? "ON (5s)" : "OFF"}
           </button>
