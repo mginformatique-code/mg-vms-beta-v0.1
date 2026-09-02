@@ -10,7 +10,7 @@ import WelcomePopup from "@/components/WelcomePopup";
 import CookieConsentBanner from "@/components/CookieConsentBanner";
 import {
   LayoutDashboard, Grid3x3, Cctv, Building2, ScanLine, Car, Bell, Map, Zap,
-  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock, Layers, ChevronDown, ChevronRight, LineChart, Sparkles, ShieldCheck, Lock, Info, LifeBuoy, ScrollText as LegalIcon,
+  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock, Layers, ChevronDown, ChevronRight, LineChart, Sparkles, ShieldCheck, Lock, Info, LifeBuoy, ScrollText as LegalIcon, Terminal,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -70,6 +70,7 @@ const NAV = [
     { to: "/reports", icon: FileText, key: "nav.reports", role: "technician" },
     { to: "/audit", icon: ScrollText, key: "nav.audit", role: "technician" },
     { to: "/diagnostics", icon: Activity, key: "nav.diagnostics", role: "technician" },
+    { to: "/logs-systeme", icon: Terminal, key: "nav.system_logs", role: "technician" },
   ]},
   { group: "nav.settings_group", items: [
     { to: "/storage", icon: HardDrive, key: "nav.storage" },

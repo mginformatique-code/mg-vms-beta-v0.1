@@ -374,32 +374,9 @@ function WorkflowsPanel() {
 }
 
 function DebugPanel() {
-  const [logs, setLogs] = useState("");
-  const load = useCallback(async () => {
-    try {
-      const r = await api.get("/diagnostics/logs?tail=200").catch(() => ({ data: "" }));
-      setLogs(typeof r.data === "string" ? r.data : JSON.stringify(r.data, null, 2));
-    } catch (e) {
-      setLogs("(endpoint indisponible sur ce backend)");
-    }
-  }, []);
-  useEffect(() => { load(); }, [load]);
   return (
     <div className="space-y-4" data-testid="debug-panel">
       <ContainerStatusPanel />
-
-      <Card className="p-4 space-y-3">
-        <div className="flex justify-between items-center">
-        <div className="text-sm text-muted-foreground">Logs récents (tail 200)</div>
-          <Button size="sm" variant="ghost" onClick={load}>
-            <RefreshCw className="w-4 h-4 mr-2" />Rafraîchir
-          </Button>
-        </div>
-        <pre className="text-xs font-mono bg-black/40 p-3 rounded max-h-96 overflow-auto">
-          {logs || "…"}
-        </pre>
-      </Card>
-
       <SshConsolePanel />
     </div>
   );
