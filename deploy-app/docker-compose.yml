@@ -42,6 +42,34 @@ services:
       retries: 5
     networks: [mgvms]
 
+  # ─── Redis · bus pub/sub pipeline IA ↔ API (temps réel) ──────────
+  # v3.22 · Chantier séparation pipeline IA / serveur API (priorité #1,
+  # 01/09) : le pipeline appelait jusqu'ici directement les connexions
+  # WebSocket du process API en mémoire (broadcast_alert/
+  # broadcast_ai_detections) — impossible à conserver une fois le
+  # pipeline dans son propre process/conteneur. Redis pub/sub choisi
+  # plutôt qu'un HTTP interne point-à-point : cible affichée = 50-100
+  # caméras, potentiellement plusieurs workers pipeline ET plusieurs
+  # répliques API plus tard — Redis découple producteurs/consommateurs
+  # sans qu'ils se connaissent (HTTP point-à-point serait un problème de
+  # découverte de service dès plus d'une instance de chaque côté).
+  # Étape 1 (celle-ci) : pub/sub uniquement, tout reste dans le même
+  # conteneur backend le temps de valider en conditions réelles — pas
+  # de persistance nécessaire (fan-out volatile, rien à perdre au
+  # redémarrage). Une future étape 2 (état partagé pour les diagnostics)
+  # pourra réutiliser cette même instance.
+  redis:
+    image: redis:7.4-alpine
+    container_name: mgvms-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks: [mgvms]
+
   # ─── go2rtc · moteur central de flux (RTSP → MJPEG preview) ──────
   # P0-fix · Solution B (Go2RTC + MJPEG) : ce service avait été retiré du
   # compose lors de la migration "video-engine-v3" (WHEP-only), mais le
@@ -88,11 +116,14 @@ services:
         condition: service_healthy
       go2rtc:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       TZ: ${TZ:-Europe/Paris}
       # ── Base MG-VMS ─────────────────────────────────────────
       MONGO_URL: ${MONGO_URL:-mongodb://mongo:27017}
       DB_NAME: ${DB_NAME:-mgvms}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       JWT_SECRET: ${JWT_SECRET:-please_change_this_secret_in_production}
       # v3.4 · Déclarée dans .env.example depuis longtemps référencée en

@@ -218,7 +218,7 @@ ok "conteneurs mis à jour (recréés uniquement pour les images qui ont changé
 # ══════════════════════════════════════════════════════════════════════
 # 5. Attente des healthchecks
 # ══════════════════════════════════════════════════════════════════════
-titre "5/5 · Attente des healthchecks (mongo → go2rtc → backend → frontend)"
+titre "5/5 · Attente des healthchecks (mongo → redis → go2rtc → backend → frontend)"
 DELAI=420
 DEBUT=$(date +%s)
 while :; do

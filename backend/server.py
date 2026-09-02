@@ -16,7 +16,7 @@ from database import create_indexes
 from auth import auth_router
 from routers import api_router
 from notifications import notif_router
-from realtime import realtime_router, metrics_broadcaster
+from realtime import realtime_router, metrics_broadcaster, redis_bridge_loop
 from plugins import plugins_router, seed_plugins
 from plugin_config import plugin_config_router
 from storage import storage_router
@@ -212,6 +212,9 @@ async def on_startup():
     # (les anciennes migrations pipeline v2 + MediaMTX sont supprimées)
     asyncio.create_task(metrics_broadcaster())
     asyncio.create_task(network_poll_broadcaster())
+    # v3.22 · Chantier séparation pipeline IA / serveur API — pont Redis
+    # pub/sub -> WebSocket local (voir realtime.py::redis_bridge_loop).
+    asyncio.create_task(redis_bridge_loop())
     # video-engine-v3 · sync_all_streams (go2rtc) supprimé
     asyncio.create_task(camera_status_loop())
     asyncio.create_task(recorder_loop())

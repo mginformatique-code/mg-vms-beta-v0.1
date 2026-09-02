@@ -23,7 +23,7 @@
 #      → --big-cleanup saute les 3 questions et applique directement le palier 3
 #   5. Création des dossiers de stockage /mnt/storage/... + .env
 #   6. docker compose config → build → up -d
-#   7. Attente des healthchecks (mongo → go2rtc → backend → frontend)
+#   7. Attente des healthchecks (mongo → redis → go2rtc → backend → frontend)
 #   8. Purge des données (optionnelle, interactive)          [--no-cleanup]
 #      → palier A : enregistrements aux métadonnées corrompues (Entrée = oui)
 #      → palier B : TOUS les enregistrements vidéo (Entrée = non)
@@ -456,7 +456,7 @@ ok "stack démarrée"
 # ══════════════════════════════════════════════════════════════════════
 # 7. Attente des healthchecks
 # ══════════════════════════════════════════════════════════════════════
-titre "7/8 · Attente des healthchecks (mongo → go2rtc → backend → frontend)"
+titre "7/8 · Attente des healthchecks (mongo → redis → go2rtc → backend → frontend)"
 DELAI=420   # 7 min (start_period backend 90 s + téléchargement modèles au 1er boot)
 DEBUT=$(date +%s)
 while :; do

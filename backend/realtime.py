@@ -1,4 +1,6 @@
 """Temps réel : métriques système (psutil), WebSocket, broadcast d'événements."""
+import json
+import logging
 import os
 import time
 import asyncio
@@ -8,8 +10,11 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from database import db
 from auth import JWT_ALGORITHM, get_jwt_secret
+from redis_bus import get_redis, publish_alert as _publish_alert, \
+    publish_ai_detections as _publish_ai_detections, CHANNEL_ALERTS, CHANNEL_AI_DETECTIONS
 
 realtime_router = APIRouter(prefix="/api")
+logger = logging.getLogger("realtime")
 
 _last_net = {"t": None, "bytes": 0}
 
@@ -92,12 +97,15 @@ def _can_see(user: dict, site_id: str) -> bool:
 
 
 async def broadcast_alert(alert: dict):
-    payload = {k: v for k, v in alert.items() if k != "_id"}
-    await manager.broadcast({"type": "alert", "data": payload},
-                            predicate=lambda u: _can_see(u, payload.get("site_id", "")))
+    """v3.22 · Publie sur Redis plutôt que de toucher `manager` en direct —
+    voir redis_bus.py. Appelants inchangés (pipeline IA ET routes HTTP),
+    la livraison réelle se fait dans redis_bridge_loop() ci-dessous."""
+    await _publish_alert(alert)
 
 
 async def broadcast_camera_status(camera: dict):
+    # Appelé uniquement depuis routers.py (process API) — pas concerné par
+    # la séparation pipeline/API, reste en appel direct.
     await manager.broadcast({"type": "camera_status", "data": {
         "id": camera.get("id"), "name": camera.get("name"),
         "status": camera.get("status"), "site_id": camera.get("site_id"),
@@ -105,10 +113,47 @@ async def broadcast_camera_status(camera: dict):
 
 
 async def broadcast_ai_detections(camera_id: str, site_id: str, payload: dict):
-    """Diffuse aux clients autorisés les détections IA d'une caméra (overlay Live)."""
-    await manager.broadcast({"type": "ai_detections", "data": {
-        "camera_id": camera_id, "site_id": site_id, **payload,
-    }}, predicate=lambda u: _can_see(u, site_id or ""))
+    """Diffuse aux clients autorisés les détections IA d'une caméra (overlay Live).
+    v3.22 · Publie sur Redis — voir broadcast_alert ci-dessus."""
+    await _publish_ai_detections(camera_id, site_id, payload)
+
+
+async def _deliver_alert(payload: dict):
+    await manager.broadcast({"type": "alert", "data": payload},
+                            predicate=lambda u: _can_see(u, payload.get("site_id", "")))
+
+
+async def _deliver_ai_detections(msg: dict):
+    await manager.broadcast({"type": "ai_detections", "data": msg},
+                            predicate=lambda u: _can_see(u, msg.get("site_id", "")))
+
+
+async def redis_bridge_loop():
+    """v3.22 · Pont Redis → WebSocket local. Tourne dans le process qui
+    détient les connexions WS (ConnectionManager) ; consomme ce que publient
+    broadcast_alert/broadcast_ai_detections — potentiellement depuis un
+    AUTRE process une fois le pipeline IA séparé du serveur API. Reconnexion
+    automatique si Redis devient injoignable (ne doit jamais faire planter
+    le process API)."""
+    while True:
+        try:
+            r = get_redis()
+            pubsub = r.pubsub()
+            await pubsub.subscribe(CHANNEL_ALERTS, CHANNEL_AI_DETECTIONS)
+            async for message in pubsub.listen():
+                if message.get("type") != "message":
+                    continue
+                try:
+                    data = json.loads(message["data"])
+                except Exception:
+                    continue
+                if message["channel"] == CHANNEL_ALERTS:
+                    await _deliver_alert(data)
+                elif message["channel"] == CHANNEL_AI_DETECTIONS:
+                    await _deliver_ai_detections(data)
+        except Exception:
+            logger.exception("redis_bridge_loop: connexion Redis perdue, reconnexion dans 3s")
+            await asyncio.sleep(3)
 
 
 async def _auth_ws(token: str):
