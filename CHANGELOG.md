@@ -2,6 +2,84 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.22-upgrade-sh-et-decouplage-pipeline] — 2026-09-01 — upgrade.sh en prod, décrue Plaques, début séparation pipeline IA/API
+
+### Added
+- **`deploy-app/upgrade.sh` — nouveau script de mise à jour, distinct
+  d'`install.sh`.** `install.sh` reste le seul capable de purger (menu
+  interactif, jamais par défaut) ; `upgrade.sh` ne propose aucune purge,
+  fait un `mongodump` de précaution avant de toucher au code, échoue fort
+  sur toute divergence git (jamais de merge/reset automatique), et ne
+  fait ni `down` ni `prune`. Disque de sauvegarde recommandé par un vrai
+  scan des points de montage (trié par espace libre réel), demandé une
+  fois puis mémorisé (`UPGRADE_BACKUP_PATH` dans `.env`). Bannière MG-VMS
+  esthétique au lancement des deux scripts. Documenté sur
+  docs.mginformatique.com (FR/EN, "Installation vs mise à jour").
+  Corrigé après le premier run réel en prod : piège classique `set -e`
+  (`grep` sans résultat + `pipefail` = script tué silencieusement dès
+  l'étape 1) et un `[ condition ] && VAR=...` sans `else`.
+- **Œil "maintenu-enfoncé" pour afficher un mot de passe en clair**
+  (connexion + mot de passe RTSP/ONVIF caméra) — composant partagé
+  `HoldToRevealInput`, reste en clair uniquement tant que le bouton est
+  pressé.
+- **Vehicles.jsx — grille de tuiles Plaques plus dense** (jusqu'à 6
+  colonnes au lieu de 4 sur grand écran), **recherche de doublons IA
+  passée en tâche de fond** (jusqu'à ~5 min en bloquant, mesuré : 36s de
+  recherche de candidats + jusqu'à 25 appels Qwen séquentiels) — la
+  requête répond désormais immédiatement, le frontend raffraîchit la
+  liste en arrière-plan. **Deux interrupteurs dédiés** (Administration →
+  LLM) pour activer/désactiver indépendamment le dédoublonnage IA et le
+  réglage ANPR auto, en plus du switch général de connexion Qwen.
+  Tooltip explicatif ajouté sur le panneau "Identités véhicule".
+- **Caméra — check horloge obligatoire à l'ajout, générique quel que
+  soit le constructeur** (ONVIF `GetSystemDateAndTime`, socle ONVIF de
+  base — contrairement à `GetNTP` qui varie selon la marque). Alerte si
+  l'horloge caméra dérive de plus de 60s. Nouvel onglet "Date et heure"
+  dans le formulaire caméra, qui regroupe le test d'API NTP spécifique
+  au constructeur (existant) et le bouton "Définir comme serveur de
+  temps", retirés du bloc de test principal.
+- **Relogin forcé après une mise à jour.** Un JWT valide (jusqu'à 8h/7j)
+  survivait à un rebuild (stocké en `localStorage`, pas des cookies) — F5
+  restaurait la session au lieu de forcer un nouveau login. Un
+  `build_id.txt` régénéré à chaque build frontend (servi tel quel par
+  nginx, pas bake dans le bundle JS) est comparé au démarrage à la
+  valeur mémorisée au dernier login ; la session locale est purgée s'il
+  diffère.
+- **Migration du stockage MongoDB vers un SSD NVMe 1 To** (passthrough,
+  remplace l'ancien disque de 400 Go) — copie intégrale vérifiée
+  (`rsync -aHAX`, tailles et nombre de fichiers identiques des deux
+  côtés), `/etc/fstab` basculé sur le nouvel UUID. Ancien disque conservé
+  monté à part comme filet de sécurité.
+- **Début du chantier de séparation du pipeline IA et du serveur API**
+  (priorité #1 — mesuré : le process API tourne à 521% CPU, le pipeline
+  IA des 14 caméras partage le même process/event loop que l'API HTTP,
+  ce qui rend n'importe quel endpoint variable en latence pendant les
+  cycles IA). Étape 1/N : bus **Redis pub/sub** (nouveau service,
+  pub/sub uniquement, pas de persistance) pour découpler la diffusion
+  WebSocket temps réel (`broadcast_alert`/`broadcast_ai_detections`) —
+  jusqu'ici un appel Python direct depuis le pipeline vers les
+  connexions WebSocket vivantes du process API, impossible à conserver
+  entre deux process distincts. Choix de Redis plutôt qu'un HTTP interne
+  point-à-point : cible affichée 50-100 caméras avec potentiellement
+  plusieurs workers pipeline et plusieurs répliques API — Redis
+  découple producteurs/consommateurs sans qu'ils se connaissent. Tout
+  reste dans le même conteneur pour cette étape (validation du
+  transport avant scission réelle en 2 services).
+
+### Fixed
+- **Tableau de bord — répartition des détections agrégeait TOUTE la
+  collection `events`** (243k+ documents, en croissance continue) sans
+  le filtre 24h appliqué partout ailleurs dans le même endpoint — mesuré
+  508 secondes. Borné à la même fenêtre 24h, nouvel index dédié
+  `{timestamp:1, type:1}`. Après correctif : 159ms.
+- **Onglet "Timeline" de la fiche véhicule, doublon de "Parcours"** —
+  correctif inversé la première fois (Timeline supprimée, Parcours
+  conservé), corrigé dans l'autre sens. Effet de bord découvert au
+  passage : grille des onglets pas repassée à 5 colonnes lors du premier
+  retrait, onglets visuellement poussés à gauche.
+- Renommage "Pipeline Center" → "Suivi des performances" harmonisé
+  entre le menu et le titre de la page (version anglaise inchangée).
+
 ## [v3.21-anti-doublons-ia-securite] — 2026-08-31 — Anti-doublons véhicule IA, réglage ANPR auto, faille mot de passe
 
 ### Fixed — Critique / sécurité
