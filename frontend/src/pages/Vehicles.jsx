@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "@/context/AppContext";
-import api from "@/lib/api";
+import api, { formatApiErrorDetail } from "@/lib/api";
 import VirtualGrid from "@/components/VirtualGrid";
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
@@ -46,6 +46,7 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
   const [anomalies, setAnomalies] = useState([]);
   const [dedupSuggestions, setDedupSuggestions] = useState([]);
   const [dedupRunning, setDedupRunning] = useState(false);
+  const [dedupAvailable, setDedupAvailable] = useState(true); // v3.22 · évite de faire attendre pour rien si le switch LLM est off
   // v3.20 · Affichage tuiles (miniatures, plus lourd à charger) vs liste
   // compacte (façon ancien menu Plaques) — demandé pour alléger l'interface.
   // Préférence mémorisée par navigateur, pas envoyée au serveur.
@@ -186,6 +187,18 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
     } catch { /* silent */ }
   }, []);
 
+  // v3.22 · Vérifie en amont si le dédoublonnage IA est réellement
+  // utilisable (connexion LLM + switch dédié) — évite de faire cliquer
+  // "Rechercher maintenant" puis attendre pour rien si c'est désactivé
+  // dans Administration → LLM. Réservé admin (seul rôle voyant le bouton).
+  const loadDedupAvailability = useCallback(async () => {
+    if (user?.role !== "admin") return;
+    try {
+      const { data } = await api.get("/settings/llm");
+      setDedupAvailable(!!data.enabled && !!data.dedup_enabled);
+    } catch { setDedupAvailable(true); /* échec réseau : ne pas bloquer sur une supposition */ }
+  }, [user?.role]);
+
   // v3.21 · La recherche complète (candidats + jusqu'à 25 appels Qwen
   // séquentiels) prend plusieurs minutes en réel — le backend la lance
   // maintenant en tâche de fond et répond immédiatement (voir
@@ -204,7 +217,13 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
         loadDedup();
         if (tries >= 18) clearInterval(poll); // ~3 min à 10s d'intervalle
       }, 10000);
-    } catch (e) { toast.error("Échec du lancement de la recherche de doublons"); }
+    } catch (e) {
+      // v3.22 · Le backend renvoie déjà un message précis (ex. DEDUP_DISABLED
+      // si le switch dédoublonnage est désactivé dans Administration → LLM)
+      // — on l'affiche tel quel au lieu d'un message générique qui laissait
+      // l'utilisateur chercher pourquoi ça ne marche pas.
+      toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec du lancement de la recherche de doublons");
+    }
     finally { setDedupRunning(false); }
   };
 
@@ -303,7 +322,7 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
   }, [q, items.length]);
 
   // Chargement initial + refresh 30 s (pausé si le drawer est ouvert)
-  useEffect(() => { load(""); loadAnomalies(); loadIdentities(); loadDedup(); }, [load, loadAnomalies, loadIdentities, loadDedup]);
+  useEffect(() => { load(""); loadAnomalies(); loadIdentities(); loadDedup(); loadDedupAvailability(); }, [load, loadAnomalies, loadIdentities, loadDedup, loadDedupAvailability]);
   // v3.19 · Relie la recherche IA générale (menu Événements → "Tous") à
   // celle-ci : "voiture"/"voiture rouge" y sont classés target:vehicles
   // avec de vrais résultats, mais la galerie Événements n'affiche que son
@@ -631,6 +650,7 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
           items={dedupSuggestions}
           admin={user?.role === "admin"}
           running={dedupRunning}
+          available={dedupAvailable}
           onRunNow={runDedupNow}
           onAccept={(id) => decideDedup(id, true)}
           onReject={(id) => decideDedup(id, false)}
@@ -1389,14 +1409,14 @@ function AnomaliesBanner({ items, onOpen, onDismiss }) {
 // configuré est texte seul). Jamais de fusion automatique : chaque
 // suggestion attend une décision manuelle, même mécanisme de fusion que
 // "Fusionner des fiches" (POST /vehicles/identities).
-function DedupBanner({ items, admin, running, onRunNow, onAccept, onReject }) {
+function DedupBanner({ items, admin, running, available, onRunNow, onAccept, onReject }) {
   return (
     <div className="border border-[#0044FF]/40 bg-[#0044FF]/5 p-3 mb-4" data-testid="dedup-banner">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-1.5 text-[#0044FF] text-xs uppercase tracking-wider font-medium">
           <Sparkles size={14} /> Doublons suggérés (IA) {items.length > 0 && `(${items.length})`}
         </div>
-        {admin && (
+        {admin && available && (
           <button onClick={onRunNow} disabled={running} data-testid="dedup-run-now"
                   className="text-[10px] uppercase tracking-wider text-[#0044FF] hover:underline disabled:opacity-50 flex items-center gap-1">
             {running && <Loader2 size={11} className="animate-spin" />}
@@ -1404,6 +1424,11 @@ function DedupBanner({ items, admin, running, onRunNow, onAccept, onReject }) {
           </button>
         )}
       </div>
+      {admin && !available && (
+        <p className="text-[11px] text-[#FF3333] mb-2" data-testid="dedup-unavailable">
+          Connexion impossible — vérifiez la configuration dans Administration → LLM (MG-IA).
+        </p>
+      )}
       {items.length === 0 ? (
         <p className="text-[11px] text-muted-foreground">
           Aucune suggestion en attente — tâche automatique une fois par jour, ou lance-la manuellement.

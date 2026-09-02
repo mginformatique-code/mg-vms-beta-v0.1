@@ -30,7 +30,7 @@ import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import {
   Camera, Wifi, Video, Layers, Cpu, Volume2, Sun, Bell, Move3d, Wrench,
   ScanLine, RefreshCw, AlertCircle, CircleCheck, ChevronLeft, ChevronRight,
-  ArrowLeft, HardDrive, Activity, Download, Type,
+  ArrowLeft, HardDrive, Activity, Download, Type, Loader2, Clock,
 } from "lucide-react";
 
 const TABS = [
@@ -44,6 +44,7 @@ const TABS = [
   { id: "audio",        label: "Audio",        icon: Volume2 },
   { id: "lighting",     label: "Lighting",     icon: Sun },
   { id: "osd",          label: "Incrustation", icon: Type },
+  { id: "datetime",     label: "Date et heure", icon: Clock },
   { id: "alarm",        label: "Alarm",        icon: Bell },
   { id: "sdcard",       label: "Carte SD",     icon: HardDrive },
   { id: "ptz",          label: "PTZ",          icon: Move3d },
@@ -175,6 +176,7 @@ export default function CameraCenter() {
         <TabsContent value="audio"><AudioTab cameraId={cameraId} caps={caps} /></TabsContent>
         <TabsContent value="lighting"><LightingTab cameraId={cameraId} caps={caps} /></TabsContent>
         <TabsContent value="osd"><OsdTab cameraId={cameraId} caps={caps} /></TabsContent>
+        <TabsContent value="datetime"><DateTimeTab cameraId={cameraId} /></TabsContent>
         <TabsContent value="alarm"><AlarmTab cameraId={cameraId} caps={caps} /></TabsContent>
         <TabsContent value="sdcard"><SdCardTab cameraId={cameraId} caps={caps} /></TabsContent>
         <TabsContent value="ptz"><PTZTab cameraId={cameraId} caps={caps} /></TabsContent>
@@ -740,6 +742,98 @@ function OsdTab({ cameraId, caps }) {
            onEnabled={(v) => save({ name_enabled: v })} onPos={(v) => save({ name_pos: v })} />
       <Row label="Date / heure" enabled={osd.date_enabled} pos={osd.date_pos}
            onEnabled={(v) => save({ date_enabled: v })} onPos={(v) => save({ date_pos: v })} />
+    </Card>
+  );
+}
+
+// ─── Date et heure (v3.22) ───
+// Horloge caméra à la demande (ONVIF GetSystemDateAndTime, générique
+// quel que soit le constructeur) + configuration NTP. Remplace l'onglet
+// équivalent retiré du formulaire d'ajout/édition caméra (le check
+// obligatoire à l'ajout suffit là-bas) — ici c'est la vue persistante,
+// consultable et actionnable à tout moment sans rouvrir le formulaire.
+function DateTimeTab({ cameraId }) {
+  const [state, setState] = useState(null); // null=chargement, false=erreur, objet=données
+  const [error, setError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [settingNtp, setSettingNtp] = useState(false);
+
+  const load = () => {
+    setRefreshing(true);
+    api.get(`/cameras/${cameraId}/datetime`)
+       .then((r) => { setState(r.data); setError(""); })
+       .catch((e) => {
+         setState(false);
+         const d = e.response?.data?.detail;
+         setError((typeof d === "string" ? d : d?.message) || "Lecture impossible sur cette caméra.");
+       })
+       .finally(() => setRefreshing(false));
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [cameraId]);
+
+  const setNtp = () => {
+    setSettingNtp(true);
+    api.post(`/cameras/${cameraId}/ntp`, { ntp_server: window.location.hostname })
+       .then(() => { toast.success("Serveur de temps défini — MG-VMS resynchronisera cette caméra automatiquement toutes les 24h"); load(); })
+       .catch((e) => toast.error(e.response?.data?.detail?.message || e.response?.data?.detail || "Échec"))
+       .finally(() => setSettingNtp(false));
+  };
+
+  if (state === null) return <Card className="p-4 text-sm text-muted-foreground" data-testid="cam-datetime">Chargement…</Card>;
+
+  const drift = state ? Math.abs(state.drift_seconds ?? 0) : null;
+  const driftOk = drift !== null && drift < 60;
+
+  return (
+    <Card className="p-4 space-y-4" data-testid="cam-datetime">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">Horloge de la caméra, lue à la demande (ONVIF).</p>
+        <Button size="sm" variant="outline" onClick={load} disabled={refreshing} data-testid="cam-datetime-refresh">
+          {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+        </Button>
+      </div>
+
+      {state === false ? (
+        <p className="text-sm text-[#FF3333]">{error}</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Heure caméra</div>
+              <div className="mono">{new Date(state.camera_time).toLocaleString("fr-FR")}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Heure serveur MG-VMS</div>
+              <div className="mono">{new Date(state.server_time).toLocaleString("fr-FR")}</div>
+            </div>
+          </div>
+          <div className={`text-sm ${driftOk ? "text-[#00E676]" : "text-[#FFB800]"}`}>
+            Écart : {state.drift_seconds > 0 ? "+" : ""}{state.drift_seconds}s
+            {driftOk ? " — horloge synchronisée" : " — dérive notable"}
+          </div>
+        </>
+      )}
+
+      <div className="border-t border-border pt-4">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Serveur de temps (NTP)</div>
+        {state && state.ntp_managed ? (
+          <p className="text-sm text-[#00E676]">
+            Gérée par MG-VMS ({state.ntp_server}) — resynchronisation automatique toutes les 24h.
+          </p>
+        ) : (
+          <>
+            <p className="text-[11px] text-muted-foreground mb-2">
+              Cette caméra n'est pas configurée pour se synchroniser sur MG-VMS — dérive possible avec le temps
+              ou après un redémarrage caméra.
+            </p>
+            <Button onClick={setNtp} disabled={settingNtp} data-testid="cam-datetime-set-ntp"
+                    className="flex items-center gap-2">
+              {settingNtp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Clock className="w-4 h-4" />}
+              Configurer avec le serveur NTP local (MG-VMS) — fortement conseillé
+            </Button>
+          </>
+        )}
+      </div>
     </Card>
   );
 }

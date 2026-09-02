@@ -2,6 +2,7 @@
 
 Fonctionnalités exposées via ONVIF :
   - `GET  /device-info`       : marque, modèle, firmware, serial
+  - `GET  /datetime`          : horloge caméra à la demande + état NTP (v3.22)
   - `GET  /capabilities`      : ce que la caméra supporte (PTZ, audio, IO, imaging…)
   - `POST /ir/{on|off}`       : bascule IR Cut Filter (via Imaging)
   - `POST /light/{on|off}`    : bascule projecteur / lumière (via DeviceIO relais)
@@ -34,6 +35,32 @@ async def _get_cam_credentials(camera_id: str):
     from crypto_utils import decrypt_secret
     pwd = decrypt_secret(cam.get("password", ""))
     return cam, cam["ip"], int(cam.get("onvif_port") or 80), cam.get("username", ""), pwd
+
+
+def _onvif_datetime(ip, port, user, pwd) -> dict:
+    """v3.22 · GetSystemDateAndTime — socle ONVIF de base, supporté par
+    tous les constructeurs (contrairement à GetNTP). Même logique que
+    streaming.py::test_connectivity (étape obligatoire à l'ajout), mais
+    ici interrogeable à la demande depuis Centre caméras → Date et heure."""
+    from datetime import datetime, timezone
+    from wsdl_path import onvif_camera
+    cam = onvif_camera(ip, port, user, pwd)
+    dev = cam.create_devicemgmt_service()
+    dt_resp = dev.GetSystemDateAndTime()
+    utc = getattr(dt_resp, "UTCDateTime", None)
+    if not (utc and utc.Date and utc.Time):
+        raise RuntimeError("Réponse ONVIF incomplète (UTCDateTime absent)")
+    camera_time = datetime(
+        utc.Date.Year, utc.Date.Month, utc.Date.Day,
+        utc.Time.Hour, utc.Time.Minute, utc.Time.Second,
+        tzinfo=timezone.utc,
+    )
+    server_time = datetime.now(timezone.utc)
+    return {
+        "camera_time": camera_time.isoformat(),
+        "server_time": server_time.isoformat(),
+        "drift_seconds": round((camera_time - server_time).total_seconds(), 1),
+    }
 
 
 def _onvif_device_info(ip, port, user, pwd) -> dict:
@@ -177,6 +204,25 @@ async def device_info(camera_id: str, user: dict = Depends(require_permission("v
     except Exception as e:
         raise HTTPException(502, f"ONVIF error: {type(e).__name__}: {str(e)[:200]}")
     return {"camera_id": camera_id, **info}
+
+
+@camera_control_router.get("/cameras/{camera_id}/datetime")
+async def camera_datetime(camera_id: str, user: dict = Depends(require_permission("view_live"))):
+    """v3.22 · Onglet "Date et heure" (Centre caméras) — horloge caméra à
+    la demande (ONVIF GetSystemDateAndTime, générique quel que soit le
+    constructeur) + état NTP déjà stocké sur la fiche caméra (ntp_managed/
+    ntp_server, mis à jour par POST .../ntp)."""
+    cam, ip, port, u, pwd = await _get_cam_credentials(camera_id)
+    try:
+        dt = await asyncio.wait_for(
+            asyncio.to_thread(_onvif_datetime, ip, port, u, pwd), timeout=12)
+    except Exception as e:
+        raise HTTPException(502, f"ONVIF error: {type(e).__name__}: {str(e)[:200]}")
+    return {
+        "camera_id": camera_id, **dt,
+        "ntp_managed": bool(cam.get("ntp_managed")),
+        "ntp_server": cam.get("ntp_server") or "",
+    }
 
 
 @camera_control_router.get("/cameras/{camera_id}/capabilities")
