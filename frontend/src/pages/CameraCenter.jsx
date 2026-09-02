@@ -757,6 +757,7 @@ function DateTimeTab({ cameraId }) {
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [settingNtp, setSettingNtp] = useState(false);
+  const [syncingNow, setSyncingNow] = useState(false);
 
   const load = () => {
     setRefreshing(true);
@@ -777,6 +778,14 @@ function DateTimeTab({ cameraId }) {
        .then(() => { toast.success("Serveur de temps défini — MG-VMS resynchronisera cette caméra automatiquement toutes les 24h"); load(); })
        .catch((e) => toast.error(e.response?.data?.detail?.message || e.response?.data?.detail || "Échec"))
        .finally(() => setSettingNtp(false));
+  };
+
+  const syncNow = () => {
+    setSyncingNow(true);
+    api.post(`/cameras/${cameraId}/datetime/sync-now`)
+       .then(() => { toast.success("Horloge caméra mise à l'heure du serveur"); load(); })
+       .catch((e) => toast.error(e.response?.data?.detail?.message || e.response?.data?.detail || "Échec"))
+       .finally(() => setSyncingNow(false));
   };
 
   if (state === null) return <Card className="p-4 text-sm text-muted-foreground" data-testid="cam-datetime">Chargement…</Card>;
@@ -811,6 +820,11 @@ function DateTimeTab({ cameraId }) {
             Écart : {state.drift_seconds > 0 ? "+" : ""}{state.drift_seconds}s
             {driftOk ? " — horloge synchronisée" : " — dérive notable"}
           </div>
+          <Button size="sm" variant="outline" onClick={syncNow} disabled={syncingNow} data-testid="cam-datetime-sync-now"
+                  className="flex items-center gap-2">
+            {syncingNow ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            Synchroniser maintenant (à l'heure du serveur, ponctuel)
+          </Button>
         </>
       )}
 

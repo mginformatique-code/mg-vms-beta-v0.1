@@ -53,6 +53,7 @@ from routes.llm_settings import llm_settings_router
 from routes.discovery import discovery_router
 from routes.system_admin import system_admin_router, auto_reboot_loop, ntp_resync_loop
 from routes.console_ssh import console_router
+from routes.live_layout import live_layout_router
 from routes.vehicle_dedup import vehicle_dedup_router, dedup_batch_loop
 from routes.anpr_tuning import anpr_tuning_router, anpr_tuning_loop
 from wsdl_path import validate_wsdl_dir
@@ -147,6 +148,7 @@ app.include_router(security_router)
 app.include_router(tls_router)   # v0.7.f · Wave G · sous-menu HTTPS/TLS
 app.include_router(system_admin_router)  # v3.19 · Paramètres système (date/heure, reboot)
 app.include_router(console_router)  # v3.22 · Console shell hôte (Debug), admin uniquement
+app.include_router(live_layout_router)  # v3.22 · Disposition personnalisée du Mur vidéo
 app.include_router(vehicle_dedup_router)  # v3.20 · Doublons véhicule assistés par Qwen
 app.include_router(anpr_tuning_router)  # v3.20 · Seuil confiance ANPR auto-réglé par Qwen
 

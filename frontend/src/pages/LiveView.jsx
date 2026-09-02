@@ -3,7 +3,7 @@ import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import LivePlayer from "@/components/video/LivePlayer";
-import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, User, Car, Truck, Bike, PawPrint, ScanLine, Flame, AlertOctagon, HardHat, MapPin, Activity, Lightbulb, Moon, Siren, Volume2, RefreshCw } from "lucide-react";
+import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, User, Car, Truck, Bike, PawPrint, ScanLine, Flame, AlertOctagon, HardHat, MapPin, Activity, Lightbulb, Moon, Siren, Volume2, RefreshCw, LayoutGrid, Save, RotateCcw, GripVertical } from "lucide-react";
 import { toast } from "sonner";
 
 const LAYOUTS = [1, 4, 9, 16, 25, 36, 49, 64];
@@ -447,6 +447,19 @@ export default function LiveView() {
   const [previewEvent, setPreviewEvent] = useState(null);  // événement cliqué depuis la timeline
   const [previewMode] = useState("auto");  // legacy — plus utilisé (video-pipeline-v2 : pipeline par caméra)
   const canPtz = can("technician");
+  const canEditLayout = can("technician");
+
+  // v3.22 · Pagination + disposition personnalisée (demande explicite du
+  // 02/09) : rester en vue 4 (ou 9, etc.) sans devoir passer en vue plus
+  // grande juste pour voir d'autres caméras — flèches de part et d'autre
+  // pour tourner par page, en boucle. Ordre des caméras personnalisable
+  // par glisser-déposer et sauvegardé en base (survit à un upgrade.sh,
+  // contrairement à un simple localStorage).
+  const [page, setPage] = useState(0);
+  const [savedOrder, setSavedOrder] = useState({}); // { [layoutSize]: [camera_id, ...] }
+  const [editingLayout, setEditingLayout] = useState(false);
+  const [dragFrom, setDragFrom] = useState(null);
+  const [savingLayout, setSavingLayout] = useState(false);
 
   useEffect(() => {
     api.get("/cameras").then((r) => setCams(r.data));
@@ -454,13 +467,71 @@ export default function LiveView() {
     return () => clearInterval(iv);
   }, []);
   useEffect(() => { localStorage.setItem("mg_ai_overlay", showOverlay ? "on" : "off"); }, [showOverlay]);
+  useEffect(() => { setPage(0); setEditingLayout(false); }, [layout]);
+  useEffect(() => {
+    if (savedOrder[layout] !== undefined) return; // déjà chargé
+    api.get(`/live/layout/${layout}`)
+       .then((r) => setSavedOrder((prev) => ({ ...prev, [layout]: r.data.camera_ids || [] })))
+       .catch(() => setSavedOrder((prev) => ({ ...prev, [layout]: [] })));
+  }, [layout]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Ordre effectif : caméras dans l'ordre sauvegardé pour cette taille de
+  // grille, puis toute caméra nouvelle/non classée ajoutée à la suite
+  // (dans l'ordre naturel de l'API) — jamais de caméra perdue.
+  const orderedCams = useMemo(() => {
+    const order = savedOrder[layout];
+    if (!order || order.length === 0) return cams;
+    const byId = new Map(cams.map((c) => [c.id, c]));
+    const placed = new Set();
+    const ordered = [];
+    for (const id of order) {
+      const c = byId.get(id);
+      if (c) { ordered.push(c); placed.add(id); }
+    }
+    for (const c of cams) if (!placed.has(c.id)) ordered.push(c);
+    return ordered;
+  }, [cams, savedOrder, layout]);
+
+  const pageCount = Math.max(1, Math.ceil(orderedCams.length / layout));
+  const pageCamsRaw = orderedCams.slice(page * layout, page * layout + layout);
+
+  const gotoPage = (delta) => setPage((p) => (p + delta + pageCount) % pageCount);
+
+  const swapPositions = (fromLocalIdx, toLocalIdx) => {
+    const fromGlobal = page * layout + fromLocalIdx;
+    const toGlobal = page * layout + toLocalIdx;
+    if (fromGlobal === toGlobal) return;
+    const next = orderedCams.slice();
+    [next[fromGlobal], next[toGlobal]] = [next[toGlobal], next[fromGlobal]];
+    setSavedOrder((prev) => ({ ...prev, [layout]: next.map((c) => c.id) }));
+  };
+
+  const saveLayout = async () => {
+    setSavingLayout(true);
+    try {
+      await api.put(`/live/layout/${layout}`, { camera_ids: orderedCams.map((c) => c.id) });
+      toast.success("Disposition enregistrée — conservée après une mise à jour");
+      setEditingLayout(false);
+    } catch (e) { toast.error("Échec de l'enregistrement de la disposition"); }
+    finally { setSavingLayout(false); }
+  };
+
+  const resetLayout = async () => {
+    setSavingLayout(true);
+    try {
+      await api.put(`/live/layout/${layout}`, { camera_ids: [] });
+      setSavedOrder((prev) => ({ ...prev, [layout]: [] }));
+      toast.success("Disposition réinitialisée (ordre par défaut)");
+    } catch (e) { toast.error("Échec"); }
+    finally { setSavingLayout(false); }
+  };
 
   // Liste des caméras naviguables (celles présentes dans la mosaïque, dans l'ordre affiché)
   const gridCams = useMemo(() => {
-    if (!focusedId) return cams;
+    if (!focusedId) return orderedCams;
     // Slice à la taille du layout courant (les slots vides ne comptent pas)
-    return cams.slice(0, Math.max(layout, cams.length));
-  }, [cams, focusedId, layout]);
+    return orderedCams.slice(0, Math.max(layout, orderedCams.length));
+  }, [orderedCams, focusedId, layout]);
   const focusedIndex = focusedId ? gridCams.findIndex((c) => c?.id === focusedId) : -1;
   const gotoDelta = (delta) => {
     if (focusedIndex < 0 || !gridCams.length) return;
@@ -537,6 +608,35 @@ export default function LiveView() {
             <button key={n} onClick={() => setLayout(n)} data-testid={`layout-${n}`}
               className={`px-2.5 py-1.5 text-xs mono ${layout === n ? "bg-[#0044FF] text-white" : "border border-border hover:bg-secondary"}`}>{n}</button>
           ))}
+          {!focusedCam && pageCount > 1 && (
+            <span className="text-[10px] mono text-muted-foreground px-1" data-testid="live-page-indicator">
+              page {page + 1}/{pageCount}
+            </span>
+          )}
+          {!focusedCam && canEditLayout && (
+            editingLayout ? (
+              <>
+                <button onClick={saveLayout} disabled={savingLayout} data-testid="live-layout-save"
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[#00E676] text-[#00E676] hover:bg-[#00E676]/10">
+                  <Save size={13} /> Enregistrer la disposition
+                </button>
+                <button onClick={resetLayout} disabled={savingLayout} data-testid="live-layout-reset"
+                        className="p-1.5 border border-border hover:bg-secondary" title="Réinitialiser (ordre par défaut)">
+                  <RotateCcw size={13} />
+                </button>
+                <button onClick={() => setEditingLayout(false)} data-testid="live-layout-cancel"
+                        className="p-1.5 border border-border hover:bg-secondary" title="Annuler">
+                  <X size={13} />
+                </button>
+              </>
+            ) : (
+              <button onClick={() => setEditingLayout(true)} data-testid="live-layout-edit"
+                      title="Glisser-déposer les tuiles pour choisir quelles caméras apparaissent ici"
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-border hover:bg-secondary">
+                <LayoutGrid size={13} /> Organiser
+              </button>
+            )
+          )}
           <button onClick={goFull} data-testid="fullscreen-btn" className="px-2.5 py-1.5 text-xs border border-border hover:bg-secondary flex items-center gap-1"><Maximize2 size={13} /> {t("live.fullscreen")}</button>
         </div>
       </div>
@@ -549,12 +649,42 @@ export default function LiveView() {
             {showTimeline && <FocusTimeline cameraId={focusedCam.id} onSelect={setPreviewEvent} />}
           </>
         ) : (
-          Array.from({ length: layout }).map((_, i) => (
-            <Feed key={cams[i]?.id || `slot-${i}`} cam={cams[i]} idx={i} canPtz={canPtz} hd={hd}
-                  showOverlay={showOverlay} focused={false}
-                  aiState={cams[i] ? aiDetections[cams[i].id] : null}
-                  onToggleFocus={toggleFocus} />
-          ))
+          Array.from({ length: layout }).map((_, i) => {
+            const cam = pageCamsRaw[i];
+            const tile = (
+              <Feed key={cam?.id || `slot-${i}`} cam={cam} idx={i} canPtz={canPtz} hd={hd}
+                    showOverlay={showOverlay} focused={false}
+                    aiState={cam ? aiDetections[cam.id] : null}
+                    onToggleFocus={editingLayout ? undefined : toggleFocus} />
+            );
+            if (!editingLayout) return tile;
+            return (
+              <div key={cam?.id || `slot-${i}`}
+                   draggable={!!cam}
+                   onDragStart={() => setDragFrom(i)}
+                   onDragOver={(e) => e.preventDefault()}
+                   onDrop={() => { if (dragFrom !== null) { swapPositions(dragFrom, i); setDragFrom(null); } }}
+                   className="relative outline outline-2 outline-dashed outline-[#0044FF]/50 cursor-grab active:cursor-grabbing"
+                   data-testid={`live-drag-slot-${i}`}>
+                <div className="absolute top-1 left-1 z-10 bg-[#0044FF] text-white p-1 pointer-events-none">
+                  <GripVertical size={12} />
+                </div>
+                {tile}
+              </div>
+            );
+          })
+        )}
+        {!focusedCam && pageCount > 1 && (
+          <>
+            <button onClick={() => gotoPage(-1)} data-testid="live-page-prev" title="Page précédente"
+                    className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 z-20 p-2 bg-black/60 text-white border border-white/20 hover:bg-black/80">
+              <ChevronLeft size={18} />
+            </button>
+            <button onClick={() => gotoPage(+1)} data-testid="live-page-next" title="Page suivante"
+                    className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 z-20 p-2 bg-black/60 text-white border border-white/20 hover:bg-black/80">
+              <ChevronRight size={18} />
+            </button>
+          </>
         )}
       </div>
 

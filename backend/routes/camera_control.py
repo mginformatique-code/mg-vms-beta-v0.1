@@ -3,6 +3,7 @@
 Fonctionnalités exposées via ONVIF :
   - `GET  /device-info`       : marque, modèle, firmware, serial
   - `GET  /datetime`          : horloge caméra à la demande + état NTP (v3.22)
+  - `POST /datetime/sync-now` : pousse l'heure serveur sur la caméra, une seule fois (v3.22)
   - `GET  /capabilities`      : ce que la caméra supporte (PTZ, audio, IO, imaging…)
   - `POST /ir/{on|off}`       : bascule IR Cut Filter (via Imaging)
   - `POST /light/{on|off}`    : bascule projecteur / lumière (via DeviceIO relais)
@@ -61,6 +62,29 @@ def _onvif_datetime(ip, port, user, pwd) -> dict:
         "server_time": server_time.isoformat(),
         "drift_seconds": round((camera_time - server_time).total_seconds(), 1),
     }
+
+
+def _onvif_set_datetime_now(ip, port, user, pwd) -> dict:
+    """v3.22 · Synchro immédiate — pousse l'heure serveur (UTC, maintenant)
+    directement sur la caméra via ONVIF SetSystemDateAndTime (DateTimeType
+    Manual). Distinct de "Configurer avec le serveur NTP local" : ici pas
+    de protocole NTP, pas de dépendance à ce que la caméra sache
+    interroger un serveur NTP correctement — un correctif ponctuel
+    immédiat, à l'instant T, sans configuration persistante côté caméra."""
+    from datetime import datetime, timezone
+    from wsdl_path import onvif_camera
+    cam = onvif_camera(ip, port, user, pwd)
+    dev = cam.create_devicemgmt_service()
+    now = datetime.now(timezone.utc)
+    req = dev.create_type("SetSystemDateAndTime")
+    req.DateTimeType = "Manual"
+    req.DaylightSavings = False
+    req.UTCDateTime = {
+        "Date": {"Year": now.year, "Month": now.month, "Day": now.day},
+        "Time": {"Hour": now.hour, "Minute": now.minute, "Second": now.second},
+    }
+    dev.SetSystemDateAndTime(req)
+    return {"synced_to": now.isoformat()}
 
 
 def _onvif_device_info(ip, port, user, pwd) -> dict:
@@ -223,6 +247,23 @@ async def camera_datetime(camera_id: str, user: dict = Depends(require_permissio
         "ntp_managed": bool(cam.get("ntp_managed")),
         "ntp_server": cam.get("ntp_server") or "",
     }
+
+
+@camera_control_router.post("/cameras/{camera_id}/datetime/sync-now")
+async def camera_datetime_sync_now(camera_id: str, user: dict = Depends(require_permission("admin"))):
+    """v3.22 · Synchro immédiate (ponctuelle) — distincte de "Configurer
+    avec le serveur NTP local" (qui met en place une synchro NTP continue,
+    resynchronisée toutes les 24h). Ici : un correctif instantané, pousse
+    l'heure serveur telle quelle, une seule fois, sans toucher à la
+    configuration NTP de la caméra."""
+    cam, ip, port, u, pwd = await _get_cam_credentials(camera_id)
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(_onvif_set_datetime_now, ip, port, u, pwd), timeout=12)
+    except Exception as e:
+        raise HTTPException(502, f"ONVIF error: {type(e).__name__}: {str(e)[:200]}")
+    await log_audit(user, "camera_datetime_sync_now", cam.get("name", camera_id))
+    return result
 
 
 @camera_control_router.get("/cameras/{camera_id}/capabilities")
