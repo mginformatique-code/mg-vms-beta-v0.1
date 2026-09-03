@@ -45,6 +45,20 @@ _MAX_DISTANCE = 3
 # au bruit — 60 appels Qwen séquentiels reste de l'ordre de quelques
 # minutes en pratique (voir mesure dans run_now : 4-77s/appel).
 _MAX_CANDIDATES_PER_RUN = 60
+# v3.30 · Tier dédié pour la distance d'édition EXACTEMENT 1 (confusion
+# OCR sur un seul caractère — le signal le plus fiable de tout le
+# pipeline). Budget largement supérieur et INDÉPENDANT du budget partagé
+# ci-dessus : avant cette étape, une paire évidente comme GR100VG/CR100VG
+# devait rivaliser pour les mêmes 60 places que des correspondances plus
+# faibles (distance 2-3, même-caméra) — avec un arriéré de plusieurs
+# centaines de paires distance-1, certaines pouvaient attendre des
+# semaines. Qwen reste juge sur CHAQUE paire malgré tout (jamais de
+# fusion automatique sans passer par lui) — ce tier ne fait qu'élargir le
+# nombre de paires distance-1 traitées par run, pas le seuil de confiance
+# ni le mécanisme de validation. 100 appels Qwen supplémentaires reste de
+# l'ordre de 20-40 min en pratique, acceptable pour une tâche de fond
+# quotidienne.
+_MAX_DISTANCE1_PER_RUN = 100
 _BATCH_INTERVAL_HOURS = 24
 # v3.20 · Constaté en réel : deux lectures du MÊME véhicule réel (même
 # caméra, 17s d'écart, crops visuellement identiques confirmés) donnaient
@@ -202,12 +216,14 @@ _MAX_PAIRS_PER_PLATE_PER_RUN = 3
 
 
 async def _find_candidates(limit: int = _MAX_CANDIDATES_PER_RUN) -> list[tuple[str, str, int, str]]:
-    """Paires (plate_a, plate_b, poids, origine) triées par poids
-    décroissant (poids = lectures cumulées des deux plaques — priorise
-    les fragments les plus significatifs), puis diversifiées pour qu'une
-    plaque hyperactive ne monopolise pas tout le budget du run. Deux
-    sources combinées : texte proche (OCR légèrement faux) + même
-    caméra/moment (OCR très faux)."""
+    """Paires (plate_a, plate_b, poids, origine), triées puis diversifiées
+    pour qu'une plaque hyperactive ne monopolise pas tout le budget du
+    run. Deux sources combinées : texte proche (OCR légèrement faux) +
+    même caméra/moment (OCR très faux). v3.30 · Les paires distance-1
+    (texte proche, 1 seul caractère différent) ont leur PROPRE budget
+    (_MAX_DISTANCE1_PER_RUN, généreux) indépendant de `limit` ci-dessous
+    (qui ne régit plus que distance 2-3 + même-caméra) — voir le tri dans
+    le corps de la fonction."""
     counts: dict[str, int] = {}
     async for row in db.plates.aggregate([{"$group": {"_id": "$plate", "n": {"$sum": 1}}},
                                             {"$match": {"n": {"$gte": 2}}}]):
@@ -248,18 +264,36 @@ async def _find_candidates(limit: int = _MAX_CANDIDATES_PER_RUN) -> list[tuple[s
 
     candidates.sort(key=_priority)
 
-    per_plate: dict[str, int] = {}
-    diversified: list[tuple[str, str, int, str]] = []
+    # v3.30 · Tier dédié distance-1 (voir _MAX_DISTANCE1_PER_RUN) : séparé
+    # du reste AVANT diversification, avec son propre budget — sinon une
+    # seule plaque très fragmentée en variantes distance-1 pourrait à elle
+    # seule saturer _MAX_PAIRS_PER_PLATE_PER_RUN et priver le tier normal
+    # de budget, ou inversement le tier normal pourrait être totalement
+    # évincé un jour où le tier distance-1 est chargé. Qwen reste juge sur
+    # CHAQUE paire des deux tiers — seule la taille du lot change.
+    distance1: list[tuple[str, str, int, str]] = []
+    others: list[tuple[str, str, int, str]] = []
     for c in candidates:
-        a, b = c[0], c[1]
-        if per_plate.get(a, 0) >= _MAX_PAIRS_PER_PLATE_PER_RUN or per_plate.get(b, 0) >= _MAX_PAIRS_PER_PLATE_PER_RUN:
-            continue
-        diversified.append(c)
-        per_plate[a] = per_plate.get(a, 0) + 1
-        per_plate[b] = per_plate.get(b, 0) + 1
-        if len(diversified) >= limit:
-            break
-    return diversified
+        if c[3] == "texte proche" and _levenshtein(c[0], c[1]) == 1:
+            distance1.append(c)
+        else:
+            others.append(c)
+
+    def _diversify(cands: list[tuple[str, str, int, str]], cap: int) -> list[tuple[str, str, int, str]]:
+        per_plate: dict[str, int] = {}
+        out: list[tuple[str, str, int, str]] = []
+        for c in cands:
+            a, b = c[0], c[1]
+            if per_plate.get(a, 0) >= _MAX_PAIRS_PER_PLATE_PER_RUN or per_plate.get(b, 0) >= _MAX_PAIRS_PER_PLATE_PER_RUN:
+                continue
+            out.append(c)
+            per_plate[a] = per_plate.get(a, 0) + 1
+            per_plate[b] = per_plate.get(b, 0) + 1
+            if len(out) >= cap:
+                break
+        return out
+
+    return _diversify(distance1, _MAX_DISTANCE1_PER_RUN) + _diversify(others, limit)
 
 
 async def _ask_qwen_same_vehicle(a: dict, b: dict) -> dict:
