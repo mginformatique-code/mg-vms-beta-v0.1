@@ -39,7 +39,12 @@ logger = logging.getLogger("routes.vehicle_dedup")
 vehicle_dedup_router = APIRouter(prefix="/api/vehicles/dedup", tags=["vehicle-dedup"])
 
 _MAX_DISTANCE = 3
-_MAX_CANDIDATES_PER_RUN = 25
+# v3.28 · 25 -> 60. Le tri priorise désormais texte proche (distance
+# croissante) avant même-caméra (voir _find_candidates) donc ce budget
+# plus large profite d'abord aux correspondances les plus fiables, pas
+# au bruit — 60 appels Qwen séquentiels reste de l'ordre de quelques
+# minutes en pratique (voir mesure dans run_now : 4-77s/appel).
+_MAX_CANDIDATES_PER_RUN = 60
 _BATCH_INTERVAL_HOURS = 24
 # v3.20 · Constaté en réel : deux lectures du MÊME véhicule réel (même
 # caméra, 17s d'écart, crops visuellement identiques confirmés) donnaient
@@ -217,7 +222,31 @@ async def _find_candidates(limit: int = _MAX_CANDIDATES_PER_RUN) -> list[tuple[s
     time_candidates = await _find_time_proximity_candidates(counts, linked, seen_pairs)
 
     candidates = text_candidates + time_candidates
-    candidates.sort(key=lambda c: -c[2])
+
+    # v3.28 · Constaté en réel (03/09) : des paires évidentes comme
+    # GR100VG/CR100VG (distance d'édition 1 — confusion OCR quasi
+    # certaine) n'étaient JAMAIS traitées. Pas un problème de seuil
+    # (_MAX_DISTANCE=3 les couvre déjà) mais d'ordre de traitement : le
+    # tri était par poids SEUL, et le bruit "même caméra, quelques
+    # secondes d'écart" (source 2, souvent 2 véhicules réellement
+    # différents qui se suivent) génère des dizaines de milliers de
+    # paires à poids élevé qui noyaient les correspondances texte
+    # évidentes bien avant qu'elles n'atteignent le budget quotidien
+    # _MAX_CANDIDATES_PER_RUN. Tri désormais : (1) texte proche AVANT
+    # même-caméra — un signal textuel est plus fort qu'une simple
+    # coïncidence temporelle ; (2) au sein du texte proche, distance
+    # d'édition croissante — une confusion 1 caractère est presque
+    # toujours le même véhicule, 3 caractères est plus incertain ;
+    # (3) poids décroissant en dernier recours. Qwen reste le seul juge
+    # final (garde-fou marque/modèle/couleur) — ce tri ne fait
+    # qu'aiguiller QUELLES paires arrivent jusqu'à lui en premier,
+    # aucune fusion automatique sans passer par cette vérification.
+    def _priority(c: tuple[str, str, int, str]) -> tuple[int, int, int]:
+        is_text = c[3] == "texte proche"
+        dist = _levenshtein(c[0], c[1]) if is_text else 9
+        return (0 if is_text else 1, dist, -c[2])
+
+    candidates.sort(key=_priority)
 
     per_plate: dict[str, int] = {}
     diversified: list[tuple[str, str, int, str]] = []
@@ -341,18 +370,25 @@ async def _run_dedup_batch(limit: int = _MAX_CANDIDATES_PER_RUN) -> int:
 
 async def dedup_batch_loop() -> None:
     """Tourne une fois toutes les `_BATCH_INTERVAL_HOURS` — jamais dans le
-    chemin chaud de l'IA, purement en tâche de fond."""
+    chemin chaud de l'IA, purement en tâche de fond.
+
+    v3.28 · La 1re passe tournait auparavant APRÈS `_BATCH_INTERVAL_HOURS`
+    (sleep avant la boucle) : un conteneur qui redémarre plus souvent que
+    cet intervalle (déploiements fréquents, reboot hôte) ne l'exécute
+    alors jamais en pratique. Court délai initial (2 min, le temps que le
+    process se stabilise) puis 1re passe réelle, ensuite l'intervalle
+    normal entre chaque passe suivante."""
     from routes.llm_settings import is_feature_enabled
+    await asyncio.sleep(120)
     while True:
+        if await is_feature_enabled("dedup_enabled"):
+            try:
+                n = await _run_dedup_batch()
+                if n:
+                    logger.info("vehicle_dedup: %s suggestion(s) générée(s)", n)
+            except Exception:
+                logger.exception("vehicle_dedup: erreur boucle dedup_batch_loop")
         await asyncio.sleep(_BATCH_INTERVAL_HOURS * 3600)
-        if not await is_feature_enabled("dedup_enabled"):
-            continue
-        try:
-            n = await _run_dedup_batch()
-            if n:
-                logger.info("vehicle_dedup: %s suggestion(s) générée(s)", n)
-        except Exception:
-            logger.exception("vehicle_dedup: erreur boucle dedup_batch_loop")
 
 
 @vehicle_dedup_router.post("/run")

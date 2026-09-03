@@ -159,21 +159,28 @@ async def _tune_camera(camera_id: str, actor: str = "system") -> dict | None:
 
 
 async def anpr_tuning_loop() -> None:
-    """Tourne une fois par semaine — jamais dans le chemin chaud de l'IA."""
+    """Tourne une fois par semaine — jamais dans le chemin chaud de l'IA.
+
+    v3.28 · Même correctif que dedup_batch_loop() (routes/vehicle_dedup.py) :
+    la 1re passe tournait auparavant APRÈS `_TUNING_INTERVAL_HOURS` (sleep
+    avant la boucle) — sur un intervalle hebdomadaire, un conteneur qui
+    redémarre plus souvent qu'une fois par semaine (déploiements fréquents)
+    peut ne JAMAIS exécuter ce réglage en pratique. Court délai initial
+    puis 1re passe réelle, ensuite l'intervalle normal."""
     from routes.llm_settings import is_feature_enabled
+    await asyncio.sleep(300)
     while True:
+        if await is_feature_enabled("anpr_tuning_enabled"):
+            try:
+                cams = await db.cameras.find({"detect_enabled": True}, {"_id": 0, "id": 1}).to_list(500)
+                for cam in cams:
+                    try:
+                        await _tune_camera(cam["id"], actor="auto")
+                    except Exception:
+                        logger.exception("anpr_tuning: échec réglage caméra %s", cam["id"])
+            except Exception:
+                logger.exception("anpr_tuning: erreur boucle anpr_tuning_loop")
         await asyncio.sleep(_TUNING_INTERVAL_HOURS * 3600)
-        if not await is_feature_enabled("anpr_tuning_enabled"):
-            continue
-        try:
-            cams = await db.cameras.find({"detect_enabled": True}, {"_id": 0, "id": 1}).to_list(500)
-            for cam in cams:
-                try:
-                    await _tune_camera(cam["id"], actor="auto")
-                except Exception:
-                    logger.exception("anpr_tuning: échec réglage caméra %s", cam["id"])
-        except Exception:
-            logger.exception("anpr_tuning: erreur boucle anpr_tuning_loop")
 
 
 @anpr_tuning_router.post("/{camera_id}/anpr-tuning/run")
