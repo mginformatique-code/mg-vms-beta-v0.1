@@ -3,7 +3,7 @@ import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import LivePlayer from "@/components/video/LivePlayer";
-import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, User, Car, Truck, Bike, PawPrint, ScanLine, Flame, AlertOctagon, HardHat, MapPin, Activity, Lightbulb, Moon, Siren, Volume2, RefreshCw, LayoutGrid, Save, RotateCcw, GripVertical } from "lucide-react";
+import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, User, Car, Truck, Bike, PawPrint, ScanLine, Flame, AlertOctagon, HardHat, MapPin, Activity, Lightbulb, Moon, Siren, Volume2, RefreshCw, LayoutGrid, Save, RotateCcw, GripVertical, Play, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 const LAYOUTS = [1, 4, 9, 16, 25, 36, 49, 64];
@@ -283,8 +283,19 @@ function FocusTimeline({ cameraId, onSelect }) {
   //   - icône par classe (person/car/truck/animal/plate/fire/…)
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [windowMinutes, setWindowMinutes] = useState(30);
+  // v3.22 · "today" est un mode à part (pas une durée fixe) — demande
+  // explicite : les 4 préréglages existants (15m/30m/1h/3h) sont tous des
+  // fenêtres glissantes, aucun ne correspond à "les événements du jour".
+  const [windowMode, setWindowMode] = useState(30); // minutes (nombre) ou "today"
   const [hoverEvent, setHoverEvent] = useState(null);
+
+  const windowStartMs = (mode) => {
+    if (mode === "today") {
+      const d = new Date(); d.setHours(0, 0, 0, 0);
+      return d.getTime();
+    }
+    return Date.now() - mode * 60 * 1000;
+  };
 
   useEffect(() => {
     if (!cameraId) return;
@@ -292,7 +303,7 @@ function FocusTimeline({ cameraId, onSelect }) {
     const load = async () => {
       setLoading(true);
       try {
-        const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+        const startMs = windowStartMs(windowMode);
         const [ev, pl] = await Promise.all([
           api.get(`/events?camera_id=${cameraId}&limit=200`),
           api.get(`/plates?camera_id=${cameraId}&limit=100`),
@@ -306,7 +317,7 @@ function FocusTimeline({ cameraId, onSelect }) {
             ...p, type: "plate_recognized", _kind: "plate",
             label: p.plate, thumbnail: p.plate_crop || p.vehicle_crop || p.frame_thumb,
           })),
-        ].filter((x) => x.timestamp && new Date(x.timestamp).getTime() >= Date.now() - windowMinutes * 60 * 1000)
+        ].filter((x) => x.timestamp && new Date(x.timestamp).getTime() >= startMs)
          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
         if (alive) setEvents(merged);
       } catch (e) { if (alive) setEvents([]); }
@@ -315,12 +326,12 @@ function FocusTimeline({ cameraId, onSelect }) {
     load();
     const iv = setInterval(load, 8000);
     return () => { alive = false; clearInterval(iv); };
-  }, [cameraId, windowMinutes]);
+  }, [cameraId, windowMode]);
 
   if (!cameraId) return null;
 
   const now = Date.now();
-  const start = now - windowMinutes * 60 * 1000;
+  const start = windowStartMs(windowMode);
   const posPct = (iso) => {
     const t = new Date(iso).getTime();
     return Math.max(0, Math.min(100, ((t - start) / (now - start)) * 100));
@@ -342,12 +353,17 @@ function FocusTimeline({ cameraId, onSelect }) {
           </span>
           <div className="flex items-center gap-1">
             {[15, 30, 60, 180].map((m) => (
-              <button key={m} onClick={() => setWindowMinutes(m)}
+              <button key={m} onClick={() => setWindowMode(m)}
                       data-testid={`focus-timeline-window-${m}`}
-                      className={`text-[9px] mono px-1 py-0.5 border ${windowMinutes === m ? "border-[#00E5FF] text-[#00E5FF]" : "border-white/10 text-white/50"}`}>
+                      className={`text-[9px] mono px-1 py-0.5 border ${windowMode === m ? "border-[#00E5FF] text-[#00E5FF]" : "border-white/10 text-white/50"}`}>
                 {m < 60 ? `${m}m` : `${m / 60}h`}
               </button>
             ))}
+            <button onClick={() => setWindowMode("today")}
+                    data-testid="focus-timeline-window-today"
+                    className={`text-[9px] mono px-1 py-0.5 border ${windowMode === "today" ? "border-[#00E5FF] text-[#00E5FF]" : "border-white/10 text-white/50"}`}>
+              Aujourd'hui
+            </button>
           </div>
         </div>
 
@@ -445,6 +461,14 @@ export default function LiveView() {
   const [focusedId, setFocusedId] = useState(null);  // camera_id focalisée (single-view) — null = mosaïque
   const [showTimeline, setShowTimeline] = useState(true);
   const [previewEvent, setPreviewEvent] = useState(null);  // événement cliqué depuis la timeline
+  // v3.22 · Retour utilisateur : le clic sur une miniature de la Timeline
+  // "ne fait rien" — techniquement une image s'ouvrait déjà, mais pas la
+  // vidéo de l'événement. Lecture directe ici (même mécanisme que
+  // EventViewer.jsx::playAround), sans changer de page.
+  const [previewVideo, setPreviewVideo] = useState(null); // {url, offset_sec}
+  const [previewVideoLoading, setPreviewVideoLoading] = useState(false);
+  const [previewVideoError, setPreviewVideoError] = useState("");
+  useEffect(() => { setPreviewVideo(null); setPreviewVideoError(""); }, [previewEvent?.id]);
   const [previewMode] = useState("auto");  // legacy — plus utilisé (video-pipeline-v2 : pipeline par caméra)
   const canPtz = can("technician");
   const canEditLayout = can("technician");
@@ -689,7 +713,9 @@ export default function LiveView() {
       </div>
 
       {previewEvent && (
-        <div className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-8" onClick={() => setPreviewEvent(null)} data-testid="event-preview-modal">
+        <div className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-8"
+             onClick={() => { setPreviewEvent(null); setPreviewVideo(null); setPreviewVideoError(""); }}
+             data-testid="event-preview-modal">
           <div className="max-w-5xl w-full" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <div>
@@ -700,11 +726,41 @@ export default function LiveView() {
                   {previewEvent.confidence ? ` · ${(previewEvent.confidence * 100).toFixed(0)}%` : ""}
                 </div>
               </div>
-              <button onClick={() => setPreviewEvent(null)} className="p-2 hover:bg-white/10 text-white" data-testid="event-preview-close">
-                <X size={18} />
-              </button>
+              <div className="flex items-center gap-2">
+                {!previewVideo && (
+                  <button
+                    onClick={async () => {
+                      if (!previewEvent.id) { setPreviewVideoError("Événement sans identifiant — vidéo indisponible"); return; }
+                      setPreviewVideoLoading(true); setPreviewVideoError("");
+                      try {
+                        const { data } = await api.get(`/events/${previewEvent.id}/recording`);
+                        const token = localStorage.getItem("mg_token");
+                        const envBase = process.env.REACT_APP_BACKEND_URL || "";
+                        setPreviewVideo({
+                          url: `${envBase}/api${data.stream_url}?token=${encodeURIComponent(token || "")}&t=${Math.max(0, data.offset_sec || 0)}`,
+                          offset_sec: Math.max(0, data.offset_sec || 0),
+                        });
+                      } catch (e) {
+                        setPreviewVideoError(e.response?.status === 404 ? "Aucun enregistrement ne couvre cet événement" : "Échec de la lecture vidéo");
+                      } finally { setPreviewVideoLoading(false); }
+                    }}
+                    disabled={previewVideoLoading} data-testid="event-preview-play-video"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-[#00E5FF] text-[#00E5FF] hover:bg-[#00E5FF]/10">
+                    {previewVideoLoading ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+                    Lire la vidéo
+                  </button>
+                )}
+                <button onClick={() => { setPreviewEvent(null); setPreviewVideo(null); setPreviewVideoError(""); }}
+                        className="p-2 hover:bg-white/10 text-white" data-testid="event-preview-close">
+                  <X size={18} />
+                </button>
+              </div>
             </div>
-            {previewEvent.thumbnail && (
+            {previewVideoError && <div className="text-[#FF6666] text-xs mb-2">{previewVideoError}</div>}
+            {previewVideo ? (
+              <video src={previewVideo.url} controls autoPlay className="w-full max-h-[80vh] bg-black" data-testid="event-preview-video"
+                     onLoadedMetadata={(e) => { e.currentTarget.currentTime = previewVideo.offset_sec; e.currentTarget.play().catch(() => {}); }} />
+            ) : previewEvent.thumbnail && (
               <img src={previewEvent.thumbnail} alt={previewEvent.type} className="w-full max-h-[80vh] object-contain bg-black" />
             )}
           </div>
