@@ -468,6 +468,14 @@ async def diagnostics_pipeline_v2_invalidate(
     Utile après un toggle admin d'un plugin global ou un reload du plugin
     manager. Sans arg → invalide TOUS les graphes.
     """
+    # v3.25 · Étape 2c séparation pipeline/API : RPC vers le pipeline via
+    # Redis (voir pipeline_commands.py) — repli sur l'appel direct
+    # historique si Redis est indisponible / le pipeline ne répond pas.
+    from redis_bus import send_pipeline_command
+    reply = await send_pipeline_command("registry_invalidate", {"camera_id": camera_id})
+    if reply is not None:
+        return reply
+    # Repli direct (Redis indisponible / pipeline pas démarré / timeout) — comportement historique inchangé
     from pipeline_v2.registry import registry as _graph_registry
     if camera_id:
         _graph_registry.invalidate(camera_id)
@@ -515,6 +523,12 @@ async def diagnostics_plate_quality_debug_toggle(
     user: dict = Depends(require_permission("technician")),
 ):
     """v0.7.e · Active/désactive le mode debug OCR (bundle images + JSON)."""
+    # v3.25 · Étape 2c : RPC pipeline via Redis, repli direct si indisponible.
+    from redis_bus import send_pipeline_command
+    reply = await send_pipeline_command("plate_quality_set_debug", {"enabled": enabled})
+    if reply is not None:
+        return reply
+    # Repli direct (Redis indisponible / pipeline pas démarré / timeout) — comportement historique inchangé
     from pipeline_v2 import plate_quality as pq
     pq.set_debug_enabled(enabled)
     return {"enabled": pq.debug_enabled(), "output_dir": pq._DEBUG_DIR}
@@ -699,6 +713,12 @@ async def diagnostics_pipeline_inspector_reset(
     camera_id: Optional[str] = None,
     user: dict = Depends(require_permission("view_live")),
 ):
+    # v3.25 · Étape 2c : RPC pipeline via Redis, repli direct si indisponible.
+    from redis_bus import send_pipeline_command
+    reply = await send_pipeline_command("inspector_reset", {"camera_id": camera_id})
+    if reply is not None:
+        return reply
+    # Repli direct (Redis indisponible / pipeline pas démarré / timeout) — comportement historique inchangé
     from pipeline_v2.inspector import inspector as _inspector
     _inspector.reset(camera_id)
     return {"ok": True, "reset": camera_id or "all"}
@@ -765,6 +785,12 @@ async def diagnostics_anpr_quality_configure(
     ``brightness_min/max``, ``sharpness_min``, ``contrast_min``,
     ``night_hour_start/end``.
     """
+    # v3.25 · Étape 2c : RPC pipeline via Redis, repli direct si indisponible.
+    from redis_bus import send_pipeline_command
+    reply = await send_pipeline_command("anpr_quality_configure", {"patch": patch})
+    if reply is not None:
+        return reply
+    # Repli direct (Redis indisponible / pipeline pas démarré / timeout) — comportement historique inchangé
     from pipeline_v2.anpr_quality import anpr_quality
     anpr_quality.configure(**(patch or {}))
     return {"ok": True, "config": anpr_quality.config_dict()}
@@ -776,6 +802,12 @@ async def diagnostics_anpr_quality_reset(
     user: dict = Depends(require_permission("view_live")),
 ):
     """v0.4.2 · Reset l'état d'auto-suspension (force reprise immédiate)."""
+    # v3.25 · Étape 2c : RPC pipeline via Redis, repli direct si indisponible.
+    from redis_bus import send_pipeline_command
+    reply = await send_pipeline_command("anpr_quality_reset", {"camera_id": camera_id})
+    if reply is not None:
+        return reply
+    # Repli direct (Redis indisponible / pipeline pas démarré / timeout) — comportement historique inchangé
     from pipeline_v2.anpr_quality import anpr_quality
     anpr_quality.reset(camera_id)
     return {"ok": True, "reset": camera_id or "all"}
@@ -914,9 +946,16 @@ async def diagnostics_traces_sampling(
     n=100 → défaut, coût négligeable
     n=1000 → sampling très rare (production)
     """
-    from pipeline_v2.trace import collector
+    # Validation d'entrée : reste API-side (input sanitization, pas état pipeline).
     if n < 1 or n > 100000:
         raise HTTPException(status_code=400, detail="n doit être entre 1 et 100000")
+    # v3.25 · Étape 2c : RPC pipeline via Redis, repli direct si indisponible.
+    from redis_bus import send_pipeline_command
+    reply = await send_pipeline_command("traces_set_sampling", {"n": n})
+    if reply is not None:
+        return reply
+    # Repli direct (Redis indisponible / pipeline pas démarré / timeout) — comportement historique inchangé
+    from pipeline_v2.trace import collector
     collector.set_sampling(n)
     return {"ok": True, "sampling_every_n_frames": collector.get_sampling()}
 
@@ -926,6 +965,12 @@ async def diagnostics_traces_clear(
     user: dict = Depends(require_permission("view_live")),
 ):
     """v0.8-rc6 · Vide le ring buffer des traces."""
+    # v3.25 · Étape 2c : RPC pipeline via Redis, repli direct si indisponible.
+    from redis_bus import send_pipeline_command
+    reply = await send_pipeline_command("traces_clear")
+    if reply is not None:
+        return reply
+    # Repli direct (Redis indisponible / pipeline pas démarré / timeout) — comportement historique inchangé
     from pipeline_v2.trace import collector
     n = collector.clear()
     return {"ok": True, "purged": n}
@@ -981,6 +1026,12 @@ async def diagnostics_stability_clear(
     user: dict = Depends(require_permission("view_live")),
 ):
     """v0.8-rc7 · Purge le ring buffer (tests / redémarrage soft)."""
+    # v3.25 · Étape 2c : RPC pipeline via Redis, repli direct si indisponible.
+    from redis_bus import send_pipeline_command
+    reply = await send_pipeline_command("stability_clear")
+    if reply is not None:
+        return reply
+    # Repli direct (Redis indisponible / pipeline pas démarré / timeout) — comportement historique inchangé
     from pipeline_v2.stability_watcher import watcher
     n = watcher.clear()
     return {"ok": True, "purged": n}

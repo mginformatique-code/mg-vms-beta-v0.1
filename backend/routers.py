@@ -347,6 +347,15 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
         signal_camera_config_changed(doc["id"])
     except Exception:
         pass
+    # v3.25 · Étape 2c séparation pipeline/API : publish best-effort en plus
+    # de l'appel direct ci-dessus (qui reste la garantie zéro régression tant
+    # que pipeline et API partagent le même process) — voir pipeline_commands.py.
+    try:
+        from redis_bus import send_pipeline_signal
+        await send_pipeline_signal("camera_topology_changed", {"camera_id": doc["id"]})
+        await send_pipeline_signal("camera_config_changed", {"camera_id": doc["id"]})
+    except Exception:
+        pass  # best-effort — l'appel direct ci-dessus a déjà fait le travail
     doc.pop("_id", None); doc.pop("password", None)
     return doc
 
@@ -397,6 +406,14 @@ async def update_pipeline_config_endpoint(camera_id: str, data: dict,
         signal_camera_config_changed(camera_id)
     except Exception:
         pass
+    # v3.25 · Étape 2c séparation pipeline/API : publish best-effort en plus
+    # de l'appel direct ci-dessus (qui reste la garantie zéro régression tant
+    # que pipeline et API partagent le même process) — voir pipeline_commands.py.
+    try:
+        from redis_bus import send_pipeline_signal
+        await send_pipeline_signal("camera_config_changed", {"camera_id": camera_id})
+    except Exception:
+        pass  # best-effort — l'appel direct ci-dessus a déjà fait le travail
     await log_audit(user, "camera_pipeline_config_updated", camera_id, details=str(patch))
     return {"ok": True, "pipeline_config": merged}
 
@@ -526,6 +543,15 @@ async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(
         signal_camera_config_changed(camera_id)
     except Exception:
         pass
+    # v3.25 · Étape 2c séparation pipeline/API : publish best-effort en plus
+    # de l'appel direct ci-dessus (qui reste la garantie zéro régression tant
+    # que pipeline et API partagent le même process) — voir pipeline_commands.py.
+    try:
+        from redis_bus import send_pipeline_signal
+        await send_pipeline_signal("camera_topology_changed", {"camera_id": camera_id})
+        await send_pipeline_signal("camera_config_changed", {"camera_id": camera_id})
+    except Exception:
+        pass  # best-effort — l'appel direct ci-dessus a déjà fait le travail
     updated.pop("password", None)
     return updated
 
@@ -548,6 +574,14 @@ async def delete_camera(camera_id: str, user: dict = Depends(require_role("techn
         signal_camera_topology_changed(camera_id, removed=True)
     except Exception:
         pass
+    # v3.25 · Étape 2c séparation pipeline/API : publish best-effort en plus
+    # de l'appel direct ci-dessus (qui reste la garantie zéro régression tant
+    # que pipeline et API partagent le même process) — voir pipeline_commands.py.
+    try:
+        from redis_bus import send_pipeline_signal
+        await send_pipeline_signal("camera_topology_changed", {"camera_id": camera_id, "removed": True})
+    except Exception:
+        pass  # best-effort — l'appel direct ci-dessus a déjà fait le travail
     # v3.20 · La suppression ne coupait ni go2rtc ni recorder.py, mais
     # oubliait `video_core` (session WebRTC live) — constaté en réel : une
     # caméra supprimée depuis plus d'une heure continuait de spammer les
@@ -1192,7 +1226,9 @@ async def ai_config_get(user: dict = Depends(get_current_user)):
 
 @api_router.put("/ai/config")
 async def ai_config_put(data: AIConfigUpdate, user: dict = Depends(require_role("admin"))):
-    from ai_engine import update_runtime_config, get_runtime_config
+    # v3.25 · Étape 2c : plus d'import ai_engine inconditionnel ici — voir le
+    # repli direct (import local) au bas de la fonction, seulement si le RPC
+    # pipeline échoue. Garde le process API découplé sur le chemin nominal.
     patch = {k: v for k, v in data.model_dump().items() if v is not None}
     if "interval_seconds" in patch:
         patch["interval_seconds"] = max(0.2, min(60.0, float(patch["interval_seconds"])))
@@ -1204,9 +1240,22 @@ async def ai_config_put(data: AIConfigUpdate, user: dict = Depends(require_role(
         patch["plate_cache_seconds"] = max(0, min(300, int(patch["plate_cache_seconds"])))
     if "device" in patch and patch["device"] not in {"cpu", "cuda", "auto"}:
         raise HTTPException(400, "device doit être cpu, cuda ou auto")
-    await update_runtime_config(patch)
+    # v3.25 · Étape 2c séparation pipeline/API : RPC vers le pipeline via
+    # Redis (voir pipeline_commands.py) — repli sur l'appel direct
+    # historique si Redis est indisponible / le pipeline ne répond pas.
+    # Toute la validation/clamping ci-dessus reste API-side (input
+    # sanitization) ; seule la mutation elle-même migre.
+    from redis_bus import send_pipeline_command
+    reply = await send_pipeline_command("update_runtime_config", {"patch": patch})
+    if reply is not None:
+        result = reply
+    else:
+        # Repli direct — comportement historique inchangé
+        from ai_engine import update_runtime_config, get_runtime_config
+        await update_runtime_config(patch)
+        result = get_runtime_config()
     await log_audit(user, "ai_config_updated", str(patch))
-    return get_runtime_config()
+    return result
 
 
 @api_router.get("/ai/debug/{camera_id}")

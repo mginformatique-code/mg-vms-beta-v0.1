@@ -236,6 +236,12 @@ async def on_startup():
     # autres boucles background pipeline-adjacentes ci-dessus.
     from pipeline_snapshot import snapshot_loop
     asyncio.create_task(snapshot_loop())
+    # v3.25 · Chantier séparation pipeline IA / serveur API, étape 2c —
+    # consommateur de commandes Redis côté pipeline (catégorie c :
+    # écriture/commande), voir pipeline_commands.py. Démarré ici comme
+    # snapshot_loop() juste au-dessus (même chantier, même boundary).
+    from pipeline_commands import command_loop
+    asyncio.create_task(command_loop())
     asyncio.create_task(auto_reboot_loop())
     asyncio.create_task(ntp_resync_loop())
     asyncio.create_task(dedup_batch_loop())
