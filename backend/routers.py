@@ -1646,17 +1646,37 @@ async def diagnostics_test_cause(camera_id: str, data: ManualIncidentInput,
 async def system_gpu_summary(user: dict = Depends(get_current_user)):
     """Snapshot compact du GPU pour le header web (poll ~5-10s).
     Retourne `{available, vendor, name, gpu_util_pct, vram_*, temperature_c}`.
-    Sans GPU NVIDIA : `available=False` + `error` explicite."""
-    from gpu import gpu_summary
-    return gpu_summary()
+    Sans GPU NVIDIA : `available=False` + `error` explicite.
+
+    v3.29 · Le GPU vit désormais dans le conteneur pipeline (Phase 3) — un
+    import direct de gpu.py ici sonderait le matériel du conteneur API, qui
+    n'en a plus. Lu via le snapshot Redis publié par le pipeline toutes les
+    3s (voir pipeline_snapshot.py)."""
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    if snap is None:
+        return {"available": False, "vendor": None, "name": None, "count": 0,
+                "gpu_util_pct": 0, "vram_used_mb": 0, "vram_total_mb": 0,
+                "vram_util_pct": 0, "temperature_c": 0,
+                "error": "pipeline snapshot indisponible"}
+    return snap["gpu_summary"]
 
 
 @api_router.get("/system/gpu")
 async def system_gpu_full(user: dict = Depends(require_role("technician"))):
     """Rapport complet GPU + runtimes CUDA/TensorRT/ONNX/OpenCV + pipeline actif.
-    Pour la page /gpu (accélération matérielle)."""
-    from gpu import gpu_full_info
-    return gpu_full_info()
+    Pour la page /gpu (accélération matérielle).
+
+    v3.29 · Même raison que system_gpu_summary ci-dessus — lu via le
+    snapshot Redis plutôt qu'un import direct de gpu.py."""
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    if snap is None:
+        return {"available": False, "vendor": None, "driver": {}, "devices": [],
+                "runtimes": {}, "pipeline": {},
+                "diagnostic": {"nvml_error": "pipeline snapshot indisponible",
+                               "nvidia_smi_available": False}}
+    return snap["gpu_full_info"]
 
 
 # ============ MOTEUR VIDÉO — Config, statut, WebRTC (Phase 4) ============
@@ -1666,7 +1686,7 @@ async def pipeline_config_get(user: dict = Depends(require_permission("view_live
     from video_engine import get_config, _ffmpeg_capabilities, has_cuda_pipeline
     return {"config": await get_config(),
              "capabilities": _ffmpeg_capabilities(),
-             "cuda_pipeline_ready": has_cuda_pipeline()}
+             "cuda_pipeline_ready": await has_cuda_pipeline()}
 
 
 class PipelineConfigInput(BaseModel):

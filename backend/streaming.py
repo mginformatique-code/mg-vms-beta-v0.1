@@ -1215,8 +1215,31 @@ async def transcode_to_temp_mp4(path: str, start_sec: float = 0.0,
     import tempfile
     use_gpu_decode = False
     try:
-        from frame_source import _use_gpu  # réutilise la détection NVDEC existante
-        use_gpu_decode = _use_gpu()
+        # v3.29 · Chantier séparation pipeline IA / serveur API — audit
+        # complémentaire. `_use_gpu()` n'est PAS un état runtime pipeline
+        # (pas de dépendance à frame_source._workers) donc l'import direct
+        # ne "voit" pas un module vide comme les autres call sites de ce
+        # batch — mais l'investigation en confirme un autre, réel : cette
+        # route est servie EXCLUSIVEMENT par le conteneur `backend`/API
+        # (nginx.conf ne proxy jamais vers `pipeline` ; vérifié en prod :
+        # docker exec mgvms-backend n'a pas runtime nvidia). Or
+        # MGVMS_AI_HW_ACCEL n'est positionnée QUE côté `pipeline`
+        # (docker-compose.yml) — absente côté `backend`, elle vaut "auto"
+        # par défaut (frame_source.py), et `_HAS_CUVID` ne teste que la
+        # compilation ffmpeg (mêmes binaires, même image `mgvms-backend:
+        # latest` pour les 2 conteneurs) — PAS le matériel réel. Résultat
+        # vérifié en prod : `_use_gpu()` retournait déjà True côté
+        # `backend`, qui n'a pourtant aucun GPU attaché (pas de
+        # `runtime: nvidia`) → tentative de décodage NVDEC vouée à
+        # l'échec. On restreint donc le décodage GPU au(x) rôle(s) qui
+        # ont réellement le matériel (voir docker-compose.yml : seul
+        # `pipeline` déclare `runtime: nvidia`; `monolith` = déploiement
+        # 1-conteneur historique, GPU dans le même process).
+        # (`os` déjà importé en tête de module — pas besoin d'import local ici.)
+        role = os.environ.get("MGVMS_ROLE", "monolith")
+        if role in ("pipeline", "monolith"):
+            from frame_source import _use_gpu  # réutilise la détection NVDEC existante
+            use_gpu_decode = _use_gpu()
     except Exception:
         pass
     use_gpu_encode = _ffmpeg_supports_nvenc_h264()
@@ -1639,9 +1662,29 @@ async def _probe_status_once(cam: dict) -> tuple[str, str, bool]:
     # Une caméra dont le worker frame_source produit des frames fraîches
     # alimente le pipeline IA — elle ne peut JAMAIS être marquée offline,
     # quel que soit le résultat des probes go2rtc/TCP en aval.
+    #
+    # v3.29 · Chantier séparation pipeline IA / serveur API — audit
+    # complémentaire (au-delà du périmètre 2a-2d) : ce call site est LE
+    # setter autoritaire de db.cameras.status (via camera_status_loop, qui
+    # tourne côté conteneur API, v3.27) et importait frame_source EN
+    # DIRECT — un module vide/dormant une fois le pipeline dans son
+    # propre conteneur, donc cette source de vérité prioritaire ne
+    # déclenchait plus jamais ("online" jamais retourné ici), rabattant
+    # systématiquement sur les probes go2rtc/TCP en aval. get_latest_frame()
+    # renvoie la frame elle-même (ndarray) — trop lourd/hors-sujet pour le
+    # snapshot périodique — mais frame_source_status() (déjà publié dans
+    # le snapshot depuis v3.27, voir routes/health_dashboard.py::
+    # diagnostics_frame_source) expose déjà `last_frame_age_ms` par worker,
+    # suffisant pour reproduire le test de fraîcheur (get_latest_frame ne
+    # teste PAS non plus w.reader_thread.is_alive() — seulement la
+    # présence + fraîcheur de la dernière frame — donc pas de vérif
+    # `alive` ici pour préserver exactement la même sémantique).
     try:
-        import frame_source as _fs
-        if _fs.get_latest_frame(cam_id, max_age_sec=10.0) is not None:
+        from pipeline_snapshot import get_snapshot
+        snap = await get_snapshot()
+        worker = ((snap or {}).get("frame_source_status") or {}).get("workers", {}).get(cam_id)
+        age_ms = worker.get("last_frame_age_ms") if worker else None
+        if age_ms is not None and age_ms <= 10.0 * 1000:
             return ("online", "", False)
     except Exception:
         pass

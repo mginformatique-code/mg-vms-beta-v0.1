@@ -46,6 +46,19 @@ async def compute_health(camera_id: str) -> dict:
     if not cam:
         return {"error": "camera_not_found", "camera_id": camera_id}
 
+    # v3.29 · Chantier séparation pipeline IA / serveur API — audit
+    # complémentaire (au-delà du périmètre 2a-2d, limité à
+    # routes/health_dashboard.py et routers.py) : ce module importait
+    # encore pipeline_v2.inspector / frame_source EN DIRECT, ce qui voit
+    # un module vide/dormant une fois le pipeline dans son propre
+    # conteneur (v3.27) — dégradation silencieuse (fallback "metric N/A"
+    # permanent), pas un crash. Une seule lecture snapshot pour toute la
+    # fonction (au lieu d'un GET Redis par signal) — mêmes clés que
+    # celles déjà publiées par pipeline_snapshot.py (pipeline_inspector /
+    # frame_source_status).
+    from pipeline_snapshot import get_snapshot
+    _snap = await get_snapshot()
+
     signals: dict = {}
     reasons: list[str] = []
     total_weight = 0.0
@@ -62,8 +75,7 @@ async def compute_health(camera_id: str) -> dict:
 
     # ── 1) FPS réel vs attendu ────────────────────────────────
     try:
-        from pipeline_v2.inspector import inspector
-        snap = inspector.snapshot()
+        snap = (_snap or {}).get("pipeline_inspector") or {}
         cam_snap = (snap.get("cameras") or {}).get(camera_id, {})
         fps_real = cam_snap.get("fps") or 0.0
         fps_expected = cam.get("target_fps") or 10.0
@@ -101,8 +113,7 @@ async def compute_health(camera_id: str) -> dict:
 
     # ── 4) Fiabilité RTSP (frame_source) ────────────────────
     try:
-        import frame_source
-        st = frame_source.status()
+        st = (_snap or {}).get("frame_source_status") or {}
         w = (st.get("workers") or {}).get(camera_id)
         if w:
             last_ok = w.get("last_frame_ts") or 0

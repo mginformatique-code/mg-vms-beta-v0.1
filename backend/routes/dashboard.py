@@ -33,7 +33,7 @@ async def dashboard_stats(user: dict = Depends(get_current_user)):
         "events_today": events_today,
         "alerts_active": alerts_active,
         "plates_today": plates_today,
-        "system": metrics_snapshot(),
+        "system": await metrics_snapshot(),
     }
 
 

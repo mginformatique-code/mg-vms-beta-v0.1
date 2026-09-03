@@ -56,9 +56,23 @@ def _build_ffmpeg_cmd(rtsp_url: str, transport: str, target_fps: int, quality: i
     use_gpu = False
     codec = (codec or "").lower()
     if codec in ("h264", "h265", "hevc"):
+        # v3.29 · Trouvé lors de la vérification indépendante (au-delà des
+        # 9 call sites audités) : même bug que streaming.py::
+        # transcode_to_temp_mp4 — GET /api/cameras/{id}/mjpeg-direct est
+        # servi exclusivement par le conteneur `backend`/API (nginx.conf
+        # ne route jamais vers `pipeline`), qui n'a PAS runtime: nvidia.
+        # MGVMS_AI_HW_ACCEL n'est positionnée QUE côté `pipeline` — absente
+        # côté `backend`, "auto" par défaut — et _HAS_CUVID (frame_source.py)
+        # ne teste que la compilation ffmpeg (même image Docker pour les 2
+        # conteneurs), pas le matériel réel : _use_gpu() retournait déjà
+        # True côté API sans GPU réellement attaché → décodage NVDEC voué
+        # à l'échec pour les previews H.264/H.265 en direct_mjpeg. Restreint
+        # au(x) rôle(s) qui ont réellement le matériel (voir docker-compose.yml).
         try:
-            from frame_source import _use_gpu as _fs_use_gpu
-            use_gpu = _fs_use_gpu()
+            role = os.environ.get("MGVMS_ROLE", "monolith")  # `os` déjà importé en tête de module
+            if role in ("pipeline", "monolith"):
+                from frame_source import _use_gpu as _fs_use_gpu
+                use_gpu = _fs_use_gpu()
         except Exception:
             use_gpu = False
 

@@ -177,10 +177,18 @@ async def _quick_mongo() -> dict:
         return {"status": "error", "error": str(e)[:200]}
 
 
-def _quick_gpu() -> dict:
+async def _quick_gpu() -> dict:
+    # v3.29 · Chantier séparation pipeline IA / serveur API — audit
+    # complémentaire (au-delà du périmètre 2a-2d) : import direct
+    # ai_engine, module vide/dormant une fois le pipeline dans son
+    # propre conteneur (v3.27) — la carte GPU du Welcome Health Score
+    # tombait silencieusement en erreur. Devenue async (voir call site
+    # dans _compute_health) pour lire le snapshot Redis, comme
+    # routes/health_dashboard.py::_ai_gpu_health.
     try:
-        from ai_engine import get_ai_health
-        h = get_ai_health()
+        from pipeline_snapshot import get_snapshot
+        snap = await get_snapshot()
+        h = (snap or {}).get("ai_health") or {}
         return {
             "yolo_loaded": bool(h.get("yolo_loaded")),
             "device": h.get("device", "cpu"),
@@ -204,10 +212,17 @@ def _quick_plugins() -> dict:
         return {"error": str(e)[:200], "total": 0, "dispatchable": 0, "errors": 0}
 
 
-def _quick_pipeline() -> dict:
+async def _quick_pipeline() -> dict:
+    # v3.29 · Chantier séparation pipeline IA / serveur API — audit
+    # complémentaire (au-delà du périmètre 2a-2d) : même raison que
+    # _quick_gpu() ci-dessus — pipeline_v2.registry dormant côté
+    # conteneur API. Devenue async pour lire le snapshot Redis, comme
+    # routes/health_dashboard.py qui expose déjà
+    # snap["pipeline_v2_graphs"]["stats"] (== registry.stats()).
     try:
-        from pipeline_v2.registry import registry
-        s = registry.stats()
+        from pipeline_snapshot import get_snapshot
+        snap = await get_snapshot()
+        s = ((snap or {}).get("pipeline_v2_graphs") or {}).get("stats") or {}
         return {
             "cameras_tracked": s.get("cameras_tracked", 0),
             "active": s.get("with_active_plugins", 0),
@@ -279,9 +294,9 @@ async def _compute_health(user: dict) -> dict:
     """Calcule le score global + le détail par composant."""
     system = await _quick_system()
     mongo = await _quick_mongo()
-    gpu = _quick_gpu()
+    gpu = await _quick_gpu()
     plugins = _quick_plugins()
-    pipeline = _quick_pipeline()
+    pipeline = await _quick_pipeline()
     go2rtc = await _quick_go2rtc()
 
     sf = site_scope({}, user)

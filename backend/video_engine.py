@@ -79,15 +79,18 @@ def _ffmpeg_capabilities() -> dict:
     return caps
 
 
-def has_cuda_pipeline() -> bool:
+async def has_cuda_pipeline() -> bool:
     """Le pipeline hardware-accel CUDA (NVDEC + scale_cuda) est-il utilisable ?
     Nécessite `cuda` dans hwaccels + au moins h264_cuvid + scale_cuda.
     """
     caps = _ffmpeg_capabilities()
-    # Croise avec la présence effective d'un GPU NVIDIA (driver chargé)
+    # v3.29 · Croise avec la présence effective d'un GPU NVIDIA — vit dans le
+    # conteneur pipeline depuis la Phase 3, lu via le snapshot Redis plutôt
+    # qu'un import direct de gpu.py (qui sonderait le conteneur API, sans GPU).
     try:
-        from gpu import gpu_summary
-        gpu_ok = bool(gpu_summary().get("available"))
+        from pipeline_snapshot import get_snapshot
+        snap = await get_snapshot()
+        gpu_ok = bool((snap or {}).get("gpu_summary", {}).get("available"))
     except Exception:
         gpu_ok = False
     return (gpu_ok
@@ -167,7 +170,7 @@ async def resolve_pipeline(cam: dict) -> dict:
     """
     cfg = await get_config()
     caps = _ffmpeg_capabilities()
-    cuda_ok = has_cuda_pipeline()
+    cuda_ok = await has_cuda_pipeline()
 
     # 1) Pipeline global (GPU ou CPU)
     forced_mode = cfg["pipeline_mode"]
@@ -222,9 +225,13 @@ async def resolve_pipeline(cam: dict) -> dict:
     elif forced_ai == "cpu":
         ai = "cpu"
     else:
+        # v3.29 · is_gpu_active_for_pipeline() sonde torch.cuda LOCAL — vit
+        # dans le conteneur pipeline depuis la Phase 3. Même calcul déjà
+        # publié dans le snapshot (gpu_full_info.pipeline.yolo_uses_gpu).
         try:
-            from gpu import is_gpu_active_for_pipeline
-            ai = "gpu" if is_gpu_active_for_pipeline() else "cpu"
+            from pipeline_snapshot import get_snapshot
+            snap = await get_snapshot()
+            ai = "gpu" if (snap or {}).get("gpu_full_info", {}).get("pipeline", {}).get("yolo_uses_gpu") else "cpu"
         except Exception:
             ai = "cpu"
 
@@ -274,7 +281,7 @@ async def engine_status() -> dict:
     """Rapport global du moteur vidéo pour la page /pipeline."""
     caps = _ffmpeg_capabilities()
     cfg = await get_config()
-    cuda_ok = has_cuda_pipeline()
+    cuda_ok = await has_cuda_pipeline()
     # Résout le pipeline effectif pour chaque caméra
     cams = await db.cameras.find({}, {"_id": 0}).to_list(500)
     per_camera = []

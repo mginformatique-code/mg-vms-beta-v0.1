@@ -122,6 +122,16 @@ async def _build_snapshot() -> dict:
     # (voir routes/health_dashboard.py::diagnostics_frame_source).
     snap["frame_source_status"] = _frame_source.status()
 
+    # v3.29 · Même constat que frame_source ci-dessus, pour le GPU : gpu.py
+    # sonde le matériel LOCAL du process (NVML, torch.cuda, TensorRT, ONNX,
+    # OpenCV CUDA) — ça n'a de sens que lu depuis le conteneur qui a
+    # réellement le GPU. Repéré via la page /gpu et le mini-widget du header
+    # (poll 5-10s, /system/gpu et /system/gpu/summary) affichant "Aucun GPU
+    # détecté" côté conteneur API alors que le pipeline tourne bien sur GPU.
+    from gpu import gpu_summary, gpu_full_info
+    snap["gpu_summary"] = gpu_summary()
+    snap["gpu_full_info"] = gpu_full_info()
+
     # Seuils qualité crop plaque : constantes de module jamais réassignées
     # à l'exécution (vérifié dans pipeline_v2/plate_quality.py) — leur
     # valeur COURANTE suffit, pas besoin de re-résoudre le module à chaque

@@ -546,9 +546,41 @@ def _bump_graph_registry() -> None:
     le ``_bus_version`` ne force AUCUN rebuild immédiat. Le prochain appel
     ``registry.get(camera_id)`` détectera le mismatch de hash et rebâtira
     UNIQUEMENT le graphe demandé. Pas de restart global du pipeline.
+
+    v3.29 · Chantier séparation pipeline IA / serveur API — audit
+    complémentaire (au-delà du périmètre 2a-2d) : `plugin_manager.bus`
+    tourne DANS LES 2 CONTENEURS — `bootstrap_bundle()` est appelé sans
+    condition de rôle au démarrage (voir server.py::on_startup), donc
+    chaque conteneur maintient son propre `bus` en mémoire, et
+    register/unregister/set_enabled peuvent être appelés soit pipeline-
+    side (bootstrap interne au process pipeline) soit API-side (ex.
+    admin qui toggle un plugin via POST /api/plugins/bus/{name}/enable,
+    routes/plugins_bus.py). Côté pipeline, l'appel direct reste correct
+    (même process, pas de round-trip Redis nécessaire). Côté API, le
+    ``registry`` importé ici serait celui — vide/dormant — du conteneur
+    API, pas celui qui sert réellement les frames : il faut invalider le
+    VRAI registry, celui du conteneur pipeline, via RPC
+    (``registry_invalidate``, voir pipeline_commands.py::_handle_cmd,
+    conçu pour exactement ce cas en étape 2c). Fonction sync (pas de
+    ``await`` possible ici) — ``asyncio.create_task`` fire-and-forget,
+    lui-même protégé par son propre try/except (aucune garantie qu'une
+    event loop tourne à cet instant précis pour tous les appelants
+    futurs de cette fonction, même si les call sites actuels connus
+    — bootstrap async au démarrage, endpoints async de
+    routes/plugins_bus.py — en ont toujours une).
     """
-    try:
-        from pipeline_v2.registry import registry
-        registry.bump_bus_version()
-    except Exception:
-        pass
+    import os
+    role = os.environ.get("MGVMS_ROLE", "monolith")
+    if role in ("pipeline", "monolith"):
+        try:
+            from pipeline_v2.registry import registry
+            registry.bump_bus_version()
+        except Exception:
+            pass
+    if role == "api":
+        try:
+            import asyncio
+            from redis_bus import send_pipeline_command
+            asyncio.create_task(send_pipeline_command("registry_invalidate", {}))
+        except Exception:
+            pass

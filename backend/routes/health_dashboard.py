@@ -748,11 +748,19 @@ async def diagnostics_capture_stats(user: dict = Depends(require_permission("vie
     Permet à l'UI de distinguer "caméra lente" (fps_capture bas) et
     "IA lente" (fps_capture normal + IA en retard).
     """
-    try:
-        from frame_source import status as _fs_status
-        return _fs_status()
-    except Exception as e:
-        return {"error": str(e), "workers": {}}
+    # v3.29 · Chantier séparation pipeline IA / serveur API — audit
+    # complémentaire (au-delà du périmètre 2a-2d, limité à ce fichier +
+    # routers.py) : cet endpoint importait encore frame_source EN DIRECT,
+    # ce qui voit un module vide/dormant une fois le pipeline dans son
+    # propre conteneur (v3.27) — c'était la cause directe des cartes
+    # caméra "offline" côté Overview (w.alive toujours falsy). Même
+    # idiome que diagnostics_frame_source() juste au-dessus : lecture via
+    # le snapshot Redis publié par pipeline_snapshot.py.
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    if snap is None:
+        return {**_SNAPSHOT_UNAVAILABLE, "workers": {}}
+    return snap["frame_source_status"]
 
 
 @health_dashboard_router.get("/diagnostics/anpr-quality")

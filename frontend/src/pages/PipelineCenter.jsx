@@ -1,8 +1,8 @@
 /**
  * PipelineCenter — Hub Pipeline v0.5.0.a
  *
- * Regroupe 10 sous-vues opérationnelles autour de l'exécution IA :
- *   Overview · Capture · AI · Tracking · Plugins · Workflows ·
+ * Regroupe 9 sous-vues opérationnelles autour de l'exécution IA :
+ *   Overview · AI · Tracking · Plugins · Workflows ·
  *   Designer · Inspector · Performance · Debug
  *
  * Consomme uniquement les APIs backend existantes :
@@ -22,7 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import api from "@/lib/api";
 import {
-  Activity, Camera, GitBranch, Layers, LineChart, Puzzle,
+  Activity, GitBranch, Layers, LineChart, Puzzle,
   ScrollText, Server, Terminal, Workflow, RefreshCw, Zap,
 } from "lucide-react";
 
@@ -35,7 +35,6 @@ import SshConsolePanel from "./SshConsolePanel";
 
 const TABS = [
   { id: "overview",    label: "Overview",    icon: Layers },
-  { id: "capture",     label: "Capture",     icon: Camera },
   { id: "tracking",    label: "Tracking",    icon: GitBranch },
   { id: "plugins",     label: "Plugins",     icon: Puzzle },
   { id: "workflows",   label: "Workflows",   icon: Workflow },
@@ -76,7 +75,6 @@ export default function PipelineCenter() {
         </TabsList>
 
         <TabsContent value="overview"><OverviewPanel /></TabsContent>
-        <TabsContent value="capture"><CapturePanel /></TabsContent>
         <TabsContent value="tracking"><TrackingPanel /></TabsContent>
         <TabsContent value="plugins"><PluginsPanel /></TabsContent>
         <TabsContent value="workflows"><WorkflowsPanel /></TabsContent>
@@ -173,65 +171,6 @@ function Stat({ label, value }) {
 }
 
 const fmtMs = (v) => (v == null ? "—" : `${v} ms`);
-
-// ───────── Capture ─────────
-function CapturePanel() {
-  const [data, setData] = useState({ workers: {} });
-  useEffect(() => {
-    const load = async () => {
-      const r = await api.get("/diagnostics/capture/stats").catch(() => ({ data: {} }));
-      setData(r.data || {});
-    };
-    load();
-    const iv = setInterval(load, 3000);
-    return () => clearInterval(iv);
-  }, []);
-  const rows = Object.entries(data.workers || {});
-  return (
-    <Card className="p-4" data-testid="capture-panel">
-      <table className="w-full text-sm">
-        <thead className="text-left text-muted-foreground">
-          <tr>
-            <th className="pb-2">Caméra</th>
-            <th>Codec</th>
-            <th>Résolution</th>
-            <th>FPS 1min</th>
-            <th>Produites</th>
-            <th>Droppées</th>
-            <th>Warmup</th>
-            <th>Reconnect</th>
-            <th>État</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(([id, w]) => (
-            <tr key={id} className="border-t border-border/40">
-              <td className="py-2 font-mono">{id}</td>
-              <td>{w.codec}</td>
-              <td>{w.resolution}</td>
-              <td className="font-mono">{w.fps_capture_1min ?? "—"}</td>
-              <td className="font-mono">{w.frames_produced ?? 0}</td>
-              <td className="font-mono">{w.frames_dropped ?? 0}</td>
-              <td className="font-mono">{fmtMs(w.warmup_ms)}</td>
-              <td className="font-mono">{w.reconnect_count ?? 0}</td>
-              <td>
-                <Badge variant={w.alive ? "default" : "destructive"}>
-                  {w.alive ? "ok" : "down"}
-                </Badge>
-              </td>
-            </tr>
-          ))}
-          {rows.length === 0 && (
-            <tr><td colSpan={9} className="py-6 text-center text-muted-foreground"
-                    data-testid="capture-empty">
-              Aucun worker capture actif.
-            </td></tr>
-          )}
-        </tbody>
-      </table>
-    </Card>
-  );
-}
 
 // ───────── AI, Tracking, Workflows, Plugins, Debug (panneaux légers) ─────────
 function TrackingPanel() {

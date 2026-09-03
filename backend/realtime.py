@@ -19,7 +19,7 @@ logger = logging.getLogger("realtime")
 _last_net = {"t": None, "bytes": 0}
 
 
-def metrics_snapshot() -> dict:
+async def metrics_snapshot() -> dict:
     cpu = psutil.cpu_percent(interval=None)
     ram = psutil.virtual_memory().percent
     try:
@@ -49,11 +49,17 @@ def metrics_snapshot() -> dict:
         uptime_days = int((now - psutil.boot_time()) / 86400)
     except Exception:
         uptime_days = 0
-    # GPU (NVIDIA via NVML — fallback silencieux sur CPU-only)
+    # v3.29 · GPU — vit dans le conteneur pipeline depuis la Phase 3 (scission
+    # en 2 conteneurs). Un import direct de gpu.py ici sonderait le matériel
+    # du conteneur API, qui n'en a plus (root cause du "GPU N/A" affiché dans
+    # le header sur toutes les pages). Lu via le snapshot Redis publié par le
+    # pipeline toutes les 3s (voir pipeline_snapshot.py).
     gpu_data = {"available": False}
     try:
-        from gpu import gpu_summary
-        gpu_data = gpu_summary()
+        from pipeline_snapshot import get_snapshot
+        snap = await get_snapshot()
+        gpu_data = snap["gpu_summary"] if snap else {"available": False,
+                                                       "error": "pipeline snapshot indisponible"}
     except Exception:
         pass
     return {
@@ -176,7 +182,7 @@ async def ws_endpoint(ws: WebSocket, token: str = ""):
         return
     await manager.connect(ws, user)
     try:
-        await ws.send_json({"type": "metrics", "data": metrics_snapshot()})
+        await ws.send_json({"type": "metrics", "data": await metrics_snapshot()})
         while True:
             await ws.receive_text()  # keepalive
     except WebSocketDisconnect:
@@ -189,4 +195,4 @@ async def metrics_broadcaster():
     while True:
         await asyncio.sleep(5)
         if manager.active:
-            await manager.broadcast({"type": "metrics", "data": metrics_snapshot()})
+            await manager.broadcast({"type": "metrics", "data": await metrics_snapshot()})

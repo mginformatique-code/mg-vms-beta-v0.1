@@ -99,6 +99,19 @@ async def anpr_camera_put(camera_id: str, data: AnprCameraConfig,
         signal_camera_config_changed(camera_id)
     except Exception:
         pass
+    # v3.29 · Chantier séparation pipeline IA / serveur API — audit
+    # complémentaire (au-delà du périmètre 2a-2d, limité aux 4 call sites
+    # de routers.py) : l'appel direct ci-dessus mute un ai_engine
+    # dormant une fois le pipeline dans son propre conteneur (v3.27) — le
+    # vrai process pipeline n'était jamais notifié du changement de
+    # config ANPR. Même pattern que routers.py (étape 2c) : publish
+    # best-effort en plus de l'appel direct (conservé tel quel, garantie
+    # zéro régression en mode monolith).
+    try:
+        from redis_bus import send_pipeline_signal
+        await send_pipeline_signal("camera_config_changed", {"camera_id": camera_id})
+    except Exception:
+        pass  # best-effort — l'appel direct ci-dessus a déjà fait le travail
     await log_audit(user, "anpr_camera_config_updated", cam["name"],
                     f"ROI={len(data.roi_polygon)} pts · WL={len(data.whitelist_local)} · BL={len(data.blacklist_local)}")
     return data.model_dump()
@@ -326,6 +339,16 @@ async def tracking_config_put(data: ByteTrackConfig, user: dict = Depends(requir
         signal_config_changed()
     except Exception:
         pass
+    # v3.29 · Chantier séparation pipeline IA / serveur API — audit
+    # complémentaire (au-delà du périmètre 2a-2d) : même raison que le
+    # site ANPR ci-dessus — ai_engine dormant côté conteneur API (v3.27),
+    # le vrai pipeline ne rechargeait plus jamais _bytetrack_cfg sur un
+    # PUT. Publish best-effort en plus de l'appel direct (conservé).
+    try:
+        from redis_bus import send_pipeline_signal
+        await send_pipeline_signal("config_changed")
+    except Exception:
+        pass  # best-effort — l'appel direct ci-dessus a déjà fait le travail
     await log_audit(user, "bytetrack_config_updated",
                     f"enabled={data.enabled} thresh={data.track_thresh}")
     return data.model_dump()

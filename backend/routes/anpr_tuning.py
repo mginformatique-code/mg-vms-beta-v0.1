@@ -152,6 +152,18 @@ async def _tune_camera(camera_id: str, actor: str = "system") -> dict | None:
         signal_camera_config_changed(camera_id)
     except Exception:
         logger.exception("anpr_tuning: signal_camera_config_changed a échoué pour %s", camera_id)
+    # v3.29 · Trouvé lors de la vérification indépendante (au-delà des 9
+    # call sites audités) : anpr_tuning_loop() tourne côté conteneur API
+    # (server.py::on_startup, bloc run_api_tasks) — l'appel direct
+    # ci-dessus mute un ai_engine dormant (v3.27), le vrai pipeline
+    # n'apprenait donc jamais le nouveau seuil auto-tuné. Même pattern
+    # que plugin_config.py / routers.py (étape 2c) : publish best-effort
+    # en plus de l'appel direct (conservé).
+    try:
+        from redis_bus import send_pipeline_signal
+        await send_pipeline_signal("camera_config_changed", {"camera_id": camera_id})
+    except Exception:
+        pass  # best-effort — l'appel direct ci-dessus a déjà fait le travail
     logger.info("anpr_tuning: %s — seuil %.2f -> %.2f (%s)",
                 cam.get("name", camera_id), current, new_value, verdict["reason"][:100])
     return {"camera_id": camera_id, "changed": True, "min_confidence": new_value,

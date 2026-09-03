@@ -176,7 +176,7 @@ def _process_cpu(names: tuple[str, ...]) -> float:
 async def _monitor_snapshot() -> dict:
     doc = await _load()
     from realtime import metrics_snapshot
-    sys = metrics_snapshot()
+    sys = await metrics_snapshot()
     streams = await db.cameras.count_documents({"status": "online"})
     gpus = _gpu_monitor(doc.get("gpus", []))
     return {

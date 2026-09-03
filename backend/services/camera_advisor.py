@@ -85,9 +85,16 @@ async def advise(camera_id: str) -> dict:
         })
 
     # 6. Analyse Engine Reliability : moteur sous-performant identifié
+    # v3.29 · Chantier séparation pipeline IA / serveur API — audit
+    # complémentaire (au-delà du périmètre 2a-2d) : import direct
+    # pipeline_v2.engine_reliability, module vide/dormant une fois le
+    # pipeline dans son propre conteneur (v3.27) — dégradation silencieuse
+    # (aucune recommandation ocr_tuning générée), pas un crash. Déjà
+    # publié dans le snapshot (catégorie b, présent depuis 2b).
     try:
-        from pipeline_v2.engine_reliability import snapshot
-        snap = snapshot()
+        from pipeline_snapshot import get_snapshot
+        _snap = await get_snapshot()
+        snap = (_snap or {}).get("engine_reliability") or {}
         cam_engines = snap.get(camera_id, {})
         engines_by_acc = sorted(cam_engines.items(),
                                  key=lambda kv: kv[1].get("rolling_accuracy", 0),
