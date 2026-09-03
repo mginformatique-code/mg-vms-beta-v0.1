@@ -46,11 +46,22 @@ _BATCH_INTERVAL_HOURS = 24
 # "TR1351G" et "CG16598" — textuellement sans aucun rapport (l'OCR a
 # complètement raté, pas une simple confusion de caractère). La
 # comparaison par distance d'édition seule ne peut structurellement pas
-# capter ce cas. Fenêtre de proximité temporelle, même caméra, réutilise
-# le seuil déjà établi ailleurs (`_PLATE_MERGE_WINDOW_SEC` dans
-# vehicles.py) pour rester cohérent avec la notion existante de "même
-# passage".
-_TIME_PROXIMITY_WINDOW_SEC = 120
+# capter ce cas. Fenêtre de proximité temporelle initialement calée sur
+# 120s (`_PLATE_MERGE_WINDOW_SEC` dans vehicles.py, notion de "même
+# passage" — un seul trajet devant la caméra).
+#
+# v3.23 (02/09) · Signalé en urgence : un véhicule RÉCURRENT (tournée,
+# repasse devant la même caméra toutes les 15-60 min, pas un seul passage
+# continu) génère une nouvelle lecture à chaque repassage, à des écarts
+# largement hors de la fenêtre "même passage" — ces lectures ne sont donc
+# JAMAIS comparées entre elles, quel que soit le nombre de repassages.
+# Confirmé en prod : un van livrant plusieurs fois sur ~1h, OCR sévèrement
+# différent à chaque lecture (longueurs de plaque différentes), 0 candidat
+# généré par aucune des deux sources. Fenêtre élargie à 1h pour couvrir ce
+# cas — reste borné par _MAX_CANDIDATES_PER_RUN en sortie (le scan lui-même
+# reste O(n) par caméra, pas O(n²) : trié par caméra puis par temps, boucle
+# interne interrompue dès qu'on sort de la fenêtre ou de la caméra).
+_TIME_PROXIMITY_WINDOW_SEC = 3600
 
 
 def _levenshtein(a: str, b: str) -> int:
@@ -173,11 +184,25 @@ def _iso_to_ts(iso: str | None) -> float | None:
         return None
 
 
+# v3.23 (02/09) · Constaté en prod : la fenêtre élargie à 1h (voir plus
+# haut) fait exploser le nombre de candidats bruts (jusqu'à plusieurs
+# milliers) — triés par poids (lectures cumulées), une SEULE plaque très
+# active (ex. 497 lectures cumulées sur ses variantes) peut à elle seule
+# remplir tout le budget quotidien de _MAX_CANDIDATES_PER_RUN, laissant
+# 0 chance aux autres véhicules (dont celui qui a déclenché ce correctif)
+# d'être un jour évalués par Qwen, même sur plusieurs jours. Diversité
+# forcée : une plaque ne peut apparaître que dans un nombre limité de
+# paires par run, quel que soit son poids.
+_MAX_PAIRS_PER_PLATE_PER_RUN = 3
+
+
 async def _find_candidates(limit: int = _MAX_CANDIDATES_PER_RUN) -> list[tuple[str, str, int, str]]:
     """Paires (plate_a, plate_b, poids, origine) triées par poids
     décroissant (poids = lectures cumulées des deux plaques — priorise
-    les fragments les plus significatifs). Deux sources combinées : texte
-    proche (OCR légèrement faux) + même caméra/moment (OCR très faux)."""
+    les fragments les plus significatifs), puis diversifiées pour qu'une
+    plaque hyperactive ne monopolise pas tout le budget du run. Deux
+    sources combinées : texte proche (OCR légèrement faux) + même
+    caméra/moment (OCR très faux)."""
     counts: dict[str, int] = {}
     async for row in db.plates.aggregate([{"$group": {"_id": "$plate", "n": {"$sum": 1}}},
                                             {"$match": {"n": {"$gte": 2}}}]):
@@ -193,7 +218,19 @@ async def _find_candidates(limit: int = _MAX_CANDIDATES_PER_RUN) -> list[tuple[s
 
     candidates = text_candidates + time_candidates
     candidates.sort(key=lambda c: -c[2])
-    return candidates[:limit]
+
+    per_plate: dict[str, int] = {}
+    diversified: list[tuple[str, str, int, str]] = []
+    for c in candidates:
+        a, b = c[0], c[1]
+        if per_plate.get(a, 0) >= _MAX_PAIRS_PER_PLATE_PER_RUN or per_plate.get(b, 0) >= _MAX_PAIRS_PER_PLATE_PER_RUN:
+            continue
+        diversified.append(c)
+        per_plate[a] = per_plate.get(a, 0) + 1
+        per_plate[b] = per_plate.get(b, 0) + 1
+        if len(diversified) >= limit:
+            break
+    return diversified
 
 
 async def _ask_qwen_same_vehicle(a: dict, b: dict) -> dict:
