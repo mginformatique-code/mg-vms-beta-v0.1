@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 import shutil
 import subprocess
 import threading
@@ -55,6 +56,17 @@ _FFMPEG_PATH = os.environ.get("MGVMS_FFMPEG_PATH", shutil.which("ffmpeg") or "ff
 _OUTPUT_FPS = float(os.environ.get("MGVMS_AI_OUTPUT_FPS", "10"))
 _RESTART_BACKOFF_SEC = 1.0     # attente initiale entre 2 tentatives de restart
 _RESTART_MAX_BACKOFF_SEC = 5.0 # v0.4.5.a — de 30s à 5s (moins d'accumulation de latence)
+# v3.31 · Incident réel (03/09) : un pic de charge CPU host a fait timeout
+# TOUTES les caméras en même temps (même fraction de seconde) — chacune
+# attendait alors EXACTEMENT le même backoff (valeur fixe, sans aléa) avant
+# de retenter, donc elles redémarraient toutes ENCORE en même temps, cycle
+# après cycle. Chaque redémarrage réinitialise le décodeur matériel NVDEC —
+# coûteux fait en même temps pour ~10 caméras, la charge de ce pic
+# s'auto-entretenait au lieu de se résorber. Jitter aléatoire ajouté au
+# backoff : casse la synchronisation entre workers sans changer le backoff
+# minimal (reprise toujours aussi rapide pour une caméra isolée qui
+# decroche seule).
+_RESTART_JITTER_SEC = 2.0
 _READ_TIMEOUT_SEC = 20.0       # si aucune frame lue en 20s → considérer mort et redémarrer
 # P0-5 (v0.7.c) : arrêt propre après N tentatives CONSÉCUTIVES sans aucune frame
 # (au lieu d'une boucle infinie). Le worker est relancé quand la caméra repasse
@@ -229,7 +241,7 @@ def _reader_loop(w: _Worker):
                 logger.error("frame-source: %s ARRÊTÉ après %d échecs consécutifs (spawn) — dernière erreur: %s",
                              w.camera_id, w.consecutive_failures, w.last_error)
                 break
-            if not w.stop_event.wait(backoff):
+            if not w.stop_event.wait(backoff + random.uniform(0, _RESTART_JITTER_SEC)):
                 backoff = min(backoff * 1.5, _RESTART_MAX_BACKOFF_SEC)
             continue
 
@@ -346,9 +358,10 @@ def _reader_loop(w: _Worker):
                 logger.error("frame-source: %s ARRÊTÉ après %d tentatives consécutives sans frame — dernière erreur: %s",
                              w.camera_id, w.consecutive_failures, w.last_error or "aucune frame reçue")
                 break
-        # Backoff progressif entre redémarrages
-        logger.info("frame-source: %s en attente %.1fs avant redémarrage", w.camera_id, backoff)
-        if not w.stop_event.wait(backoff):
+        # Backoff progressif entre redémarrages + jitter (voir _RESTART_JITTER_SEC)
+        wait_s = backoff + random.uniform(0, _RESTART_JITTER_SEC)
+        logger.info("frame-source: %s en attente %.1fs avant redémarrage", w.camera_id, wait_s)
+        if not w.stop_event.wait(wait_s):
             backoff = min(backoff * 1.5, _RESTART_MAX_BACKOFF_SEC)
 
 
