@@ -27,19 +27,13 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from database import db
+# v3.23 · Constante déplacée dans ai_rules_settings.py (étape 2a séparation
+# pipeline/API — jamais mutée à l'exécution, aucune raison de dépendre du
+# module pipeline pour la lire côté API). Alias conservé pour ne rien
+# changer au reste de ce fichier.
+from ai_rules_settings import DEFAULT_QOS_THRESHOLDS as DEFAULT_THRESHOLDS  # noqa: F401
 
 logger = logging.getLogger("pipeline_v2.qos_alerts")
-
-
-DEFAULT_THRESHOLDS = {
-    "pipeline_total_ms": 200.0,
-    "yolo_ms": 50.0,
-    "tracking_ms": 5.0,
-    "anpr_ms": 120.0,
-    "fps_min": 5.0,
-    "ram_percent": 85.0,
-    "gpu_vram_percent": 90.0,
-}
 
 _last_notified: dict[tuple[str, str], float] = {}  # (camera_id, kind) → epoch
 _repeat_count: dict[tuple[str, str], int] = {}     # v0.8-rc4 · backoff progressif

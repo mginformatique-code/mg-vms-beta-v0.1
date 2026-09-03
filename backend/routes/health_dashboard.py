@@ -528,7 +528,9 @@ async def diagnostics_engine_reliability(user: dict = Depends(require_permission
 @health_dashboard_router.get("/diagnostics/qos-thresholds")
 async def diagnostics_qos_get(user: dict = Depends(require_permission("view_live"))):
     """Seuils SLA courants (surveillance permanente Wave I)."""
-    from pipeline_v2.qos_alerts import DEFAULT_THRESHOLDS
+    # v3.23 · Import direct depuis ai_rules_settings (pas pipeline_v2) — étape
+    # 2a séparation pipeline/API : constante figée, pas d'état pipeline.
+    from ai_rules_settings import DEFAULT_QOS_THRESHOLDS as DEFAULT_THRESHOLDS
     doc = await db.settings.find_one({"key": "qos_thresholds"}, {"_id": 0, "value": 1})
     return {
         "defaults": DEFAULT_THRESHOLDS,
@@ -541,7 +543,7 @@ async def diagnostics_qos_put(
     payload: dict,
     user: dict = Depends(require_permission("technician")),
 ):
-    from pipeline_v2.qos_alerts import DEFAULT_THRESHOLDS
+    from ai_rules_settings import DEFAULT_QOS_THRESHOLDS as DEFAULT_THRESHOLDS
     allowed = set(DEFAULT_THRESHOLDS.keys())
     cleaned = {k: float(v) for k, v in payload.items() if k in allowed and v is not None}
     await db.settings.update_one(

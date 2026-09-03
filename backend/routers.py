@@ -2017,7 +2017,10 @@ async def delete_watchlist(wid: str, user: dict = Depends(require_role("technici
 # ============ ALERTS ============
 @api_router.get("/ai/arming")
 async def get_arming(user: dict = Depends(require_role("technician"))):
-    from ai_engine import get_arming_config, _is_armed
+    # v3.23 · Import direct depuis ai_rules_settings (pas ai_engine) — étape 2a
+    # séparation pipeline/API : cette config n'a aucun état pipeline, juste
+    # de la config Mongo, aucune raison de dépendre du module pipeline.
+    from ai_rules_settings import get_arming_config, _is_armed
     cfg = await get_arming_config()
     cfg["armed_now"] = await _is_armed(datetime.now(timezone.utc))
     return cfg
@@ -2025,7 +2028,7 @@ async def get_arming(user: dict = Depends(require_role("technician"))):
 
 @api_router.put("/ai/arming")
 async def update_arming(cfg: dict, user: dict = Depends(require_role("admin"))):
-    from ai_engine import DEFAULT_ARMING, get_arming_config, _is_armed
+    from ai_rules_settings import DEFAULT_ARMING, get_arming_config, _is_armed
     clean = {k: cfg[k] for k in DEFAULT_ARMING if k in cfg}
     if clean.get("mode") not in ("always", "schedule", "off"):
         clean.pop("mode", None)
@@ -2039,17 +2042,17 @@ async def update_arming(cfg: dict, user: dict = Depends(require_role("admin"))):
 
 @api_router.get("/ai/alert-rules")
 async def get_ai_alert_rules(user: dict = Depends(require_role("technician"))):
-    from ai_engine import _get_scenario_rules
+    from ai_rules_settings import _get_scenario_rules
     return await _get_scenario_rules()
 
 
 @api_router.put("/ai/alert-rules")
 async def update_ai_alert_rules(rules: Dict[str, dict], user: dict = Depends(require_role("admin"))):
-    from ai_engine import DEFAULT_SCENARIOS
+    from ai_rules_settings import DEFAULT_SCENARIOS
     clean = {k: v for k, v in rules.items() if k in DEFAULT_SCENARIOS and isinstance(v, dict)}
     await db.settings.update_one({"key": "ai_alert_rules"}, {"$set": {"key": "ai_alert_rules", "value": clean}}, upsert=True)
     await log_audit(user, "ai_rules_updated", details=str(list(clean.keys())))
-    from ai_engine import _get_scenario_rules
+    from ai_rules_settings import _get_scenario_rules
     return await _get_scenario_rules()
 
 

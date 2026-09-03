@@ -502,12 +502,16 @@ async def _do_downstream_work(cam: dict, frame, result: dict) -> None:
     await run_downstream(cam, frame, result)
 
 
-# Re-exports scénarios / armement (logique déplacée dans pipeline_v2.scenarios)
-from pipeline_v2.scenarios import (DEFAULT_ARMING, DEFAULT_SCENARIOS,  # noqa: E402,F401
-                                    _evaluate_scenarios, _get_scenario_rules,
-                                    _is_armed, _is_night, _iou,
+# Re-exports scénarios / armement (logique déplacée dans pipeline_v2.scenarios ;
+# la config armement/règles elle-même vit dans ai_rules_settings.py depuis le
+# 02/09 — étape 2a séparation pipeline/API, zéro état pipeline dans ces
+# fonctions, pas de raison de les garder dans ai_engine/pipeline_v2)
+from pipeline_v2.scenarios import (_evaluate_scenarios,  # noqa: E402,F401
+                                    _is_night, _iou,
                                     _raise_blacklist_alert, _raise_scenario_alert,
-                                    cooldown_ok as _cooldown_ok, get_arming_config)
+                                    cooldown_ok as _cooldown_ok)
+from ai_rules_settings import (DEFAULT_ARMING, DEFAULT_SCENARIOS,  # noqa: E402,F401
+                                _get_scenario_rules, _is_armed, get_arming_config)
 
 
 def analyze_image_local(image_bytes: bytes) -> dict:

@@ -11,6 +11,12 @@ from datetime import datetime, timedelta, timezone
 
 from database import db
 from realtime import broadcast_alert
+# v3.23 · Config armement/règles déplacée dans ai_rules_settings.py (étape 2a
+# du chantier séparation pipeline/API — aucun état mutable par le pipeline
+# dans ces fonctions, juste des constantes + de la config Mongo, aucune
+# raison de les garder ici). Comportement inchangé, import direct.
+from ai_rules_settings import (DEFAULT_ARMING, DEFAULT_SCENARIOS,  # noqa: F401
+                                _get_scenario_rules, _is_armed, get_arming_config)
 
 logger = logging.getLogger("pipeline_v2.scenarios")
 
@@ -23,36 +29,6 @@ def cooldown_ok(key: str, seconds: int, now: datetime) -> bool:
         return False
     _cooldowns[key] = now
     return True
-
-
-DEFAULT_SCENARIOS = {
-    "intrusion_nocturne": {"enabled": True, "severity": "critical", "night_start": 22, "night_end": 6,
-                           "label": "Intrusion / effraction possible (présence nocturne)"},
-    "rodeur": {"enabled": True, "severity": "warning", "consecutive": 3,
-               "label": "Comportement suspect (personne qui s'attarde)"},
-    "attroupement": {"enabled": True, "severity": "warning", "min_persons": 4,
-                     "label": "Attroupement de personnes"},
-    "vive_allure": {"enabled": True, "severity": "warning", "motion_pct": 12.0,
-                    "label": "Véhicule à vive allure"},
-    "collision": {"enabled": True, "severity": "critical", "iou": 0.15,
-                  "label": "Collision possible entre véhicules (accident)"},
-    "enfant_route": {"enabled": True, "severity": "critical", "ratio": 0.55,
-                     "label": "Enfant possible sur la chaussée"},
-    "vol_vehicule": {"enabled": True, "severity": "critical", "night_start": 22, "night_end": 6,
-                     "label": "Vol / cambriolage possible (personne près d'un véhicule la nuit)"},
-}
-
-DEFAULT_ARMING = {"mode": "always", "days": [0, 1, 2, 3, 4, 5, 6], "start_h": 0, "end_h": 24}
-
-
-async def _get_scenario_rules() -> dict:
-    doc = await db.settings.find_one({"key": "ai_alert_rules"}, {"_id": 0})
-    rules = {k: dict(v) for k, v in DEFAULT_SCENARIOS.items()}
-    if doc:
-        for key, override in (doc.get("value") or {}).items():
-            if key in rules and isinstance(override, dict):
-                rules[key].update(override)
-    return rules
 
 
 def _iou(a, b) -> float:
@@ -69,23 +45,6 @@ def _iou(a, b) -> float:
 def _is_night(now: datetime, start_h: int, end_h: int) -> bool:
     h = now.hour
     return h >= start_h or h < end_h if start_h > end_h else start_h <= h < end_h
-
-
-async def get_arming_config() -> dict:
-    doc = await db.settings.find_one({"key": "arming_schedule"}, {"_id": 0})
-    return {**DEFAULT_ARMING, **((doc or {}).get("value") or {})}
-
-
-async def _is_armed(now: datetime) -> bool:
-    cfg = await get_arming_config()
-    if cfg["mode"] == "off":
-        return False
-    if cfg["mode"] == "always":
-        return True
-    if now.weekday() not in (cfg.get("days") or []):
-        return False
-    h, s, e = now.hour, int(cfg["start_h"]), int(cfg["end_h"])
-    return s <= h < e if s < e else (h >= s or h < e)
 
 
 async def _raise_scenario_alert(cam: dict, scenario: str, rule: dict,
