@@ -1798,10 +1798,32 @@ async def anpr_benchmark(camera_id: Optional[str] = None,
       - `gpu_active` : le pipeline utilise-t-il le GPU
       - `models_info` : version + backend YOLO / ALPR
     """
-    from gpu import is_gpu_active_for_pipeline, _runtime_pytorch
-    from ai_engine import _analyze_frame, _fetch_frame, _model_name, _alpr_model_name
     if iterations < 1 or iterations > 30:
         raise HTTPException(400, "iterations doit être entre 1 et 30")
+    # v3.26 · Étape 2d séparation pipeline/API, catégorie (d) : RPC vers le
+    # pipeline via Redis — timeout généreux (jusqu'à 30 itérations × plusieurs
+    # moteurs OCR peut légitimement prendre plusieurs dizaines de secondes).
+    # Repli sur le corps historique direct si Redis indisponible / le
+    # pipeline ne répond pas dans le timeout — comportement historique
+    # garanti inchangé tant que pipeline et API partagent le même process
+    # (même principe que l'étape 2c, voir pipeline_commands.py).
+    from redis_bus import send_pipeline_command
+    reply = await send_pipeline_command(
+        "anpr_benchmark",
+        {"camera_id": camera_id, "iterations": iterations, "engines": engines, "fusion": fusion},
+        timeout=180.0,
+    )
+    if reply is not None:
+        if "__http_error__" in reply:  # voir pipeline_commands.py : relaie les 400/502 d'origine
+            raise HTTPException(status_code=reply["__http_error__"]["status"],
+                                 detail=reply["__http_error__"]["detail"])
+        return reply
+
+    # ── Repli direct (Redis indisponible / pipeline pas démarré / timeout) ──
+    # Comportement historique inchangé — voir pipeline_commands.py::_run_anpr_benchmark
+    # pour la copie exacte de ce corps utilisée côté RPC.
+    from gpu import is_gpu_active_for_pipeline, _runtime_pytorch
+    from ai_engine import _analyze_frame, _fetch_frame, _model_name, _alpr_model_name
     # Choix du frame source
     cam_id = camera_id
     frame_bytes = None
@@ -2445,8 +2467,20 @@ async def analyze_plate(background: BackgroundTasks, file: UploadFile = File(...
         raise HTTPException(400, "Image trop volumineuse (max 8MB)")
     b64 = base64.b64encode(content).decode("utf-8")
     try:
-        from ai_engine import analyze_image_local
-        data = await asyncio.to_thread(analyze_image_local, content)
+        # v3.26 · Étape 2d séparation pipeline/API, catégorie (d) : RPC vers
+        # le pipeline via Redis (image en base64 dans le payload — bien sous
+        # la limite Redis, l'upload est déjà plafonné à 8MB ci-dessus), repli
+        # sur l'appel Python direct historique si Redis indisponible / le
+        # pipeline ne répond pas dans le timeout — comportement historique
+        # garanti inchangé tant que pipeline et API partagent le même
+        # process (même principe que l'étape 2c, voir pipeline_commands.py).
+        from redis_bus import send_pipeline_command
+        reply = await send_pipeline_command("analyze_image_local", {"image_b64": b64}, timeout=20.0)
+        if reply is not None:
+            data = reply
+        else:
+            from ai_engine import analyze_image_local
+            data = await asyncio.to_thread(analyze_image_local, content)
     except Exception as e:
         raise HTTPException(500, f"Erreur analyse IA (fast-alpr) : {str(e)}")
 

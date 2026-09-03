@@ -24,10 +24,22 @@ logger = logging.getLogger("camera_benchmark")
 
 
 async def _sample_once(camera_id: str) -> dict:
-    """Un échantillon instantané des métriques disponibles."""
-    from pipeline_v2.inspector import inspector
-    snap = inspector.snapshot()
-    cam_snap = (snap.get("cameras") or {}).get(camera_id, {})
+    """Un échantillon instantané des métriques disponibles.
+
+    v3.26 · Chantier séparation pipeline IA / serveur API, étape 2d —
+    ceci n'était pas un calcul à la demande mais une LECTURE de
+    inspector.snapshot(), déjà publiée par le pipeline toutes les 3 s
+    dans pipeline_snapshot.py (clé "pipeline_inspector", même forme que
+    inspector.snapshot()) depuis l'étape 2b. Import direct
+    pipeline_v2.inspector remplacé par une lecture du snapshot Redis —
+    voir pipeline_snapshot.py::_build_snapshot(). Précision : le
+    snapshot a jusqu'à 3 s de retard, du même ordre que sample_every_s
+    (défaut 3 s) — non significatif pour un benchmark qui dure jusqu'à
+    300 s.
+    """
+    from pipeline_snapshot import get_snapshot
+    psnap = await get_snapshot()
+    cam_snap = (((psnap or {}).get("pipeline_inspector") or {}).get("cameras") or {}).get(camera_id, {})
     stages = cam_snap.get("stages") or {}
     return {
         "fps": cam_snap.get("fps") or 0.0,
