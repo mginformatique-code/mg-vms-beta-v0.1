@@ -329,8 +329,16 @@ async def diagnostics_frame_source(user: dict = Depends(require_permission("view
     Un ``last_frame_age_s`` < 2s = worker actif et alimente le pipeline IA
     en RTSP direct (plus de fallback go2rtc HTTP).
     """
-    import frame_source
-    return frame_source.status()
+    # v3.27 · Phase 3 : frame_source.start() n'est appelé que depuis
+    # ai_engine.py (pipeline-side) — un import direct ici verrait un
+    # module vide une fois le pipeline scindé dans son propre conteneur.
+    # Même idiome que les autres endpoints catégorie (b) de ce fichier :
+    # lecture via le snapshot Redis publié par pipeline_snapshot.py.
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    if snap is None:
+        return dict(_SNAPSHOT_UNAVAILABLE)
+    return snap["frame_source_status"]
 
 
 @health_dashboard_router.get("/diagnostics/anpr-tracker")

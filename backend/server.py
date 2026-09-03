@@ -201,6 +201,17 @@ async def on_startup():
     except Exception as e:
         logger.warning("GPU · impossible de logger l'état Torch/CUDA : %s", e)
 
+    # v3.27 · Phase 3 — scission réelle en 2 conteneurs (backend API vs
+    # pipeline IA). MGVMS_ROLE ∈ {"api", "pipeline", "monolith"} — défaut
+    # "monolith" : préserve le comportement historique (tout dans un seul
+    # process) pour toute installation qui ne définit pas cette variable
+    # (ex. rollback, ou déploiement à 1 seul conteneur encore utilisé
+    # ailleurs). "api" et "pipeline" sont les 2 rôles du docker-compose.yml
+    # à jour (services `backend` et `pipeline`).
+    role = os.environ.get("MGVMS_ROLE", "monolith")
+    run_api_tasks = role in ("api", "monolith")
+    run_pipeline_tasks = role in ("pipeline", "monolith")
+
     await create_indexes()
     await seed()
     await seed_hardware()
@@ -214,39 +225,45 @@ async def on_startup():
     await hydrate_journal_from_db()
     # video-engine-v3 : migration & auto-start du Video Core RTSP-native
     # (les anciennes migrations pipeline v2 + MediaMTX sont supprimées)
-    asyncio.create_task(metrics_broadcaster())
-    asyncio.create_task(network_poll_broadcaster())
-    # v3.22 · Chantier séparation pipeline IA / serveur API — pont Redis
-    # pub/sub -> WebSocket local (voir realtime.py::redis_bridge_loop).
-    asyncio.create_task(redis_bridge_loop())
-    # video-engine-v3 · sync_all_streams (go2rtc) supprimé
-    asyncio.create_task(camera_status_loop())
-    asyncio.create_task(recorder_loop())
-    asyncio.create_task(ai_loop())
-    # v0.7.h · Wave I · Axe QoS · Surveillance permanente + alertes Ops Center
-    from pipeline_v2.qos_alerts import qos_watcher_loop
-    asyncio.create_task(qos_watcher_loop())
-    # v0.8-rc7 · Sprint 4 P4 · Stability Watcher 72 h (minute-par-minute)
-    from pipeline_v2.stability_watcher import watcher as _stability_watcher
-    _stability_watcher.start()
-    # v3.24 · Chantier séparation pipeline IA / serveur API, étape 2b —
-    # snapshot Redis consolidé de l'état runtime pipeline (catégorie b),
-    # lu côté API par les endpoints diagnostics via pipeline_snapshot.get_snapshot()
-    # (voir routes/health_dashboard.py, routers.py). Démarré ici comme les
-    # autres boucles background pipeline-adjacentes ci-dessus.
-    from pipeline_snapshot import snapshot_loop
-    asyncio.create_task(snapshot_loop())
-    # v3.25 · Chantier séparation pipeline IA / serveur API, étape 2c —
-    # consommateur de commandes Redis côté pipeline (catégorie c :
-    # écriture/commande), voir pipeline_commands.py. Démarré ici comme
-    # snapshot_loop() juste au-dessus (même chantier, même boundary).
-    from pipeline_commands import command_loop
-    asyncio.create_task(command_loop())
-    asyncio.create_task(auto_reboot_loop())
-    asyncio.create_task(ntp_resync_loop())
-    asyncio.create_task(dedup_batch_loop())
-    asyncio.create_task(anpr_tuning_loop())
-    logger.info("MG-VMS API démarré - données initialisées + broadcaster temps réel actif")
+    if run_api_tasks:
+        asyncio.create_task(metrics_broadcaster())
+        asyncio.create_task(network_poll_broadcaster())
+        # v3.22 · Chantier séparation pipeline IA / serveur API — pont Redis
+        # pub/sub -> WebSocket local (voir realtime.py::redis_bridge_loop).
+        # v3.27 · Doit rester côté API : ne fait que relayer le pub/sub Redis
+        # vers les connexions WebSocket LOCALES des navigateurs — seul le
+        # conteneur API en détient une fois la scission faite.
+        asyncio.create_task(redis_bridge_loop())
+        # video-engine-v3 · sync_all_streams (go2rtc) supprimé
+        asyncio.create_task(camera_status_loop())
+        asyncio.create_task(recorder_loop())
+    if run_pipeline_tasks:
+        asyncio.create_task(ai_loop())
+        # v0.7.h · Wave I · Axe QoS · Surveillance permanente + alertes Ops Center
+        from pipeline_v2.qos_alerts import qos_watcher_loop
+        asyncio.create_task(qos_watcher_loop())
+        # v0.8-rc7 · Sprint 4 P4 · Stability Watcher 72 h (minute-par-minute)
+        from pipeline_v2.stability_watcher import watcher as _stability_watcher
+        _stability_watcher.start()
+        # v3.24 · Chantier séparation pipeline IA / serveur API, étape 2b —
+        # snapshot Redis consolidé de l'état runtime pipeline (catégorie b),
+        # lu côté API par les endpoints diagnostics via pipeline_snapshot.get_snapshot()
+        # (voir routes/health_dashboard.py, routers.py). Démarré ici comme les
+        # autres boucles background pipeline-adjacentes ci-dessus.
+        from pipeline_snapshot import snapshot_loop
+        asyncio.create_task(snapshot_loop())
+        # v3.25 · Chantier séparation pipeline IA / serveur API, étape 2c —
+        # consommateur de commandes Redis côté pipeline (catégorie c :
+        # écriture/commande), voir pipeline_commands.py. Démarré ici comme
+        # snapshot_loop() juste au-dessus (même chantier, même boundary).
+        from pipeline_commands import command_loop
+        asyncio.create_task(command_loop())
+    if run_api_tasks:
+        asyncio.create_task(auto_reboot_loop())
+        asyncio.create_task(ntp_resync_loop())
+        asyncio.create_task(dedup_batch_loop())
+        asyncio.create_task(anpr_tuning_loop())
+    logger.info("MG-VMS API démarré (rôle=%s) - données initialisées + broadcaster temps réel actif", role)
     # v3.1.7 · SUPPRIMÉ : l'auto-start `VideoCoreManager.ensure_camera()` pour
     # chaque caméra ici ouvrait une 2e connexion RTSP DIRECTE vers la caméra
     # (PyAV, indépendante de go2rtc) sans jamais avoir le moindre consommateur
@@ -263,25 +280,36 @@ async def on_startup():
 
 @app.on_event("shutdown")
 async def on_shutdown():
+    # v3.27 · Phase 3 — même calcul de rôle que on_startup() ; recalculé
+    # ici car ce sont 2 handlers d'événement distincts, sans état partagé.
+    role = os.environ.get("MGVMS_ROLE", "monolith")
+    run_api_tasks = role in ("api", "monolith")
+    run_pipeline_tasks = role in ("pipeline", "monolith")
+
     # video-engine-v3 · fermeture propre du Video Core + WebRTC gateway
-    try:
-        from webrtc_gateway import shutdown_all as _webrtc_shutdown
-        await _webrtc_shutdown()
-        from video_core import VideoCoreManager as _VCM
-        _vcm = _VCM.instance()
-        for _cid in list(_vcm.list_cameras()):
-            await _vcm.stop_camera(_cid)
-    except Exception:
-        logger.exception("video-engine-v3 shutdown erreur (non bloquant)")
-    await stop_all_recorders()
-    # Arrêt propre des workers ffmpeg-CUDA persistants (frame_source)
-    try:
-        from frame_source import stop_all as _fs_stop_all
-        _fs_stop_all()
-    except Exception:
-        pass
+    # v3.27 · API-side uniquement : video_core/webrtc_gateway ne servent que
+    # les connexions WHEP des navigateurs (aucun import pipeline_v2/ai_engine/
+    # frame_source, confirmé par grep) — n'existent que dans le conteneur API.
+    if run_api_tasks:
+        try:
+            from webrtc_gateway import shutdown_all as _webrtc_shutdown
+            await _webrtc_shutdown()
+            from video_core import VideoCoreManager as _VCM
+            _vcm = _VCM.instance()
+            for _cid in list(_vcm.list_cameras()):
+                await _vcm.stop_camera(_cid)
+        except Exception:
+            logger.exception("video-engine-v3 shutdown erreur (non bloquant)")
+        await stop_all_recorders()
+    if run_pipeline_tasks:
+        # Arrêt propre des workers ffmpeg-CUDA persistants (frame_source)
+        try:
+            from frame_source import stop_all as _fs_stop_all
+            _fs_stop_all()
+        except Exception:
+            pass
     # video-engine-v3 : brokers MJPEG partagés supprimés
-    logger.info("MG-VMS API arrêté — enregistreurs ffmpeg + workers IA terminés")
+    logger.info("MG-VMS API arrêté (rôle=%s) — enregistreurs ffmpeg + workers IA terminés", role)
 
 
 @app.get("/api/")

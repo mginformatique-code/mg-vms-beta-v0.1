@@ -85,6 +85,7 @@ async def _build_snapshot() -> dict:
     from pipeline_v2.trace import collector as _trace_collector
     from pipeline_v2.stability_watcher import watcher as _stability_watcher, WINDOWS as _STABILITY_WINDOWS
     from pipeline_v2.camera_state import check_pipeline_activity
+    import frame_source as _frame_source
 
     snap: dict = {"generated_at": time.time()}
 
@@ -110,6 +111,16 @@ async def _build_snapshot() -> dict:
     inspector_snap = _inspector.snapshot()
     inspector_snap["runtime"] = _worker_runtime.describe()
     snap["pipeline_inspector"] = inspector_snap
+
+    # v3.27 · Chantier séparation pipeline IA / serveur API, Phase 3 —
+    # scission réelle en 2 conteneurs. frame_source.start() n'est appelé
+    # que depuis ai_engine.py (aucun autre appelant) : une fois le
+    # pipeline dans son propre process, un import direct de frame_source
+    # côté API verrait un module vide (aucun worker) — dégradation
+    # silencieuse, pas un crash. Publié ici comme le reste de cet état
+    # catégorie (b), lu côté API via get_snapshot()["frame_source_status"]
+    # (voir routes/health_dashboard.py::diagnostics_frame_source).
+    snap["frame_source_status"] = _frame_source.status()
 
     # Seuils qualité crop plaque : constantes de module jamais réassignées
     # à l'exécution (vérifié dans pipeline_v2/plate_quality.py) — leur
