@@ -1179,8 +1179,15 @@ class AIConfigUpdate(BaseModel):
 
 @api_router.get("/ai/config")
 async def ai_config_get(user: dict = Depends(get_current_user)):
-    from ai_engine import get_runtime_config
-    return get_runtime_config()
+    # v3.24 · Étape 2b séparation pipeline/API : get_runtime_config() est
+    # catégorie (b) (pure in-memory) → lu via le snapshot Redis consolidé
+    # au lieu d'importer ai_engine en direct. update_runtime_config() (PUT
+    # ci-dessous) reste catégorie (c) — écriture, inchangée.
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    if snap is None:
+        return {"error": "pipeline snapshot indisponible"}
+    return snap["runtime_config"]
 
 
 @api_router.put("/ai/config")
@@ -1423,8 +1430,12 @@ async def diagnostics_ai_health(user: dict = Depends(require_permission("view_li
     Astuce prod : si `yolo_loaded=false` ET `torch_available=true`, l'erreur exacte
     est dans `yolo_error` (ex. modèle introuvable, incompat CUDA↔driver, VRAM saturée).
     """
-    from ai_engine import get_ai_health
-    return get_ai_health()
+    # v3.24 · Étape 2b : get_ai_health() (catégorie b) via snapshot Redis.
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    if snap is None:
+        return {"error": "pipeline snapshot indisponible"}
+    return snap["ai_health"]
 
 
 @api_router.get("/plugins/registry")
@@ -1435,9 +1446,15 @@ async def list_plugins_registry(user: dict = Depends(require_permission("view_li
     les plugins actifs de l'ancien modèle. Cet endpoint expose le nouveau
     catalogue Plugin Manager (chapitre 11) synchronisé avec `_ai_health`.
     """
+    # v3.24 · Étape 2b : get_ai_health() (catégorie b) via snapshot Redis —
+    # si le snapshot est indisponible, sync_from_ai_health() est simplement
+    # sautée pour ce cycle (le registry garde son dernier état connu) plutôt
+    # que de lever une exception.
     from plugin_manager import registry
-    from ai_engine import get_ai_health
-    registry.sync_from_ai_health(get_ai_health())
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    if snap is not None:
+        registry.sync_from_ai_health(snap["ai_health"])
     return {
         "plugins": registry.list_plugins(),
         "core_version": "2.30.0-preview-ng",
@@ -1448,9 +1465,12 @@ async def list_plugins_registry(user: dict = Depends(require_permission("view_li
 @api_router.get("/plugins/registry/{name}")
 async def get_plugin_registry(name: str, user: dict = Depends(require_permission("view_live"))):
     """Détail d'un plugin du registre NG (Preview NG v2.30)."""
+    # v3.24 · Étape 2b : idem list_plugins_registry ci-dessus.
     from plugin_manager import registry
-    from ai_engine import get_ai_health
-    registry.sync_from_ai_health(get_ai_health())
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    if snap is not None:
+        registry.sync_from_ai_health(snap["ai_health"])
     info = registry.get(name)
     if not info:
         raise HTTPException(status_code=404, detail=f"Plugin '{name}' introuvable")

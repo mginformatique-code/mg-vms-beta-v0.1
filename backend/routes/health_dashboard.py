@@ -28,6 +28,14 @@ health_dashboard_router = APIRouter(prefix="/api", tags=["health-dashboard"])
 
 _START_TIME = time.time()
 
+# v3.24 · Chantier séparation pipeline IA / serveur API, étape 2b : message
+# uniforme utilisé par tous les endpoints de ce fichier qui lisent désormais
+# pipeline_snapshot.get_snapshot() au lieu d'importer pipeline_v2/ai_engine
+# en direct. Le snapshot peut être absent juste après un (re)démarrage du
+# pipeline (premier tick pas encore écrit) ou si Redis est indisponible —
+# dans les deux cas on dégrade proprement (jamais de 500 non géré).
+_SNAPSHOT_UNAVAILABLE = {"error": "pipeline snapshot indisponible"}
+
 
 async def _system_metrics() -> dict:
     """CPU, RAM, disque via psutil (déjà installé)."""
@@ -111,11 +119,14 @@ async def _plugins_health() -> dict:
 
 
 async def _ai_gpu_health() -> dict:
-    try:
-        from ai_engine import get_ai_health
-        return get_ai_health()
-    except Exception as e:
-        return {"error": str(e)}
+    # v3.24 · Étape 2b séparation pipeline/API : lit le snapshot Redis
+    # consolidé (pipeline_snapshot.py) au lieu d'importer ai_engine en
+    # direct — get_ai_health() est catégorie (b), pur in-memory.
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    if snap is None:
+        return dict(_SNAPSHOT_UNAVAILABLE)
+    return snap["ai_health"]
 
 
 async def _recorder_health() -> dict:
@@ -200,8 +211,15 @@ async def diagnostics_pipeline_metrics(user: dict = Depends(require_permission("
       - `success_count / error_count` : compteurs cumulés
       - `last_plugins`      : {detectors, trackers, segmenters, business, notifiers}
     """
-    from pipeline_metrics import pipeline_metrics
-    snap = pipeline_metrics.snapshot()
+    # v3.24 · Étape 2b : `pipeline_metrics` + le bloc `runtime` (bytetrack,
+    # ai_config, batch_infer) viennent du snapshot Redis consolidé au lieu
+    # d'importer pipeline_metrics/ai_engine/pipeline_v2.batch_infer en
+    # direct. `plugin_manager.bus` (comptage plugins dispatchables) et
+    # `torch` (infos GPU) restent des imports directs : ni pipeline_v2 ni
+    # ai_engine, hors périmètre de cette étape.
+    from pipeline_snapshot import get_snapshot
+    psnap = await get_snapshot()
+    snap = psnap["pipeline_metrics"] if psnap else {}
     # Enrichit avec état du bus (nombre de plugins par interface)
     try:
         from plugin_manager.bus import bus
@@ -215,22 +233,15 @@ async def diagnostics_pipeline_metrics(user: dict = Depends(require_permission("
     # v0.4 · Runtime state réellement appliqué au moteur IA (fix bug
     # "ByteTrack=False dans le monitoring alors qu'il est activé en config")
     runtime: dict = {}
-    try:
-        import ai_engine as _ae
-        runtime["bytetrack"] = (dict(_ae._bytetrack_cfg) if _ae._bytetrack_cfg
-                                 else {"enabled": True, "source": "defaults"})
-        runtime["ai_config"] = dict(_ae._runtime_config) if _ae._runtime_config else {}
-    except Exception:
-        pass
-    # v3.12 · Efficacité réelle du regroupement d'inférence. `avg_batch`
-    # proche de 1 signifie que les caméras n'arrivent PAS dans la même
-    # fenêtre et que le regroupement ne sert à rien — information nécessaire
-    # pour savoir s'il faut élargir la fenêtre ou chercher ailleurs.
-    try:
-        from pipeline_v2.batch_infer import batch_inference
-        runtime["batch_infer"] = batch_inference.stats()
-    except Exception:
-        pass
+    if psnap:
+        runtime["bytetrack"] = psnap["bytetrack_cfg"]
+        runtime["ai_config"] = psnap["ai_config_runtime"]
+        # v3.12 · Efficacité réelle du regroupement d'inférence. `avg_batch`
+        # proche de 1 signifie que les caméras n'arrivent PAS dans la même
+        # fenêtre et que le regroupement ne sert à rien — information
+        # nécessaire pour savoir s'il faut élargir la fenêtre ou chercher
+        # ailleurs.
+        runtime["batch_infer"] = psnap["batch_infer"]
     try:
         import torch
         runtime["gpu"] = {
@@ -414,11 +425,13 @@ async def diagnostics_pipeline_v2(user: dict = Depends(require_permission("view_
     Utilisé par l'UI Pipeline Designer + le monitoring pour prouver que les
     plugins désactivés ne consomment aucune ressource.
     """
-    from pipeline_v2.registry import registry as _graph_registry
-    return {
-        "cameras": _graph_registry.all_graphs(),
-        "stats": _graph_registry.stats(),
-    }
+    # v3.24 · Étape 2b : registry.all_graphs()/.stats() (catégorie b) via
+    # snapshot Redis — remplace l'import direct de pipeline_v2.registry.
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    if snap is None:
+        return dict(_SNAPSHOT_UNAVAILABLE)
+    return snap["pipeline_v2_graphs"]
 
 
 @health_dashboard_router.get("/diagnostics/pipeline-v2/stats")
@@ -475,33 +488,25 @@ async def diagnostics_hot_reload(user: dict = Depends(require_permission("view_l
         ``camera_config_reloads`` restent bornés par les signaux reçus)
       * pas de churn frame_source (``frame_source_starts / stops`` restent bas)
     """
-    try:
-        from ai_engine import get_hot_reload_metrics
-        return get_hot_reload_metrics()
-    except Exception as e:
-        return {"error": str(e)}
+    # v3.24 · Étape 2b : get_hot_reload_metrics() (catégorie b) via snapshot.
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    if snap is None:
+        return dict(_SNAPSHOT_UNAVAILABLE)
+    return snap["hot_reload"]
 
 
 @health_dashboard_router.get("/diagnostics/plate-quality")
 async def diagnostics_plate_quality(user: dict = Depends(require_permission("view_live"))):
     """v0.7.e · Wave C · État du gate qualité crop plaque + mode debug."""
-    from pipeline_v2 import plate_quality as pq
-    return {
-        "thresholds": {
-            "min_plate_side_px": pq.MIN_PLATE_SIDE_PX,
-            "min_sharpness": pq.MIN_SHARPNESS,
-            "min_contrast": pq.MIN_CONTRAST,
-            "max_skew_deg": pq.MAX_SKEW_DEG,
-            "good_enough_sharpness": pq.GOOD_ENOUGH_SHARPNESS,
-            "good_enough_contrast": pq.GOOD_ENOUGH_CONTRAST,
-        },
-        "engine_weights": pq.ENGINE_WEIGHTS,
-        "debug_mode": {
-            "enabled": pq.debug_enabled(),
-            "output_dir": pq._DEBUG_DIR,
-            "env_var": "MGVMS_DEBUG_OCR",
-        },
-    }
+    # v3.24 · Étape 2b : seuils + engine_weights + debug_mode (catégorie b,
+    # les seuils sont des constantes figées — voir pipeline_snapshot.py)
+    # via snapshot Redis, plus d'import direct de pipeline_v2.plate_quality.
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    if snap is None:
+        return dict(_SNAPSHOT_UNAVAILABLE)
+    return snap["plate_quality"]
 
 
 @health_dashboard_router.put("/diagnostics/plate-quality/debug")
@@ -521,8 +526,12 @@ async def diagnostics_plate_quality_debug_toggle(
 @health_dashboard_router.get("/diagnostics/engine-reliability")
 async def diagnostics_engine_reliability(user: dict = Depends(require_permission("view_live"))):
     """Fiabilité par (camera × moteur OCR) — rolling accuracy 100 lectures."""
-    from pipeline_v2.engine_reliability import snapshot
-    return snapshot()
+    # v3.24 · Étape 2b : engine_reliability.snapshot() (catégorie b) via
+    # snapshot Redis. Repli sur {} (comme l'original, jamais d'exception ici)
+    # plutôt qu'un dict `error` — cet endpoint n'a jamais eu de champ error.
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    return snap["engine_reliability"] if snap else {}
 
 
 @health_dashboard_router.get("/diagnostics/qos-thresholds")
@@ -676,11 +685,13 @@ async def diagnostics_pipeline_inspector(user: dict = Depends(require_permission
     temps moyen/max, appels, erreurs, timeouts, FPS effectif. Snapshot
     système : CPU, RAM, GPU, VRAM. Inclut les workers et trackers actifs.
     """
-    from pipeline_v2.inspector import inspector as _inspector
-    from pipeline_v2.camera_worker import runtime as _runtime
-    snap = _inspector.snapshot()
-    snap["runtime"] = _runtime.describe()
-    return snap
+    # v3.24 · Étape 2b : inspector.snapshot() + camera_worker.runtime.describe()
+    # (catégorie b) via snapshot Redis, plus d'import direct pipeline_v2.
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    if snap is None:
+        return dict(_SNAPSHOT_UNAVAILABLE)
+    return snap["pipeline_inspector"]
 
 
 @health_dashboard_router.post("/diagnostics/pipeline-inspector/reset")
@@ -734,11 +745,13 @@ async def diagnostics_anpr_quality(user: dict = Depends(require_permission("view
     Le seuil et l'hystérésis sont configurables via
     ``PUT /api/diagnostics/anpr-quality/config``.
     """
-    from pipeline_v2.anpr_quality import anpr_quality
-    return {
-        "config": anpr_quality.config_dict(),
-        "cameras": anpr_quality.states(),
-    }
+    # v3.24 · Étape 2b : anpr_quality.config_dict()/.states() (catégorie b)
+    # via snapshot Redis, plus d'import direct pipeline_v2.anpr_quality.
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    if snap is None:
+        return dict(_SNAPSHOT_UNAVAILABLE)
+    return snap["anpr_quality"]
 
 
 @health_dashboard_router.put("/diagnostics/anpr-quality/config")
@@ -794,8 +807,19 @@ async def diagnostics_camera_state(
     cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
     if not cam:
         raise HTTPException(status_code=404, detail="camera_not_found")
+    # v3.24 · Étape 2b/3 : le signal pipeline_activity est désormais lu depuis
+    # le snapshot Redis (pipeline_snapshot.camera_activity) et passé en
+    # paramètre à fuse_camera_state() au lieu que camera_state.py aille lire
+    # pipeline_v2.inspector lui-même. Note : fuse_camera_state() reste
+    # importée depuis pipeline_v2.camera_state (frame_source local +
+    # signaux réseau go2rtc/tcp restent hors périmètre de cette étape —
+    # voir rapport de livraison 2b).
     from pipeline_v2.camera_state import fuse_camera_state
-    fused = await fuse_camera_state(cam, check_network=check_network)
+    from pipeline_snapshot import get_snapshot
+    psnap = await get_snapshot()
+    activity = ((psnap or {}).get("camera_activity") or {}).get(camera_id)
+    fused = await fuse_camera_state(cam, check_network=check_network,
+                                     pipeline_activity=activity)
     return fused.to_dict()
 
 
@@ -810,11 +834,15 @@ async def diagnostics_camera_state_all(
     Passer ``check_network=true`` pour inclure go2rtc + TCP probe.
     """
     from pipeline_v2.camera_state import fuse_camera_state
+    from pipeline_snapshot import get_snapshot
+    psnap = await get_snapshot()
+    activity_map = (psnap or {}).get("camera_activity") or {}
     cams = await db.cameras.find({}, {"_id": 0}).to_list(None)
     out = []
     for cam in cams:
         try:
-            fused = await fuse_camera_state(cam, check_network=check_network)
+            fused = await fuse_camera_state(cam, check_network=check_network,
+                                             pipeline_activity=activity_map.get(cam.get("id")))
             out.append(fused.to_dict())
         except Exception as e:
             logger.warning("fuse_camera_state failed for %s: %s", cam.get("id"), e)
@@ -839,10 +867,21 @@ async def diagnostics_traces(
     yolo, tracking, roi, anpr, crop_premium, dispatch, persist...) avec
     ``start_ms`` relatif au trace + ``duration_ms``.
     """
-    from pipeline_v2.trace import collector
+    # v3.24 · Étape 2b : le ring buffer complet (≤ MAX_TRACES=50, voir
+    # pipeline_v2/trace.py) est dumped tel quel dans le snapshot — déjà
+    # trié plus-récent-d'abord par collector.list_recent(). Le filtrage
+    # camera_id/limit se fait ici, côté lecteur, au lieu de rappeler
+    # collector.list_recent(camera_id=..., limit=...) en direct.
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    if snap is None:
+        return dict(_SNAPSHOT_UNAVAILABLE)
+    all_traces = snap["traces"]["list"]
+    if camera_id:
+        all_traces = [t for t in all_traces if t.get("camera_id") == camera_id]
     return {
-        "sampling_every_n_frames": collector.get_sampling(),
-        "traces": collector.list_recent(camera_id=camera_id, limit=limit),
+        "sampling_every_n_frames": snap["traces"]["sampling_every_n_frames"],
+        "traces": all_traces[:max(1, limit)],
     }
 
 
@@ -852,8 +891,13 @@ async def diagnostics_trace_detail(
     user: dict = Depends(require_permission("view_live")),
 ):
     """v0.8-rc6 · Détail d'un trace précis (résolution UUID)."""
-    from pipeline_v2.trace import collector
-    t = collector.get(trace_id)
+    # v3.24 · Étape 2b : recherche linéaire dans le ring buffer embarqué du
+    # snapshot au lieu de collector.get(trace_id) en direct (≤ 50 entrées —
+    # coût négligeable).
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    traces = snap["traces"]["list"] if snap else []
+    t = next((tr for tr in traces if tr.get("trace_id") == trace_id), None)
     if not t:
         raise HTTPException(status_code=404, detail="trace_not_found")
     return t
@@ -905,11 +949,18 @@ async def diagnostics_stability(
 
     Le watcher tourne en background (tick 60 s) — voir server.on_startup.
     """
-    from pipeline_v2.stability_watcher import watcher, WINDOWS
-    if window not in WINDOWS:
+    # v3.24 · Étape 2b : watcher.snapshot(window) (catégorie b) via snapshot
+    # Redis (toutes les fenêtres 1h/6h/24h/72h déjà agrégées à l'écriture),
+    # plus d'import direct pipeline_v2.stability_watcher.
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    if snap is None:
+        return dict(_SNAPSHOT_UNAVAILABLE)
+    windows = snap["stability"]["windows"]
+    if window not in windows:
         raise HTTPException(status_code=400,
-                             detail=f"window doit être dans {list(WINDOWS)}")
-    return watcher.snapshot(window)
+                             detail=f"window doit être dans {list(windows)}")
+    return windows[window]
 
 
 @health_dashboard_router.get("/diagnostics/stability/latest")
@@ -917,8 +968,9 @@ async def diagnostics_stability_latest(
     user: dict = Depends(require_permission("view_live")),
 ):
     """v0.8-rc7 · Dernier snapshot brut (utile pour dashboards temps réel)."""
-    from pipeline_v2.stability_watcher import watcher
-    latest = watcher.latest()
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    latest = (snap or {}).get("stability", {}).get("latest")
     if latest is None:
         raise HTTPException(status_code=404, detail="pas encore de snapshot (attendre 60s)")
     return latest
@@ -932,4 +984,3 @@ async def diagnostics_stability_clear(
     from pipeline_v2.stability_watcher import watcher
     n = watcher.clear()
     return {"ok": True, "purged": n}
-

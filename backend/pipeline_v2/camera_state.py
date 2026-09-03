@@ -154,20 +154,35 @@ async def check_tcp_reachable(cam: dict) -> Signal:
 # Fusion principale
 # ═════════════════════════════════════════════════════════════════════
 async def fuse_camera_state(cam: dict,
-                             check_network: bool = True) -> FusedState:
+                             check_network: bool = True,
+                             pipeline_activity: Optional[dict] = None) -> FusedState:
     """Calcule l'état caméra en fusionnant tous les signaux disponibles.
 
     Args:
         cam       : document caméra Mongo (dict avec au moins `id`).
         check_network : si False, saute go2rtc + TCP (utile en tests
                         offline sans réseau).
+        pipeline_activity : v3.24 · signal "pipeline actif" précalculé côté
+                        API via pipeline_snapshot.get_snapshot()["camera_activity"]
+                        (format ``{"positive": bool, "detail": str}``). Permet
+                        à l'appelant de fournir ce signal sans importer
+                        pipeline_v2.inspector — utile une fois le pipeline
+                        scindé en process séparé (voir pipeline_snapshot.py).
+                        Si omis, repli sur l'import direct historique
+                        (check_pipeline_activity) — préserve la compatibilité
+                        des autres appelants/tests.
     """
     camera_id = cam["id"]
     signals: list[Signal] = []
 
     # Signaux locaux (rapides, pas de I/O réseau)
     signals.append(check_frame_source(camera_id))
-    signals.append(check_pipeline_activity(camera_id))
+    if pipeline_activity is not None:
+        signals.append(Signal("pipeline_activity",
+                               bool(pipeline_activity.get("positive")),
+                               str(pipeline_activity.get("detail") or "")))
+    else:
+        signals.append(check_pipeline_activity(camera_id))
 
     # Signaux réseau (opt-out pour tests)
     if check_network:

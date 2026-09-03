@@ -229,6 +229,13 @@ async def on_startup():
     # v0.8-rc7 · Sprint 4 P4 · Stability Watcher 72 h (minute-par-minute)
     from pipeline_v2.stability_watcher import watcher as _stability_watcher
     _stability_watcher.start()
+    # v3.24 · Chantier séparation pipeline IA / serveur API, étape 2b —
+    # snapshot Redis consolidé de l'état runtime pipeline (catégorie b),
+    # lu côté API par les endpoints diagnostics via pipeline_snapshot.get_snapshot()
+    # (voir routes/health_dashboard.py, routers.py). Démarré ici comme les
+    # autres boucles background pipeline-adjacentes ci-dessus.
+    from pipeline_snapshot import snapshot_loop
+    asyncio.create_task(snapshot_loop())
     asyncio.create_task(auto_reboot_loop())
     asyncio.create_task(ntp_resync_loop())
     asyncio.create_task(dedup_batch_loop())
