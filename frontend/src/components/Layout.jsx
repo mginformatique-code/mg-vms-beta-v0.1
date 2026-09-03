@@ -71,6 +71,7 @@ const NAV = [
     { to: "/audit", icon: ScrollText, key: "nav.audit", role: "technician" },
     { to: "/diagnostics", icon: Activity, key: "nav.diagnostics", role: "technician" },
     { to: "/logs-systeme", icon: Terminal, key: "nav.system_logs", role: "technician" },
+    { to: "/log-anpr", icon: ScanLine, key: "nav.anpr_log", role: "technician" },
   ]},
   { group: "nav.settings_group", items: [
     { to: "/storage", icon: HardDrive, key: "nav.storage" },

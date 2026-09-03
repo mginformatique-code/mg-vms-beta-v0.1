@@ -413,6 +413,43 @@ class IdentityBody(BaseModel):
     notes: Optional[str] = ""
 
 
+@vehicles_router.get("/anpr-log/top")
+async def anpr_log_top_vehicles(
+    limit: int = Query(200, ge=1, le=1000),
+    user: dict = Depends(require_permission("read_plates")),
+):
+    """v3.31 · Menu Journaux → Log ANPR : tableau des véhicules les plus
+    lus, toutes caméras confondues (dans la portée du site de
+    l'utilisateur), triés par nombre d'occurrences décroissant. Demande
+    explicite : un tableau, rien de plus — pas de graphique/agrégat
+    visuel, juste la liste triée."""
+    match = await _base_match(user)
+    pipeline = [
+        {"$match": match},
+        {"$sort": {"timestamp": 1}},  # pour que $last reflète bien la lecture la plus récente
+        {"$group": {
+            "_id": "$plate",
+            "occurrences": {"$sum": 1},
+            "cameras": {"$addToSet": "$camera_id"},
+            "last_seen": {"$max": "$timestamp"},
+            "vehicle_color": {"$last": "$vehicle_color"},
+            "vehicle_type": {"$last": "$vehicle_type"},
+        }},
+        {"$sort": {"occurrences": -1}},
+        {"$limit": limit},
+    ]
+    rows = await db.plates.aggregate(pipeline).to_list(limit)
+    items = [{
+        "plate": r["_id"],
+        "occurrences": r["occurrences"],
+        "cameras_count": len(r.get("cameras") or []),
+        "last_seen": r.get("last_seen"),
+        "vehicle_color": r.get("vehicle_color") or "",
+        "vehicle_type": r.get("vehicle_type") or "",
+    } for r in rows]
+    return {"count": len(items), "items": items}
+
+
 @vehicles_router.get("/identities")
 async def list_identities(user: dict = Depends(require_permission("read_plates"))):
     """Liste toutes les identités véhicule (regroupement cross-plate)."""
