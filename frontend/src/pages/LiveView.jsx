@@ -81,6 +81,10 @@ function OverlayCanvas({ cam, boxes, showOverlay, showDiagnostics }) {
         ctx.fillText(label, rx + 4, Math.max(11, ry - 3));
       }
       if (showDiagnostics) {
+        // v3.35 · Repositionné de "bottom-left" à "top-left, sous l'en-tête"
+        // — chevauchait le bandeau de pied de tuile (nom du site + heure,
+        // absolute bottom-0) signalé avec capture. L'en-tête (nom caméra +
+        // horodatage) fait ~20px : on démarre juste en dessous.
         const lines = [
           `Detection FPS: ${diagnostics.detectionFps}`,
           `Display FPS: ${diagnostics.displayFps}`,
@@ -88,11 +92,11 @@ function OverlayCanvas({ cam, boxes, showOverlay, showDiagnostics }) {
           `Last det. age: ${diagnostics.lastDetectionAgeMs != null ? Math.round(diagnostics.lastDetectionAgeMs) + "ms" : "—"}`,
         ];
         ctx.font = "10px ui-monospace, monospace";
-        const lh = 13, boxW = 155, boxH = lines.length * lh + 8;
+        const lh = 13, boxW = 155, boxH = lines.length * lh + 8, top = 22;
         ctx.fillStyle = "rgba(0,0,0,0.65)";
-        ctx.fillRect(4, h - boxH - 4, boxW, boxH);
+        ctx.fillRect(4, top, boxW, boxH);
         ctx.fillStyle = "#00E676";
-        lines.forEach((line, i) => ctx.fillText(line, 10, h - boxH + 12 + i * lh));
+        lines.forEach((line, i) => ctx.fillText(line, 10, top + 12 + i * lh));
       }
     };
 

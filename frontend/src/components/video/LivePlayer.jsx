@@ -221,9 +221,12 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
         {badge.txt}
       </span>
       {mode === "webrtc" && (
+        // v3.35 · Remonté de bottom-2 à bottom-7 : chevauchait l'horodatage
+        // du bandeau de pied de tuile (Feed, LiveView.jsx, absolute bottom-0
+        // inset-x-0) — signalé avec capture (icône micro par-dessus l'heure).
         <button
           onClick={(e) => { e.stopPropagation(); setMuted((m) => !m); }}
-          className="absolute bottom-2 right-2 z-10 p-1 bg-black/60 hover:bg-black/80 text-white/90 border border-white/20"
+          className="absolute bottom-7 right-2 z-10 p-1 bg-black/60 hover:bg-black/80 text-white/90 border border-white/20"
           title={muted ? "Activer le son" : "Couper le son"}
           data-testid={`${dataTestId}-mute-btn`}
         >
