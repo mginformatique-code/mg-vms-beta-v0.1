@@ -1130,7 +1130,17 @@ async def search_plates(response: Response, plate: Optional[str] = None, color: 
             rng["$lte"] = date_to
         q["timestamp"] = rng
     site_scope(q, user)
-    total = await db.plates.count_documents(q)
+    # v3.33 · count_documents({}) fait un vrai scan (pas de raccourci
+    # metadata) — mesuré en prod : 9s sur 21 547 plaques sans filtre, contre
+    # 36ms pour le find+sort+limit qui suit (le vrai contenu de la page).
+    # estimated_document_count() lit les métadonnées de la collection, quasi
+    # instantané (10ms mesuré) ; utilisable seulement quand `q` est vide
+    # (aucun filtre réel appliqué) — même correctif déjà appliqué à
+    # /alerts (voir plus bas dans ce fichier).
+    if q:
+        total = await db.plates.count_documents(q)
+    else:
+        total = await db.plates.estimated_document_count()
     response.headers["X-Total-Count"] = str(total)
     # v3.13 · `frame_thumb` (la scène HD complète) est EXCLUE de la liste.
     # Elle pèse ~709 Ko par plaque en base : à 50 plaques par page, la réponse
