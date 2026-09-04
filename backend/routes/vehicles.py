@@ -34,7 +34,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from auth import require_permission, require_role, log_audit
+from auth import require_permission, require_role, log_audit, allowed_sites
 from database import db
 
 logger = logging.getLogger("routes.vehicles")
@@ -1321,19 +1321,31 @@ def _norm_plate(p: str) -> str:
     return (p or "").upper().replace(" ", "").replace("-", "")
 
 
-async def _find_variants(seed_plate: str, user: dict, max_distance: int = 2) -> list[dict]:
-    """Retourne les plaques "voisines" susceptibles d'appartenir au même véhicule.
+# v3.41 · Root cause mesurée de la lenteur "Consensus" (~8.5s en prod, sur
+# le chemin d'ouverture de CHAQUE fiche véhicule via PlateConsensusBlock) :
+# le $group ci-dessous balaie l'INTÉGRALITÉ de db.plates (22 000+ docs) pour
+# produire la liste des plaques distinctes + leur méta — un résultat
+# STRICTEMENT IDENTIQUE quelle que soit la plaque consultée, pourtant
+# reconstruit intégralement depuis Mongo à chaque appel. Cache TTL court
+# (3 min), par périmètre de sites (`allowed_sites`, None=admin/technicien
+# non cloisonné) pour ne jamais servir les données d'un site à un
+# utilisateur qui n'y a pas accès. Une lecture ANPR toute fraîche invisible
+# dans la recherche de variantes pendant au plus 3 min est un compromis
+# largement acceptable pour une heuristique de suggestion (pas une donnée
+# consultée pour sa fraîcheur seconde-près) — même principe que
+# smart_zones/engine.py::_zones_cache (TTL 15s).
+_variant_pool_cache: dict = {}
+_VARIANT_POOL_TTL_S = 180.0
 
-    Critères :
-      - Longueur identique (±1 caractère max)
-      - Distance de Levenshtein ≤ ``max_distance``
-      - Même vendor de couleur/marque OU même caméra (heuristique)
-    """
-    seed = _norm_plate(seed_plate)
-    if len(seed) < 4:
-        return []
+
+async def _load_variant_pool(user: dict) -> list[dict]:
+    scope = allowed_sites(user)
+    key = tuple(sorted(scope)) if scope is not None else None
+    now = time.time()
+    entry = _variant_pool_cache.get(key)
+    if entry and (now - entry["ts"]) < _VARIANT_POOL_TTL_S:
+        return entry["data"]
     match = await _base_match(user)
-    # Récupère toutes les plaques distinctes avec meta
     pipe = [
         {"$match": match},
         {"$group": {
@@ -1347,7 +1359,23 @@ async def _find_variants(seed_plate: str, user: dict, max_distance: int = 2) -> 
         }},
         {"$limit": 5000},
     ]
-    all_plates = await db.plates.aggregate(pipe).to_list(5000)
+    data = await db.plates.aggregate(pipe).to_list(5000)
+    _variant_pool_cache[key] = {"ts": now, "data": data}
+    return data
+
+
+async def _find_variants(seed_plate: str, user: dict, max_distance: int = 2) -> list[dict]:
+    """Retourne les plaques "voisines" susceptibles d'appartenir au même véhicule.
+
+    Critères :
+      - Longueur identique (±1 caractère max)
+      - Distance de Levenshtein ≤ ``max_distance``
+      - Même vendor de couleur/marque OU même caméra (heuristique)
+    """
+    seed = _norm_plate(seed_plate)
+    if len(seed) < 4:
+        return []
+    all_plates = await _load_variant_pool(user)
     seed_meta = next((p for p in all_plates if _norm_plate(p["_id"]) == seed), None)
     if not seed_meta:
         return []
