@@ -155,7 +155,11 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
           <div className="text-center"><CamIcon size={24} className="mx-auto text-white/30 mb-1" /><span className="text-[10px] uppercase tracking-wider text-white/30">—</span></div>
         </div>
       )}
-      <div className="absolute top-0 inset-x-0 flex items-center justify-between px-2 py-1 bg-gradient-to-b from-black/70 to-transparent">
+      {/* v3.37 · Bandeaux (haut/bas) passés du dégradé (from-black/70 to-transparent,
+          quasi invisible côté bord de tuile) à un fond plein — demande explicite
+          "tous les textes à l'écran soient opaques", illisibles sur fond clair
+          (trottoir, façade) sur la capture fournie. */}
+      <div className="absolute top-0 inset-x-0 flex items-center justify-between px-2 py-1 bg-black/70">
         <span className="text-[10px] mono text-white truncate">{cam?.name || `CAM-${idx + 1}`}</span>
         <div className="flex items-center gap-1.5">
           {online && cam?.detect_enabled && showOverlay && totalDetected > 0 && (
@@ -163,8 +167,11 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
               {Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(" · ")}
             </span>
           )}
+          {/* v3.37 · Heure déplacée du bandeau de pied (demande explicite) vers
+              ici, juste à gauche de la résolution. */}
+          {online && <span className="text-[9px] mono text-white/80" data-testid="feed-time">{new Date().toLocaleTimeString()}</span>}
           {online && cam?.resolution && (
-            <span className="text-[9px] mono px-1 text-white/80 bg-black/50" data-testid="feed-resolution">{cam.resolution}</span>
+            <span className="text-[9px] mono px-1 text-white/80 bg-black/70" data-testid="feed-resolution">{cam.resolution}</span>
           )}
           {online && <span className="flex items-center gap-1 text-[9px] mono text-[#00E676]"><Circle size={6} className="fill-[#00E676] rec-dot" /> LIVE</span>}
           {focused && <X size={13} className="text-white/80" />}
@@ -177,14 +184,15 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
           </div>
         </div>
       )}
-      <div className="absolute bottom-0 inset-x-0 px-2 py-1 bg-gradient-to-t from-black/70 to-transparent flex justify-between">
+      <div className="absolute bottom-0 inset-x-0 px-2 py-1 bg-black/70">
         {/* v3.36 · Nom caméra ajouté à côté du site (demande explicite) —
             le nom de site seul ne dit pas quelle caméra c'est sur une
-            petite tuile où l'en-tête peut être tronqué. */}
+            petite tuile où l'en-tête peut être tronqué.
+            v3.37 · Heure retirée d'ici, déplacée dans le bandeau du haut
+            (demande explicite) — ce bandeau ne porte plus que site+caméra. */}
         <span className="text-[9px] mono text-white/70 truncate">
           {cam?.site_name || ""}{cam?.site_name && cam?.name ? " · " : ""}{cam?.name || ""}
         </span>
-        <span className="text-[9px] mono text-white/70 flex-shrink-0 pl-2">{new Date().toLocaleTimeString()}</span>
       </div>
       {/* v0.4 · Overlay contrôles caméra (Projecteur, IR, Sirène, TTS, Reboot)
           v3.19 · Toujours monté (visible pilote l'opacité) — voir

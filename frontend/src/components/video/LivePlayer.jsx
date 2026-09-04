@@ -213,9 +213,13 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
           horodatage affichés par le bandeau d'en-tête du Feed parent,
           LiveView.jsx, absolute top-0 inset-x-0) vers la droite sous la
           ligne résolution/LIVE de ce même bandeau, où il y a de la place. */}
+      {/* v3.37 · Fond passé de `${badge.color}15` (~8% d'opacité, quasi
+          invisible sur fond clair — signalé avec capture) à un fond noir
+          plein, cohérent avec les autres badges de la tuile (résolution,
+          compteur IA...) — demande explicite "tous les textes opaques". */}
       <span
-        className="absolute top-8 right-2 z-10 text-[9px] mono uppercase tracking-wider px-1.5 py-0.5 border pointer-events-none"
-        style={{ color: badge.color, borderColor: `${badge.color}80`, background: `${badge.color}15` }}
+        className="absolute top-8 right-2 z-10 text-[9px] mono uppercase tracking-wider px-1.5 py-0.5 border pointer-events-none bg-black/70"
+        style={{ color: badge.color, borderColor: `${badge.color}80` }}
         data-testid={`${dataTestId}-badge`}
       >
         {badge.txt}
