@@ -10,7 +10,7 @@ import WelcomePopup from "@/components/WelcomePopup";
 import CookieConsentBanner from "@/components/CookieConsentBanner";
 import {
   LayoutDashboard, Grid3x3, Cctv, Building2, ScanLine, Car, Bell, Map, Zap,
-  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock, Layers, ChevronDown, ChevronRight, LineChart, Sparkles, ShieldCheck, Lock, Info, LifeBuoy, ScrollText as LegalIcon, Terminal,
+  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock, Layers, ChevronDown, ChevronRight, LineChart, Sparkles, ShieldCheck, Lock, Info, LifeBuoy, ScrollText as LegalIcon, Terminal, AlertTriangle,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -46,6 +46,7 @@ const NAV = [
     { key: "nav.events_root", icon: Zap, children: [
       { to: "/events", key: "nav.events_item", icon: Zap },
       { to: "/alerts", key: "nav.alerts", icon: Bell },
+      { to: "/anomalies", key: "nav.anomalies", icon: AlertTriangle },
     ]},
   ]},
   { group: "nav.intelligence", items: [

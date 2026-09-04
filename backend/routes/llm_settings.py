@@ -46,6 +46,10 @@ class LlmConfigIn(BaseModel):
     # vehicle_dedup.py::dedup_auto_approve_loop).
     dedup_auto_approve_enabled: bool = False
     dedup_auto_approve_interval_min: int = 60
+    # v3.44 · IA anomalies véhicule (menu dédié + corrélations convoi/vague,
+    # voir vehicle_anomaly_ai.py) — même convention que les autres switchs
+    # dédiés ci-dessus.
+    anomaly_ai_enabled: bool = False
 
 
 async def _load_raw() -> dict:
@@ -66,6 +70,7 @@ def _mask(v: dict) -> dict:
         "anpr_tuning_enabled": bool(v.get("anpr_tuning_enabled", False)),
         "dedup_auto_approve_enabled": bool(v.get("dedup_auto_approve_enabled", False)),
         "dedup_auto_approve_interval_min": int(v.get("dedup_auto_approve_interval_min") or 60),
+        "anomaly_ai_enabled": bool(v.get("anomaly_ai_enabled", False)),
     }
 
 
@@ -92,6 +97,7 @@ async def put_llm_config(data: LlmConfigIn, user: dict = Depends(require_role("a
         # envoyé (un intervalle trop court transformerait la boucle de poll
         # en quasi-temps réel, aucun cas d'usage légitime).
         "dedup_auto_approve_interval_min": max(5, int(data.dedup_auto_approve_interval_min or 60)),
+        "anomaly_ai_enabled": data.anomaly_ai_enabled,
     }
     await db.settings.update_one({"key": "llm_config"}, {"$set": {"key": "llm_config", "value": value}}, upsert=True)
     await log_audit(user, "llm_config_updated", value["base_url"])

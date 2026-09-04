@@ -16,6 +16,7 @@ const empty = {
   enabled: false, base_url: "https://ia.mginformatique.com", model: "qwen2.5", api_key: "", has_api_key: false,
   dedup_enabled: false, anpr_tuning_enabled: false,
   dedup_auto_approve_enabled: false, dedup_auto_approve_interval_min: 60,
+  anomaly_ai_enabled: false,
 };
 
 const Inp = (p) => <input {...p} className="w-full px-3 py-2 bg-card border border-input outline-none text-sm focus:border-[#0044FF]" />;
@@ -61,6 +62,7 @@ export default function LlmSettings() {
         dedup_enabled: cfg.dedup_enabled, anpr_tuning_enabled: cfg.anpr_tuning_enabled,
         dedup_auto_approve_enabled: cfg.dedup_auto_approve_enabled,
         dedup_auto_approve_interval_min: cfg.dedup_auto_approve_interval_min,
+        anomaly_ai_enabled: cfg.anomaly_ai_enabled,
       });
       setCfg({ ...empty, ...data });
       toast.success("Configuration LLM enregistrée");
@@ -158,7 +160,7 @@ export default function LlmSettings() {
           </div>
         )}
 
-        <div className="flex items-center justify-between py-2.5">
+        <div className="flex items-center justify-between py-2.5 border-b border-border">
           <div>
             <div className="text-sm">Réglage ANPR auto (Qwen)</div>
             <div className="text-[11px] text-muted-foreground">Ajuste le seuil de confiance ANPR par caméra selon la distribution des lectures — tâche hebdomadaire + bouton manuel sur Centre caméras.</div>
@@ -166,7 +168,15 @@ export default function LlmSettings() {
           <Switch checked={cfg.anpr_tuning_enabled} onCheckedChange={(v) => upd("anpr_tuning_enabled", v)} data-testid="llm-anpr-tuning-toggle" />
         </div>
 
-        {!cfg.enabled && (cfg.dedup_enabled || cfg.anpr_tuning_enabled) && (
+        <div className="flex items-center justify-between py-2.5">
+          <div>
+            <div className="text-sm">Anomalies IA (Qwen)</div>
+            <div className="text-[11px] text-muted-foreground">Explique en langage clair les écarts d'habitudes par véhicule, les convois répétés et les pics de trafic inhabituels — menu dédié "Anomalies IA", tâche périodique + bouton manuel.</div>
+          </div>
+          <Switch checked={cfg.anomaly_ai_enabled} onCheckedChange={(v) => upd("anomaly_ai_enabled", v)} data-testid="llm-anomaly-ai-toggle" />
+        </div>
+
+        {!cfg.enabled && (cfg.dedup_enabled || cfg.anpr_tuning_enabled || cfg.anomaly_ai_enabled) && (
           <p className="text-[11px] text-[#FFB800] mt-3">La connexion ci-dessus est désactivée — ces fonctionnalités resteront inactives tant qu'elle ne l'est pas.</p>
         )}
       </div>
