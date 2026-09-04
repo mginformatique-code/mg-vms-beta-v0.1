@@ -67,6 +67,16 @@ _RESTART_MAX_BACKOFF_SEC = 5.0 # v0.4.5.a — de 30s à 5s (moins d'accumulation
 # minimal (reprise toujours aussi rapide pour une caméra isolée qui
 # decroche seule).
 _RESTART_JITTER_SEC = 2.0
+# v3.33 · Backstop structurel au même incident (voir _RESTART_JITTER_SEC
+# ci-dessus) : le jitter réduit fortement le risque de resynchronisation mais
+# ne l'élimine pas — au tout premier échec groupé (avant que le jitter ait pu
+# désynchroniser quoi que ce soit), N caméras peuvent encore relancer ffmpeg
+# (réinit NVDEC) exactement au même instant. Sémaphore global : plafonne le
+# nombre de workers en cours de (re)démarrage — libéré dès la 1re frame reçue
+# (coût matériel déjà payé), pas pendant tout le streaming.
+_MAX_CONCURRENT_RECONNECTS = int(os.environ.get("MGVMS_AI_MAX_CONCURRENT_RECONNECTS", "4"))
+_reconnect_semaphore = threading.Semaphore(_MAX_CONCURRENT_RECONNECTS)
+_RECONNECT_SEM_TIMEOUT_SEC = 60.0  # mieux vaut démarrer sans plafond que bloquer indéfiniment
 _READ_TIMEOUT_SEC = 20.0       # si aucune frame lue en 20s → considérer mort et redémarrer
 # P0-5 (v0.7.c) : arrêt propre après N tentatives CONSÉCUTIVES sans aucune frame
 # (au lieu d'une boucle infinie). Le worker est relancé quand la caméra repasse
@@ -220,6 +230,13 @@ def _reader_loop(w: _Worker):
     """
     backoff = _RESTART_BACKOFF_SEC
     while not w.stop_event.is_set():
+        # v3.33 · Voir _MAX_CONCURRENT_RECONNECTS — plafonne les (re)démarrages
+        # concurrents. Libéré à la 1re frame reçue plus bas, ou ici sur tout
+        # chemin de sortie précoce (spawn raté / abandon).
+        got_slot = _reconnect_semaphore.acquire(timeout=_RECONNECT_SEM_TIMEOUT_SEC)
+        if not got_slot:
+            logger.warning("frame-source: %s — file d'attente de reconnexion pleine depuis %.0fs, démarrage sans plafond",
+                            w.camera_id, _RECONNECT_SEM_TIMEOUT_SEC)
         # Démarrer le subprocess ffmpeg
         cmd = _build_ffmpeg_cmd(w)
         try:
@@ -233,6 +250,9 @@ def _reader_loop(w: _Worker):
                 w.camera_id, w.proc.pid, _use_gpu(), w.codec, w.width, w.height, w.restart_count,
             )
         except Exception as e:
+            if got_slot:
+                _reconnect_semaphore.release()
+                got_slot = False
             w.last_error = f"spawn error: {e}"
             logger.warning("frame-source: impossible de démarrer ffmpeg pour %s: %s", w.camera_id, e)
             w.consecutive_failures += 1
@@ -332,9 +352,19 @@ def _reader_loop(w: _Worker):
                 _notify_new_frame(w.camera_id)
                 if not w.first_frame_at:
                     w.first_frame_at = now
+                if got_slot:
+                    # v3.33 · Décodeur initialisé avec succès — coût matériel
+                    # payé, la caméra ne compte plus dans le plafond.
+                    _reconnect_semaphore.release()
+                    got_slot = False
                 last_read_ts = now
                 backoff = _RESTART_BACKOFF_SEC   # reset backoff après succès
         finally:
+            if got_slot:
+                # v3.33 · Filet de sécurité : sorti de la boucle de lecture
+                # sans jamais avoir reçu de frame (ex. timeout immédiat).
+                _reconnect_semaphore.release()
+                got_slot = False
             # Cleanup ffmpeg
             try:
                 if w.proc and w.proc.poll() is None:
