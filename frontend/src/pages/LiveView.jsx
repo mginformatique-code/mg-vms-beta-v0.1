@@ -195,15 +195,20 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, showDiagnostics, aiState
       {/* v3.19 · PTZ déplacé du centre plein écran (gênait la vue) vers un
           coin, avec un bouton dédié pour afficher/masquer le pavé — ne
           s'ouvre plus automatiquement au survol. */}
+      {/* v3.35 · Descendu de top-8 à top-16 : entrait en collision directe
+          avec le badge de mode WEBRTC (LivePlayer.jsx, également positionné
+          top-8 right-2 — les deux boutons/badges se superposaient sur les
+          caméras PTZ). Signalé par l'utilisateur ("le menu PTZ, c'est pas
+          bon") après le repositionnement du badge WEBRTC plus tôt. */}
       {online && cam?.ptz_enabled && canPtz && (hover || showPtz) && (
         <button data-ptz-btn onClick={(e) => { e.stopPropagation(); setShowPtz((v) => !v); }}
-                className={`absolute top-8 right-2 w-7 h-7 flex items-center justify-center text-white transition-colors ${showPtz ? "bg-[#0044FF]" : "bg-black/70 hover:bg-[#0044FF]"}`}
+                className={`absolute top-16 right-2 w-7 h-7 flex items-center justify-center text-white transition-colors ${showPtz ? "bg-[#0044FF]" : "bg-black/70 hover:bg-[#0044FF]"}`}
                 data-testid="ptz-toggle" title={showPtz ? "Masquer les contrôles PTZ" : "Afficher les contrôles PTZ"}>
           <Move size={14} />
         </button>
       )}
       {showPtz && online && cam?.ptz_enabled && canPtz && (
-        <div className="absolute top-16 right-2 bg-black/60 p-1.5" data-testid="ptz-controls">
+        <div className="absolute top-24 right-2 bg-black/60 p-1.5" data-testid="ptz-controls">
           <div className="flex items-center gap-1.5">
             {/* Pan/Tilt cross */}
             <div className="grid grid-cols-3 gap-0.5">
