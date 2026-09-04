@@ -259,10 +259,28 @@ async def _base_match(user: dict, plate_filter: Optional[str] = None,
 
 
 async def _plate_or_404(plate: str, user: dict) -> str:
-    """Normalise + vérifie qu'au moins une lecture existe pour cette plaque."""
+    """Normalise + vérifie qu'au moins une lecture existe pour cette plaque.
+
+    v3.41 · Root cause de la lenteur d'ouverture de la fiche véhicule
+    (Vue/Timeline/Heatmap) : CE endpoint + quasiment tous les endpoints
+    "détail d'une plaque" (`/passages`, `/heatmap`, `/cameras`, `/journey`,
+    `/habits`, `/anomaly`) reconstruisaient chacun un `$regex` NON ANCRÉ sur
+    `plate` — un tel regex ne peut utiliser NI l'index simple `{plate:1}`
+    NI le composite `{plate:1,timestamp:-1}` (déjà en place), donc COLLSCAN
+    systématique sur les 22 000+ documents `db.plates`, À CHAQUE appel,
+    pour chacun des ~6 endpoints tirés en parallèle à l'ouverture de la
+    fiche. Un cas quasi identique (300 appels regex séquentiels sur
+    `/anomalies/recent`) avait déjà été root-causé et corrigé (voir
+    `_compute_anomaly(exact=True)` plus bas) — jamais généralisé aux
+    endpoints "une seule plaque déjà connue" ci-dessus, qui n'ont
+    structurellement aucun besoin de correspondance floue : `normalized`
+    est déjà la forme exacte stockée (majuscules, sans espace/tiret —
+    vérifié en prod : 0 minuscule, 0 espace sur toute la collection).
+    Égalité exacte partout ci-dessous → utilise l'index composite, plus de
+    COLLSCAN."""
     normalized = plate.upper().replace(" ", "").replace("-", "")
     q = await _base_match(user)
-    q["plate"] = {"$regex": normalized, "$options": "i"}
+    q["plate"] = normalized
     count = await db.plates.count_documents(q)
     if count == 0:
         raise HTTPException(status_code=404,
@@ -748,7 +766,7 @@ async def vehicle_detail(plate: str,
                           user: dict = Depends(require_permission("read_plates"))):
     normalized = await _plate_or_404(plate, user)
     match = await _base_match(user)
-    match["plate"] = {"$regex": normalized, "$options": "i"}
+    match["plate"] = normalized  # v3.41 · égalité exacte — voir _plate_or_404
 
     pipeline = [
         {"$match": match},
@@ -835,7 +853,7 @@ async def vehicle_passages(plate: str,
                             user: dict = Depends(require_permission("read_plates"))):
     normalized = await _plate_or_404(plate, user)
     q = await _base_match(user)
-    q["plate"] = {"$regex": normalized, "$options": "i"}
+    q["plate"] = normalized  # v3.41 · égalité exacte — voir _plate_or_404
 
     total = await db.plates.count_documents(q)
     # v3.13 · Cette liste ne renvoie que des booléens `has_*` — inutile de
@@ -875,7 +893,7 @@ async def vehicle_heatmap(plate: str,
                            user: dict = Depends(require_permission("read_plates"))):
     normalized = await _plate_or_404(plate, user)
     q = await _base_match(user)
-    q["plate"] = {"$regex": normalized, "$options": "i"}
+    q["plate"] = normalized  # v3.41 · égalité exacte — voir _plate_or_404
 
     by_hour = [0] * 24
     by_dow = [0] * 7  # 0 = Lundi
@@ -903,7 +921,7 @@ async def vehicle_cameras(plate: str,
                            user: dict = Depends(require_permission("read_plates"))):
     normalized = await _plate_or_404(plate, user)
     match = await _base_match(user)
-    match["plate"] = {"$regex": normalized, "$options": "i"}
+    match["plate"] = normalized  # v3.41 · égalité exacte — voir _plate_or_404
     pipeline = [
         {"$match": match},
         {"$group": {
@@ -933,7 +951,7 @@ async def vehicle_journey(plate: str,
                            user: dict = Depends(require_permission("read_plates"))):
     normalized = await _plate_or_404(plate, user)
     q = await _base_match(user)
-    q["plate"] = {"$regex": normalized, "$options": "i"}
+    q["plate"] = normalized  # v3.41 · égalité exacte — voir _plate_or_404
     docs = await db.plates.find(
         q, {"_id": 0, "timestamp": 1, "camera_id": 1, "camera_name": 1, "direction": 1}
     ).sort("timestamp", -1).limit(limit).to_list(limit)
@@ -949,7 +967,7 @@ async def vehicle_habits(plate: str,
                           user: dict = Depends(require_permission("read_plates"))):
     normalized = await _plate_or_404(plate, user)
     q = await _base_match(user)
-    q["plate"] = {"$regex": normalized, "$options": "i"}
+    q["plate"] = normalized  # v3.41 · égalité exacte — voir _plate_or_404
 
     docs = await db.plates.find(q, {"timestamp": 1, "_id": 0}).to_list(length=None)
     times: list[datetime] = []
@@ -1213,7 +1231,7 @@ async def vehicle_anomaly(plate: str,
                            user: dict = Depends(require_permission("read_plates"))):
     """Analyse d'anomalie de la dernière passe (lecture seule)."""
     await _plate_or_404(plate, user)
-    return await _compute_anomaly(plate, user)
+    return await _compute_anomaly(plate, user, exact=True)  # v3.41 · voir _plate_or_404
 
 
 @vehicles_router.get("/anomalies/recent")
@@ -1263,7 +1281,7 @@ async def vehicle_notify_anomaly(plate: str,
     détectées pour ce véhicule. Ne modifie pas le pipeline OCR — appel manuel
     depuis le drawer véhicule."""
     await _plate_or_404(plate, user)
-    report = await _compute_anomaly(plate, user)
+    report = await _compute_anomaly(plate, user, exact=True)  # v3.41 · voir _plate_or_404
     if not report.get("anomalies") or report["severity"] == "info":
         raise HTTPException(status_code=400,
                             detail={"error": "no_anomaly",
@@ -1385,7 +1403,7 @@ async def vehicle_consensus(plate: str,
     """
     seed = _norm_plate(plate)
     q = await _base_match(user)
-    q["plate"] = {"$regex": seed, "$options": "i"}
+    q["plate"] = seed  # v3.41 · égalité exacte — voir _plate_or_404
     count = await db.plates.count_documents(q)
     if count == 0:
         raise HTTPException(status_code=404, detail={"error": "vehicle_not_found"})

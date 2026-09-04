@@ -861,19 +861,15 @@ export function VehicleDrawer({ plate, onClose, onWatchChanged }) {
 
         {detail && (
           <Tabs defaultValue="overview" className="p-4">
-            <TabsList className="grid grid-cols-5 rounded-none bg-secondary/40 border border-border h-auto p-0">
+            <TabsList className="grid grid-cols-3 rounded-none bg-secondary/40 border border-border h-auto p-0">
               <TabsTrigger value="overview"  className="rounded-none text-xs py-2" data-testid="tab-overview">Vue</TabsTrigger>
-              <TabsTrigger value="gallery"   className="rounded-none text-xs py-2" data-testid="tab-gallery">Galerie</TabsTrigger>
               <TabsTrigger value="timeline"  className="rounded-none text-xs py-2" data-testid="tab-timeline">Timeline</TabsTrigger>
               <TabsTrigger value="heatmap"   className="rounded-none text-xs py-2" data-testid="tab-heatmap">Heatmap</TabsTrigger>
-              <TabsTrigger value="cameras"   className="rounded-none text-xs py-2" data-testid="tab-cameras">{t("veh.cameras")}</TabsTrigger>
             </TabsList>
 
             <TabsContent value="overview" className="mt-4"><TabOverview d={detail} onWatchChanged={handleWatchChanged} onReload={reload} /></TabsContent>
-            <TabsContent value="gallery"  className="mt-4"><TabGallery plate={plate} /></TabsContent>
             <TabsContent value="timeline" className="mt-4"><TabTimeline plate={plate} /></TabsContent>
             <TabsContent value="heatmap"  className="mt-4"><TabHeatmap plate={plate} /></TabsContent>
-            <TabsContent value="cameras"  className="mt-4"><TabCameras plate={plate} /></TabsContent>
           </Tabs>
         )}
       </SheetContent>
@@ -1486,92 +1482,6 @@ function DedupRow({ s, onAccept, onReject }) {
   );
 }
 
-function TabGallery({ plate }) {
-  const { t } = useApp();
-  const [items, setItems] = useState([]);
-  const [offset, setOffset] = useState(0);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const loadMore = useCallback(async (o = 0, replace = false) => {
-    setLoading(true);
-    try {
-      const { data } = await api.get(`/vehicles/${encodeURIComponent(plate)}/passages`, {
-        params: { limit: 24, offset: o },
-      });
-      setTotal(data.total || 0);
-      setItems((prev) => replace ? data.items : [...prev, ...data.items]);
-      setOffset(o + (data.items?.length || 0));
-    } finally { setLoading(false); }
-  }, [plate]);
-  useEffect(() => { loadMore(0, true); }, [loadMore]);
-
-  return (
-    <div className="space-y-3" data-testid="drawer-gallery">
-      <div className="text-xs text-muted-foreground mono">{items.length} / {total} captures</div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-        {items.map((p) => (
-          <div key={p.id}
-               className="relative block bg-secondary/40 border border-border hover:border-[#0044FF] transition-colors"
-               data-testid={`gallery-${p.id}`}>
-            {/* v0.7.e · Wave E · 3 crops préservés : photo complète (lien),
-                crop véhicule (miniature principale), crop plaque (bandeau bas). */}
-            <a href={passageThumbUrl(p.id, "frame")}
-               target="_blank" rel="noreferrer"
-               className="block relative"
-               data-testid={`gallery-frame-link-${p.id}`}
-               title={t("veh.view_full_photo")}>
-              <img
-                src={passageThumbUrl(p.id, "vehicle")}
-                alt=""
-                loading="lazy"
-                className="w-full h-24 object-cover"
-                data-testid={`gallery-vehicle-thumb-${p.id}`}
-                onError={(e) => { e.target.style.display = "none"; }}
-              />
-              <span className="absolute top-1 right-1 px-1.5 py-0.5 text-[8px] mono uppercase tracking-wider bg-black/60 text-white border border-white/20">
-                Full →
-              </span>
-            </a>
-            {/* Bandeau crop plaque (petit ruban 100% × 20px) — le vrai crop
-                de plaque optimisé par le gate qualité v0.7.e Wave C. */}
-            <a href={passageThumbUrl(p.id, "plate")}
-               target="_blank" rel="noreferrer"
-               className="block bg-black border-t border-border"
-               data-testid={`gallery-plate-link-${p.id}`}
-               title="Voir le crop plaque HD">
-              <img
-                src={passageThumbUrl(p.id, "plate")}
-                alt=""
-                loading="lazy"
-                className="w-full h-8 object-contain bg-black"
-                data-testid={`gallery-plate-thumb-${p.id}`}
-                onError={(e) => { e.target.style.display = "none"; }}
-              />
-            </a>
-            <div className="p-1 text-[9px] mono text-muted-foreground">
-              <div className="truncate">{fmtDateTime(p.timestamp)}</div>
-              <div className="flex items-center justify-between">
-                <span className="truncate">{p.camera_name}</span>
-                <span style={{ color: p.confidence > 0.9 ? "#00E676" : "#FFB800" }}>{(p.confidence * 100).toFixed(0)}%</span>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-      {items.length < total && (
-        <button
-          onClick={() => loadMore(offset)}
-          disabled={loading}
-          className="w-full px-4 py-2 border border-border text-sm hover:bg-secondary flex items-center justify-center gap-2"
-          data-testid="load-more-gallery"
-        >
-          {loading ? <Loader2 size={14} className="animate-spin" /> : "Charger plus"}
-        </button>
-      )}
-    </div>
-  );
-}
-
 // v3.40 · Demande explicite : au survol de la miniature de passage, afficher
 // la photo en grand (suit la souris, jamais coupée par le conteneur qui
 // défile — position fixed) ; au clic, l'ouvrir plein écran.
@@ -1608,12 +1518,51 @@ function PassageThumb({ passageId, alt }) {
   );
 }
 
+// v3.41 · Demande explicite : les données de l'ex-onglet "Caméras"
+// (passages/dernier/premier par caméra) fusionnées ici, affichées au survol
+// du nom de caméra d'un item de la timeline — pas cliquable, pas un onglet
+// séparé. Réutilise le même mécanisme "fixed + suit la souris" que
+// PassageThumb ci-dessus pour rester cohérent visuellement.
+function CameraHoverStat({ camera_id, camera_name, statsByCamera }) {
+  const [hoverPos, setHoverPos] = useState(null);
+  const stat = statsByCamera.get(camera_id);
+  return (
+    <>
+      <span
+        className="text-muted-foreground truncate flex-1 cursor-default"
+        onMouseMove={(e) => setHoverPos({ x: e.clientX, y: e.clientY })}
+        onMouseLeave={() => setHoverPos(null)}
+        data-testid="timeline-camera-name"
+      >
+        {camera_name}
+      </span>
+      {hoverPos && stat && (
+        <div className="fixed z-[60] pointer-events-none border border-border bg-card shadow-xl p-2 text-[10px] mono space-y-0.5"
+             style={{
+               left: Math.min(hoverPos.x + 16, window.innerWidth - 260),
+               top: Math.min(hoverPos.y + 16, window.innerHeight - 90),
+             }}>
+          <div className="flex items-center gap-1 text-foreground font-medium"><CameraIcon size={11} className="text-[#0044FF]" /> {camera_name}</div>
+          <div>{stat.count} passage{stat.count > 1 ? "s" : ""}</div>
+          <div className="text-muted-foreground">Dernier : {fmtDateTime(stat.last_seen)}</div>
+          <div className="text-muted-foreground">Premier : {fmtDateTime(stat.first_seen)}</div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function TabTimeline({ plate }) {
   const [items, setItems] = useState([]);
+  const [cameras, setCameras] = useState([]);
   useEffect(() => {
     api.get(`/vehicles/${encodeURIComponent(plate)}/passages`, { params: { limit: 200 } })
        .then(({ data }) => setItems(data.items || []));
+    api.get(`/vehicles/${encodeURIComponent(plate)}/cameras`)
+       .then(({ data }) => setCameras(data.items || []));
   }, [plate]);
+
+  const statsByCamera = useMemo(() => new Map(cameras.map((c) => [c.camera_id, c])), [cameras]);
 
   const groups = useMemo(() => {
     const out = new Map();
@@ -1636,7 +1585,7 @@ function TabTimeline({ plate }) {
               <div key={p.id} className="flex items-center gap-3 text-xs" data-testid={`timeline-item-${p.id}`}>
                 <span className="mono text-[#0044FF] w-14">{new Date(p.timestamp).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span>
                 <PassageThumb passageId={p.id} alt={p.camera_name} />
-                <span className="text-muted-foreground truncate flex-1">{p.camera_name}</span>
+                <CameraHoverStat camera_id={p.camera_id} camera_name={p.camera_name} statsByCamera={statsByCamera} />
                 <span className="mono" style={{ color: p.confidence > 0.9 ? "#00E676" : "#FFB800" }}>{(p.confidence * 100).toFixed(0)}%</span>
               </div>
             ))}
@@ -1692,33 +1641,6 @@ function TabHeatmap({ plate }) {
           ))}
         </div>
       </div>
-    </div>
-  );
-}
-
-function TabCameras({ plate }) {
-  const { t } = useApp();
-  const [items, setItems] = useState([]);
-  useEffect(() => {
-    api.get(`/vehicles/${encodeURIComponent(plate)}/cameras`).then(({ data }) => setItems(data.items || []));
-  }, [plate]);
-  return (
-    <div className="space-y-2" data-testid="drawer-cameras">
-      {items.map((c) => (
-        <div key={c.camera_id} className="border border-border p-3" data-testid={`cam-${c.camera_id}`}>
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <CameraIcon size={14} className="text-[#0044FF]" />
-              <span className="text-sm truncate">{c.camera_name || c.camera_id}</span>
-            </div>
-            <span className="mono text-xs px-2 py-0.5 bg-secondary/60">{c.count} passages</span>
-          </div>
-          <div className="text-[10px] text-muted-foreground mt-1 mono">
-            Dernier : {fmtDateTime(c.last_seen)} · Premier : {fmtDateTime(c.first_seen)}
-          </div>
-        </div>
-      ))}
-      {items.length === 0 && <div className="text-xs text-muted-foreground">{t("veh.no_camera")}</div>}
     </div>
   );
 }
