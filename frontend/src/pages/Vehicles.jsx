@@ -1612,6 +1612,42 @@ function TabGallery({ plate }) {
   );
 }
 
+// v3.40 · Demande explicite : au survol de la miniature de passage, afficher
+// la photo en grand (suit la souris, jamais coupée par le conteneur qui
+// défile — position fixed) ; au clic, l'ouvrir plein écran.
+function PassageThumb({ passageId, alt }) {
+  const [hoverPos, setHoverPos] = useState(null);
+  const [fullOpen, setFullOpen] = useState(false);
+  const url = passageThumbUrl(passageId, "vehicle");
+  if (!url) return <div className="w-10 h-10 bg-secondary border border-border shrink-0" />;
+  return (
+    <>
+      <img src={url} alt={alt} loading="lazy"
+           className="w-10 h-10 object-cover border border-border shrink-0 cursor-pointer"
+           onError={(e) => { e.target.style.display = "none"; }}
+           onMouseMove={(e) => setHoverPos({ x: e.clientX, y: e.clientY })}
+           onMouseLeave={() => setHoverPos(null)}
+           onClick={() => setFullOpen(true)}
+           data-testid={`passage-thumb-${passageId}`} />
+      {hoverPos && (
+        <div className="fixed z-[60] pointer-events-none border-2 border-[#0044FF] bg-black shadow-xl"
+             style={{
+               left: Math.min(hoverPos.x + 16, window.innerWidth - 340),
+               top: Math.min(hoverPos.y + 16, window.innerHeight - 260),
+             }}>
+          <img src={url} alt="" className="max-w-[320px] max-h-[240px] object-contain" />
+        </div>
+      )}
+      {fullOpen && (
+        <div className="fixed inset-0 z-[70] bg-black/90 flex items-center justify-center p-8"
+             onClick={() => setFullOpen(false)} data-testid="passage-thumb-fullscreen">
+          <img src={url} alt="" className="max-w-full max-h-full object-contain" />
+        </div>
+      )}
+    </>
+  );
+}
+
 function TabTimeline({ plate }) {
   const [items, setItems] = useState([]);
   useEffect(() => {
@@ -1639,9 +1675,7 @@ function TabTimeline({ plate }) {
             {rows.map((p) => (
               <div key={p.id} className="flex items-center gap-3 text-xs" data-testid={`timeline-item-${p.id}`}>
                 <span className="mono text-[#0044FF] w-14">{new Date(p.timestamp).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span>
-                <img src={passageThumbUrl(p.id, "vehicle")} alt="" loading="lazy"
-                     className="w-10 h-10 object-cover border border-border"
-                     onError={(e) => { e.target.style.display = "none"; }} />
+                <PassageThumb passageId={p.id} alt={p.camera_name} />
                 <span className="text-muted-foreground truncate flex-1">{p.camera_name}</span>
                 <span className="mono" style={{ color: p.confidence > 0.9 ? "#00E676" : "#FFB800" }}>{(p.confidence * 100).toFixed(0)}%</span>
               </div>
