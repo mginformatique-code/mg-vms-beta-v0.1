@@ -132,6 +132,17 @@ async def _build_snapshot() -> dict:
     snap["gpu_summary"] = gpu_summary()
     snap["gpu_full_info"] = gpu_full_info()
 
+    # v3.34 · Investigation tracking "par saccades" (04/09) : batch_infer.py
+    # regroupe les images de plusieurs caméras en un seul appel GPU (voir son
+    # docstring) — mais aucun point de mesure n'existait sur le processus
+    # RÉEL pour confirmer que ça se produit vraiment à 14 caméras (un test
+    # via `docker exec` instancie un singleton neuf, vide, pas le vrai état).
+    try:
+        from pipeline_v2.batch_infer import batch_inference
+        snap["batch_infer_stats"] = batch_inference.stats()
+    except Exception:
+        snap["batch_infer_stats"] = None
+
     # Seuils qualité crop plaque : constantes de module jamais réassignées
     # à l'exécution (vérifié dans pipeline_v2/plate_quality.py) — leur
     # valeur COURANTE suffit, pas besoin de re-résoudre le module à chaque
