@@ -155,12 +155,12 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
           <div className="text-center"><CamIcon size={24} className="mx-auto text-white/30 mb-1" /><span className="text-[10px] uppercase tracking-wider text-white/30">—</span></div>
         </div>
       )}
-      {/* v3.37 · Bandeaux (haut/bas) passés du dégradé (from-black/70 to-transparent,
-          quasi invisible côté bord de tuile) à un fond plein — demande explicite
-          "tous les textes à l'écran soient opaques", illisibles sur fond clair
-          (trottoir, façade) sur la capture fournie. */}
-      <div className="absolute top-0 inset-x-0 flex items-center justify-between px-2 py-1 bg-black/70">
-        <span className="text-[10px] mono text-white truncate">{cam?.name || `CAM-${idx + 1}`}</span>
+      {/* v3.38 · Retour au dégradé (revert de v3.37) — le fond plein rendait
+          un bandeau jugé moins bon visuellement une fois vu en vrai
+          ("pas ouf"), signalé avec capture. Nom caméra retiré d'ici : il
+          fait doublon avec celui ajouté au bandeau du bas (à côté du site,
+          v3.36) — un seul affichage, en bas. */}
+      <div className="absolute top-0 inset-x-0 flex items-center justify-end px-2 py-1 bg-gradient-to-b from-black/70 to-transparent">
         <div className="flex items-center gap-1.5">
           {online && cam?.detect_enabled && showOverlay && totalDetected > 0 && (
             <span className="text-[9px] mono px-1.5 py-0.5 bg-black/70 text-white" data-testid="feed-ai-counter">
@@ -184,10 +184,12 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
           </div>
         </div>
       )}
-      <div className="absolute bottom-0 inset-x-0 px-2 py-1 bg-black/70">
+      {/* v3.38 · Retour au dégradé (revert de v3.37, "pas ouf" en vrai). */}
+      <div className="absolute bottom-0 inset-x-0 px-2 py-1 bg-gradient-to-t from-black/70 to-transparent">
         {/* v3.36 · Nom caméra ajouté à côté du site (demande explicite) —
             le nom de site seul ne dit pas quelle caméra c'est sur une
-            petite tuile où l'en-tête peut être tronqué.
+            petite tuile où l'en-tête peut être tronqué. Seul affichage du
+            nom caméra désormais (retiré du bandeau du haut, v3.38).
             v3.37 · Heure retirée d'ici, déplacée dans le bandeau du haut
             (demande explicite) — ce bandeau ne porte plus que site+caméra. */}
         <span className="text-[9px] mono text-white/70 truncate">
