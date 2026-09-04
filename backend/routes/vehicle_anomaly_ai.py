@@ -52,8 +52,19 @@ _BATCH_INTERVAL_HOURS = 6
 
 # Convoi : deux plaques vues à quelques minutes d'écart sur la même caméra,
 # de façon répétée — un seul croisement est une coïncidence, pas un motif.
-_CONVOY_WINDOW_SEC = 180
-_CONVOY_MIN_OCCURRENCES = 3
+# v3.44.1 · Vérifié sur données réelles : la 1ère version (fenêtre 180s,
+# 3 occurrences) rapportait 4482 "convois" — quasi tous des paires de
+# plaques textuellement PRESQUE IDENTIQUES (ex. "CG633SE"/"CG6335E",
+# "F43384"/"F45334") : le même véhicule mal lu deux fois par l'ANPR à
+# quelques secondes d'écart, pas deux véhicules distincts. Fenêtre
+# resserrée à 30s (déplacement physique conjoint, pas une simple
+# corrélation d'horaires de trajet) + seuil relevé à 5 occurrences +
+# exclusion des paires à distance d'édition faible (même filtre que
+# vehicle_dedup.py, la variante OCR d'UN véhicule n'est jamais un convoi).
+_CONVOY_WINDOW_SEC = 30
+_CONVOY_MIN_OCCURRENCES = 5
+_CONVOY_OCR_EXCLUDE_DISTANCE = 3
+_CONVOY_MAX_PLATE_FREQUENCY = 100
 
 # Vague : nombre de véhicules distincts sur une caméra dans une fenêtre de
 # 15 min, comparé à la médiane historique de CETTE caméra sur des fenêtres
@@ -103,9 +114,26 @@ def _detect_convoys(rows: list[dict]) -> list[dict]:
     OCCURRENCES DISTINCTES d'une paire (pas juste sa présence), et
     déduplique les lectures multiples d'un même croisement (plusieurs
     passages ANPR à quelques secondes d'écart pour le même événement réel)
-    en un seul "occurrence" par tranche de _CONVOY_WINDOW_SEC."""
+    en un seul "occurrence" par tranche de _CONVOY_WINDOW_SEC.
+
+    v3.44.1 · 2e correctif vérifié sur données réelles : une plaque à très
+    forte fréquence de lecture (ex. AA2307JA, 667 lectures sur la fenêtre —
+    plaque de test/démo utilisée pendant les vérifications de cette même
+    session) co-occurrait "par hasard" avec des dizaines de plaques
+    différentes en 30s, juste par densité de trafic sur sa caméra — pas un
+    vrai déplacement conjoint. Exclut les plaques dont le total de lectures
+    dépasse _CONVOY_MAX_PLATE_FREQUENCY : au-delà, la co-occurrence n'est
+    plus un signal fiable de "voyagent ensemble" avec une simple compte
+    d'occurrences (nécessiterait de normaliser par le taux de base, hors
+    scope de ce 1er passage)."""
+    from routes.vehicles import _levenshtein
+    plate_freq: dict[str, int] = defaultdict(int)
+    for r in rows:
+        plate_freq[r["plate"]] += 1
     pair_events: dict[tuple, list[float]] = defaultdict(list)
     for i, r1 in enumerate(rows):
+        if plate_freq[r1["plate"]] > _CONVOY_MAX_PLATE_FREQUENCY:
+            continue
         t1 = _iso_to_dt(r1.get("timestamp"))
         if t1 is None:
             continue
@@ -116,6 +144,15 @@ def _detect_convoys(rows: list[dict]) -> list[dict]:
             if t2 is None or (t2 - t1).total_seconds() > _CONVOY_WINDOW_SEC:
                 break
             if r1["plate"] == r2["plate"]:
+                continue
+            if plate_freq[r2["plate"]] > _CONVOY_MAX_PLATE_FREQUENCY:
+                continue
+            # v3.44.1 · Exclut les paires textuellement quasi identiques —
+            # presque toujours LE MÊME véhicule mal lu deux fois par
+            # l'ANPR à quelques secondes d'écart, pas deux véhicules
+            # distincts voyageant ensemble (voir commentaire des constantes).
+            if abs(len(r1["plate"]) - len(r2["plate"])) <= _CONVOY_OCR_EXCLUDE_DISTANCE and \
+                    _levenshtein(r1["plate"], r2["plate"]) <= _CONVOY_OCR_EXCLUDE_DISTANCE:
                 continue
             key = (r1["camera_id"], tuple(sorted((r1["plate"], r2["plate"]))))
             pair_events[key].append(t1.timestamp())
@@ -211,8 +248,13 @@ async def _ask_qwen_narrate(kind: str, facts: dict) -> dict:
         "fournis), jamais une reformulation générique du type \"comportement inhabituel "
         "détecté\". Aucun texte hors JSON."
     )
-    prompts = {
-        "per_vehicle": (
+    # v3.44.1 · Un dict littéral {"kind": f"...{facts[...]}"} évalue TOUS les
+    # f-strings immédiatement, y compris ceux des `kind` non sélectionnés —
+    # crash garanti sur une clé absente d'un autre kind (ex. `facts['plate']`
+    # du prompt per_vehicle évalué même en appelant avec kind="convoy").
+    # if/elif : un seul prompt construit, celui réellement demandé.
+    if kind == "per_vehicle":
+        prompt = (
             f"Véhicule {facts['plate']} — habitudes observées sur son historique réel : "
             f"arrivée typique {facts.get('typical_arrival') or 'inconnue'}, départ typique "
             f"{facts.get('typical_departure') or 'inconnu'}, jours habituels "
@@ -221,16 +263,18 @@ async def _ask_qwen_narrate(kind: str, facts: dict) -> dict:
             f"Anomalies détectées par les règles : {', '.join(facts['anomalies'])}. "
             "Explique en une phrase concrète pourquoi ce passage sort de l'ordinaire pour "
             "CE véhicule précis, en citant les horaires/jours réels."
-        ),
-        "convoy": (
+        )
+    elif kind == "convoy":
+        prompt = (
             f"Les plaques {facts['plates'][0]} et {facts['plates'][1]} ont été vues ensemble "
             f"(à moins de {_CONVOY_WINDOW_SEC}s d'écart) sur la caméra "
             f"{facts.get('camera_name') or facts.get('camera_id')} à {facts['occurrences']} reprises "
             f"distinctes entre le {facts['first_seen']} et le {facts['last_seen']}. "
             "Explique en une phrase concrète ce motif de déplacement répété conjoint, "
             "en citant le nombre de fois et la caméra."
-        ),
-        "wave": (
+        )
+    elif kind == "wave":
+        prompt = (
             f"La caméra {facts.get('camera_name') or facts.get('camera_id')} a vu "
             f"{facts['distinct_count']} véhicules DIFFÉRENTS en {facts['slot_minutes']} minutes "
             f"à partir de {facts['slot_start']}, alors que cette même caméra n'en voit "
@@ -238,8 +282,9 @@ async def _ask_qwen_narrate(kind: str, facts: dict) -> dict:
             f"(médiane calculée sur son propre historique). Plaques concernées : "
             f"{', '.join(facts['plates'])}. Explique en une phrase concrète pourquoi ce "
             "pic de trafic sort de l'ordinaire pour CETTE caméra précise, en citant les chiffres."
-        ),
-    }
+        )
+    else:
+        raise ValueError(f"kind inconnu: {kind}")
     headers = {"Content-Type": "application/json"}
     if cfg.get("api_key"):
         headers["Authorization"] = f"Bearer {cfg['api_key']}"
@@ -247,7 +292,7 @@ async def _ask_qwen_narrate(kind: str, facts: dict) -> dict:
         "model": cfg["model"],
         "messages": [
             {"role": "system", "content": system},
-            {"role": "user", "content": prompts[kind]},
+            {"role": "user", "content": prompt},
         ],
         "think": False,
         "format": schema,
