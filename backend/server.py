@@ -54,7 +54,7 @@ from routes.discovery import discovery_router
 from routes.system_admin import system_admin_router, auto_reboot_loop, ntp_resync_loop
 from routes.console_ssh import console_router
 from routes.live_layout import live_layout_router
-from routes.vehicle_dedup import vehicle_dedup_router, dedup_batch_loop
+from routes.vehicle_dedup import vehicle_dedup_router, dedup_batch_loop, dedup_auto_approve_loop
 from routes.anpr_tuning import anpr_tuning_router, anpr_tuning_loop
 from wsdl_path import validate_wsdl_dir
 
@@ -262,6 +262,7 @@ async def on_startup():
         asyncio.create_task(auto_reboot_loop())
         asyncio.create_task(ntp_resync_loop())
         asyncio.create_task(dedup_batch_loop())
+        asyncio.create_task(dedup_auto_approve_loop())
         asyncio.create_task(anpr_tuning_loop())
     logger.info("MG-VMS API démarré (rôle=%s) - données initialisées + broadcaster temps réel actif", role)
     # v3.1.7 · SUPPRIMÉ : l'auto-start `VideoCoreManager.ensure_camera()` pour

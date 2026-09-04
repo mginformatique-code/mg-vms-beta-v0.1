@@ -39,6 +39,13 @@ class LlmConfigIn(BaseModel):
     # nécessitant en plus que `enabled` (la connexion elle-même) le soit.
     dedup_enabled: bool = False
     anpr_tuning_enabled: bool = False
+    # v3.26 · Auto-approbation des suggestions de dédoublonnage — demande
+    # explicite : approuver automatiquement TOUTES les suggestions en
+    # attente à intervalle régulier (30min/1h/etc), sans validation
+    # manuelle. N'a d'effet que si `dedup_enabled` l'est aussi (voir
+    # vehicle_dedup.py::dedup_auto_approve_loop).
+    dedup_auto_approve_enabled: bool = False
+    dedup_auto_approve_interval_min: int = 60
 
 
 async def _load_raw() -> dict:
@@ -57,6 +64,8 @@ def _mask(v: dict) -> dict:
         "has_api_key": bool(v.get("api_key")),
         "dedup_enabled": bool(v.get("dedup_enabled", False)),
         "anpr_tuning_enabled": bool(v.get("anpr_tuning_enabled", False)),
+        "dedup_auto_approve_enabled": bool(v.get("dedup_auto_approve_enabled", False)),
+        "dedup_auto_approve_interval_min": int(v.get("dedup_auto_approve_interval_min") or 60),
     }
 
 
@@ -78,6 +87,11 @@ async def put_llm_config(data: LlmConfigIn, user: dict = Depends(require_role("a
         "api_key": api_key_enc,
         "dedup_enabled": data.dedup_enabled,
         "anpr_tuning_enabled": data.anpr_tuning_enabled,
+        "dedup_auto_approve_enabled": data.dedup_auto_approve_enabled,
+        # Garde-fou : jamais en dessous de 5 min, quel que soit ce qui est
+        # envoyé (un intervalle trop court transformerait la boucle de poll
+        # en quasi-temps réel, aucun cas d'usage légitime).
+        "dedup_auto_approve_interval_min": max(5, int(data.dedup_auto_approve_interval_min or 60)),
     }
     await db.settings.update_one({"key": "llm_config"}, {"$set": {"key": "llm_config", "value": value}}, upsert=True)
     await log_audit(user, "llm_config_updated", value["base_url"])
@@ -90,6 +104,18 @@ async def is_feature_enabled(feature: str) -> bool:
     globale ET l'interrupteur dédié à la fonctionnalité, tous les deux actifs."""
     v = await _load_raw()
     return bool(v.get("enabled")) and bool(v.get(feature))
+
+
+async def get_dedup_auto_approve_settings() -> dict:
+    """Utilisé par vehicle_dedup.py::dedup_auto_approve_loop. Ne vérifie PAS
+    `dedup_enabled`/`enabled` ici — reste la responsabilité de l'appelant
+    (même convention que is_feature_enabled, qui les vérifie déjà pour la
+    génération des suggestions elles-mêmes)."""
+    v = await _load_raw()
+    return {
+        "enabled": bool(v.get("dedup_auto_approve_enabled", False)),
+        "interval_min": max(5, int(v.get("dedup_auto_approve_interval_min") or 60)),
+    }
 
 
 async def get_active_llm_config() -> Optional[dict]:

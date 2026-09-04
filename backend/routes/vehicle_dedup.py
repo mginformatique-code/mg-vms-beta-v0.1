@@ -475,36 +475,129 @@ class SuggestionDecision(BaseModel):
     name: str = ""
 
 
+async def _accept_suggestion_doc(sugg: dict, name: str, reviewed_by: str) -> dict:
+    """Cœur de l'acceptation d'une suggestion — factorisé pour être appelé
+    aussi bien depuis l'endpoint manuel (accept_suggestion) que depuis la
+    boucle d'auto-approbation (dedup_auto_approve_loop), qui doivent créer
+    exactement le même type de document `vehicle_identities`."""
+    now = datetime.now(timezone.utc).isoformat()
+    plates = sorted({sugg["plate_a"], sugg["plate_b"]})
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": (name or plates[0]).strip(),
+        "plates": plates,
+        "vehicle_make": sugg["stats_a"].get("make") or sugg["stats_b"].get("make"),
+        "vehicle_color": sugg["stats_a"].get("color") or sugg["stats_b"].get("color"),
+        "vehicle_type": sugg["stats_a"].get("type") or sugg["stats_b"].get("type"),
+        "notes": f"Fusion suggérée par Qwen ({sugg.get('reason', '')[:200]})",
+        "created_by": reviewed_by,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.vehicle_identities.insert_one(doc.copy())
+    await db.dedup_suggestions.update_one(
+        {"id": sugg["id"]},
+        {"$set": {"status": "accepted", "reviewed_by": reviewed_by, "reviewed_at": now}},
+    )
+    from routes.vehicles import _list_cache
+    _list_cache.clear()
+    doc.pop("_id", None)
+    return doc
+
+
 @vehicle_dedup_router.post("/suggestions/{suggestion_id}/accept")
 async def accept_suggestion(suggestion_id: str, body: SuggestionDecision = SuggestionDecision(),
                              user: dict = Depends(require_permission("read_plates"))):
     sugg = await db.dedup_suggestions.find_one({"id": suggestion_id}, {"_id": 0})
     if not sugg:
         raise HTTPException(404, "Suggestion introuvable")
-    now = datetime.now(timezone.utc).isoformat()
-    plates = sorted({sugg["plate_a"], sugg["plate_b"]})
-    doc = {
-        "id": str(uuid.uuid4()),
-        "name": (body.name or plates[0]).strip(),
-        "plates": plates,
-        "vehicle_make": sugg["stats_a"].get("make") or sugg["stats_b"].get("make"),
-        "vehicle_color": sugg["stats_a"].get("color") or sugg["stats_b"].get("color"),
-        "vehicle_type": sugg["stats_a"].get("type") or sugg["stats_b"].get("type"),
-        "notes": f"Fusion suggérée par Qwen ({sugg.get('reason', '')[:200]})",
-        "created_by": user.get("email"),
-        "created_at": now,
-        "updated_at": now,
-    }
-    await db.vehicle_identities.insert_one(doc.copy())
-    await db.dedup_suggestions.update_one(
-        {"id": suggestion_id},
-        {"$set": {"status": "accepted", "reviewed_by": user.get("email"), "reviewed_at": now}},
-    )
-    from routes.vehicles import _list_cache
-    _list_cache.clear()
-    await log_audit(user, "vehicle_dedup_accepted", f"{plates[0]} + {plates[1]}")
-    doc.pop("_id", None)
+    doc = await _accept_suggestion_doc(sugg, body.name, user.get("email"))
+    await log_audit(user, "vehicle_dedup_accepted", f"{doc['plates'][0]} + {doc['plates'][1]}")
     return doc
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Auto-approbation périodique — demande explicite (04/09) : approuver
+# automatiquement TOUTES les suggestions en attente à intervalle
+# régulier (30min/1h/etc, réglable Administration → LLM), sans
+# validation manuelle. Interrupteur dédié + intervalle stockés dans
+# llm_config (routes/llm_settings.py) — n'a d'effet que si
+# `dedup_enabled` (génération des suggestions) l'est aussi.
+# ═══════════════════════════════════════════════════════════════════
+_AUTO_APPROVE_POLL_S = 60
+_AUTO_APPROVE_ACTOR = "Auto-approbation (IA)"
+
+
+async def _run_auto_approve() -> int:
+    pending = await db.dedup_suggestions.find({"status": "pending"}, {"_id": 0}).to_list(1000)
+    n = 0
+    for sugg in pending:
+        try:
+            await _accept_suggestion_doc(sugg, "", _AUTO_APPROVE_ACTOR)
+            n += 1
+        except Exception:
+            logger.exception("vehicle_dedup: auto-approve — échec sur suggestion %s", sugg.get("id"))
+    return n
+
+
+async def _maybe_auto_approve() -> None:
+    from routes.llm_settings import is_feature_enabled, get_dedup_auto_approve_settings
+    if not await is_feature_enabled("dedup_enabled"):
+        return
+    cfg = await get_dedup_auto_approve_settings()
+    if not cfg["enabled"]:
+        return
+    state = (await db.settings.find_one({"key": "dedup_auto_approve_state"}, {"_id": 0}) or {}).get("value") or {}
+    last_run = _iso_to_ts(state.get("last_run_at"))
+    if last_run is not None and (datetime.now(timezone.utc).timestamp() - last_run) < cfg["interval_min"] * 60:
+        return
+    n = await _run_auto_approve()
+    await db.settings.update_one(
+        {"key": "dedup_auto_approve_state"},
+        {"$set": {"key": "dedup_auto_approve_state",
+                   "value": {"last_run_at": datetime.now(timezone.utc).isoformat(), "approved_count": n}}},
+        upsert=True,
+    )
+    if n:
+        logger.info("vehicle_dedup: auto-approve — %d suggestion(s) approuvée(s) automatiquement", n)
+
+
+async def dedup_auto_approve_loop() -> None:
+    """Poll court (1 min) plutôt qu'un sleep(interval) : un changement
+    d'intervalle depuis Administration → LLM prend effet au prochain poll,
+    pas seulement après un redémarrage du conteneur. L'heure du dernier
+    passage est persistée en base (dedup_auto_approve_state), pas en
+    mémoire — un redémarrage ne redéclenche pas une approbation immédiate
+    si l'intervalle n'est pas encore écoulé."""
+    await asyncio.sleep(60)
+    while True:
+        try:
+            await _maybe_auto_approve()
+        except Exception:
+            logger.exception("vehicle_dedup: erreur boucle dedup_auto_approve_loop")
+        await asyncio.sleep(_AUTO_APPROVE_POLL_S)
+
+
+@vehicle_dedup_router.get("/auto-approve/status")
+async def auto_approve_status(user: dict = Depends(require_permission("read_plates"))):
+    from routes.llm_settings import get_dedup_auto_approve_settings
+    cfg = await get_dedup_auto_approve_settings()
+    state = (await db.settings.find_one({"key": "dedup_auto_approve_state"}, {"_id": 0}) or {}).get("value") or {}
+    last_run = state.get("last_run_at")
+    next_run = None
+    if cfg["enabled"] and last_run:
+        ts = _iso_to_ts(last_run)
+        if ts is not None:
+            next_run = datetime.fromtimestamp(ts + cfg["interval_min"] * 60, tz=timezone.utc).isoformat()
+    pending_count = await db.dedup_suggestions.count_documents({"status": "pending"})
+    return {
+        "enabled": cfg["enabled"],
+        "interval_min": cfg["interval_min"],
+        "last_run_at": last_run,
+        "last_approved_count": state.get("approved_count"),
+        "next_run_at": next_run,
+        "pending_count": pending_count,
+    }
 
 
 @vehicle_dedup_router.post("/suggestions/{suggestion_id}/reject")

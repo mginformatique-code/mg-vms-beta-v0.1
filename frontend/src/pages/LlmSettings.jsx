@@ -12,16 +12,44 @@ import { toast } from "sonner";
  * déploiement client simple : une URL, une clé API, un switch, pas
  * d'édition manuelle de fichier .env par site. Voir backend/routes/llm_settings.py.
  */
-const empty = { enabled: false, base_url: "https://ia.mginformatique.com", model: "qwen2.5", api_key: "", has_api_key: false, dedup_enabled: false, anpr_tuning_enabled: false };
+const empty = {
+  enabled: false, base_url: "https://ia.mginformatique.com", model: "qwen2.5", api_key: "", has_api_key: false,
+  dedup_enabled: false, anpr_tuning_enabled: false,
+  dedup_auto_approve_enabled: false, dedup_auto_approve_interval_min: 60,
+};
 
 const Inp = (p) => <input {...p} className="w-full px-3 py-2 bg-card border border-input outline-none text-sm focus:border-[#0044FF]" />;
+const Sel = (p) => <select {...p} className="px-2 py-1.5 bg-card border border-input outline-none text-xs focus:border-[#0044FF]" />;
 const Lbl = ({ children }) => <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{children}</label>;
+
+const AUTO_APPROVE_INTERVALS = [
+  { value: 30, label: "30 minutes" },
+  { value: 60, label: "1 heure" },
+  { value: 120, label: "2 heures" },
+  { value: 360, label: "6 heures" },
+  { value: 1440, label: "24 heures" },
+];
+
+function fmtDateTime(iso) {
+  if (!iso) return "—";
+  try { return new Date(iso).toLocaleString("fr-FR"); } catch { return iso; }
+}
 
 export default function LlmSettings() {
   const [cfg, setCfg] = useState(empty);
   const [saving, setSaving] = useState(false);
+  const [autoStatus, setAutoStatus] = useState(null);
 
-  useEffect(() => { api.get("/settings/llm").then((r) => setCfg({ ...empty, ...r.data })).catch(() => {}); }, []);
+  const loadAutoStatus = () => {
+    api.get("/vehicles/dedup/auto-approve/status").then((r) => setAutoStatus(r.data)).catch(() => {});
+  };
+
+  useEffect(() => {
+    api.get("/settings/llm").then((r) => setCfg({ ...empty, ...r.data })).catch(() => {});
+    loadAutoStatus();
+    const iv = setInterval(loadAutoStatus, 30000);
+    return () => clearInterval(iv);
+  }, []);
 
   const upd = (k, v) => setCfg((c) => ({ ...c, [k]: v }));
 
@@ -31,9 +59,12 @@ export default function LlmSettings() {
       const { data } = await api.put("/settings/llm", {
         enabled: cfg.enabled, base_url: cfg.base_url, model: cfg.model, api_key: cfg.api_key,
         dedup_enabled: cfg.dedup_enabled, anpr_tuning_enabled: cfg.anpr_tuning_enabled,
+        dedup_auto_approve_enabled: cfg.dedup_auto_approve_enabled,
+        dedup_auto_approve_interval_min: cfg.dedup_auto_approve_interval_min,
       });
       setCfg({ ...empty, ...data });
       toast.success("Configuration LLM enregistrée");
+      loadAutoStatus();
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); } finally { setSaving(false); }
   };
 
@@ -97,6 +128,35 @@ export default function LlmSettings() {
           </div>
           <Switch checked={cfg.dedup_enabled} onCheckedChange={(v) => upd("dedup_enabled", v)} data-testid="llm-dedup-toggle" />
         </div>
+
+        {cfg.dedup_enabled && (
+          <div className="py-2.5 border-b border-border pl-3 border-l-2 border-l-[#0044FF]/30 space-y-2" data-testid="llm-dedup-auto-approve-block">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm">Auto-approbation des suggestions</div>
+                <div className="text-[11px] text-muted-foreground">Approuve automatiquement TOUTES les suggestions en attente à l'intervalle choisi, sans validation manuelle — à utiliser avec prudence.</div>
+              </div>
+              <Switch checked={cfg.dedup_auto_approve_enabled} onCheckedChange={(v) => upd("dedup_auto_approve_enabled", v)} data-testid="llm-dedup-auto-approve-toggle" />
+            </div>
+            {cfg.dedup_auto_approve_enabled && (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground">Toutes les</span>
+                <Sel value={cfg.dedup_auto_approve_interval_min}
+                     onChange={(e) => upd("dedup_auto_approve_interval_min", Number(e.target.value))}
+                     data-testid="llm-dedup-auto-approve-interval">
+                  {AUTO_APPROVE_INTERVALS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </Sel>
+              </div>
+            )}
+            {autoStatus?.enabled && (
+              <div className="text-[10px] text-muted-foreground mono" data-testid="llm-dedup-auto-approve-status">
+                {autoStatus.pending_count} en attente · dernier passage : {fmtDateTime(autoStatus.last_run_at)}
+                {autoStatus.last_approved_count != null && ` (${autoStatus.last_approved_count} approuvée${autoStatus.last_approved_count > 1 ? "s" : ""})`}
+                {autoStatus.next_run_at && ` · prochain : ${fmtDateTime(autoStatus.next_run_at)}`}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex items-center justify-between py-2.5">
           <div>
