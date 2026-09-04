@@ -1211,6 +1211,13 @@ async def transcode_to_temp_mp4(path: str, start_sec: float = 0.0,
     caler le début du fichier généré sur l'instant précis d'un événement.
     L'appelant est responsable de supprimer le fichier retourné après usage
     (voir `BackgroundTask` dans la route qui consomme cette fonction).
+
+    v3.32 · Peut désormais être appelée depuis le conteneur `pipeline` (RPC,
+    voir pipeline_commands.py::transcode_recording) OU directement depuis
+    `backend` (repli historique). Le fichier temporaire est donc créé dans
+    `RECORDINGS_DIR/.transcode_tmp` — même volume monté identiquement dans
+    les deux conteneurs (voir docker-compose.yml) — et non plus dans le
+    tmpdir système du process, qui n'est PAS partagé entre conteneurs.
     """
     import tempfile
     use_gpu_decode = False
@@ -1244,7 +1251,9 @@ async def transcode_to_temp_mp4(path: str, start_sec: float = 0.0,
         pass
     use_gpu_encode = _ffmpeg_supports_nvenc_h264()
 
-    fd, out_path = tempfile.mkstemp(suffix=".mp4", prefix="mgvms_transcode_")
+    transcode_tmp_dir = os.path.join(os.environ.get("RECORDINGS_DIR", "/app/recordings"), ".transcode_tmp")
+    os.makedirs(transcode_tmp_dir, exist_ok=True)
+    fd, out_path = tempfile.mkstemp(suffix=".mp4", prefix="mgvms_transcode_", dir=transcode_tmp_dir)
     os.close(fd)
 
     def _build_cmd(gpu_encode: bool) -> list[str]:
@@ -1298,7 +1307,7 @@ async def transcode_to_temp_mp4(path: str, start_sec: float = 0.0,
             os.unlink(out_path)
         except OSError:
             pass
-        fd, out_path = tempfile.mkstemp(suffix=".mp4", prefix="mgvms_transcode_")
+        fd, out_path = tempfile.mkstemp(suffix=".mp4", prefix="mgvms_transcode_", dir=transcode_tmp_dir)
         os.close(fd)
         logger.warning("recording-transcode: encodage GPU échoué (rc=%s) %s — repli logiciel (libx264)",
                         rc, (stderr or b"")[:300].decode(errors="replace"))

@@ -2350,10 +2350,23 @@ async def recordings_media(recording_id: str, request: Request, t: float = 0):
     if not path or not os.path.exists(path):
         raise HTTPException(404, "Fichier vidéo introuvable")
     if await asyncio.to_thread(needs_transcode_for_browser, path):
-        try:
-            temp_path = await transcode_to_temp_mp4(path, start_sec=t)
-        except Exception:
-            raise HTTPException(502, "Transcodage HEVC→H264 échoué")
+        # v3.32 · Étape 2d séparation pipeline/API, catégorie (d) : RPC vers
+        # le pipeline (a le GPU — voir pipeline_commands.py::
+        # transcode_recording) plutôt qu'un transcodage local dans ce
+        # conteneur API, qui n'a aucun GPU depuis la scission (repli
+        # logiciel CPU systématique constaté en prod, pic CPU signalé par
+        # l'utilisateur pendant la relecture). Repli sur l'appel direct
+        # historique si Redis indisponible / le pipeline ne répond pas dans
+        # le timeout — comportement historique garanti inchangé (même
+        # principe que anpr_benchmark/analyze_image_local ci-dessus).
+        from redis_bus import send_pipeline_command
+        reply = await send_pipeline_command("transcode_recording", {"path": path, "start_sec": t}, timeout=60.0)
+        temp_path = reply.get("temp_path") if reply else None
+        if not temp_path:
+            try:
+                temp_path = await transcode_to_temp_mp4(path, start_sec=t)
+            except Exception:
+                raise HTTPException(502, "Transcodage HEVC→H264 échoué")
         return await range_file_response(temp_path, request, background=BackgroundTask(os.unlink, temp_path))
     return await range_file_response(path, request)
 

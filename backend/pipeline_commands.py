@@ -138,6 +138,27 @@ async def _handle_cmd(cmd: str, payload: dict) -> dict:
         # corps historique de l'endpoint).
         return await _run_anpr_benchmark(payload)
 
+    if cmd == "transcode_recording":
+        # v3.32 · Étape 2d, catégorie (d) — voir routers.py::recordings_media.
+        # Constaté en prod : GET /recordings/{id}/media (relecture d'un
+        # enregistrement HEVC) transcode HEVC→H264 via streaming.py::
+        # transcode_to_temp_mp4, mais cette route est servie exclusivement
+        # par le conteneur `backend`/API, qui n'a AUCUN GPU depuis la
+        # scission (voir le commentaire détaillé dans transcode_to_temp_mp4)
+        # → repli logiciel (libx264) systématique, pic CPU signalé par
+        # l'utilisateur à chaque relecture. Exécuté ici, ce conteneur a le
+        # vrai GPU (NVDEC+NVENC) → transcodage matériel effectif. Le fichier
+        # produit vit dans RECORDINGS_DIR/.transcode_tmp, volume partagé à
+        # l'identique avec `backend` (voir docker-compose.yml) — pas de
+        # transfert de données binaires par Redis, juste le chemin.
+        # Erreur (RuntimeError de transcode_to_temp_mp4) laissée remonter
+        # telle quelle : capturée par command_loop, qui répond déjà
+        # {"error": str(e)} — routers.py bascule alors sur son repli direct
+        # historique (comportement inchangé si le pipeline échoue aussi).
+        from streaming import transcode_to_temp_mp4
+        out_path = await transcode_to_temp_mp4(payload["path"], start_sec=payload.get("start_sec", 0.0))
+        return {"temp_path": out_path}
+
     raise ValueError(f"commande pipeline inconnue: {cmd!r}")
 
 
