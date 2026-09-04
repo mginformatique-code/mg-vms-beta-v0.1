@@ -764,7 +764,7 @@ def _ensure_frame_source_running(cam: dict) -> None:
 _last_log_ts: dict = {}
 
 
-async def _process_camera(cam: dict, frame=None) -> None:
+async def _process_camera(cam: dict, frame=None) -> bool:
     """Phase A : acquisition + CameraWorker (pipeline v2) + broadcast overlay.
 
     v3.14 · `frame` peut être fourni par l'appelant. La boucle par caméra
@@ -772,6 +772,10 @@ async def _process_camera(cam: dict, frame=None) -> None:
     la re-demander ici rouvrirait la porte à l'analyse d'une image périmée.
     Sans argument, le comportement historique (acquisition non bloquante) est
     conservé pour les autres appelants.
+
+    v3.36 · Retourne True si `_camera_loop` doit enchaîner immédiatement des
+    passages supplémentaires pour cette caméra (échantillonnage en rafale
+    sur mouvement) — False sinon, y compris sur toute sortie anticipée.
     """
     from pipeline_v2.camera_worker import runtime as _runtime
     from pipeline_v2.inspector import inspector as _inspector
@@ -787,7 +791,7 @@ async def _process_camera(cam: dict, frame=None) -> None:
         frame = await _fetch_frame(cam["id"])
     if frame is None:
         logger.debug("IA · %s (%s) : frame indisponible (skip iteration)", cam["name"], cam["id"])
-        return
+        return False
     t_fetch_ms = (time.perf_counter() - t_start) * 1000
     _inspector.record(cam["id"], "fetch", t_fetch_ms)
 
@@ -797,6 +801,24 @@ async def _process_camera(cam: dict, frame=None) -> None:
     dets = result.get("detections", [])
     plates = result.get("plates", [])
     tim = result.get("timings", {})
+
+    # v3.36 · Échantillonnage en rafale sur mouvement — réutilise EXACTEMENT
+    # le même signal que l'alerte "vive_allure" déjà en prod (motion_pct +
+    # véhicule détecté ce cycle), pas un nouveau seuil inventé. Purement
+    # informatif ici : ne modifie ni le résultat ni le comportement de ce
+    # cycle, seulement ce que _camera_loop fait APRÈS. Aucune conséquence
+    # si _get_scenario_rules() échoue (config indisponible) — pas de rafale,
+    # comportement historique.
+    burst_recommended = False
+    try:
+        _rules = await _get_scenario_rules()
+        _r = _rules.get("vive_allure") or {}
+        _vehicles_present = any(d.get("class") in VEHICLE_CLASSES for d in dets)
+        if _r.get("enabled") and _vehicles_present and \
+                result.get("motion_pct", 0.0) >= float(_r.get("motion_pct", 12.0)):
+            burst_recommended = True
+    except Exception:
+        pass
 
     # Broadcast overlay (léger, <5 ms)
     t_ws = time.perf_counter()
@@ -868,9 +890,12 @@ async def _process_camera(cam: dict, frame=None) -> None:
             "IA · %s : downstream saturé (%d en vol) — frame IA droppée pour préserver le live",
             cam["name"], inflight,
         )
-        return
+        # v3.36 · Jamais de rafale quand le système est déjà en backpressure
+        # — ce serait précisément le mauvais moment pour ajouter des passages.
+        return False
     _downstream_inflight[cam["id"]] = inflight + 1
     asyncio.create_task(_process_downstream(cam, frame, result))
+    return burst_recommended
 
 
 async def _process_downstream(cam: dict, frame, result: dict) -> None:
@@ -919,6 +944,16 @@ _camera_specs: dict = {}
 #: bloqué indéfiniment si le worker ffmpeg est en train de redémarrer.
 _FRAME_WAIT_TIMEOUT_S = 2.0
 
+#: v3.36 · Échantillonnage en rafale sur mouvement (voir _process_camera pour
+#: la condition de déclenchement). Nombre de passages IMMÉDIATS supplémentaires
+#: pour la caméra concernée quand un mouvement de véhicule est détecté —
+#: purement additif, chaque passage attend une VRAIE nouvelle image (jamais
+#: la même analysée deux fois). Timeout plus court que la cadence normale :
+#: si aucune image fraîche n'arrive vite, on arrête la rafale plutôt que de
+#: bloquer la boucle de cette caméra.
+_BURST_EXTRA_PASSES = 2
+_BURST_FRAME_TIMEOUT_S = 1.0
+
 #: Période du superviseur : relecture de la config et de la liste des caméras.
 #: 1 s suffit — l'analyse, elle, n'attend plus ce tour de boucle.
 _SUPERVISOR_PERIOD_S = 1.0
@@ -947,7 +982,31 @@ async def _camera_loop(camera_id: str) -> None:
         last_seq = seq
 
         try:
-            await _process_camera(cam, frame=frame)
+            burst = await _process_camera(cam, frame=frame)
+            if burst:
+                # v3.36 · Échantillonnage en rafale sur mouvement — voir
+                # _process_camera pour la condition (même signal que
+                # l'alerte "vive_allure" déjà en prod : motion_pct + véhicule
+                # détecté ce cycle). Preuve du besoin (audit tracking
+                # MG-VMS) : 7 événements Voiture sur 8 avec track_id=null au
+                # moment précis où cette même alerte se déclenche — un seul
+                # point de détection par passage rapide, ByteTrack ne peut
+                # JAMAIS confirmer de piste avec un seul point, quel que
+                # soit l'algorithme. Objectif : donner au moins un 2e point
+                # tout de suite, pendant que le véhicule est encore dans le
+                # champ, plutôt que d'attendre le prochain tour normal.
+                for _ in range(_BURST_EXTRA_PASSES):
+                    b_frame, b_seq = await wait_for_new_frame(
+                        camera_id, last_seq, timeout=_BURST_FRAME_TIMEOUT_S)
+                    if b_frame is None:
+                        break  # rien de frais rapidement — le véhicule est probablement déjà sorti du champ
+                    last_seq = b_seq
+                    try:
+                        await _process_camera(cam, frame=b_frame)
+                    except Exception:
+                        logger.exception("IA · %s : erreur pendant la rafale mouvement",
+                                         cam.get("name", camera_id))
+                        break
         except asyncio.CancelledError:
             raise
         except Exception as e:
