@@ -228,6 +228,62 @@ async def _merge_by_identity(groups: list[list[str]]) -> list[list[str]]:
     return list(merged.values())
 
 
+# v3.43 · Root cause du "j'ai validé la bonne plaque mais c'est pas à jour
+# visuellement" : la validation manuelle (bloc Consensus multi-plugins,
+# POST /vehicles/{plate}/validate, table `plate_validations`) n'était
+# consultée QUE par `vehicle_detail` (fiche d'UNE plaque), et seulement
+# pour réécrire le TITRE affiché — jamais pour regrouper les cartes de la
+# grille principale (contrairement à `vehicle_identities`, déjà branché
+# ci-dessus depuis v3.18), ni pour recalculer passages/caméras/timeline
+# d'une fiche. Une plaque validée comme variante restait donc sa propre
+# carte à part entière, avec son propre historique, partout ailleurs dans
+# l'appli. Même mécanique que _merge_by_identity, appliquée aux
+# validations Consensus.
+async def _merge_by_validation(groups: list[list[str]], validations: list[dict]) -> list[list[str]]:
+    if not validations:
+        return groups
+    plate_to_group: dict[str, int] = {}
+    for gi, group in enumerate(groups):
+        for p in group:
+            plate_to_group[p] = gi
+    uf = _UnionFind(list(range(len(groups))))
+    for val in validations:
+        members = [val["canonical_plate"]] + (val.get("variants") or [])
+        member_groups = list({plate_to_group[p] for p in members if p in plate_to_group})
+        for k in range(1, len(member_groups)):
+            uf.union(member_groups[0], member_groups[k])
+    merged: dict[int, list[str]] = {}
+    for gi, group in enumerate(groups):
+        merged.setdefault(uf.find(gi), []).extend(group)
+    return list(merged.values())
+
+
+async def _resolve_plate_family(plate: str) -> list[str]:
+    """Retourne TOUTES les plaques appartenant au même véhicule que `plate`
+    (elle incluse) — union des 2 mécanismes de fusion existants
+    (`vehicle_identities` et `plate_validations`), jusqu'ici cloisonnés
+    l'un de l'autre ET jamais consultés par les endpoints "détail d'une
+    plaque" (`/passages`, `/heatmap`, `/cameras`, `/journey`, `/habits`,
+    `/anomaly`, `/parking-status`, `vehicle_detail` lui-même) — TOUS
+    scopés sur la SEULE plaque exacte demandée, ignorant l'historique des
+    variantes fusionnées. Utilisée partout ci-dessous à la place d'une
+    égalité exacte sur `plate` (via `{"$in": famille}`, toujours
+    index-friendly même à 1 seul élément)."""
+    normalized = _norm_plate(plate)
+    family = {normalized}
+    ident = await db.vehicle_identities.find_one({"plates": normalized}, {"_id": 0, "plates": 1})
+    if ident:
+        family.update(ident.get("plates") or [])
+    val = await db.plate_validations.find_one(
+        {"$or": [{"canonical_plate": normalized}, {"variants": normalized}]},
+        {"_id": 0, "canonical_plate": 1, "variants": 1},
+    )
+    if val:
+        family.add(val["canonical_plate"])
+        family.update(val.get("variants") or [])
+    return sorted(family)
+
+
 def _to_hhmm(dt: datetime) -> str:
     return dt.strftime("%H:%M")
 
@@ -371,6 +427,10 @@ async def list_vehicles(
 
     groups = _cluster_plate_groups(passages)
     groups = await _merge_by_identity(groups)
+    validations = await db.plate_validations.find(
+        {}, {"_id": 0, "canonical_plate": 1, "variants": 1}).to_list(2000)
+    groups = await _merge_by_validation(groups, validations)
+    validated_canonicals = {v["canonical_plate"] for v in validations}
 
     total = 0
     items = []
@@ -381,11 +441,14 @@ async def list_vehicles(
 
         # Plaque canonique = la variante à la MEILLEURE confiance moyenne
         # (plus fiable qu'une simple majorité : une erreur OCR répétée ne
-        # doit pas l'emporter sur une lecture nette mais rare).
+        # doit pas l'emporter sur une lecture nette mais rare) — SAUF si
+        # une plaque du groupe a été validée manuellement (bloc Consensus) :
+        # le choix explicite d'un humain l'emporte toujours sur l'heuristique.
         per_variant: dict[str, list[float]] = {}
         for d in docs:
             per_variant.setdefault(d["plate"], []).append(d.get("confidence") or 0.0)
-        canonical = max(per_variant.items(), key=lambda kv: (mean(kv[1]), len(kv[1])))[0]
+        validated_pick = next((p for p in per_variant if p in validated_canonicals), None)
+        canonical = validated_pick or max(per_variant.items(), key=lambda kv: (mean(kv[1]), len(kv[1])))[0]
 
         preview = docs[:3]
         best = preview[0] if preview else None
@@ -765,14 +828,20 @@ async def smart_search(body: SmartSearchBody,
 async def vehicle_detail(plate: str,
                           user: dict = Depends(require_permission("read_plates"))):
     normalized = await _plate_or_404(plate, user)
+    family = await _resolve_plate_family(normalized)  # v3.43 · inclut variantes validées/fusionnées
     match = await _base_match(user)
-    match["plate"] = normalized  # v3.41 · égalité exacte — voir _plate_or_404
+    match["plate"] = {"$in": family}
 
     pipeline = [
         {"$match": match},
         {"$sort": {"timestamp": -1}},
         {"$group": {
-            "_id": "$plate",
+            # v3.43 · None (pas "$plate") : `match` peut désormais couvrir
+            # plusieurs plaques exactes (famille fusionnée) — un group key
+            # par plaque produirait un document par variante au lieu d'UN
+            # total consolidé, et le `.to_list(1)` plus bas n'en garderait
+            # arbitrairement qu'un seul.
+            "_id": None,
             "passages_count": {"$sum": 1},
             "last_seen":  {"$first": "$timestamp"},
             "first_seen": {"$last":  "$timestamp"},
@@ -817,7 +886,15 @@ async def vehicle_detail(plate: str,
     # peuvent l'utiliser pour ré-écrire la plaque affichée") mais rien ne
     # le faisait. On résout ici la plaque canonique si la plaque demandée
     # est elle-même canonique OU listée comme variante validée.
-    display_plate = d["_id"]
+    #
+    # v3.43 · `d["_id"]` n'existe plus (group key passé à None pour
+    # consolider toute la famille, voir plus haut) — défaut sur la plaque
+    # normalisée demandée. Nom d'identité (fusion manuelle/IA) en 2e
+    # priorité si aucune validation Consensus explicite n'existe.
+    display_plate = normalized
+    ident = await db.vehicle_identities.find_one({"plates": {"$in": family}}, {"_id": 0, "name": 1})
+    if ident and ident.get("name"):
+        display_plate = ident["name"]
     val_doc = await db.plate_validations.find_one(
         {"$or": [{"canonical_plate": normalized}, {"variants": normalized}]},
         {"_id": 0, "canonical_plate": 1},
@@ -852,8 +929,9 @@ async def vehicle_passages(plate: str,
                             offset: int = Query(0, ge=0),
                             user: dict = Depends(require_permission("read_plates"))):
     normalized = await _plate_or_404(plate, user)
+    family = await _resolve_plate_family(normalized)  # v3.43 · inclut variantes validées/fusionnées
     q = await _base_match(user)
-    q["plate"] = normalized  # v3.41 · égalité exacte — voir _plate_or_404
+    q["plate"] = {"$in": family}
 
     total = await db.plates.count_documents(q)
     # v3.13 · Cette liste ne renvoie que des booléens `has_*` — inutile de
@@ -892,8 +970,9 @@ async def vehicle_passages(plate: str,
 async def vehicle_heatmap(plate: str,
                            user: dict = Depends(require_permission("read_plates"))):
     normalized = await _plate_or_404(plate, user)
+    family = await _resolve_plate_family(normalized)  # v3.43 · inclut variantes validées/fusionnées
     q = await _base_match(user)
-    q["plate"] = normalized  # v3.41 · égalité exacte — voir _plate_or_404
+    q["plate"] = {"$in": family}
 
     by_hour = [0] * 24
     by_dow = [0] * 7  # 0 = Lundi
@@ -920,8 +999,9 @@ async def vehicle_heatmap(plate: str,
 async def vehicle_cameras(plate: str,
                            user: dict = Depends(require_permission("read_plates"))):
     normalized = await _plate_or_404(plate, user)
+    family = await _resolve_plate_family(normalized)  # v3.43 · inclut variantes validées/fusionnées
     match = await _base_match(user)
-    match["plate"] = normalized  # v3.41 · égalité exacte — voir _plate_or_404
+    match["plate"] = {"$in": family}
     pipeline = [
         {"$match": match},
         {"$group": {
@@ -950,8 +1030,9 @@ async def vehicle_journey(plate: str,
                            limit: int = Query(50, ge=5, le=200),
                            user: dict = Depends(require_permission("read_plates"))):
     normalized = await _plate_or_404(plate, user)
+    family = await _resolve_plate_family(normalized)  # v3.43 · inclut variantes validées/fusionnées
     q = await _base_match(user)
-    q["plate"] = normalized  # v3.41 · égalité exacte — voir _plate_or_404
+    q["plate"] = {"$in": family}
     docs = await db.plates.find(
         q, {"_id": 0, "timestamp": 1, "camera_id": 1, "camera_name": 1, "direction": 1}
     ).sort("timestamp", -1).limit(limit).to_list(limit)
@@ -966,8 +1047,9 @@ async def vehicle_journey(plate: str,
 async def vehicle_habits(plate: str,
                           user: dict = Depends(require_permission("read_plates"))):
     normalized = await _plate_or_404(plate, user)
+    family = await _resolve_plate_family(normalized)  # v3.43 · inclut variantes validées/fusionnées
     q = await _base_match(user)
-    q["plate"] = normalized  # v3.41 · égalité exacte — voir _plate_or_404
+    q["plate"] = {"$in": family}
 
     docs = await db.plates.find(q, {"timestamp": 1, "_id": 0}).to_list(length=None)
     times: list[datetime] = []
@@ -1028,6 +1110,11 @@ async def vehicle_parking_status(plate: str,
     statistique historique comme `avg_visit_duration_min`. Publié dans le
     snapshot Redis consolidé (pipeline_snapshot.py) toutes les 3s."""
     normalized = await _plate_or_404(plate, user)
+    # v3.43 · Le dwell côté pipeline est indexé par le TEXTE de plaque lu
+    # par l'ANPR — si le véhicule a été fusionné/validé avec une variante
+    # OCR différente, la session dwell en cours peut être enregistrée sous
+    # cette variante plutôt que sous la plaque consultée ici.
+    family = set(await _resolve_plate_family(normalized))
 
     from pipeline_snapshot import get_snapshot
     snap = await get_snapshot()
@@ -1040,9 +1127,9 @@ async def vehicle_parking_status(plate: str,
 
     candidates = []
     for cam_id, plates in cameras_dwell.items():
-        st = plates.get(normalized)
-        if st and st.get("parked"):
-            candidates.append((cam_id, st))
+        matches = [st for p, st in plates.items() if p in family and st.get("parked")]
+        if matches:
+            candidates.append((cam_id, max(matches, key=lambda s: s["dwell_seconds"])))
     if not candidates:
         return {"parked": False, "min_dwell_seconds": min_dwell}
 
@@ -1104,7 +1191,8 @@ async def vehicle_identity(plate: str,
 # ═══════════════════════════════════════════════════════════════════
 # 8b. Anomalies (Habitudes → Alertes) — v0.6b
 # ═══════════════════════════════════════════════════════════════════
-async def _compute_anomaly(plate: str, user: dict, exact: bool = False) -> dict:
+async def _compute_anomaly(plate: str, user: dict, exact: bool = False,
+                            family: Optional[list[str]] = None) -> dict:
     """Calcule un rapport d'anomalie pour la **dernière** passe d'un véhicule.
 
     Compare le dernier timestamp aux habitudes calculées (arrivée typique,
@@ -1127,10 +1215,22 @@ async def _compute_anomaly(plate: str, user: dict, exact: bool = False) -> dict:
     ne peut pas l'utiliser efficacement — mesuré en réel : 300 appels
     regex séquentiels saturaient MongoDB à 432% CPU, ralentissant tout le
     reste (dashboard, recherche) pendant plusieurs minutes.
+
+    v3.43 · `family` (optionnel) — liste de plaques déjà résolue par
+    `_resolve_plate_family()` côté appelant, pour inclure l'historique des
+    variantes fusionnées/validées. Réservé aux appels SUR UNE SEULE
+    plaque (`/anomaly`, `/notify-anomaly`) : `vehicles_anomalies_recent`
+    (jusqu'à 300 appels/requête) ne le passe jamais — résoudre la famille
+    de chacune des 300 plaques ferait 300 × 2 requêtes Mongo
+    supplémentaires, cause exacte de l'incident 432% CPU documenté
+    ci-dessus si réintroduit ici.
     """
     normalized = plate.upper().replace(" ", "").replace("-", "")
     q = await _base_match(user)
-    q["plate"] = normalized if exact else {"$regex": normalized, "$options": "i"}
+    if family:
+        q["plate"] = {"$in": family}
+    else:
+        q["plate"] = normalized if exact else {"$regex": normalized, "$options": "i"}
 
     docs = await db.plates.find(
         q, {"_id": 0, "timestamp": 1, "camera_name": 1}
@@ -1230,8 +1330,9 @@ async def _compute_anomaly(plate: str, user: dict, exact: bool = False) -> dict:
 async def vehicle_anomaly(plate: str,
                            user: dict = Depends(require_permission("read_plates"))):
     """Analyse d'anomalie de la dernière passe (lecture seule)."""
-    await _plate_or_404(plate, user)
-    return await _compute_anomaly(plate, user, exact=True)  # v3.41 · voir _plate_or_404
+    normalized = await _plate_or_404(plate, user)
+    family = await _resolve_plate_family(normalized)  # v3.43 · inclut variantes validées/fusionnées
+    return await _compute_anomaly(plate, user, exact=True, family=family)
 
 
 @vehicles_router.get("/anomalies/recent")
@@ -1280,8 +1381,9 @@ async def vehicle_notify_anomaly(plate: str,
     """Envoie une notification (SMTP/Discord/Telegram) sur les anomalies
     détectées pour ce véhicule. Ne modifie pas le pipeline OCR — appel manuel
     depuis le drawer véhicule."""
-    await _plate_or_404(plate, user)
-    report = await _compute_anomaly(plate, user, exact=True)  # v3.41 · voir _plate_or_404
+    normalized = await _plate_or_404(plate, user)
+    family = await _resolve_plate_family(normalized)  # v3.43 · inclut variantes validées/fusionnées
+    report = await _compute_anomaly(plate, user, exact=True, family=family)
     if not report.get("anomalies") or report["severity"] == "info":
         raise HTTPException(status_code=400,
                             detail={"error": "no_anomaly",
