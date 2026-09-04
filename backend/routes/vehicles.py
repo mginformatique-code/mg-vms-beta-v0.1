@@ -85,6 +85,8 @@ def _iso_to_dt(iso: str) -> Optional[datetime]:
 #      impossible tout en couvrant le cas réel visé ici.
 _PLATE_MERGE_WINDOW_SEC = 120
 _PLATE_MERGE_MAX_DISTANCE = 1
+# v3.43 · Garde-fou pour _resolve_plate_family() — voir sa docstring.
+_MAX_PLAUSIBLE_FAMILY_SIZE = 8
 
 
 def _levenshtein(a: str, b: str) -> int:
@@ -268,11 +270,25 @@ async def _resolve_plate_family(plate: str) -> list[str]:
     scopés sur la SEULE plaque exacte demandée, ignorant l'historique des
     variantes fusionnées. Utilisée partout ci-dessous à la place d'une
     égalité exacte sur `plate` (via `{"$in": famille}`, toujours
-    index-friendly même à 1 seul élément)."""
+    index-friendly même à 1 seul élément).
+
+    v3.43 · Garde-fou taille : découvert en vérifiant ce correctif sur
+    données réelles — une identité `vehicle_identities` (créée le 02/09,
+    hors de cette session) regroupe 49 plaques manifestement sans rapport
+    (ex. "1211TT", "7991TT" aux côtés de "AX217EM") sous un même id,
+    probablement une sélection multiple accidentelle côté UI ("Fusionner
+    des fiches"). Jusqu'ici invisible (rien ne consultait
+    vehicle_identities pour les stats détaillées) — ce correctif l'aurait
+    sinon propagée telle quelle (passages/caméras/timeline d'un véhicule
+    mélangés avec 48 autres). Une identité de plus de
+    `_MAX_PLAUSIBLE_FAMILY_SIZE` plaques est ignorée ici (jamais un OCR de
+    plaque française plausible) plutôt que fusionnée aveuglément — la
+    grille principale (_merge_by_identity) n'a PAS ce garde-fou, à
+    corriger si d'autres identités de ce type existent."""
     normalized = _norm_plate(plate)
     family = {normalized}
     ident = await db.vehicle_identities.find_one({"plates": normalized}, {"_id": 0, "plates": 1})
-    if ident:
+    if ident and len(ident.get("plates") or []) <= _MAX_PLAUSIBLE_FAMILY_SIZE:
         family.update(ident.get("plates") or [])
     val = await db.plate_validations.find_one(
         {"$or": [{"canonical_plate": normalized}, {"variants": normalized}]},
