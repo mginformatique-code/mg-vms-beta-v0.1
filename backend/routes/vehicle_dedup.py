@@ -106,8 +106,16 @@ def _majority(values: list) -> str | None:
 async def _plate_stats(plate: str) -> dict:
     docs = await db.plates.find(
         {"plate": plate},
-        {"_id": 0, "vehicle_make": 1, "vehicle_model": 1, "vehicle_color": 1, "vehicle_type": 1, "timestamp": 1},
+        # v3.38 · `id` ajouté — sert uniquement à retrouver, côté frontend, une
+        # miniature réelle du véhicule (GET /plates/{id}, qui expose
+        # vehicle_crop/frame_thumb — volontairement exclus de cette requête
+        # ici, batch potentiellement lourd sur 500 documents). Demande
+        # explicite : les suggestions de fusion doivent pouvoir être
+        # vérifiées visuellement, pas seulement sur la confiance du LLM.
+        {"_id": 0, "id": 1, "vehicle_make": 1, "vehicle_model": 1, "vehicle_color": 1, "vehicle_type": 1, "timestamp": 1},
     ).to_list(500)
+    # Détection la plus récente = la plus représentative pour une vignette.
+    sample = max(docs, key=lambda d: d.get("timestamp") or "", default=None)
     return {
         "plate": plate,
         "count": len(docs),
@@ -116,6 +124,7 @@ async def _plate_stats(plate: str) -> dict:
         "color": _majority([d.get("vehicle_color") for d in docs]),
         "type": _majority([d.get("vehicle_type") for d in docs]),
         "last_seen": max((d.get("timestamp") or "" for d in docs), default=None),
+        "sample_plate_id": sample.get("id") if sample else None,
     }
 
 

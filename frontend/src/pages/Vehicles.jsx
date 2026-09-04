@@ -646,7 +646,7 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
       )}
 
       {(dedupSuggestions.length > 0 || user?.role === "admin") && (
-        <DedupBanner
+        <DedupButton
           items={dedupSuggestions}
           admin={user?.role === "admin"}
           running={dedupRunning}
@@ -1409,60 +1409,119 @@ function AnomaliesBanner({ items, onOpen, onDismiss }) {
 // configuré est texte seul). Jamais de fusion automatique : chaque
 // suggestion attend une décision manuelle, même mécanisme de fusion que
 // "Fusionner des fiches" (POST /vehicles/identities).
-function DedupBanner({ items, admin, running, available, onRunNow, onAccept, onReject }) {
+// v3.38 · Refonte demandée : un bouton unique (au lieu d'un bandeau
+// toujours affiché) qui ouvre une fenêtre listant les suggestions, avec
+// miniature réelle du véhicule par plaque (récupérée via le même
+// endpoint/pattern que le reste de l'appli, passageThumbUrl — voir son
+// commentaire plus haut) pour un vrai contrôle visuel avant fusion, et le
+// détail des attributs au survol de chaque miniature.
+function DedupButton({ items, admin, running, available, onRunNow, onAccept, onReject }) {
+  const [open, setOpen] = useState(false);
+  if (!admin && items.length === 0) return null;
   return (
-    <div className="border border-[#0044FF]/40 bg-[#0044FF]/5 p-3 mb-4" data-testid="dedup-banner">
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-1.5 text-[#0044FF] text-xs uppercase tracking-wider font-medium">
-          <Sparkles size={14} /> Doublons suggérés (IA) {items.length > 0 && `(${items.length})`}
-        </div>
-        {admin && available && (
-          <button onClick={onRunNow} disabled={running} data-testid="dedup-run-now"
-                  className="text-[10px] uppercase tracking-wider text-[#0044FF] hover:underline disabled:opacity-50 flex items-center gap-1">
-            {running && <Loader2 size={11} className="animate-spin" />}
-            {running ? "Recherche…" : "Rechercher maintenant"}
-          </button>
+    <>
+      <button onClick={() => setOpen(true)} data-testid="dedup-open-modal"
+              className="flex items-center gap-1.5 border border-[#0044FF]/40 bg-[#0044FF]/5 text-[#0044FF] px-3 py-1.5 text-xs uppercase tracking-wider mb-4 hover:bg-[#0044FF]/10">
+        <Sparkles size={14} /> Doublons suggérés (IA) {items.length > 0 && `(${items.length})`}
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="rounded-none border-border max-w-3xl max-h-[85vh] flex flex-col" data-testid="dedup-modal">
+          <DialogHeader>
+            <DialogTitle className="font-head flex items-center justify-between gap-4 pr-6">
+              <span className="flex items-center gap-2"><Sparkles size={16} /> Doublons suggérés (IA) {items.length > 0 && `(${items.length})`}</span>
+              {admin && available && (
+                <button onClick={onRunNow} disabled={running} data-testid="dedup-run-now"
+                        className="text-[10px] uppercase tracking-wider text-[#0044FF] hover:underline disabled:opacity-50 flex items-center gap-1 font-normal normal-case">
+                  {running && <Loader2 size={11} className="animate-spin" />}
+                  {running ? "Recherche…" : "Rechercher maintenant"}
+                </button>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          {admin && !available && (
+            <p className="text-[11px] text-[#FF3333]" data-testid="dedup-unavailable">
+              Connexion impossible — vérifiez la configuration dans Administration → LLM (MG-IA).
+            </p>
+          )}
+          <div className="flex-1 overflow-y-auto space-y-2 -mx-1 px-1">
+            {items.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">
+                Aucune suggestion en attente — tâche automatique une fois par jour, ou lance-la manuellement.
+              </p>
+            ) : (
+              items.map((s) => (
+                <DedupRow key={s.id} s={s} onAccept={onAccept} onReject={onReject} />
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// Une paire de vignettes cliquables au survol (attributs détaillés) +
+// décision. Deux miniatures distinctes (une par plaque) : le point du
+// tri manuel demandé — les attributs seuls ne montrent pas si c'est
+// visuellement la même voiture.
+function DedupRow({ s, onAccept, onReject }) {
+  const [hover, setHover] = useState(null); // "a" | "b" | null
+  const thumbA = passageThumbUrl(s.stats_a?.sample_plate_id, "vehicle");
+  const thumbB = passageThumbUrl(s.stats_b?.sample_plate_id, "vehicle");
+  const Thumb = ({ side, url, plate }) => {
+    const st = side === "a" ? s.stats_a : s.stats_b;
+    return (
+      <div className="relative" onMouseEnter={() => setHover(side)} onMouseLeave={() => setHover((h) => (h === side ? null : h))}>
+        {url ? (
+          <img src={url} alt={plate} loading="lazy" data-testid={`dedup-thumb-${side}-${s.id}`}
+               className="w-16 h-12 object-cover border border-border" />
+        ) : (
+          <div className="w-16 h-12 bg-secondary flex items-center justify-center text-[9px] text-muted-foreground border border-border">—</div>
+        )}
+        {hover === side && st && (
+          <div className="absolute z-10 top-full left-0 mt-1 bg-black/90 border border-[#0044FF]/40 p-2 text-[10px] text-white w-48 space-y-0.5"
+               data-testid={`dedup-hover-info-${side}-${s.id}`}>
+            <div>Marque : {st.make || "—"}</div>
+            <div>Modèle : {st.model || "—"}</div>
+            <div>Couleur : {st.color || "—"}</div>
+            <div>Type : {st.type || "—"}</div>
+            <div>Lectures : {st.count ?? "—"}</div>
+            <div>Dernière vue : {st.last_seen ? new Date(st.last_seen).toLocaleString("fr-FR") : "—"}</div>
+          </div>
         )}
       </div>
-      {admin && !available && (
-        <p className="text-[11px] text-[#FF3333] mb-2" data-testid="dedup-unavailable">
-          Connexion impossible — vérifiez la configuration dans Administration → LLM (MG-IA).
-        </p>
+    );
+  };
+  return (
+    <div className="flex items-center gap-3 border border-border bg-card px-3 py-2 text-xs" data-testid={`dedup-item-${s.id}`}>
+      <div className="flex items-center gap-1.5 shrink-0">
+        <Thumb side="a" url={thumbA} plate={s.plate_a} />
+        <span className="mono font-semibold">{s.plate_a}</span>
+      </div>
+      <span className="text-muted-foreground shrink-0">↔</span>
+      <div className="flex items-center gap-1.5 shrink-0">
+        <span className="mono font-semibold">{s.plate_b}</span>
+        <Thumb side="b" url={thumbB} plate={s.plate_b} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <span className="text-muted-foreground text-[10px]">
+          ({s.stats_a?.count} + {s.stats_b?.count} lectures)
+        </span>
+        {s.reason && <div className="text-[10px] text-muted-foreground mt-0.5 truncate">{s.reason}</div>}
+      </div>
+      {s.confidence != null && (
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">
+          confiance {Math.round(s.confidence * 100)}%
+        </span>
       )}
-      {items.length === 0 ? (
-        <p className="text-[11px] text-muted-foreground">
-          Aucune suggestion en attente — tâche automatique une fois par jour, ou lance-la manuellement.
-        </p>
-      ) : (
-        <div className="space-y-2">
-          {items.map((s) => (
-            <div key={s.id} className="flex items-center gap-3 border border-border bg-card px-3 py-2 text-xs" data-testid={`dedup-item-${s.id}`}>
-              <div className="flex-1 min-w-0">
-                <span className="mono font-semibold">{s.plate_a}</span>
-                <span className="text-muted-foreground mx-1">↔</span>
-                <span className="mono font-semibold">{s.plate_b}</span>
-                <span className="text-muted-foreground ml-2">
-                  ({s.stats_a?.count} + {s.stats_b?.count} lectures)
-                </span>
-                {s.reason && <div className="text-[10px] text-muted-foreground mt-0.5 truncate">{s.reason}</div>}
-              </div>
-              {s.confidence != null && (
-                <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">
-                  confiance {Math.round(s.confidence * 100)}%
-                </span>
-              )}
-              <button onClick={() => onAccept(s.id)} data-testid={`dedup-accept-${s.id}`}
-                      className="px-2 py-1 border border-[#00E676] text-[#00E676] hover:bg-[#00E676]/10 shrink-0 uppercase tracking-wider text-[10px]">
-                Fusionner
-              </button>
-              <button onClick={() => onReject(s.id)} data-testid={`dedup-reject-${s.id}`}
-                      className="px-2 py-1 border border-border text-muted-foreground hover:text-foreground shrink-0 uppercase tracking-wider text-[10px]">
-                Ignorer
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      <button onClick={() => onAccept(s.id)} data-testid={`dedup-accept-${s.id}`}
+              className="px-2 py-1 border border-[#00E676] text-[#00E676] hover:bg-[#00E676]/10 shrink-0 uppercase tracking-wider text-[10px]">
+        Fusionner
+      </button>
+      <button onClick={() => onReject(s.id)} data-testid={`dedup-reject-${s.id}`}
+              className="px-2 py-1 border border-border text-muted-foreground hover:text-foreground shrink-0 uppercase tracking-wider text-[10px]">
+        Ignorer
+      </button>
     </div>
   );
 }

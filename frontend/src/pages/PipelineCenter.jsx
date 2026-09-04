@@ -32,6 +32,7 @@ import Hardware from "./Hardware";
 import GPUStatus from "./GPUStatus";
 import ContainerStatusPanel from "./ContainerStatusPanel";
 import SshConsolePanel from "./SshConsolePanel";
+import * as DiagnosticsRegistry from "@/tracking/DiagnosticsRegistry";
 
 const TABS = [
   { id: "overview",    label: "Overview",    icon: Layers },
@@ -279,7 +280,67 @@ function DebugPanel() {
   return (
     <div className="space-y-4" data-testid="debug-panel">
       <ContainerStatusPanel />
+      <TrackingDiagnosticsPanel />
       <SshConsolePanel />
     </div>
+  );
+}
+
+// v3.40 · Déplacé depuis le panneau debug app-level (Ctrl+Shift+D) — demande
+// explicite : ce diagnostic (Detection FPS / Display FPS / lissage / âge
+// dernière détection, par caméra) a plus sa place ici, dans Suivi des
+// performances, qu'au niveau app. Même source (DiagnosticsRegistry.js) que
+// le panneau app — chaque tuile de la mosaïque live enregistre un accès à
+// son propre TrackInterpolator à son montage, retiré à son démontage.
+function TrackingDiagnosticsPanel() {
+  const [snapshot, setSnapshot] = useState({});
+  useEffect(() => {
+    const poll = () => setSnapshot(DiagnosticsRegistry.snapshotAll());
+    poll();
+    const iv = setInterval(poll, 1000);
+    return () => clearInterval(iv);
+  }, []);
+  const rows = Object.entries(snapshot);
+  return (
+    <Card className="p-4" data-testid="tracking-diagnostics-panel">
+      <div className="text-sm font-medium mb-1">Diagnostic tracking (temps réel, côté client)</div>
+      <div className="text-xs text-muted-foreground mb-3">
+        Une caméra n'apparaît ici que si une tuile est actuellement montée dans Vues en direct
+        (Overlay IA activé) — ouvrez cette page dans un autre onglet pour peupler la liste.
+        Prediction = extrapolation en cours entre 2 détections réelles (lissage actif sur cette
+        caméra) — YES en continu sur une caméra sans détection récente indiquerait que le
+        lissage masque un vrai décrochage plutôt que de le compenser.
+      </div>
+      <table className="w-full text-sm">
+        <thead className="text-left text-muted-foreground text-xs uppercase tracking-wider">
+          <tr>
+            <th className="pb-1">Caméra</th><th className="pb-1">Detect. FPS</th>
+            <th className="pb-1">Display FPS</th><th className="pb-1">Prediction</th>
+            <th className="pb-1">Dern. détection</th><th className="pb-1">Pistes</th>
+            <th className="pb-1">Lissage</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([camId, d]) => (
+            <tr key={camId} className="border-t border-border/40 font-mono text-xs" data-testid={`tracking-diag-row-${camId}`}>
+              <td className="py-1.5">{d.camName || camId}</td>
+              <td className={d.detectionFps > 0 ? "text-[#00E676]" : "text-[#FF3333]"}>{d.detectionFps ?? "—"}</td>
+              <td>{d.displayFps ?? "—"}</td>
+              <td className={d.predictionActive ? "text-[#00E5FF]" : "text-muted-foreground"}>{d.predictionActive ? "YES" : "no"}</td>
+              <td className={d.lastDetectionAgeMs != null && d.lastDetectionAgeMs > 5000 ? "text-[#FFB800]" : ""}>
+                {d.lastDetectionAgeMs != null ? `${Math.round(d.lastDetectionAgeMs)}ms` : "—"}
+              </td>
+              <td>{d.trackedCount ?? "—"}</td>
+              <td className={d.smoothingEnabled ? "text-[#00E5FF]" : "text-muted-foreground"}>{d.smoothingEnabled ? "actif" : "off"}</td>
+            </tr>
+          ))}
+          {rows.length === 0 && (
+            <tr><td colSpan={7} className="py-6 text-center text-muted-foreground">
+              Aucune tuile live montée actuellement.
+            </td></tr>
+          )}
+        </tbody>
+      </table>
+    </Card>
   );
 }
