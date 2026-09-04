@@ -37,8 +37,30 @@ class SmartZonesEngine:
 
     # v3.40 · Stationnement natif (dwell par plaque) — indépendant des
     # zones configurées manuellement en DB. Voir track_plate_dwell().
+    #
+    # v3.42 · Correctif faux-positif signalé en prod (véhicule EN MOUVEMENT
+    # affiché "en stationnement depuis 2 min") : la v3.40 dérivait le dwell
+    # du simple ÉCART DE TEMPS entre 2 lectures ANPR de la même plaque —
+    # un véhicule qui repasse deux fois devant la caméra en moins de
+    # _PARKING_GRACE_S (demi-tour, file d'attente, aller-retour) déclenchait
+    # le badge sans jamais s'être réellement arrêté. Le dwell dérive
+    # désormais de l'IMMOBILITÉ RÉELLE du track_id associé à la plaque
+    # (voir track_vehicle_stillness/get_track_stillness ci-dessous) — la
+    # même ROI véhicule d'où l'OCR a extrait la plaque (camera_worker.py::
+    # _stage_anpr, `p["track_id"] = roi.track_id`), donc pas de 2e système
+    # de tracking ni de nouvelle dépendance.
     _PARKING_GRACE_S = 180.0
     _PARKING_MIN_DWELL_S = 120.0
+    # Déplacement du centre de bbox (coords normalisées 0..1) au-delà duquel
+    # un track_id est considéré "en mouvement" plutôt que "immobile" —
+    # première valeur raisonnable, pas encore calibrée sur des mesures
+    # terrain (à ajuster si des stationnements réels sont ratés/faux positifs).
+    _STILL_MOVE_THRESHOLD_NORM = 0.02
+    # Tolérance d'absence dans overlay_boxes avant d'oublier un track_id —
+    # nettement plus courte que _PARKING_GRACE_S car les cycles de
+    # détection (chaque appel run_downstream) sont bien plus fréquents que
+    # les lectures ANPR elles-mêmes.
+    _STILL_GRACE_S = 30.0
 
     def __init__(self):
         # zone_id → _ZoneState
@@ -47,8 +69,10 @@ class SmartZonesEngine:
         self._zones_cache: list[dict] = []
         self._cache_ts: float = 0
         self._cache_ttl_s: float = 15.0
-        # camera_id → plate → {first_seen, last_seen}
-        self._plate_dwell: dict[str, dict[str, dict]] = {}
+        # camera_id → track_id → {anchor_cx, anchor_cy, still_since, last_seen}
+        self._track_stillness: dict[str, dict] = {}
+        # camera_id → plate → {track_id, last_anpr_seen}
+        self._plate_track_map: dict[str, dict[str, dict]] = {}
 
     async def _load_zones(self) -> list[dict]:
         """Cache 15s pour éviter d'aller taper la DB à chaque frame."""
@@ -220,50 +244,101 @@ class SmartZonesEngine:
         except Exception:
             pass
 
-    def track_plate_dwell(self, camera_id: str, plates: list[dict]) -> None:
-        """Suivi dwell par plaque — alimente le "stationnement natif"
-        (menu véhicule), SANS nécessiter de Smart Zone configurée en DB.
-
-        Appelé à chaque cycle pipeline avec ``result["plates"]`` brut
-        (avant dédup/persistance `db.plates`) : une lecture ANPR de ce
-        cycle = présence continue de la plaque devant la caméra. Une
-        coupure > `_PARKING_GRACE_S` (lecture ANPR sporadique, plaque
-        temporairement masquée) démarre une NOUVELLE session dwell plutôt
-        que de considérer le véhicule garé en continu depuis sa toute
-        première apparition.
+    def track_vehicle_stillness(self, camera_id: str, overlay_boxes: list) -> None:
+        """Suit l'immobilité RÉELLE (position bbox) de chaque track_id vu ce
+        cycle — indépendant de l'ANPR, alimenté à chaque cycle pipeline
+        (`result["overlay_boxes"]`, déjà normalisé 0..1 par
+        camera_worker.py). C'est CE signal, pas le texte de la plaque, qui
+        détermine si un véhicule est réellement garé (voir
+        track_plate_dwell). L'ancre de position (anchor_cx/cy) est celle du
+        DÉBUT de l'immobilité — comparer au dernier point à chaque cycle
+        laisserait une dérive lente (petit mouvement à chaque frame, jamais
+        au-dessus du seuil individuellement) passer inaperçue indéfiniment.
         """
         now = time.time()
-        cam_state = self._plate_dwell.setdefault(camera_id, {})
+        cam_state = self._track_stillness.setdefault(camera_id, {})
+        seen = set()
+        for b in overlay_boxes:
+            tid = b.get("track_id")
+            bn = b.get("bbox_norm")
+            if tid is None or not bn or len(bn) != 4:
+                continue
+            x1, y1, x2, y2 = bn
+            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+            seen.add(tid)
+            st = cam_state.get(tid)
+            if st is None:
+                cam_state[tid] = {"anchor_cx": cx, "anchor_cy": cy, "still_since": now, "last_seen": now}
+                continue
+            moved = (abs(cx - st["anchor_cx"]) > self._STILL_MOVE_THRESHOLD_NORM
+                     or abs(cy - st["anchor_cy"]) > self._STILL_MOVE_THRESHOLD_NORM)
+            if moved:
+                # Nouvelle ancre — le véhicule bouge, l'immobilité (si elle
+                # reprend) recompte depuis maintenant.
+                cam_state[tid] = {"anchor_cx": cx, "anchor_cy": cy, "still_since": now, "last_seen": now}
+            else:
+                st["last_seen"] = now
+        stale = [tid for tid, st in cam_state.items()
+                 if tid not in seen and (now - st["last_seen"]) > self._STILL_GRACE_S]
+        for tid in stale:
+            cam_state.pop(tid, None)
+
+    def get_track_stillness(self, camera_id: str, track_id) -> dict | None:
+        """None si ce track_id n'est pas actuellement suivi comme immobile
+        (en mouvement, sorti du cadre, ou jamais vu) — sinon
+        {"still_since": epoch}."""
+        if track_id is None:
+            return None
+        st = self._track_stillness.get(camera_id, {}).get(track_id)
+        if not st:
+            return None
+        return {"still_since": st["still_since"]}
+
+    def track_plate_dwell(self, camera_id: str, plates: list[dict]) -> None:
+        """Associe chaque plaque lue ce cycle à son track_id — CETTE
+        fonction ne calcule PLUS le dwell elle-même (v3.42, voir le
+        commentaire de classe) : elle mémorise juste "cette plaque = ce
+        track_id en ce moment" (`p["track_id"]` vient de la même ROI
+        véhicule que l'OCR, camera_worker.py::_stage_anpr). Le dwell réel
+        est dérivé EN LECTURE (snapshot_plate_dwell) de l'immobilité live du
+        track_id — toujours à jour, se corrige immédiatement si le véhicule
+        redémarre, jamais de désynchronisation entre 2 lectures ANPR.
+        """
+        now = time.time()
+        cam_map = self._plate_track_map.setdefault(camera_id, {})
         seen = set()
         for p in plates:
             plate = (p.get("plate") or "").upper().strip()
-            if not plate:
+            tid = p.get("track_id")
+            if not plate or tid is None:
                 continue
             seen.add(plate)
-            st = cam_state.get(plate)
-            if st is None or (now - st["last_seen"]) > self._PARKING_GRACE_S:
-                cam_state[plate] = {"first_seen": now, "last_seen": now}
-            else:
-                st["last_seen"] = now
-        # Purge : plaques absentes ce cycle et hors grace (véhicule reparti)
-        stale = [p for p, st in cam_state.items()
-                 if p not in seen and (now - st["last_seen"]) > self._PARKING_GRACE_S]
-        for p in stale:
-            cam_state.pop(p, None)
+            cam_map[plate] = {"track_id": tid, "last_anpr_seen": now}
+        # Oublie l'association plaque→track_id si l'ANPR ne l'a plus
+        # reconfirmée depuis _PARKING_GRACE_S — l'immobilité elle-même reste
+        # suivie indépendamment tant que le track existe dans overlay_boxes.
+        stale = [pl for pl, st in cam_map.items()
+                 if pl not in seen and (now - st["last_anpr_seen"]) > self._PARKING_GRACE_S]
+        for pl in stale:
+            cam_map.pop(pl, None)
 
     def snapshot_plate_dwell(self) -> dict:
         """Lecture — état courant dwell par plaque/caméra (API-side, via
-        pipeline_snapshot.py). Inclut les seuils pour éviter que l'appelant
-        les duplique."""
+        pipeline_snapshot.py). Le dwell est calculé ICI, au moment de la
+        lecture, à partir de l'immobilité live du track_id associé — pas
+        d'un compteur incrémenté au fil des cycles pipeline."""
         now = time.time()
         cameras: dict[str, dict] = {}
-        for cam_id, plates in self._plate_dwell.items():
+        for cam_id, plates in self._plate_track_map.items():
             cam_out = {}
-            for plate, st in plates.items():
-                dwell = now - st["first_seen"]
+            for plate, link in plates.items():
+                stillness = self.get_track_stillness(cam_id, link["track_id"])
+                if stillness is None:
+                    continue  # véhicule associé pas (plus) suivi comme immobile
+                dwell = now - stillness["still_since"]
                 cam_out[plate] = {
-                    "first_seen": _iso(st["first_seen"]),
-                    "last_seen": _iso(st["last_seen"]),
+                    "first_seen": _iso(stillness["still_since"]),
+                    "last_seen": _iso(now),
                     "dwell_seconds": int(dwell),
                     "parked": dwell >= self._PARKING_MIN_DWELL_S,
                 }

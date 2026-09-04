@@ -626,13 +626,17 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
     _apply_hierarchical_anpr_fusion(cam, result)
 
     # ── Stationnement natif (dwell par plaque) ────────────────────────
-    # Indépendant de la dédup/cooldown ci-dessous (`db.plates`) : chaque
-    # lecture ANPR de ce cycle, même si elle ne déclenche pas une nouvelle
-    # écriture DB, signale une présence continue de la plaque devant la
-    # caméra — c'est ce signal qui alimente la case "en stationnement" de
-    # la fiche véhicule (voir GET /vehicles/plate/{plate}/parking-status).
+    # v3.42 · Le dwell est dérivé de l'immobilité RÉELLE du véhicule
+    # (track_vehicle_stillness, sur overlay_boxes — CHAQUE cycle, pas
+    # seulement quand l'ANPR lit une plaque), pas du simple écart de temps
+    # entre 2 lectures ANPR — voir smart_zones/engine.py pour le pourquoi
+    # (faux-positif "en stationnement" sur un véhicule en mouvement,
+    # signalé en prod). track_plate_dwell() ne fait plus qu'associer
+    # plaque→track_id, la case "en stationnement" de la fiche véhicule
+    # (GET /vehicles/plate/{plate}/parking-status) lit l'immobilité live.
     try:
         from smart_zones.engine import engine as _sz_engine
+        _sz_engine.track_vehicle_stillness(cam["id"], result.get("overlay_boxes", []))
         _sz_engine.track_plate_dwell(cam["id"], result["plates"])
     except Exception:
         logger.exception("track_plate_dwell error")
