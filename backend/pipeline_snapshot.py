@@ -198,6 +198,16 @@ async def _build_snapshot() -> dict:
         camera_activity[cid] = {"positive": sig.positive, "detail": sig.detail}
     snap["camera_activity"] = camera_activity
 
+    # v3.40 · Stationnement natif — état dwell par plaque (smart_zones/
+    # engine.py::track_plate_dwell, alimenté depuis pipeline_v2/downstream.py
+    # à chaque lecture ANPR). Lu côté API via
+    # GET /vehicles/plate/{plate}/parking-status (routes/vehicles.py).
+    try:
+        from smart_zones.engine import engine as _sz_engine
+        snap["parking"] = _sz_engine.snapshot_plate_dwell()
+    except Exception:
+        snap["parking"] = {"cameras": {}, "min_dwell_seconds": 120, "grace_seconds": 180}
+
     return snap
 
 

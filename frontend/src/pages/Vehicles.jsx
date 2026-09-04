@@ -11,7 +11,7 @@ import {
   Search, Car, Camera as CameraIcon, Clock,
   Activity, BarChart3, Loader2, Info, ChevronRight,
   AlertTriangle, ShieldAlert, ShieldCheck, Shield, Bell, X as XIcon,
-  CheckCircle2, GitMerge, Sparkles, Users, Plus, LayoutGrid, List,
+  CheckCircle2, GitMerge, Sparkles, Users, Plus, LayoutGrid, List, MapPin,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -886,11 +886,19 @@ function TabOverview({ d, onWatchChanged, onReload }) {
   const { t } = useApp();
   const [habits, setHabits] = useState(null);
   const [anomaly, setAnomaly] = useState(null);
+  const [parking, setParking] = useState(null);
   const [wlSaving, setWlSaving] = useState(false);
   const [notifSending, setNotifSending] = useState(false);
   useEffect(() => {
     api.get(`/vehicles/${encodeURIComponent(d.plate)}/habits`).then(({ data }) => setHabits(data)).catch(() => {});
     api.get(`/vehicles/${encodeURIComponent(d.plate)}/anomaly`).then(({ data }) => setAnomaly(data)).catch(() => {});
+    const loadParking = () => {
+      api.get(`/vehicles/${encodeURIComponent(d.plate)}/parking-status`).then(({ data }) => setParking(data)).catch(() => {});
+    };
+    loadParking();
+    // Dwell temps réel côté pipeline — reste à jour tant que la fiche est ouverte.
+    const iv = setInterval(loadParking, 15000);
+    return () => clearInterval(iv);
   }, [d.plate]);
 
   const setWatch = async (listType) => {
@@ -1016,6 +1024,22 @@ function TabOverview({ d, onWatchChanged, onReload }) {
           </button>
         </div>
       </div>
+
+      {/* Stationnement natif — dwell ANPR temps réel (pipeline), pas une
+          moyenne statistique. Affiché seulement si actif (dwell détecté). */}
+      {parking?.parked && (
+        <div className="border p-3 space-y-1 text-xs"
+             style={{ borderColor: "#00E676", background: "rgba(0,230,118,0.06)" }}
+             data-testid="parking-block">
+          <div className="flex items-center gap-1.5 font-medium" style={{ color: "#00E676" }}>
+            <MapPin size={13} /> En stationnement
+            <span className="ml-auto mono">{fmtDuration(parking.duration_seconds)}</span>
+          </div>
+          <div className="text-muted-foreground">
+            {parking.camera_name}{parking.site_name ? ` · ${parking.site_name}` : ""} — depuis {fmtDateTime(parking.since)}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-2 text-sm">
         <Stat label="Passages" value={d.passages_count} />
@@ -1760,6 +1784,14 @@ function fmtDateTime(iso) {
   if (!iso) return "—";
   try { return new Date(iso).toLocaleString("fr-FR"); }
   catch { return iso; }
+}
+
+function fmtDuration(totalSeconds) {
+  if (totalSeconds == null) return "—";
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  if (h > 0) return `${h} h ${m} min`;
+  return `${m} min`;
 }
 
 function fmtRelative(iso) {

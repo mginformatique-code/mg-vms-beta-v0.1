@@ -35,6 +35,11 @@ class _ZoneState:
 class SmartZonesEngine:
     """Singleton — évalue les zones à chaque cycle pipeline."""
 
+    # v3.40 · Stationnement natif (dwell par plaque) — indépendant des
+    # zones configurées manuellement en DB. Voir track_plate_dwell().
+    _PARKING_GRACE_S = 180.0
+    _PARKING_MIN_DWELL_S = 120.0
+
     def __init__(self):
         # zone_id → _ZoneState
         self._states: dict[str, _ZoneState] = {}
@@ -42,6 +47,8 @@ class SmartZonesEngine:
         self._zones_cache: list[dict] = []
         self._cache_ts: float = 0
         self._cache_ttl_s: float = 15.0
+        # camera_id → plate → {first_seen, last_seen}
+        self._plate_dwell: dict[str, dict[str, dict]] = {}
 
     async def _load_zones(self) -> list[dict]:
         """Cache 15s pour éviter d'aller taper la DB à chaque frame."""
@@ -212,6 +219,61 @@ class SmartZonesEngine:
             )
         except Exception:
             pass
+
+    def track_plate_dwell(self, camera_id: str, plates: list[dict]) -> None:
+        """Suivi dwell par plaque — alimente le "stationnement natif"
+        (menu véhicule), SANS nécessiter de Smart Zone configurée en DB.
+
+        Appelé à chaque cycle pipeline avec ``result["plates"]`` brut
+        (avant dédup/persistance `db.plates`) : une lecture ANPR de ce
+        cycle = présence continue de la plaque devant la caméra. Une
+        coupure > `_PARKING_GRACE_S` (lecture ANPR sporadique, plaque
+        temporairement masquée) démarre une NOUVELLE session dwell plutôt
+        que de considérer le véhicule garé en continu depuis sa toute
+        première apparition.
+        """
+        now = time.time()
+        cam_state = self._plate_dwell.setdefault(camera_id, {})
+        seen = set()
+        for p in plates:
+            plate = (p.get("plate") or "").upper().strip()
+            if not plate:
+                continue
+            seen.add(plate)
+            st = cam_state.get(plate)
+            if st is None or (now - st["last_seen"]) > self._PARKING_GRACE_S:
+                cam_state[plate] = {"first_seen": now, "last_seen": now}
+            else:
+                st["last_seen"] = now
+        # Purge : plaques absentes ce cycle et hors grace (véhicule reparti)
+        stale = [p for p, st in cam_state.items()
+                 if p not in seen and (now - st["last_seen"]) > self._PARKING_GRACE_S]
+        for p in stale:
+            cam_state.pop(p, None)
+
+    def snapshot_plate_dwell(self) -> dict:
+        """Lecture — état courant dwell par plaque/caméra (API-side, via
+        pipeline_snapshot.py). Inclut les seuils pour éviter que l'appelant
+        les duplique."""
+        now = time.time()
+        cameras: dict[str, dict] = {}
+        for cam_id, plates in self._plate_dwell.items():
+            cam_out = {}
+            for plate, st in plates.items():
+                dwell = now - st["first_seen"]
+                cam_out[plate] = {
+                    "first_seen": _iso(st["first_seen"]),
+                    "last_seen": _iso(st["last_seen"]),
+                    "dwell_seconds": int(dwell),
+                    "parked": dwell >= self._PARKING_MIN_DWELL_S,
+                }
+            if cam_out:
+                cameras[cam_id] = cam_out
+        return {
+            "cameras": cameras,
+            "min_dwell_seconds": int(self._PARKING_MIN_DWELL_S),
+            "grace_seconds": int(self._PARKING_GRACE_S),
+        }
 
     @staticmethod
     def _bbox_in_polygon(bbox, polygon: list[list[float]]) -> bool:

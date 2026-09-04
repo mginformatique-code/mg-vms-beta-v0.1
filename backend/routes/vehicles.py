@@ -1000,6 +1000,66 @@ async def vehicle_habits(plate: str,
 
 
 # ═══════════════════════════════════════════════════════════════════
+# 7bis. Stationnement natif — /parking-status
+# ═══════════════════════════════════════════════════════════════════
+@vehicles_router.get("/{plate}/parking-status")
+async def vehicle_parking_status(plate: str,
+                                  user: dict = Depends(require_permission("read_plates"))):
+    """État "en stationnement" natif — dwell ANPR temps réel calculé par le
+    pipeline (smart_zones/engine.py::track_plate_dwell), pas une moyenne
+    statistique historique comme `avg_visit_duration_min`. Publié dans le
+    snapshot Redis consolidé (pipeline_snapshot.py) toutes les 3s."""
+    normalized = await _plate_or_404(plate, user)
+
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    if snap is None:
+        return {"parked": False, "reason": "pipeline_unavailable"}
+
+    parking = snap.get("parking") or {}
+    cameras_dwell = parking.get("cameras") or {}
+    min_dwell = parking.get("min_dwell_seconds", 120)
+
+    candidates = []
+    for cam_id, plates in cameras_dwell.items():
+        st = plates.get(normalized)
+        if st and st.get("parked"):
+            candidates.append((cam_id, st))
+    if not candidates:
+        return {"parked": False, "min_dwell_seconds": min_dwell}
+
+    # Filtre par site_scope — ne fait pas confiance aveuglément au snapshot
+    # Redis (global, toutes caméras) pour décider de ce qu'un utilisateur
+    # multi-site a le droit de voir.
+    cam_q: dict = {"id": {"$in": [c for c, _ in candidates]}}
+    try:
+        from routers import site_scope
+        site_scope(cam_q, user)
+    except Exception:
+        pass
+    allowed_cams = {c["id"]: c async for c in db.cameras.find(
+        cam_q, {"_id": 0, "id": 1, "name": 1, "site_name": 1})}
+    candidates = [(c, st) for c, st in candidates if c in allowed_cams]
+    if not candidates:
+        return {"parked": False, "min_dwell_seconds": min_dwell}
+
+    # Plusieurs caméras peuvent voir la même plaque garée (recoupement de
+    # champ) — la session dwell la plus longue est l'emplacement le plus
+    # probable.
+    cam_id, st = max(candidates, key=lambda cs: cs[1]["dwell_seconds"])
+    cam = allowed_cams[cam_id]
+    return {
+        "parked": True,
+        "since": st["first_seen"],
+        "duration_seconds": st["dwell_seconds"],
+        "camera_id": cam_id,
+        "camera_name": cam.get("name"),
+        "site_name": cam.get("site_name"),
+        "min_dwell_seconds": min_dwell,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
 # 8. Vehicle Identity — STUB v0.6 (préparation v0.7)
 # ═══════════════════════════════════════════════════════════════════
 @vehicles_router.get("/{plate}/identity")

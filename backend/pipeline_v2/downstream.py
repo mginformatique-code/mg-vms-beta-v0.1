@@ -625,6 +625,18 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
     # Les autres lectures sont conservées en `evidence` pour audit.
     _apply_hierarchical_anpr_fusion(cam, result)
 
+    # ── Stationnement natif (dwell par plaque) ────────────────────────
+    # Indépendant de la dédup/cooldown ci-dessous (`db.plates`) : chaque
+    # lecture ANPR de ce cycle, même si elle ne déclenche pas une nouvelle
+    # écriture DB, signale une présence continue de la plaque devant la
+    # caméra — c'est ce signal qui alimente la case "en stationnement" de
+    # la fiche véhicule (voir GET /vehicles/plate/{plate}/parking-status).
+    try:
+        from smart_zones.engine import engine as _sz_engine
+        _sz_engine.track_plate_dwell(cam["id"], result["plates"])
+    except Exception:
+        logger.exception("track_plate_dwell error")
+
     # ── Persistance plaques + alertes liste noire ────────────────────
     # ── Persistance plaques + alertes liste noire ────────────────────
     # Charge la config ANPR caméra (whitelist/blacklist locales, override
