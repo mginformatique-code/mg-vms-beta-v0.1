@@ -956,6 +956,23 @@ _FRAME_WAIT_TIMEOUT_S = 2.0
 _BURST_EXTRA_PASSES = 2
 _BURST_FRAME_TIMEOUT_S = 1.0
 
+#: v3.39 · Plafond de rafales SIMULTANÉES, toutes caméras confondues.
+#: Constaté en prod le 04/09 : un événement de mouvement synchronisé sur
+#: plusieurs caméras (vent, patrouille PTZ...) a déclenché ~94 rafales en
+#: 10 min — sans plafond, chaque caméra ajoutait jusqu'à 2 passages EN PLUS
+#: pile au moment où le système est déjà sous tension (mouvement généralisé
+#: partout à la fois). A contribué à un pic de charge sévère (load 99,74
+#: sur 12 cœurs) qui a lui-même déclenché une vague de redémarrages
+#: frame_source (le mécanisme même que la rafale cherche à mieux servir —
+#: cercle vicieux). Même principe que le sémaphore de reconnexion
+#: frame_source (v3.33) mais délai d'acquisition volontairement quasi nul :
+#: une rafale ratée n'est pas grave (le cycle normal a déjà tourné), mieux
+#: vaut la sauter que faire la queue — une rafale qui attend son tour n'a
+#: plus grand intérêt, l'objet est probablement déjà sorti du champ.
+_MAX_CONCURRENT_BURSTS = int(os.environ.get("MGVMS_AI_MAX_CONCURRENT_BURSTS", "3"))
+_burst_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_BURSTS)
+_BURST_SEM_ACQUIRE_TIMEOUT_S = 0.05
+
 #: Période du superviseur : relecture de la config et de la liste des caméras.
 #: 1 s suffit — l'analyse, elle, n'attend plus ce tour de boucle.
 _SUPERVISOR_PERIOD_S = 1.0
@@ -997,20 +1014,38 @@ async def _camera_loop(camera_id: str) -> None:
                 # soit l'algorithme. Objectif : donner au moins un 2e point
                 # tout de suite, pendant que le véhicule est encore dans le
                 # champ, plutôt que d'attendre le prochain tour normal.
-                for _burst_i in range(_BURST_EXTRA_PASSES):
-                    b_frame, b_seq = await wait_for_new_frame(
-                        camera_id, last_seq, timeout=_BURST_FRAME_TIMEOUT_S)
-                    if b_frame is None:
-                        logger.info("IA · %s : rafale arrêtée après %d passage(s) — pas de nouvelle image sous %.1fs",
-                                    cam.get("name", camera_id), _burst_i, _BURST_FRAME_TIMEOUT_S)
-                        break  # rien de frais rapidement — le véhicule est probablement déjà sorti du champ
-                    last_seq = b_seq
+                #
+                # v3.39 · Plafond global (voir _MAX_CONCURRENT_BURSTS) —
+                # jamais plus de N caméras en rafale simultanément, quel que
+                # soit le nombre de caméras qui qualifient au même instant
+                # (événement de mouvement synchronisé). Acquisition quasi
+                # non bloquante : une rafale ratée passe son tour plutôt que
+                # de faire la queue.
+                _burst_got_slot = False
+                try:
+                    await asyncio.wait_for(_burst_semaphore.acquire(), timeout=_BURST_SEM_ACQUIRE_TIMEOUT_S)
+                    _burst_got_slot = True
+                except asyncio.TimeoutError:
+                    logger.info("IA · %s : rafale sautée — plafond de %d rafales simultanées atteint",
+                                cam.get("name", camera_id), _MAX_CONCURRENT_BURSTS)
+                if _burst_got_slot:
                     try:
-                        await _process_camera(cam, frame=b_frame)
-                    except Exception:
-                        logger.exception("IA · %s : erreur pendant la rafale mouvement",
-                                         cam.get("name", camera_id))
-                        break
+                        for _burst_i in range(_BURST_EXTRA_PASSES):
+                            b_frame, b_seq = await wait_for_new_frame(
+                                camera_id, last_seq, timeout=_BURST_FRAME_TIMEOUT_S)
+                            if b_frame is None:
+                                logger.info("IA · %s : rafale arrêtée après %d passage(s) — pas de nouvelle image sous %.1fs",
+                                            cam.get("name", camera_id), _burst_i, _BURST_FRAME_TIMEOUT_S)
+                                break  # rien de frais rapidement — le véhicule est probablement déjà sorti du champ
+                            last_seq = b_seq
+                            try:
+                                await _process_camera(cam, frame=b_frame)
+                            except Exception:
+                                logger.exception("IA · %s : erreur pendant la rafale mouvement",
+                                                 cam.get("name", camera_id))
+                                break
+                    finally:
+                        _burst_semaphore.release()
         except asyncio.CancelledError:
             raise
         except Exception as e:
