@@ -817,6 +817,8 @@ async def _process_camera(cam: dict, frame=None) -> bool:
         if _r.get("enabled") and _vehicles_present and \
                 result.get("motion_pct", 0.0) >= float(_r.get("motion_pct", 12.0)):
             burst_recommended = True
+            logger.info("IA · %s : rafale mouvement déclenchée (mouvement=%.1f%%, %d véhicule(s))",
+                        cam["name"], result.get("motion_pct", 0.0), sum(1 for d in dets if d.get("class") in VEHICLE_CLASSES))
     except Exception:
         pass
 
@@ -995,10 +997,12 @@ async def _camera_loop(camera_id: str) -> None:
                 # soit l'algorithme. Objectif : donner au moins un 2e point
                 # tout de suite, pendant que le véhicule est encore dans le
                 # champ, plutôt que d'attendre le prochain tour normal.
-                for _ in range(_BURST_EXTRA_PASSES):
+                for _burst_i in range(_BURST_EXTRA_PASSES):
                     b_frame, b_seq = await wait_for_new_frame(
                         camera_id, last_seq, timeout=_BURST_FRAME_TIMEOUT_S)
                     if b_frame is None:
+                        logger.info("IA · %s : rafale arrêtée après %d passage(s) — pas de nouvelle image sous %.1fs",
+                                    cam.get("name", camera_id), _burst_i, _BURST_FRAME_TIMEOUT_S)
                         break  # rien de frais rapidement — le véhicule est probablement déjà sorti du champ
                     last_seq = b_seq
                     try:
