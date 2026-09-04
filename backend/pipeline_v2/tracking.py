@@ -19,23 +19,38 @@ KNOWN_TRACKER_PLUGINS = ("bytetrack", "botsort", "deepsort", "ocsort", "strongso
 SUPPORTED_ALGOS = {"bytetrack", "botsort"}
 
 
+#: v3.35 · Config par défaut de la couche de lissage (extrapolation position
+#: entre 2 détections réelles, voir smoothing.py côté... non, côté FRONTEND —
+#: cette constante ne sert qu'à documenter/valider les bornes acceptées par
+#: PUT /cameras/{id}/pipeline-config, voir routers.py).
+DEFAULT_SMOOTHING = {"enabled": False, "type": "motion_predictor", "max_prediction_ms": 800}
+KNOWN_SMOOTHING_TYPES = ("motion_predictor",)
+
+
 def resolve_algo(enabled_plugins: Optional[list],
                   camera: Optional[dict] = None) -> tuple[str, str, Optional[str]]:
     """Retourne (algo_demandé, algo_effectif, warning_ou_None).
 
     v0.5.6 Phase C · Priorité de lecture :
-      1. ``camera['pipeline_config']['tracker']`` (config par caméra).
-      2. Premier plugin tracker dans ``enabled_plugins`` (whitelist historique).
-      3. Défaut ``bytetrack``.
+      1. ``camera['pipeline_config']['ai']['tracker']['type']`` (v3.35, nouveau
+         schéma imbriqué — voir resolve_tracker_enabled ci-dessous pour le
+         volet ``enabled``).
+      2. ``camera['pipeline_config']['tracker']`` (ancien champ plat,
+         conservé pour compat — toutes les caméras existantes l'utilisent).
+      3. Premier plugin tracker dans ``enabled_plugins`` (whitelist historique).
+      4. Défaut ``bytetrack``.
     """
     requested = "bytetrack"
-    # 1. Config caméra
+    # 1 & 2. Config caméra — nouveau schéma imbriqué, repli sur l'ancien plat
     if camera and isinstance(camera, dict):
         pc = camera.get("pipeline_config") or {}
-        wanted = pc.get("tracker")
+        ai_cfg = pc.get("ai") or {}
+        wanted = (ai_cfg.get("tracker") or {}).get("type") if isinstance(ai_cfg.get("tracker"), dict) else None
+        if not (isinstance(wanted, str) and wanted):
+            wanted = pc.get("tracker")  # ancien champ plat
         if isinstance(wanted, str) and wanted:
             requested = wanted
-    # 2. Sinon whitelist plugins historique
+    # 3. Sinon whitelist plugins historique
     if requested == "bytetrack":
         for name in (enabled_plugins or []):
             if name in KNOWN_TRACKER_PLUGINS:
@@ -50,6 +65,41 @@ def resolve_algo(enabled_plugins: Optional[list],
     )
     logger.warning("[Tracker] %s", warning)
     return requested, "bytetrack", warning
+
+
+def resolve_tracker_enabled(camera: Optional[dict], global_enabled: bool) -> bool:
+    """v3.35 · Bascule par caméra — ``ai.tracker.enabled`` prime sur le
+    réglage global (``bytetrack_cfg.enabled``, jusqu'ici la seule bascule,
+    identique pour les 14 caméras). Caméra sans réglage explicite → réglage
+    global inchangé (zéro régression)."""
+    if camera and isinstance(camera, dict):
+        pc = camera.get("pipeline_config") or {}
+        ai_cfg = pc.get("ai") or {}
+        tr = ai_cfg.get("tracker")
+        if isinstance(tr, dict) and isinstance(tr.get("enabled"), bool):
+            return tr["enabled"]
+    return global_enabled
+
+
+def resolve_smoothing(camera: Optional[dict]) -> dict:
+    """v3.35 · Config de la couche de lissage pour une caméra — appliquée
+    côté FRONTEND (voir frontend/src/tracking/), le backend ne fait
+    qu'exposer un réglage validé par caméra. Défaut : désactivé (rollout
+    prudent, opt-in explicite par caméra)."""
+    out = dict(DEFAULT_SMOOTHING)
+    if camera and isinstance(camera, dict):
+        pc = camera.get("pipeline_config") or {}
+        ai_cfg = pc.get("ai") or {}
+        sm = ai_cfg.get("smoothing")
+        if isinstance(sm, dict):
+            if isinstance(sm.get("enabled"), bool):
+                out["enabled"] = sm["enabled"]
+            if sm.get("type") in KNOWN_SMOOTHING_TYPES:
+                out["type"] = sm["type"]
+            mpm = sm.get("max_prediction_ms")
+            if isinstance(mpm, (int, float)) and 0 < mpm <= 5000:
+                out["max_prediction_ms"] = mpm
+    return out
 
 
 class TrackerPool:
@@ -107,13 +157,21 @@ class TrackerPool:
             return None
 
     def update(self, camera_id: str, ctx, cfg: dict,
-               enabled_plugins: Optional[list] = None) -> dict:
+               enabled_plugins: Optional[list] = None,
+               camera: Optional[dict] = None) -> dict:
         """Met à jour le tracker UNIQUE de la caméra et attache les track_id.
 
         Modifie ``ctx.detections`` en place (champ ``track_id``) et remplit
         ``ctx.tracks``. Retourne des métadonnées ({algo, tracked}).
+
+        v3.35 · Bug trouvé en implémentant le switch par caméra : ``camera``
+        n'était jusqu'ici JAMAIS transmis à ``resolve_algo`` ici (seul
+        l'appel de métadonnées dans ``_stage_tracking`` le recevait) — la
+        config ``pipeline_config`` d'une caméra ne pouvait donc jamais
+        influencer QUEL tracker est réellement instancié via
+        ``_get_tracker``/``_create``, seulement l'étiquette affichée.
         """
-        requested, effective, warning = resolve_algo(enabled_plugins)
+        requested, effective, warning = resolve_algo(enabled_plugins, camera)
         meta = {"algo_requested": requested, "algo_effective": effective, "tracked": 0}
         if warning:
             meta["warning"] = warning

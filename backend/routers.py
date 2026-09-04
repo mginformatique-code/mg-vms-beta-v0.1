@@ -366,14 +366,20 @@ async def update_pipeline_config_endpoint(camera_id: str, data: dict,
     """v0.5.6 Phase C — Met à jour la config pipeline IA d'une caméra.
 
     Champs acceptés (tous optionnels, patch partiel) :
-      * ``detector`` : yolov11 / rt-detr / tensorrt / …
-      * ``tracker``  : bytetrack / botsort / …
+      * ``detector`` : yolov11 / rt-detr / tensorrt / … (ancien champ plat)
+      * ``tracker``  : bytetrack / botsort / … (ancien champ plat)
       * ``anpr``     : liste ordonnée [core, additionnels…]
       * ``fusion``   : hierarchical / highest / majority / cascade / vote
+      * ``ai``       : v3.35, nouveau schéma imbriqué — voir
+        pipeline_v2/tracking.py::resolve_algo/resolve_tracker_enabled/
+        resolve_smoothing pour l'ordre de priorité de lecture (ai.* prime
+        sur les champs plats ci-dessus quand présent) :
+            {"tracker": {"enabled": bool, "type": str},
+             "smoothing": {"enabled": bool, "type": str, "max_prediction_ms": int}}
     """
     from pipeline_v2.detector import registry as _det_registry
     from pipeline_v2.plate_recognizer import plate_registry as _ocr_registry
-    from pipeline_v2.tracking import SUPPORTED_ALGOS
+    from pipeline_v2.tracking import SUPPORTED_ALGOS, KNOWN_SMOOTHING_TYPES
     from plugin_manager.fusion import VALID_MODES
 
     existing = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
@@ -382,7 +388,7 @@ async def update_pipeline_config_endpoint(camera_id: str, data: dict,
 
     current = existing.get("pipeline_config") or {}
     patch = {k: v for k, v in (data or {}).items()
-             if k in {"detector", "tracker", "anpr", "fusion"} and v is not None}
+             if k in {"detector", "tracker", "anpr", "fusion", "ai"} and v is not None}
 
     if "detector" in patch and patch["detector"] not in _det_registry.known():
         raise HTTPException(400, f"Détecteur '{patch['detector']}' non enregistré. Connus: {_det_registry.known()}")
@@ -396,8 +402,39 @@ async def update_pipeline_config_endpoint(camera_id: str, data: dict,
             raise HTTPException(400, f"OCR non enregistrés: {unknown}. Connus: {_ocr_registry.known()}")
     if "fusion" in patch and patch["fusion"] not in VALID_MODES:
         raise HTTPException(400, f"Mode fusion '{patch['fusion']}' invalide. Valides: {sorted(VALID_MODES)}")
+    if "ai" in patch:
+        if not isinstance(patch["ai"], dict):
+            raise HTTPException(400, "'ai' doit être un objet")
+        _ai = patch["ai"]
+        _tr = _ai.get("tracker")
+        if _tr is not None:
+            if not isinstance(_tr, dict):
+                raise HTTPException(400, "'ai.tracker' doit être un objet {enabled, type}")
+            if "enabled" in _tr and not isinstance(_tr["enabled"], bool):
+                raise HTTPException(400, "'ai.tracker.enabled' doit être un booléen")
+            if "type" in _tr and _tr["type"] is not None and _tr["type"] not in SUPPORTED_ALGOS:
+                raise HTTPException(400, f"'ai.tracker.type' non supporté. Supportés: {sorted(SUPPORTED_ALGOS)}")
+        _sm = _ai.get("smoothing")
+        if _sm is not None:
+            if not isinstance(_sm, dict):
+                raise HTTPException(400, "'ai.smoothing' doit être un objet {enabled, type, max_prediction_ms}")
+            if "enabled" in _sm and not isinstance(_sm["enabled"], bool):
+                raise HTTPException(400, "'ai.smoothing.enabled' doit être un booléen")
+            if "type" in _sm and _sm["type"] is not None and _sm["type"] not in KNOWN_SMOOTHING_TYPES:
+                raise HTTPException(400, f"'ai.smoothing.type' inconnu. Connus: {list(KNOWN_SMOOTHING_TYPES)}")
+            _mpm = _sm.get("max_prediction_ms")
+            if _mpm is not None and not (isinstance(_mpm, (int, float)) and 0 < _mpm <= 5000):
+                raise HTTPException(400, "'ai.smoothing.max_prediction_ms' doit être entre 1 et 5000")
 
     merged = {**current, **patch}
+    if "ai" in patch and isinstance(current.get("ai"), dict):
+        # Patch partiel sur les sous-objets ai.tracker/ai.smoothing (pas un
+        # remplacement total) — cohérent avec le patch top-level déjà partiel.
+        merged["ai"] = {**current["ai"], **patch["ai"]}
+        if isinstance(current["ai"].get("tracker"), dict) and isinstance(patch["ai"].get("tracker"), dict):
+            merged["ai"]["tracker"] = {**current["ai"]["tracker"], **patch["ai"]["tracker"]}
+        if isinstance(current["ai"].get("smoothing"), dict) and isinstance(patch["ai"].get("smoothing"), dict):
+            merged["ai"]["smoothing"] = {**current["ai"]["smoothing"], **patch["ai"]["smoothing"]}
     await db.cameras.update_one({"id": camera_id}, {"$set": {"pipeline_config": merged}})
     # v0.7.e · Wave A : signale la modification pipeline pour rebuild lazy
     # du CameraGraph de cette caméra uniquement (pas de global reload).
@@ -425,12 +462,23 @@ async def get_pipeline_config_endpoint(camera_id: str,
     existing = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
     if not existing:
         raise HTTPException(404, "Caméra introuvable")
+    from pipeline_v2.tracking import resolve_algo, resolve_tracker_enabled, resolve_smoothing
+    import ai_engine as _ae
     cfg = existing.get("pipeline_config") or {}
+    _req, _eff, _warn = resolve_algo(None, existing)
     effective = {
-        "detector": cfg.get("detector", "yolov11"),
-        "tracker":  cfg.get("tracker", "bytetrack"),
-        "anpr":     cfg.get("anpr", ["fast-alpr"]),
-        "fusion":   cfg.get("fusion", "hierarchical"),
+        "detector":  cfg.get("detector", "yolov11"),
+        "tracker":   cfg.get("tracker", "bytetrack"),
+        "anpr":      cfg.get("anpr", ["fast-alpr"]),
+        "fusion":    cfg.get("fusion", "hierarchical"),
+        # v3.35 · Vue effective du nouveau schéma imbriqué (ai.*) — résolue
+        # avec la même priorité de lecture que le pipeline réel (voir
+        # pipeline_v2/tracking.py), pas une simple relecture du champ brut.
+        "ai": {
+            "tracker": {"enabled": resolve_tracker_enabled(existing, _ae._bytetrack_cfg.get("enabled", True)),
+                        "type": _eff},
+            "smoothing": resolve_smoothing(existing),
+        },
     }
     return {"pipeline_config": effective, "explicit": cfg}
 

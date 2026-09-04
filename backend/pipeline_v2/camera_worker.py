@@ -273,15 +273,18 @@ class CameraWorker:
         """Tracking UNIQUE — un seul tracker par caméra (TrackerPool).
         Les plugins tracker sont convertis en choix d'algorithme du stage."""
         import ai_engine as _ae
-        from .tracking import resolve_algo
+        from .tracking import resolve_algo, resolve_tracker_enabled
         t0 = time.monotonic()
         _req, _eff, _warn = resolve_algo(enabled_plugins, camera)
         meta = {"algo_requested": _req, "algo_effective": _eff, "tracked": 0}
         if _warn:
             meta["warning"] = _warn
-        if _ae._bytetrack_cfg.get("enabled", True) and ctx.detections:
+        # v3.35 · Bascule par caméra (ai.tracker.enabled) — prime sur le
+        # réglage global historique quand une caméra la définit explicitement.
+        tracker_enabled = resolve_tracker_enabled(camera, _ae._bytetrack_cfg.get("enabled", True))
+        if tracker_enabled and ctx.detections:
             meta = tracker_pool.update(self.camera_id, ctx, _ae._bytetrack_cfg,
-                                       enabled_plugins=enabled_plugins)
+                                       enabled_plugins=enabled_plugins, camera=camera)
         ms = (time.monotonic() - t0) * 1000
         ctx.timings["tracking_ms"] = round(ms, 1)
         ctx.metadata["tracking"] = meta
