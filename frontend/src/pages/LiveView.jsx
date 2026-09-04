@@ -693,6 +693,43 @@ export default function LiveView() {
                 <div className="absolute top-1 left-1 z-10 bg-[#0044FF] text-white p-1 pointer-events-none">
                   <GripVertical size={12} />
                 </div>
+                {/* v3.32 · Le drag&drop natif HTML5 ne fonctionne pas sur
+                    tablette/écran tactile (pas d'événement drag standard) —
+                    boutons flèches en repli, mêmes cibles que swapPositions. */}
+                {cam && (
+                  <div className="absolute top-1 right-1 z-10 grid grid-cols-3 gap-0.5"
+                       onClick={(e) => e.stopPropagation()}>
+                    <div />
+                    <button disabled={i - cols < 0}
+                            onClick={() => swapPositions(i, i - cols)}
+                            className="w-5 h-5 flex items-center justify-center bg-[#0044FF] text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                            title="Déplacer vers le haut" data-testid={`live-move-up-${i}`}>
+                      <ArrowUp size={11} />
+                    </button>
+                    <div />
+                    <button disabled={i % cols === 0}
+                            onClick={() => swapPositions(i, i - 1)}
+                            className="w-5 h-5 flex items-center justify-center bg-[#0044FF] text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                            title="Déplacer vers la gauche" data-testid={`live-move-left-${i}`}>
+                      <ArrowLeft size={11} />
+                    </button>
+                    <div />
+                    <button disabled={i % cols === cols - 1 || i + 1 >= layout}
+                            onClick={() => swapPositions(i, i + 1)}
+                            className="w-5 h-5 flex items-center justify-center bg-[#0044FF] text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                            title="Déplacer vers la droite" data-testid={`live-move-right-${i}`}>
+                      <ArrowRight size={11} />
+                    </button>
+                    <div />
+                    <button disabled={i + cols >= layout}
+                            onClick={() => swapPositions(i, i + cols)}
+                            className="w-5 h-5 flex items-center justify-center bg-[#0044FF] text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                            title="Déplacer vers le bas" data-testid={`live-move-down-${i}`}>
+                      <ArrowDown size={11} />
+                    </button>
+                    <div />
+                  </div>
+                )}
                 {tile}
               </div>
             );
