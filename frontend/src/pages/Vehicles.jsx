@@ -11,7 +11,7 @@ import {
   Search, Car, Camera as CameraIcon, Clock,
   Activity, BarChart3, Loader2, Info, ChevronRight,
   AlertTriangle, ShieldAlert, ShieldCheck, Shield, Bell, X as XIcon,
-  CheckCircle2, GitMerge, Sparkles, Users, Link2, Plus, LayoutGrid, List,
+  CheckCircle2, GitMerge, Sparkles, Users, Plus, LayoutGrid, List,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -168,8 +168,6 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
   });
   // Identities
   const [identities, setIdentities] = useState([]);
-  const [identityCandidates, setIdentityCandidates] = useState([]);
-  const [showCandidates, setShowCandidates] = useState(false);
 
   const loadAnomalies = useCallback(async () => {
     try {
@@ -235,14 +233,15 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
     } catch { toast.error("Échec"); }
   };
 
+  // v3.41 · L'ancien détecteur heuristique de candidats (/vehicles/identities/detect
+  // — marque/couleur/type + plaques proches, v0.7) est retiré : redondant
+  // avec le dédoublonnage Qwen, bien plus abouti après les affinages du
+  // jour (tri, tier distance-1, planification fiable). Ne reste que la
+  // liste des identités déjà confirmées, affichée dans la fenêtre fusion.
   const loadIdentities = useCallback(async () => {
     try {
-      const [{ data: list }, { data: cand }] = await Promise.all([
-        api.get("/vehicles/identities"),
-        api.get("/vehicles/identities/detect", { params: { min_plates: 2 } }),
-      ]);
+      const { data: list } = await api.get("/vehicles/identities");
       setIdentities(list.items || []);
-      setIdentityCandidates(cand.items || []);
     } catch { /* silent */ }
   }, []);
 
@@ -632,28 +631,21 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
         </div>
       )}
 
-      <IdentitiesPanel
-        identities={identities}
-        candidates={identityCandidates}
-        show={showCandidates}
-        onToggle={() => setShowCandidates((s) => !s)}
-        onReload={loadIdentities}
-        onOpenPlate={(p) => setOpenPlate(p)}
-      />
-
       {anomalies.length > 0 && (
         <AnomaliesBanner items={anomalies} onOpen={(p) => setOpenPlate(p)} onDismiss={() => setAnomalies([])} />
       )}
 
-      {(dedupSuggestions.length > 0 || user?.role === "admin") && (
+      {(dedupSuggestions.length > 0 || identities.length > 0 || user?.role === "admin") && (
         <DedupButton
           items={dedupSuggestions}
+          identities={identities}
           admin={user?.role === "admin"}
           running={dedupRunning}
           available={dedupAvailable}
           onRunNow={runDedupNow}
           onAccept={(id) => decideDedup(id, true)}
           onReject={(id) => decideDedup(id, false)}
+          onOpenPlate={(p) => setOpenPlate(p)}
         />
       )}
 
@@ -1102,102 +1094,6 @@ function PersonsSection({ persons, description }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Panneau Identités véhicule (cross-plate) · v0.7
-// ═══════════════════════════════════════════════════════════════════
-function IdentitiesPanel({ identities, candidates, show, onToggle, onReload, onOpenPlate }) {
-  const [creating, setCreating] = useState(null); // signature en cours de création
-  if (!identities.length && !candidates.length) return null;
-
-  const promote = async (c) => {
-    setCreating(c.signature);
-    try {
-      const name = [c.signature.make, c.signature.color, c.signature.type].filter(Boolean).join(" ").trim() || c.plates[0];
-      await api.post("/vehicles/identities", {
-        name, plates: c.plates,
-        vehicle_make: c.signature.make,
-        vehicle_color: c.signature.color,
-        vehicle_type: c.signature.type,
-        notes: "Créée depuis la détection auto",
-      });
-      toast.success(`Identité créée : ${name}`);
-      onReload();
-    } catch { toast.error("Création impossible"); }
-    finally { setCreating(null); }
-  };
-
-  return (
-    <div className="border border-border bg-secondary/30 p-3 mb-4" data-testid="identities-panel">
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
-          <Users size={13} className="text-[#0044FF]" />
-          Identités véhicule
-          <span className="mono">{identities.length}</span>
-          <Info size={12} className="opacity-50 cursor-help"
-                title="Regroupe plusieurs plaques (variantes OCR d'une même lecture, ou même véhicule vu différemment) sous une seule fiche véhicule. « candidats » = regroupements détectés automatiquement (marque/couleur/type + plaques proches), pas encore confirmés — cliquez « Créer l'identité » pour les valider." />
-          {candidates.length > 0 && (
-            <span className="text-[#FFB800] ml-2 flex items-center gap-1">
-              <Link2 size={11} /> {candidates.length} candidat{candidates.length > 1 ? "s" : ""}
-            </span>
-          )}
-        </div>
-        {candidates.length > 0 && (
-          <button onClick={onToggle}
-                  data-testid="toggle-identity-candidates"
-                  className="text-[10px] uppercase tracking-wider text-[#0044FF] hover:underline">
-            {show ? "Masquer les candidats" : "Afficher les candidats"}
-          </button>
-        )}
-      </div>
-
-      {identities.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-2">
-          {identities.slice(0, 6).map((id) => (
-            <div key={id.id} className="border border-[#0044FF]/40 bg-card px-2 py-1 text-[11px]" data-testid={`identity-${id.id}`}>
-              <div className="font-medium">{id.name}</div>
-              <div className="text-muted-foreground text-[10px]">
-                {id.plates.length} plaque{id.plates.length > 1 ? "s" : ""} · {id.vehicle_make || "—"} {id.vehicle_color || ""}
-              </div>
-              <div className="flex flex-wrap gap-1 mt-1">
-                {id.plates.slice(0, 4).map((p) => (
-                  <button key={p} onClick={() => onOpenPlate(p)}
-                          className="mono text-[9px] px-1 py-0.5 border border-border hover:bg-secondary"
-                          data-testid={`identity-plate-${p}`}>
-                    {p}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {show && candidates.length > 0 && (
-        <div className="border-t border-border pt-2 space-y-1.5">
-          {candidates.slice(0, 5).map((c, idx) => (
-            <div key={idx} className="flex items-center gap-2 text-[11px]" data-testid={`identity-candidate-${idx}`}>
-              <span className="text-muted-foreground w-40 truncate">
-                {[c.signature.make, c.signature.color, c.signature.type].filter(Boolean).join(" · ")}
-              </span>
-              <span className="text-[10px] text-muted-foreground">{c.plates_count} plaques · {c.reads} lectures</span>
-              <div className="flex flex-wrap gap-1 flex-1">
-                {c.plates.slice(0, 6).map((p) => (
-                  <span key={p} className="mono text-[9px] px-1 py-0.5 border border-border">{p}</span>
-                ))}
-              </div>
-              <button onClick={() => promote(c)} disabled={creating === c.signature}
-                      data-testid={`promote-identity-${idx}`}
-                      className="text-[9px] uppercase tracking-wider px-2 py-1 border border-[#00E676] text-[#00E676] hover:bg-[#00E676]/10">
-                {creating === c.signature ? <Loader2 size={10} className="animate-spin" /> : "Créer l'identité"}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════
 // Consensus multi-plugins & Validation manuelle de la plaque (v0.7 preview)
 // ═══════════════════════════════════════════════════════════════════
 function PlateConsensusBlock({ plate, onValidated }) {
@@ -1415,20 +1311,27 @@ function AnomaliesBanner({ items, onOpen, onDismiss }) {
 // endpoint/pattern que le reste de l'appli, passageThumbUrl — voir son
 // commentaire plus haut) pour un vrai contrôle visuel avant fusion, et le
 // détail des attributs au survol de chaque miniature.
-function DedupButton({ items, admin, running, available, onRunNow, onAccept, onReject }) {
+// v3.41 · Fusionné avec l'ancien panneau "Identités véhicule" (v0.7) —
+// même donnée sous-jacente (accepter une suggestion écrit dans la même
+// collection vehicle_identities que ce panneau affichait), plus de raison
+// d'avoir 2 menus séparés. Son propre détecteur de candidats heuristique
+// est retiré (redondant avec le dédoublonnage Qwen ci-dessous, bien plus
+// abouti). Renommé en conséquence : ce n'est plus seulement des
+// suggestions, mais aussi les fusions déjà confirmées.
+function DedupButton({ items, identities, admin, running, available, onRunNow, onAccept, onReject, onOpenPlate }) {
   const [open, setOpen] = useState(false);
-  if (!admin && items.length === 0) return null;
+  if (!admin && items.length === 0 && identities.length === 0) return null;
   return (
     <>
       <button onClick={() => setOpen(true)} data-testid="dedup-open-modal"
               className="flex items-center gap-1.5 border border-[#0044FF]/40 bg-[#0044FF]/5 text-[#0044FF] px-3 py-1.5 text-xs uppercase tracking-wider mb-4 hover:bg-[#0044FF]/10">
-        <Sparkles size={14} /> Doublons suggérés (IA) {items.length > 0 && `(${items.length})`}
+        <Sparkles size={14} /> Fusion & identités véhicule (IA) {items.length > 0 && `(${items.length})`}
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="rounded-none border-border max-w-3xl max-h-[85vh] flex flex-col" data-testid="dedup-modal">
           <DialogHeader>
             <DialogTitle className="font-head flex items-center justify-between gap-4 pr-6">
-              <span className="flex items-center gap-2"><Sparkles size={16} /> Doublons suggérés (IA) {items.length > 0 && `(${items.length})`}</span>
+              <span className="flex items-center gap-2"><Sparkles size={16} /> Fusion & identités véhicule (IA)</span>
               {admin && available && (
                 <button onClick={onRunNow} disabled={running} data-testid="dedup-run-now"
                         className="text-[10px] uppercase tracking-wider text-[#0044FF] hover:underline disabled:opacity-50 flex items-center gap-1 font-normal normal-case">
@@ -1443,15 +1346,48 @@ function DedupButton({ items, admin, running, available, onRunNow, onAccept, onR
               Connexion impossible — vérifiez la configuration dans Administration → LLM (MG-IA).
             </p>
           )}
-          <div className="flex-1 overflow-y-auto space-y-2 -mx-1 px-1">
-            {items.length === 0 ? (
-              <p className="text-[11px] text-muted-foreground">
-                Aucune suggestion en attente — tâche automatique une fois par jour, ou lance-la manuellement.
-              </p>
-            ) : (
-              items.map((s) => (
-                <DedupRow key={s.id} s={s} onAccept={onAccept} onReject={onReject} />
-              ))
+          <div className="flex-1 overflow-y-auto space-y-4 -mx-1 px-1">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
+                Suggestions en attente {items.length > 0 && `(${items.length})`}
+              </div>
+              {items.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground">
+                  Aucune suggestion en attente — tâche automatique une fois par jour, ou lance-la manuellement.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {items.map((s) => (
+                    <DedupRow key={s.id} s={s} onAccept={onAccept} onReject={onReject} />
+                  ))}
+                </div>
+              )}
+            </div>
+            {identities.length > 0 && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
+                  <Users size={11} /> Identités confirmées ({identities.length})
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {identities.map((id) => (
+                    <div key={id.id} className="border border-[#0044FF]/40 bg-card px-2 py-1 text-[11px]" data-testid={`identity-${id.id}`}>
+                      <div className="font-medium">{id.name}</div>
+                      <div className="text-muted-foreground text-[10px]">
+                        {id.plates.length} plaque{id.plates.length > 1 ? "s" : ""} · {id.vehicle_make || "—"} {id.vehicle_color || ""}
+                      </div>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {id.plates.map((p) => (
+                          <button key={p} onClick={() => { onOpenPlate(p); setOpen(false); }}
+                                  className="mono text-[9px] px-1 py-0.5 border border-border hover:bg-secondary"
+                                  data-testid={`identity-plate-${p}`}>
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         </DialogContent>

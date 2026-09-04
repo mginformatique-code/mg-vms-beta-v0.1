@@ -458,53 +458,6 @@ async def list_identities(user: dict = Depends(require_permission("read_plates")
     return {"count": len(docs), "items": docs}
 
 
-@vehicles_router.get("/identities/detect")
-async def detect_identity_candidates(
-    min_plates: int = Query(2, ge=2, le=10),
-    user: dict = Depends(require_permission("read_plates")),
-):
-    """Détecte les groupes de plaques appartenant potentiellement au même véhicule
-    (mêmes make + color + type observés sur au moins ``min_plates`` plaques
-    distinctes). Suggestion pour l'utilisateur — validation manuelle requise.
-    """
-    match = await _base_match(user)
-    pipe = [
-        {"$match": match},
-        {"$match": {"vehicle_make": {"$ne": None}, "vehicle_color": {"$ne": None}}},
-        {"$group": {
-            "_id": {"make": "$vehicle_make", "color": "$vehicle_color",
-                    "type": "$vehicle_type"},
-            "plates": {"$addToSet": "$plate"},
-            "reads": {"$sum": 1},
-            "cameras": {"$addToSet": "$camera_id"},
-            "first_seen": {"$min": "$timestamp"},
-            "last_seen": {"$max": "$timestamp"},
-        }},
-        {"$match": {f"plates.{min_plates - 1}": {"$exists": True}}},
-        {"$sort": {"reads": -1}},
-        {"$limit": 30},
-    ]
-    docs = await db.plates.aggregate(pipe).to_list(30)
-    items = []
-    for d in docs:
-        # Retire les groupes déjà couverts par une identité existante.
-        existing = await db.vehicle_identities.find_one(
-            {"plates": {"$all": d["plates"][:2]}}
-        )
-        if existing:
-            continue
-        items.append({
-            "signature": d["_id"],
-            "plates": d["plates"],
-            "plates_count": len(d["plates"]),
-            "reads": d["reads"],
-            "cameras_count": len(d["cameras"] or []),
-            "first_seen": d.get("first_seen"),
-            "last_seen": d.get("last_seen"),
-        })
-    return {"count": len(items), "items": items}
-
-
 @vehicles_router.post("/identities")
 async def create_identity(body: IdentityBody,
                            user: dict = Depends(require_permission("read_plates"))):
