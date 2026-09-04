@@ -209,8 +209,12 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
           </button>
         </div>
       )}
+      {/* v3.33 · Déplacé de top-2 left-2 (chevauchait le nom de la caméra +
+          horodatage affichés par le bandeau d'en-tête du Feed parent,
+          LiveView.jsx, absolute top-0 inset-x-0) vers la droite sous la
+          ligne résolution/LIVE de ce même bandeau, où il y a de la place. */}
       <span
-        className="absolute top-2 left-2 z-10 text-[9px] mono uppercase tracking-wider px-1.5 py-0.5 border pointer-events-none"
+        className="absolute top-8 right-2 z-10 text-[9px] mono uppercase tracking-wider px-1.5 py-0.5 border pointer-events-none"
         style={{ color: badge.color, borderColor: `${badge.color}80`, background: `${badge.color}15` }}
         data-testid={`${dataTestId}-badge`}
       >
