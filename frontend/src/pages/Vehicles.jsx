@@ -933,11 +933,10 @@ function TabOverview({ d, onWatchChanged, onReload }) {
   return (
     <div className="space-y-4" data-testid="drawer-overview">
       {d.best_thumb_id && (
-        <img
+        <MagnifierImage
           src={passageThumbUrl(d.best_thumb_id, "frame")}
           alt="Best thumbnail"
           className="w-full max-h-64 object-cover border border-border"
-          onError={(e) => { e.target.style.display = "none"; }}
         />
       )}
 
@@ -1478,6 +1477,54 @@ function DedupRow({ s, onAccept, onReject }) {
               className="px-2 py-1 border border-border text-muted-foreground hover:text-foreground shrink-0 uppercase tracking-wider text-[10px]">
         Ignorer
       </button>
+    </div>
+  );
+}
+
+// v3.43 · Loupe circulaire au survol de la photo principale de la fiche
+// véhicule — demande explicite ("bête mais utile"), pour lire la plaque ou
+// d'autres détails sans quitter la page. Technique CSS classique
+// background-position : le cercle affiche la MÊME image, zoomée, décalée
+// pour centrer le point survolé.
+function MagnifierImage({ src, alt, className, zoom = 3, size = 200 }) {
+  const containerRef = useRef(null);
+  const [lens, setLens] = useState(null);
+
+  const handleMove = (e) => {
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    if (x < 0 || y < 0 || x > rect.width || y > rect.height) { setLens(null); return; }
+    setLens({
+      x, y,
+      bgW: rect.width * zoom,
+      bgH: rect.height * zoom,
+      bgX: -(x * zoom - size / 2),
+      bgY: -(y * zoom - size / 2),
+    });
+  };
+
+  return (
+    <div ref={containerRef} className="relative" onMouseMove={handleMove} onMouseLeave={() => setLens(null)}>
+      <img src={src} alt={alt} className={className}
+           onError={(e) => { e.target.style.display = "none"; }}
+           data-testid="magnifier-source-img" />
+      {lens && (
+        <div
+          className="absolute pointer-events-none rounded-full border-2 border-[#0044FF] shadow-xl"
+          style={{
+            left: lens.x - size / 2,
+            top: lens.y - size / 2,
+            width: size,
+            height: size,
+            backgroundImage: `url(${src})`,
+            backgroundRepeat: "no-repeat",
+            backgroundSize: `${lens.bgW}px ${lens.bgH}px`,
+            backgroundPosition: `${lens.bgX}px ${lens.bgY}px`,
+          }}
+          data-testid="magnifier-lens"
+        />
+      )}
     </div>
   );
 }

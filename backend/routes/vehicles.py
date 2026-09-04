@@ -565,6 +565,20 @@ async def create_identity(body: IdentityBody,
         raise HTTPException(status_code=400,
                             detail={"error": "empty_plates",
                                     "message": "Au moins une plaque est requise."})
+    # v3.43 · Garde-fou à la CRÉATION (pas seulement à la lecture, voir
+    # _resolve_plate_family) — découvert en prod une identité à 49 plaques
+    # manifestement sans rapport (1211TT, 7991TT, etc. avec AX217EM),
+    # probablement une sélection multiple accidentelle sur "Fusionner des
+    # fiches". Aucun vrai véhicule ne justifie autant de variantes OCR —
+    # bloque la création plutôt que de re-corrompre silencieusement les
+    # données ; l'utilisateur peut refaire des fusions plus ciblées.
+    if len(plates) > _MAX_PLAUSIBLE_FAMILY_SIZE:
+        raise HTTPException(status_code=400,
+                            detail={"error": "too_many_plates",
+                                    "message": f"{len(plates)} plaques sélectionnées — "
+                                               f"au-delà de {_MAX_PLAUSIBLE_FAMILY_SIZE}, ce n'est "
+                                               f"vraisemblablement plus le même véhicule. "
+                                               f"Vérifiez la sélection."})
     now = datetime.now(timezone.utc).isoformat()
     doc = {
         "id": str(_uuid.uuid4()),
