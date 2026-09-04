@@ -3,9 +3,10 @@ import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import LivePlayer from "@/components/video/LivePlayer";
-import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, User, Car, Truck, Bike, PawPrint, ScanLine, Flame, AlertOctagon, HardHat, MapPin, Activity, Lightbulb, Moon, Siren, Volume2, RefreshCw, LayoutGrid, Save, RotateCcw, GripVertical, Play, Loader2, Gauge } from "lucide-react";
+import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, User, Car, Truck, Bike, PawPrint, ScanLine, Flame, AlertOctagon, HardHat, MapPin, Activity, Lightbulb, Moon, Siren, Volume2, RefreshCw, LayoutGrid, Save, RotateCcw, GripVertical, Play, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { TrackInterpolator } from "@/tracking/TrackInterpolator";
+import * as DiagnosticsRegistry from "@/tracking/DiagnosticsRegistry";
 
 const LAYOUTS = [1, 4, 9, 16, 25, 36, 49, 64];
 
@@ -28,7 +29,7 @@ const colorFor = (label) => CLASS_COLORS[label] || "#FF3333";
 // dessiner l'état qu'on lui donne. Une instance de TrackInterpolator par
 // tuile (créée une fois, réutilisée tant que le composant reste monté —
 // remonte avec la tuile si la caméra change, via la `key` posée par l'appelant).
-function OverlayCanvas({ cam, boxes, showOverlay, showDiagnostics }) {
+function OverlayCanvas({ cam, boxes, showOverlay }) {
   const ref = useRef(null);
   const interpolatorRef = useRef(null);
   if (!interpolatorRef.current) interpolatorRef.current = new TrackInterpolator();
@@ -44,6 +45,20 @@ function OverlayCanvas({ cam, boxes, showOverlay, showDiagnostics }) {
     interpolatorRef.current.ingest(boxes || [], performance.now());
   }, [boxes]);
 
+  // v3.36 · Diagnostics déplacés du canvas (incrustation par tuile,
+  // signalée comme un chevauchement de plus) vers le panneau debug
+  // app-level (AppDebugPanel.jsx, Ctrl+Shift+D) — on ne fait plus
+  // qu'enregistrer un accès à l'interpolateur de cette tuile, lu par le
+  // panneau debug s'il est ouvert. Coût nul tant qu'il ne l'est pas.
+  useEffect(() => {
+    if (!cam?.id) return;
+    DiagnosticsRegistry.register(cam.id, (now) => ({
+      camName: cam.name, smoothingEnabled,
+      ...interpolatorRef.current.getDiagnosticsSnapshot(now),
+    }));
+    return () => DiagnosticsRegistry.unregister(cam.id);
+  }, [cam?.id, cam?.name, smoothingEnabled]);
+
   useEffect(() => {
     if (!showOverlay) return;
     const canvas = ref.current;
@@ -58,8 +73,7 @@ function OverlayCanvas({ cam, boxes, showOverlay, showDiagnostics }) {
       const ctx = canvas.getContext("2d");
       ctx.clearRect(0, 0, w, h);
       const now = performance.now();
-      const { boxes: renderBoxes, diagnostics } =
-        interpolatorRef.current.getRenderState(now, smoothingEnabled, maxPredictionMs);
+      const { boxes: renderBoxes } = interpolatorRef.current.getRenderState(now, smoothingEnabled, maxPredictionMs);
       ctx.lineWidth = 2;
       ctx.font = "bold 11px ui-monospace, monospace";
       for (const b of renderBoxes) {
@@ -80,32 +94,14 @@ function OverlayCanvas({ cam, boxes, showOverlay, showDiagnostics }) {
         ctx.fillStyle = "#000";
         ctx.fillText(label, rx + 4, Math.max(11, ry - 3));
       }
-      if (showDiagnostics) {
-        // v3.35 · Repositionné de "bottom-left" à "top-left, sous l'en-tête"
-        // — chevauchait le bandeau de pied de tuile (nom du site + heure,
-        // absolute bottom-0) signalé avec capture. L'en-tête (nom caméra +
-        // horodatage) fait ~20px : on démarre juste en dessous.
-        const lines = [
-          `Detection FPS: ${diagnostics.detectionFps}`,
-          `Display FPS: ${diagnostics.displayFps}`,
-          `Prediction: ${diagnostics.predictionActive ? "YES" : "no"}`,
-          `Last det. age: ${diagnostics.lastDetectionAgeMs != null ? Math.round(diagnostics.lastDetectionAgeMs) + "ms" : "—"}`,
-        ];
-        ctx.font = "10px ui-monospace, monospace";
-        const lh = 13, boxW = 155, boxH = lines.length * lh + 8, top = 22;
-        ctx.fillStyle = "rgba(0,0,0,0.65)";
-        ctx.fillRect(4, top, boxW, boxH);
-        ctx.fillStyle = "#00E676";
-        lines.forEach((line, i) => ctx.fillText(line, 10, top + 12 + i * lh));
-      }
     };
 
-    // v3.35 · Lissage/diagnostics désactivés (réglage par défaut, rollout
-    // prudent) -> chemin HISTORIQUE inchangé : un redraw par message reçu,
-    // aucune boucle. Coût zéro ajouté pour les caméras qui n'activent pas
-    // le lissage. Activé -> boucle rAF, cadencée par l'écran, pour un
+    // v3.35 · Lissage désactivé (réglage par défaut, rollout prudent) ->
+    // chemin HISTORIQUE inchangé : un redraw par message reçu, aucune
+    // boucle. Coût zéro ajouté pour les caméras qui n'activent pas le
+    // lissage. Activé -> boucle rAF, cadencée par l'écran, pour un
     // affichage réellement fluide entre deux détections réelles.
-    if (!smoothingEnabled && !showDiagnostics) {
+    if (!smoothingEnabled) {
       drawFrame();
       return;
     }
@@ -114,13 +110,13 @@ function OverlayCanvas({ cam, boxes, showOverlay, showDiagnostics }) {
       raf = requestAnimationFrame(loop);
     });
     return () => cancelAnimationFrame(raf);
-  }, [boxes, showOverlay, showDiagnostics, smoothingEnabled, maxPredictionMs, cam?.id]);
+  }, [boxes, showOverlay, smoothingEnabled, maxPredictionMs, cam?.id]);
 
   if (!showOverlay) return null;
   return <canvas ref={ref} className="absolute inset-0 w-full h-full pointer-events-none" data-testid="ai-overlay" />;
 }
 
-function FeedInner({ cam, idx, canPtz, hd, showOverlay, showDiagnostics, aiState, focused, onToggleFocus }) {
+function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onToggleFocus }) {
   const [hover, setHover] = useState(false);
   const [showPtz, setShowPtz] = useState(false);
   const online = cam?.status === "online";
@@ -143,7 +139,7 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, showDiagnostics, aiState
       {cam?.id ? (
         <>
           <LivePlayer camera={cam} hd={hd} className="w-full h-full" dataTestId="wall-player" />
-          {cam?.detect_enabled && <OverlayCanvas cam={cam} boxes={boxes} showOverlay={showOverlay} showDiagnostics={showDiagnostics} />}
+          {cam?.detect_enabled && <OverlayCanvas cam={cam} boxes={boxes} showOverlay={showOverlay} />}
           {/* Overlay No Signal superposé — le player reste monté en dessous */}
           {!online && (
             <div className="absolute inset-0 flex items-center justify-center bg-[#0a0a0a]/85 pointer-events-none z-10" data-testid="feed-no-signal-overlay">
@@ -182,8 +178,13 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, showDiagnostics, aiState
         </div>
       )}
       <div className="absolute bottom-0 inset-x-0 px-2 py-1 bg-gradient-to-t from-black/70 to-transparent flex justify-between">
-        <span className="text-[9px] mono text-white/70">{cam?.site_name || ""}</span>
-        <span className="text-[9px] mono text-white/70">{new Date().toLocaleTimeString()}</span>
+        {/* v3.36 · Nom caméra ajouté à côté du site (demande explicite) —
+            le nom de site seul ne dit pas quelle caméra c'est sur une
+            petite tuile où l'en-tête peut être tronqué. */}
+        <span className="text-[9px] mono text-white/70 truncate">
+          {cam?.site_name || ""}{cam?.site_name && cam?.name ? " · " : ""}{cam?.name || ""}
+        </span>
+        <span className="text-[9px] mono text-white/70 flex-shrink-0 pl-2">{new Date().toLocaleTimeString()}</span>
       </div>
       {/* v0.4 · Overlay contrôles caméra (Projecteur, IR, Sirène, TTS, Reboot)
           v3.19 · Toujours monté (visible pilote l'opacité) — voir
@@ -269,7 +270,7 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, showDiagnostics, aiState
 const Feed = React.memo(FeedInner, (prev, next) => {
   // Comparaison rapide des props scalaires
   if (prev.idx !== next.idx || prev.canPtz !== next.canPtz || prev.hd !== next.hd
-      || prev.showOverlay !== next.showOverlay || prev.showDiagnostics !== next.showDiagnostics
+      || prev.showOverlay !== next.showOverlay
       || prev.focused !== next.focused
       || prev.onToggleFocus !== next.onToggleFocus) return false;
   // Comparaison des propriétés utiles de la caméra (ignore `last_seen` etc.)
@@ -535,12 +536,6 @@ export default function LiveView() {
   const [layout, setLayout] = useState(4);
   const [hd, setHd] = useState(false);
   const [showOverlay, setShowOverlay] = useState(() => localStorage.getItem("mg_ai_overlay") !== "off");
-  // v3.35 · Diagnostic tracking par tuile (FPS détection/affichage, lissage
-  // actif ou non, âge de la dernière détection) — OFF par défaut, pour ne
-  // pas encombrer l'écran d'un opérateur ; utile en réglage/dépannage à
-  // l'échelle (savoir tout de suite si une caméra détecte, si l'affichage
-  // est fluide, si le prédicteur masque un vrai problème de cadence).
-  const [showDiagnostics, setShowDiagnostics] = useState(() => localStorage.getItem("mg_ai_diagnostics") === "on");
   const [focusedId, setFocusedId] = useState(null);  // camera_id focalisée (single-view) — null = mosaïque
   const [showTimeline, setShowTimeline] = useState(true);
   const [previewEvent, setPreviewEvent] = useState(null);  // événement cliqué depuis la timeline
@@ -574,7 +569,6 @@ export default function LiveView() {
     return () => clearInterval(iv);
   }, []);
   useEffect(() => { localStorage.setItem("mg_ai_overlay", showOverlay ? "on" : "off"); }, [showOverlay]);
-  useEffect(() => { localStorage.setItem("mg_ai_diagnostics", showDiagnostics ? "on" : "off"); }, [showDiagnostics]);
   useEffect(() => { setPage(0); setEditingLayout(false); }, [layout]);
   useEffect(() => {
     if (savedOrder[layout] !== undefined) return; // déjà chargé
@@ -711,13 +705,6 @@ export default function LiveView() {
             title={t("lv.toggle_ai")}>
             {showOverlay ? <Eye size={13} /> : <EyeOff size={13} />} Overlay IA
           </button>
-          {showOverlay && (
-            <button onClick={() => setShowDiagnostics((v) => !v)} data-testid="toggle-ai-diagnostics"
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs border ${showDiagnostics ? "bg-[#0044FF] text-white border-[#0044FF]" : "border-border hover:bg-secondary"}`}
-              title="Detection FPS / Display FPS / lissage actif / âge dernière détection, par tuile">
-              <Gauge size={13} /> Diagnostic tracking
-            </button>
-          )}
           <button onClick={() => setHd(!hd)} data-testid="hd-toggle" className={`px-2.5 py-1.5 text-xs border ${hd ? "bg-[#00E676] text-black border-[#00E676]" : "border-border"} hover:opacity-80`}>{hd ? "HD" : "SD"}</button>
           {!focusedCam && LAYOUTS.map((n) => (
             <button key={n} onClick={() => setLayout(n)} data-testid={`layout-${n}`}
@@ -760,7 +747,6 @@ export default function LiveView() {
         {focusedCam ? (
           <>
             <Feed cam={focusedCam} idx={0} canPtz={canPtz} hd={hd} showOverlay={showOverlay}
-                  showDiagnostics={showDiagnostics}
                   aiState={aiDetections[focusedCam.id]} focused={true} onToggleFocus={toggleFocus} />
             {showTimeline && <FocusTimeline cameraId={focusedCam.id} onSelect={setPreviewEvent} />}
           </>
@@ -769,7 +755,7 @@ export default function LiveView() {
             const cam = pageCamsRaw[i];
             const tile = (
               <Feed key={cam?.id || `slot-${i}`} cam={cam} idx={i} canPtz={canPtz} hd={hd}
-                    showOverlay={showOverlay} showDiagnostics={showDiagnostics} focused={false}
+                    showOverlay={showOverlay} focused={false}
                     aiState={cam ? aiDetections[cam.id] : null}
                     onToggleFocus={editingLayout ? undefined : toggleFocus} />
             );

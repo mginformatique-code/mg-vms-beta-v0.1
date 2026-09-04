@@ -192,7 +192,12 @@ export default function CameraControlOverlay({ cam, footer = false, visible = tr
   // d'éteindre). Signalé par l'utilisateur : "le bouton lumière ça
   // fonctionne, mais pas possible de l'éteindre".
   return (
-    <div className={`absolute bottom-2 left-2 transition-opacity ${visible ? "opacity-70 hover:opacity-100" : "opacity-0 pointer-events-none"}`}
+    // v3.36 · Remonté de bottom-2 à bottom-6 (demande explicite, "remonte
+    // légèrement les boutons d'actions caméras") — chevauchait le bandeau
+    // de pied de tuile (site + caméra, LiveView.jsx absolute bottom-0).
+    // Reste bien sous la timeline de la vue focus (FocusTimeline, bottom-14
+    // — voir son propre commentaire sur cette même zone), non touchée.
+    <div className={`absolute bottom-6 left-2 transition-opacity ${visible ? "opacity-70 hover:opacity-100" : "opacity-0 pointer-events-none"}`}
          data-testid={`camera-controls-${camId}`}>
       <div className="flex gap-0.5 bg-black/50 p-0.5 backdrop-blur-sm">{buttons}</div>
       {ttsOpen && (

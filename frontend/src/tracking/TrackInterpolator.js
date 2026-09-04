@@ -8,6 +8,13 @@
 // ici — uniquement de l'affichage, voir l'audit tracking MG-VMS §"Intégration
 // ANPR" : les stages backend (ROI, ANPR, événements) consomment la sortie
 // BRUTE de ByteTrack, jamais celle-ci.
+//
+// v3.36 · Les diagnostics (Detection FPS, Display FPS, Prediction active,
+// âge dernière détection) sont maintenant lus depuis le panneau debug
+// app-level (AppDebugPanel.jsx, Ctrl+Shift+D) plutôt qu'incrustés sur
+// chaque tuile — voir getDiagnosticsSnapshot(), appelable à tout moment
+// (même sans boucle de rendu active) et DiagnosticsRegistry.js pour
+// l'enregistrement par caméra.
 
 import { TrackState } from "./TrackState";
 import { extrapolate } from "./MotionPredictor";
@@ -21,6 +28,8 @@ export class TrackInterpolator {
     this._detectionTimestamps = [];
     this._renderTimestamps = [];
     this._lastDetectionTs = null;
+    this._lastDisplayFps = 0;
+    this._lastPredictionActive = false;
   }
 
   /** Appelé quand un nouveau message `ai_detections` arrive pour cette caméra. */
@@ -75,18 +84,31 @@ export class TrackInterpolator {
     // interpolation possible sans identité stable — affichées telles quelles.
     for (const b of this.state.untracked) boxes.push({ ...b, predicted: false });
 
-    const detectionFps = this._detectionTimestamps.length / (DETECTION_FPS_WINDOW_MS / 1000);
-    const displayFps = this._renderTimestamps.length / (RENDER_FPS_WINDOW_MS / 1000);
-    const lastDetectionAgeMs = this._lastDetectionTs != null ? Math.max(0, nowMs - this._lastDetectionTs) : null;
+    this._lastDisplayFps = Math.round(this._renderTimestamps.length / (RENDER_FPS_WINDOW_MS / 1000));
+    this._lastPredictionActive = predictionActive;
 
+    return { boxes, diagnostics: this.getDiagnosticsSnapshot(nowMs) };
+  }
+
+  /**
+   * Snapshot diagnostics, appelable à tout instant (poll du panneau debug,
+   * ~1x/s) — indépendant de la boucle de rendu : Detection FPS et âge de la
+   * dernière détection restent exacts même si aucune boucle rAF ne tourne
+   * (lissage désactivé sur cette caméra). Display FPS / Prediction active
+   * reflètent la dernière boucle de rendu connue (figés à 0/false si le
+   * lissage n'est pas actif — rien à mesurer dans ce cas).
+   */
+  getDiagnosticsSnapshot(nowMs) {
+    const cutoff = nowMs - DETECTION_FPS_WINDOW_MS;
+    const recent = this._detectionTimestamps.filter((t) => t >= cutoff).length;
+    const detectionFps = Math.round((recent / (DETECTION_FPS_WINDOW_MS / 1000)) * 10) / 10;
+    const lastDetectionAgeMs = this._lastDetectionTs != null ? Math.max(0, nowMs - this._lastDetectionTs) : null;
     return {
-      boxes,
-      diagnostics: {
-        detectionFps: Math.round(detectionFps * 10) / 10,
-        displayFps: Math.round(displayFps),
-        predictionActive,
-        lastDetectionAgeMs,
-      },
+      detectionFps,
+      displayFps: this._lastDisplayFps,
+      predictionActive: this._lastPredictionActive,
+      lastDetectionAgeMs,
+      trackedCount: this.state.size,
     };
   }
 }

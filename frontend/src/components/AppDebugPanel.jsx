@@ -16,6 +16,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
+import * as DiagnosticsRegistry from "@/tracking/DiagnosticsRegistry";
 
 function decodeJwt(token) {
   try {
@@ -47,6 +48,12 @@ export default function AppDebugPanel() {
   const [running, setRunning] = useState({});
   const [netRefresh, setNetRefresh] = useState(0);
   const [appVersion, setAppVersion] = useState(null);
+  // v3.36 · Diagnostics tracking par caméra (Detection FPS, Display FPS,
+  // lissage actif, âge dernière détection) — déplacés ici depuis une
+  // incrustation par tuile de la mosaïque live (signalée comme un
+  // chevauchement de plus, et hors-sujet du menu caméra) vers ce panneau
+  // debug app-level. Voir frontend/src/tracking/DiagnosticsRegistry.js.
+  const [trackingSnapshot, setTrackingSnapshot] = useState({});
   const { user, lang, theme } = useApp() || {};
   const location = useLocation();
   const params = useParams();
@@ -65,6 +72,18 @@ export default function AppDebugPanel() {
   useEffect(() => {
     if (!open || tab !== "network") return;
     const iv = setInterval(() => setNetRefresh((n) => n + 1), 500);
+    return () => clearInterval(iv);
+  }, [open, tab]);
+
+  // ─── Auto-refresh onglet Tracking (1s tant que ouvert) ────────────
+  // 1s suffit (Detection FPS mesuré sur une fenêtre glissante de 5s côté
+  // TrackInterpolator) — pas besoin du 500ms du Réseau, ces métriques ne
+  // varient pas aussi vite.
+  useEffect(() => {
+    if (!open || tab !== "tracking") return;
+    const poll = () => setTrackingSnapshot(DiagnosticsRegistry.snapshotAll());
+    poll();
+    const iv = setInterval(poll, 1000);
     return () => clearInterval(iv);
   }, [open, tab]);
 
@@ -277,6 +296,7 @@ export default function AppDebugPanel() {
         <div style={{ marginLeft: "auto", display: "flex", gap: "6px" }}>
           {tabBtn("session", "Session")}
           {tabBtn("network", "Réseau")}
+          {tabBtn("tracking", "Tracking")}
           {tabBtn("navigation", "Navigation")}
           {tabBtn("build", "Build")}
         </div>
@@ -441,6 +461,46 @@ export default function AppDebugPanel() {
                         <pre style={{ color: "#f88", fontSize: "9px", whiteSpace: "pre-wrap" }}>{e.stack}</pre>
                       </details>
                     )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+
+        {tab === "tracking" && (() => {
+          const rows = Object.entries(trackingSnapshot);
+          return (
+            <div data-testid="app-dbg-panel-tracking">
+              <div style={{ color: "#00E5FF", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "4px" }}>
+                Tracking par caméra — {rows.length} tuile(s) affichée(s) actuellement
+              </div>
+              <div style={{ color: "#888", fontSize: "10px", marginBottom: "10px" }}>
+                Une caméra n'apparaît ici que si une tuile est actuellement montée dans Vues en direct
+                (Overlay IA activé). Prediction = extrapolation en cours entre 2 détections réelles
+                (lissage actif sur cette caméra) — YES en continu sur une caméra sans détection récente
+                indiquerait que le lissage masque un vrai décrochage.
+              </div>
+              <div style={{ background: "#111", border: "1px solid #222" }}>
+                <div style={{ padding: "5px 8px", borderBottom: "1px solid #333", fontSize: "9px", textTransform: "uppercase", color: "#666", display: "grid", gridTemplateColumns: "1.4fr 0.8fr 0.8fr 0.8fr 0.9fr 0.6fr 0.7fr", gap: "6px" }}>
+                  <span>Caméra</span><span>Detect. FPS</span><span>Display FPS</span><span>Prediction</span><span>Dern. détect.</span><span>Pistes</span><span>Lissage</span>
+                </div>
+                {rows.length === 0 && (
+                  <div style={{ padding: "16px", color: "#555", fontSize: "11px", textAlign: "center" }}>
+                    Aucune tuile live montée — ouvrez Vues en direct dans un autre onglet pour peupler cette liste
+                  </div>
+                )}
+                {rows.map(([camId, d]) => (
+                  <div key={camId} style={{ padding: "5px 8px", borderBottom: "1px dashed #222", fontSize: "10px", display: "grid", gridTemplateColumns: "1.4fr 0.8fr 0.8fr 0.8fr 0.9fr 0.6fr 0.7fr", gap: "6px", alignItems: "center" }}>
+                    <span style={{ color: "#ddd" }}>{d.camName || camId}</span>
+                    <span style={{ color: d.detectionFps > 0 ? "#8f8" : "#f66" }}>{d.detectionFps ?? "—"}</span>
+                    <span style={{ color: "#aaa" }}>{d.displayFps ?? "—"}</span>
+                    <span style={{ color: d.predictionActive ? "#0ff" : "#666" }}>{d.predictionActive ? "YES" : "no"}</span>
+                    <span style={{ color: d.lastDetectionAgeMs != null && d.lastDetectionAgeMs > 5000 ? "#fa0" : "#aaa" }}>
+                      {d.lastDetectionAgeMs != null ? `${Math.round(d.lastDetectionAgeMs)}ms` : "—"}
+                    </span>
+                    <span style={{ color: "#aaa" }}>{d.trackedCount ?? "—"}</span>
+                    <span style={{ color: d.smoothingEnabled ? "#0ff" : "#666" }}>{d.smoothingEnabled ? "actif" : "off"}</span>
                   </div>
                 ))}
               </div>
