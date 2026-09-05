@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { Switch } from "@/components/ui/switch";
-import { Brain, Save, Loader2, CheckCircle2, RefreshCw, Eye } from "lucide-react";
+import { Brain, Save, Loader2, CheckCircle2, RefreshCw, Eye, Car } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -17,7 +17,7 @@ const empty = {
   dedup_enabled: false, anpr_tuning_enabled: false,
   dedup_auto_approve_enabled: false, dedup_auto_approve_interval_min: 60,
   anomaly_ai_enabled: false,
-  vision_model: "qwen2.5vl:7b", color_ai_enabled: false,
+  vision_model: "qwen2.5vl:7b", color_ai_enabled: false, make_ai_enabled: false,
 };
 
 const Inp = (p) => <input {...p} className="w-full px-3 py-2 bg-card border border-input outline-none text-sm focus:border-[#0044FF]" />;
@@ -43,6 +43,8 @@ export default function LlmSettings() {
   const [autoStatus, setAutoStatus] = useState(null);
   const [colorStatus, setColorStatus] = useState(null);
   const [colorRunning, setColorRunning] = useState(false);
+  const [makeStatus, setMakeStatus] = useState(null);
+  const [makeRunning, setMakeRunning] = useState(false);
 
   const loadAutoStatus = () => {
     api.get("/vehicles/dedup/auto-approve/status").then((r) => setAutoStatus(r.data)).catch(() => {});
@@ -50,12 +52,16 @@ export default function LlmSettings() {
   const loadColorStatus = () => {
     api.get("/vehicles/color-ai/status").then((r) => setColorStatus(r.data)).catch(() => {});
   };
+  const loadMakeStatus = () => {
+    api.get("/vehicles/make-ai/status").then((r) => setMakeStatus(r.data)).catch(() => {});
+  };
 
   useEffect(() => {
     api.get("/settings/llm").then((r) => setCfg({ ...empty, ...r.data })).catch(() => {});
     loadAutoStatus();
     loadColorStatus();
-    const iv = setInterval(() => { loadAutoStatus(); loadColorStatus(); }, 30000);
+    loadMakeStatus();
+    const iv = setInterval(() => { loadAutoStatus(); loadColorStatus(); loadMakeStatus(); }, 30000);
     return () => clearInterval(iv);
   }, []);
 
@@ -70,6 +76,17 @@ export default function LlmSettings() {
     } finally { setColorRunning(false); }
   };
 
+  const runMakeNow = async () => {
+    setMakeRunning(true);
+    try {
+      await api.post("/vehicles/make-ai/run");
+      toast.success("Identification marque lancée en arrière-plan — la progression se met à jour ci-dessous d'ici quelques minutes.");
+      setTimeout(loadMakeStatus, 15000);
+    } catch (e) {
+      toast.error(e.response?.data?.detail?.message || "Échec du lancement");
+    } finally { setMakeRunning(false); }
+  };
+
   const upd = (k, v) => setCfg((c) => ({ ...c, [k]: v }));
 
   const save = async () => {
@@ -82,6 +99,7 @@ export default function LlmSettings() {
         dedup_auto_approve_interval_min: cfg.dedup_auto_approve_interval_min,
         anomaly_ai_enabled: cfg.anomaly_ai_enabled,
         vision_model: cfg.vision_model, color_ai_enabled: cfg.color_ai_enabled,
+        make_ai_enabled: cfg.make_ai_enabled,
       });
       setCfg({ ...empty, ...data });
       toast.success("Configuration LLM enregistrée");
@@ -230,7 +248,34 @@ export default function LlmSettings() {
           )}
         </div>
 
-        {!cfg.enabled && (cfg.dedup_enabled || cfg.anpr_tuning_enabled || cfg.anomaly_ai_enabled || cfg.color_ai_enabled) && (
+        <div className="py-2.5 border-t border-border">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Car size={13} className="text-muted-foreground" />
+              <div>
+                <div className="text-sm">Identification marque véhicule (vision)</div>
+                <div className="text-[11px] text-muted-foreground">Identifie la marque via le logo/la calandre (fonctionne aussi de nuit/IR, contrairement à la couleur — la forme reste visible en niveaux de gris). Tâche périodique + bouton manuel.</div>
+              </div>
+            </div>
+            <Switch checked={cfg.make_ai_enabled} onCheckedChange={(v) => upd("make_ai_enabled", v)} data-testid="llm-make-ai-toggle" />
+          </div>
+          {cfg.make_ai_enabled && (
+            <div className="mt-2 flex items-center justify-between gap-2 pl-5">
+              {makeStatus ? (
+                <div className="text-[10px] text-muted-foreground mono" data-testid="llm-make-ai-status">
+                  {makeStatus.checked} / {makeStatus.total_eligible} lectures vérifiées (30j) · {makeStatus.corrected} corrigée{makeStatus.corrected > 1 ? "s" : ""}
+                </div>
+              ) : <span />}
+              <button onClick={runMakeNow} disabled={makeRunning}
+                      className="shrink-0 flex items-center gap-1 px-2 py-1 border border-border text-[10px] uppercase tracking-wider hover:bg-secondary/60 disabled:opacity-40"
+                      data-testid="llm-make-ai-run-btn">
+                {makeRunning ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Vérifier maintenant
+              </button>
+            </div>
+          )}
+        </div>
+
+        {!cfg.enabled && (cfg.dedup_enabled || cfg.anpr_tuning_enabled || cfg.anomaly_ai_enabled || cfg.color_ai_enabled || cfg.make_ai_enabled) && (
           <p className="text-[11px] text-[#FFB800] mt-3">La connexion ci-dessus est désactivée — ces fonctionnalités resteront inactives tant qu'elle ne l'est pas.</p>
         )}
       </div>

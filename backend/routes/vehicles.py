@@ -598,6 +598,58 @@ async def create_identity(body: IdentityBody,
     return doc
 
 
+class IdentityMergeBody(BaseModel):
+    identity_ids: list[str]
+    name: str = ""
+
+
+# v3.46 · Fusionner 2+ identités DÉJÀ confirmées entre elles — demande
+# explicite (04/09), distincte de "Fusionner des fiches" (plaques
+# individuelles depuis la grille principale) : ici on part de cartes déjà
+# validées dans la fenêtre "Fusion & identités véhicule (IA)". Route
+# déclarée AVANT GET /identities/{identity_id} — sinon FastAPI matcherait
+# "merge" comme une valeur de {identity_id} (ordre de déclaration =
+# priorité de résolution des routes).
+@vehicles_router.post("/identities/merge")
+async def merge_identities(body: IdentityMergeBody,
+                            user: dict = Depends(require_permission("read_plates"))):
+    ids = list(dict.fromkeys(body.identity_ids))  # dédupliqué, ordre préservé
+    if len(ids) < 2:
+        raise HTTPException(status_code=400, detail={"error": "need_at_least_two",
+                                                        "message": "Sélectionnez au moins 2 identités à fusionner."})
+    docs = await db.vehicle_identities.find({"id": {"$in": ids}}, {"_id": 0}).to_list(len(ids))
+    if len(docs) != len(ids):
+        raise HTTPException(status_code=404, detail={"error": "identity_not_found",
+                                                        "message": "Une ou plusieurs identités sont introuvables."})
+    plates = sorted({p for d in docs for p in (d.get("plates") or [])})
+    # Même garde-fou qu'à la création directe (v3.43) — une fusion de
+    # fusions ne doit pas non plus produire un groupe implausible.
+    if len(plates) > _MAX_PLAUSIBLE_FAMILY_SIZE:
+        raise HTTPException(status_code=400, detail={
+            "error": "too_many_plates",
+            "message": f"{len(plates)} plaques au total — au-delà de {_MAX_PLAUSIBLE_FAMILY_SIZE}, "
+                       f"ce n'est vraisemblablement plus le même véhicule. Vérifiez la sélection.",
+        })
+    docs.sort(key=lambda d: d.get("created_at") or "")  # la plus ancienne devient la survivante
+    survivor, others = docs[0], docs[1:]
+    now = datetime.now(timezone.utc).isoformat()
+    update = {
+        "name": (body.name or survivor.get("name") or plates[0]).strip(),
+        "plates": plates,
+        "vehicle_make": survivor.get("vehicle_make") or next((d.get("vehicle_make") for d in others if d.get("vehicle_make")), None),
+        "vehicle_color": survivor.get("vehicle_color") or next((d.get("vehicle_color") for d in others if d.get("vehicle_color")), None),
+        "vehicle_type": survivor.get("vehicle_type") or next((d.get("vehicle_type") for d in others if d.get("vehicle_type")), None),
+        "notes": " / ".join(n for n in ([survivor.get("notes")] + [d.get("notes") for d in others]) if n),
+        "updated_at": now,
+    }
+    await db.vehicle_identities.update_one({"id": survivor["id"]}, {"$set": update})
+    await db.vehicle_identities.delete_many({"id": {"$in": [d["id"] for d in others]}})
+    _list_cache.clear()
+    await log_audit(user, "vehicle_identities_merged", f"{len(docs)} identités -> {survivor['id']}")
+    merged = {**survivor, **update}
+    return merged
+
+
 @vehicles_router.get("/identities/{identity_id}")
 async def get_identity(identity_id: str,
                         user: dict = Depends(require_permission("read_plates"))):

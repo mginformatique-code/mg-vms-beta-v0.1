@@ -1,0 +1,180 @@
+"""v3.46 · Identification marque véhicule via modèle vision (qwen2.5vl).
+
+Même principe que vehicle_color_ai.py (même modèle vision, même connexion,
+même architecture tâche périodique) mais PAS le même comportement IR :
+- Couleur : une image monochrome IR ne contient structurellement AUCUNE
+  information de teinte — la vision ne peut pas deviner mieux qu'une
+  hallucination, on skip (voir dominant_color_fr).
+- Marque : le LOGO/la calandre/la silhouette d'un véhicule restent
+  identifiables en niveaux de gris — l'information est dans la FORME, pas
+  la couleur. Aucune raison de sauter les crops IR ici.
+
+Vocabulaire OUVERT (contrairement à la couleur, enum fermé à 10 valeurs) :
+`vehicle_make` n'a pas de liste fixe. Risque de confusion documenté sur ce
+type de champ texte libre avec un petit modèle (voir reference mgai) —
+mitigé par (1) une liste de marques courantes du marché français fournie
+en suggestion dans le prompt système, PAS une contrainte stricte, (2) une
+instruction explicite de répondre "Inconnue" si le logo/la calandre n'est
+pas clairement identifiable plutôt que de deviner, (3) un seuil de
+confiance minimum avant d'écraser la valeur existante.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import re
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from auth import require_permission, require_role, log_audit
+from database import db
+
+logger = logging.getLogger("routes.vehicle_make_ai")
+
+vehicle_make_ai_router = APIRouter(prefix="/api/vehicles/make-ai", tags=["vehicle-make-ai"])
+
+_LOOKBACK_DAYS = 30
+_BATCH_SIZE = 200
+_BATCH_INTERVAL_HOURS = 6
+# Sous ce seuil de confiance, on garde la valeur existante plutôt que
+# d'écraser avec une supposition faible — un champ texte libre a plus de
+# marge d'erreur qu'un enum fermé (voir docstring module).
+_MIN_CONFIDENCE_TO_APPLY = 0.6
+
+_SUGGESTED_MAKES = (
+    "Renault, Peugeot, Citroën, Volkswagen, Toyota, Ford, Dacia, BMW, "
+    "Mercedes-Benz, Audi, Fiat, Opel, Nissan, Hyundai, Kia, Škoda, Seat, "
+    "Volvo, Mini, Suzuki, Honda, Mazda, Land Rover, Jeep, Tesla, Alfa Romeo, "
+    "Mitsubishi, Porsche, Jaguar, DS Automobiles, Alpine, Smart, Cupra, MG, Lexus"
+)
+
+
+def _iso(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+async def _ask_qwen_vision_make(vehicle_crop_data_uri: str) -> dict:
+    from routes.llm_settings import get_vision_llm_config
+    cfg = await get_vision_llm_config()
+    if not cfg:
+        raise HTTPException(status_code=503, detail={"code": "MAKE_AI_LLM_NOT_CONFIGURED",
+                                                        "message": "Modèle vision non configuré (Administration → LLM)."})
+    import httpx
+    system = (
+        "Tu es un analyste ANPR spécialisé en identification de véhicules. "
+        'Réponds UNIQUEMENT avec un objet JSON valide respectant EXACTEMENT ce '
+        'schéma : {"marque": texte ou null, "confiance": nombre entre 0 et 1}. '
+        f"Marques courantes en France (liste indicative, pas exhaustive) : {_SUGGESTED_MAKES}. "
+        "Base ton jugement sur le logo, la calandre, la silhouette générale — "
+        "cette identification reste valable même sur une image en niveaux de "
+        "gris (infrarouge nocturne), l'information est dans la FORME pas la "
+        "couleur. Si le logo n'est pas clairement visible ou identifiable, "
+        'réponds {"marque": null, "confiance": 0} plutôt que de deviner. '
+        "Aucun texte hors JSON."
+    )
+    headers = {"Content-Type": "application/json"}
+    if cfg.get("api_key"):
+        headers["Authorization"] = f"Bearer {cfg['api_key']}"
+    payload = {
+        "model": cfg["model"],
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": [
+                {"type": "text", "text": "Quelle est la marque de ce véhicule ?"},
+                {"type": "image_url", "image_url": {"url": vehicle_crop_data_uri}},
+            ]},
+        ],
+        "stream": False,
+    }
+    # v3.46 · Même endpoint que vehicle_color_ai.py (/api/chat/completions,
+    # pas /v1/chat/completions) — base_url pointe vers Open WebUI (WAN), pas
+    # Ollama brut. Voir le correctif déjà vérifié sur le module couleur.
+    url = f"{cfg['base_url']}/api/chat/completions"
+    async with httpx.AsyncClient(timeout=40.0) as client:
+        resp = await client.post(url, json=payload, headers=headers)
+        resp.raise_for_status()
+        body = resp.json()
+    raw = (body["choices"][0]["message"]["content"] or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw).strip()
+    parsed = json.loads(raw)
+    marque = (parsed.get("marque") or "").strip() or None
+    return {"marque": marque, "confiance": float(parsed.get("confiance") or 0)}
+
+
+async def _run_make_ai_batch() -> dict:
+    since = _iso(datetime.now(timezone.utc) - timedelta(days=_LOOKBACK_DAYS))
+    docs = await db.plates.find(
+        {"timestamp": {"$gte": since}, "vehicle_crop": {"$exists": True, "$ne": None},
+         "vehicle_make_ai_checked_at": {"$exists": False}},
+        {"_id": 0, "id": 1, "vehicle_crop": 1, "vehicle_make": 1},
+    ).limit(_BATCH_SIZE).to_list(_BATCH_SIZE)
+
+    checked = corrected = low_confidence = errors = 0
+    for doc in docs:
+        now_iso = _iso(datetime.now(timezone.utc))
+        try:
+            verdict = await _ask_qwen_vision_make(doc["vehicle_crop"])
+        except Exception:
+            logger.exception("make_ai: échec vérification %s", doc["id"])
+            errors += 1
+            continue
+        checked += 1
+        update = {"vehicle_make_ai_checked_at": now_iso, "vehicle_make_ai_confidence": verdict["confiance"]}
+        if verdict["marque"] and verdict["confiance"] >= _MIN_CONFIDENCE_TO_APPLY \
+                and verdict["marque"] != doc.get("vehicle_make"):
+            update["vehicle_make"] = verdict["marque"]
+            update["vehicle_make_source"] = "vision_ai"
+            corrected += 1
+        elif verdict["marque"] and verdict["confiance"] < _MIN_CONFIDENCE_TO_APPLY:
+            low_confidence += 1
+        await db.plates.update_one({"id": doc["id"]}, {"$set": update})
+    return {"checked": checked, "corrected": corrected, "low_confidence": low_confidence, "errors": errors}
+
+
+async def make_ai_batch_loop() -> None:
+    """Même garde-fou anti-jamais-exécuté que les autres tâches périodiques."""
+    from routes.llm_settings import is_feature_enabled
+    await asyncio.sleep(300)
+    while True:
+        if await is_feature_enabled("make_ai_enabled"):
+            try:
+                counts = await _run_make_ai_batch()
+                if counts["checked"]:
+                    logger.info("make_ai: run terminé — %s", counts)
+            except Exception:
+                logger.exception("make_ai: erreur boucle make_ai_batch_loop")
+        await asyncio.sleep(_BATCH_INTERVAL_HOURS * 3600)
+
+
+@vehicle_make_ai_router.post("/run")
+async def run_now(user: dict = Depends(require_role("admin"))):
+    from routes.llm_settings import is_feature_enabled
+    if not await is_feature_enabled("make_ai_enabled"):
+        raise HTTPException(status_code=400, detail={
+            "code": "MAKE_AI_DISABLED",
+            "message": "Identification marque IA désactivée — Administration → LLM (MG-IA).",
+        })
+
+    async def _run_bg():
+        try:
+            counts = await _run_make_ai_batch()
+            logger.info("make_ai: recherche manuelle terminée, %s", counts)
+        except Exception:
+            logger.exception("make_ai: erreur pendant la recherche manuelle")
+    asyncio.create_task(_run_bg())
+    await log_audit(user, "make_ai_run_started", "lancée en arrière-plan")
+    return {"started": True}
+
+
+@vehicle_make_ai_router.get("/status")
+async def status(user: dict = Depends(require_permission("read_plates"))):
+    since = _iso(datetime.now(timezone.utc) - timedelta(days=_LOOKBACK_DAYS))
+    total = await db.plates.count_documents({"timestamp": {"$gte": since}, "vehicle_crop": {"$exists": True, "$ne": None}})
+    checked = await db.plates.count_documents({"timestamp": {"$gte": since}, "vehicle_make_ai_checked_at": {"$exists": True}})
+    corrected = await db.plates.count_documents({"timestamp": {"$gte": since}, "vehicle_make_source": "vision_ai"})
+    return {"total_eligible": total, "checked": checked, "corrected": corrected}

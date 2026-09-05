@@ -57,6 +57,9 @@ class LlmConfigIn(BaseModel):
     # différent. Voir vehicle_color_ai.py.
     vision_model: str = "qwen2.5vl:7b"
     color_ai_enabled: bool = False
+    # v3.46 · Identification marque véhicule — même modèle vision que la
+    # couleur, interrupteur dédié séparé (voir vehicle_make_ai.py).
+    make_ai_enabled: bool = False
 
 
 async def _load_raw() -> dict:
@@ -80,6 +83,7 @@ def _mask(v: dict) -> dict:
         "anomaly_ai_enabled": bool(v.get("anomaly_ai_enabled", False)),
         "vision_model": v.get("vision_model") or "qwen2.5vl:7b",
         "color_ai_enabled": bool(v.get("color_ai_enabled", False)),
+        "make_ai_enabled": bool(v.get("make_ai_enabled", False)),
     }
 
 
@@ -109,6 +113,7 @@ async def put_llm_config(data: LlmConfigIn, user: dict = Depends(require_role("a
         "anomaly_ai_enabled": data.anomaly_ai_enabled,
         "vision_model": (data.vision_model or "").strip() or "qwen2.5vl:7b",
         "color_ai_enabled": data.color_ai_enabled,
+        "make_ai_enabled": data.make_ai_enabled,
     }
     await db.settings.update_one({"key": "llm_config"}, {"$set": {"key": "llm_config", "value": value}}, upsert=True)
     await log_audit(user, "llm_config_updated", value["base_url"])
@@ -149,12 +154,17 @@ async def get_active_llm_config() -> Optional[dict]:
 
 
 async def get_vision_llm_config() -> Optional[dict]:
-    """Utilisé par vehicle_color_ai.py — même connexion que get_active_llm_config
-    mais avec le modèle VISION dédié (`vision_model`), pas le modèle texte
-    (`model`). None si la connexion, `color_ai_enabled` ou `vision_model`
-    manque — l'appelant dégrade proprement (pas de 500)."""
+    """Utilisé par vehicle_color_ai.py ET vehicle_make_ai.py — même connexion
+    que get_active_llm_config mais avec le modèle VISION dédié
+    (`vision_model`), pas le modèle texte (`model`). Ne vérifie QUE la
+    connexion globale (`enabled`) + `vision_model` — PAS un interrupteur de
+    fonctionnalité spécifique (color_ai_enabled/make_ai_enabled), puisque
+    cette config est partagée par plusieurs plugins vision distincts ;
+    chaque appelant vérifie son propre `is_feature_enabled(...)` séparément
+    avant d'en avoir besoin. None si la connexion ou `vision_model` manque
+    — l'appelant dégrade proprement (pas de 500)."""
     v = await _load_raw()
-    if not v.get("enabled") or not v.get("color_ai_enabled") or not v.get("base_url") or not v.get("vision_model"):
+    if not v.get("enabled") or not v.get("base_url") or not v.get("vision_model"):
         return None
     return {
         "base_url": v["base_url"],

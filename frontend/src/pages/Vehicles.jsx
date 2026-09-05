@@ -646,6 +646,7 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
           onAccept={(id) => decideDedup(id, true)}
           onReject={(id) => decideDedup(id, false)}
           onOpenPlate={(p) => setOpenPlate(p)}
+          onMerged={loadIdentities}
         />
       )}
 
@@ -1337,9 +1338,34 @@ function AnomaliesBanner({ items, onOpen, onDismiss }) {
 // est retiré (redondant avec le dédoublonnage Qwen ci-dessous, bien plus
 // abouti). Renommé en conséquence : ce n'est plus seulement des
 // suggestions, mais aussi les fusions déjà confirmées.
-function DedupButton({ items, identities, admin, running, available, onRunNow, onAccept, onReject, onOpenPlate }) {
+function DedupButton({ items, identities, admin, running, available, onRunNow, onAccept, onReject, onOpenPlate, onMerged }) {
   const [open, setOpen] = useState(false);
+  const [mergeMode, setMergeMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [merging, setMerging] = useState(false);
   if (!admin && items.length === 0 && identities.length === 0) return null;
+
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const confirmMergeIdentities = async () => {
+    if (selectedIds.size < 2) return;
+    setMerging(true);
+    try {
+      await api.post("/vehicles/identities/merge", { identity_ids: Array.from(selectedIds) });
+      toast.success(`${selectedIds.size} identités fusionnées`);
+      setSelectedIds(new Set());
+      setMergeMode(false);
+      onMerged && onMerged();
+    } catch (e) {
+      toast.error(e.response?.data?.detail?.message || "Échec de la fusion");
+    } finally { setMerging(false); }
+  };
   return (
     <>
       <button onClick={() => setOpen(true)} data-testid="dedup-open-modal"
@@ -1384,27 +1410,58 @@ function DedupButton({ items, identities, admin, running, available, onRunNow, o
             </div>
             {identities.length > 0 && (
               <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-                  <Users size={11} /> Identités confirmées ({identities.length})
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Users size={11} /> Identités confirmées ({identities.length})
+                  </div>
+                  <button
+                    onClick={() => { setMergeMode((v) => !v); setSelectedIds(new Set()); }}
+                    className={`text-[10px] uppercase tracking-wider px-2 py-0.5 border ${mergeMode ? "border-[#0044FF] text-[#0044FF] bg-[#0044FF]/5" : "border-border text-muted-foreground hover:bg-secondary"}`}
+                    data-testid="identity-merge-mode-toggle">
+                    {mergeMode ? "Annuler" : "Fusionner des identités"}
+                  </button>
                 </div>
+                {mergeMode && (
+                  <div className="flex items-center justify-between gap-2 mb-2 p-2 border border-[#0044FF]/40 bg-[#0044FF]/5 text-[11px]" data-testid="identity-merge-bar">
+                    <span>{selectedIds.size} sélectionnée{selectedIds.size > 1 ? "s" : ""} — clique 2+ cartes ci-dessous.</span>
+                    <button onClick={confirmMergeIdentities} disabled={selectedIds.size < 2 || merging}
+                            className="flex items-center gap-1 px-2 py-1 bg-[#0044FF] text-white text-[10px] uppercase tracking-wider disabled:opacity-40"
+                            data-testid="identity-merge-confirm">
+                      {merging ? <Loader2 size={11} className="animate-spin" /> : <GitMerge size={11} />}
+                      Fusionner ({selectedIds.size})
+                    </button>
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-2">
-                  {identities.map((id) => (
-                    <div key={id.id} className="border border-[#0044FF]/40 bg-card px-2 py-1 text-[11px]" data-testid={`identity-${id.id}`}>
-                      <div className="font-medium">{id.name}</div>
-                      <div className="text-muted-foreground text-[10px]">
-                        {id.plates.length} plaque{id.plates.length > 1 ? "s" : ""} · {id.vehicle_make || "—"} {id.vehicle_color || ""}
+                  {identities.map((id) => {
+                    const selected = selectedIds.has(id.id);
+                    return (
+                      <div key={id.id}
+                           onClick={mergeMode ? () => toggleSelect(id.id) : undefined}
+                           className={`border px-2 py-1 text-[11px] ${mergeMode ? "cursor-pointer" : ""} ${selected ? "border-[#0044FF] bg-[#0044FF]/10" : "border-[#0044FF]/40 bg-card"}`}
+                           data-testid={`identity-${id.id}`}>
+                        <div className="font-medium flex items-center gap-1">
+                          {mergeMode && (
+                            <span className={`inline-block w-3 h-3 border ${selected ? "bg-[#0044FF] border-[#0044FF]" : "border-muted-foreground"}`} />
+                          )}
+                          {id.name}
+                        </div>
+                        <div className="text-muted-foreground text-[10px]">
+                          {id.plates.length} plaque{id.plates.length > 1 ? "s" : ""} · {id.vehicle_make || "—"} {id.vehicle_color || ""}
+                        </div>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {id.plates.map((p) => (
+                            <button key={p}
+                                    onClick={(e) => { if (mergeMode) { e.stopPropagation(); return; } onOpenPlate(p); setOpen(false); }}
+                                    className="mono text-[9px] px-1 py-0.5 border border-border hover:bg-secondary"
+                                    data-testid={`identity-plate-${p}`}>
+                              {p}
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {id.plates.map((p) => (
-                          <button key={p} onClick={() => { onOpenPlate(p); setOpen(false); }}
-                                  className="mono text-[9px] px-1 py-0.5 border border-border hover:bg-secondary"
-                                  data-testid={`identity-plate-${p}`}>
-                            {p}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
