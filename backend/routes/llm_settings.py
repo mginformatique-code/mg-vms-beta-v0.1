@@ -50,6 +50,13 @@ class LlmConfigIn(BaseModel):
     # voir vehicle_anomaly_ai.py) — même convention que les autres switchs
     # dédiés ci-dessus.
     anomaly_ai_enabled: bool = False
+    # v3.45 · Couleur véhicule via modèle VISION (qwen2.5vl) — distinct du
+    # `model` texte ci-dessus (utilisé par dedup/anpr_tuning/anomaly_ai) :
+    # aucun des modèles texte de ce serveur ne peut voir une image. Même
+    # connexion (base_url/api_key) que le reste, juste un nom de modèle
+    # différent. Voir vehicle_color_ai.py.
+    vision_model: str = "qwen2.5vl:7b"
+    color_ai_enabled: bool = False
 
 
 async def _load_raw() -> dict:
@@ -71,6 +78,8 @@ def _mask(v: dict) -> dict:
         "dedup_auto_approve_enabled": bool(v.get("dedup_auto_approve_enabled", False)),
         "dedup_auto_approve_interval_min": int(v.get("dedup_auto_approve_interval_min") or 60),
         "anomaly_ai_enabled": bool(v.get("anomaly_ai_enabled", False)),
+        "vision_model": v.get("vision_model") or "qwen2.5vl:7b",
+        "color_ai_enabled": bool(v.get("color_ai_enabled", False)),
     }
 
 
@@ -98,6 +107,8 @@ async def put_llm_config(data: LlmConfigIn, user: dict = Depends(require_role("a
         # en quasi-temps réel, aucun cas d'usage légitime).
         "dedup_auto_approve_interval_min": max(5, int(data.dedup_auto_approve_interval_min or 60)),
         "anomaly_ai_enabled": data.anomaly_ai_enabled,
+        "vision_model": (data.vision_model or "").strip() or "qwen2.5vl:7b",
+        "color_ai_enabled": data.color_ai_enabled,
     }
     await db.settings.update_one({"key": "llm_config"}, {"$set": {"key": "llm_config", "value": value}}, upsert=True)
     await log_audit(user, "llm_config_updated", value["base_url"])
@@ -133,5 +144,20 @@ async def get_active_llm_config() -> Optional[dict]:
     return {
         "base_url": v["base_url"],
         "model": v.get("model") or _DEFAULT_MODEL,
+        "api_key": decrypt_secret(v.get("api_key", "")),
+    }
+
+
+async def get_vision_llm_config() -> Optional[dict]:
+    """Utilisé par vehicle_color_ai.py — même connexion que get_active_llm_config
+    mais avec le modèle VISION dédié (`vision_model`), pas le modèle texte
+    (`model`). None si la connexion, `color_ai_enabled` ou `vision_model`
+    manque — l'appelant dégrade proprement (pas de 500)."""
+    v = await _load_raw()
+    if not v.get("enabled") or not v.get("color_ai_enabled") or not v.get("base_url") or not v.get("vision_model"):
+        return None
+    return {
+        "base_url": v["base_url"],
+        "model": v["vision_model"],
         "api_key": decrypt_secret(v.get("api_key", "")),
     }

@@ -57,6 +57,7 @@ from routes.live_layout import live_layout_router
 from routes.vehicle_dedup import vehicle_dedup_router, dedup_batch_loop, dedup_auto_approve_loop
 from routes.anpr_tuning import anpr_tuning_router, anpr_tuning_loop
 from routes.vehicle_anomaly_ai import vehicle_anomaly_ai_router, anomaly_ai_batch_loop
+from routes.vehicle_color_ai import vehicle_color_ai_router, color_ai_batch_loop
 from wsdl_path import validate_wsdl_dir
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -153,6 +154,7 @@ app.include_router(live_layout_router)  # v3.22 · Disposition personnalisée du
 app.include_router(vehicle_dedup_router)  # v3.20 · Doublons véhicule assistés par Qwen
 app.include_router(anpr_tuning_router)  # v3.20 · Seuil confiance ANPR auto-réglé par Qwen
 app.include_router(vehicle_anomaly_ai_router)  # v3.44 · IA anomalies vehicule (convoi/vague, narration Qwen)
+app.include_router(vehicle_color_ai_router)  # v3.45 · Correction couleur vehicule via modele vision
 
 app.add_middleware(SecurityMiddleware)
 
@@ -266,6 +268,7 @@ async def on_startup():
         asyncio.create_task(dedup_batch_loop())
         asyncio.create_task(dedup_auto_approve_loop())
         asyncio.create_task(anomaly_ai_batch_loop())
+        asyncio.create_task(color_ai_batch_loop())
         asyncio.create_task(anpr_tuning_loop())
     logger.info("MG-VMS API démarré (rôle=%s) - données initialisées + broadcaster temps réel actif", role)
     # v3.1.7 · SUPPRIMÉ : l'auto-start `VideoCoreManager.ensure_camera()` pour
