@@ -34,7 +34,7 @@ def _now_iso() -> str:
 # ANPR — Configuration globale + par caméra (ROI polygone, listes)
 # ═══════════════════════════════════════════════════════════════════
 class AnprGlobalConfig(BaseModel):
-    country: str = "fr"  # fr, de, it, es, be, nl, uk, us, eu, other
+    country: str = "fr"  # fr, de, it, es, be, nl, uk, ch, pt, us, eu, other
     min_plate_px: int = 24
     max_plate_px: int = 400
     ocr_confidence: float = 0.55

@@ -8,6 +8,16 @@ const MAKES = ["Renault", "Peugeot", "Citroën", "Volkswagen", "BMW", "Mercedes"
 const VTYPES = ["Voiture", "Camion", "Moto", "Bus", "Utilitaire"];
 const DIRS = ["Nord", "Sud", "Est", "Ouest", "Entrée", "Sortie"];
 
+// v3.47 · Même correctif que Vehicles.jsx::PlateBadge — les plaques ne
+// sont pas forcément toutes françaises, le badge affichait "F" en dur.
+const COUNTRY_BADGE = {
+  fr: "F", de: "D", it: "I", es: "E", be: "B", nl: "NL", uk: "GB",
+  ch: "CH", pt: "P", us: "USA", eu: "EU", other: "?",
+};
+function countryBadgeLabel(country) {
+  return COUNTRY_BADGE[(country || "fr").toLowerCase()] || "F";
+}
+
 // v0.5.1.c · Couleurs des badges plugins pour distinguer visuellement les
 // moteurs (core vs cloud vs on-prem).
 const PLUGIN_COLORS = {
@@ -237,7 +247,7 @@ export default function VehicleSearch() {
               {p.list_status !== "none" && <span className="absolute top-1 right-1 text-[9px] uppercase px-1.5 py-0.5 text-white" style={{ background: p.list_status === "black" ? "#FF3333" : "#00E676" }}>{p.list_status}</span>}
             </div>
             <div className="p-3">
-              <div className="mono font-semibold text-sm tracking-wider px-2 py-0.5 border-2 border-black bg-white text-black inline-flex items-center mb-2"><span className="text-[7px] bg-[#0044FF] text-white px-0.5 mr-1 py-1">F</span>{p.plate}</div>
+              <div className="mono font-semibold text-sm tracking-wider px-2 py-0.5 border-2 border-black bg-white text-black inline-flex items-center mb-2"><span className="text-[7px] bg-[#0044FF] text-white px-0.5 mr-1 py-1">{countryBadgeLabel(p.country)}</span>{p.plate}</div>
               <div className="text-sm font-medium flex items-center gap-1"><Car size={13} className="text-muted-foreground" /> {p.vehicle_make} {p.vehicle_model}</div>
               <div className="text-xs text-muted-foreground mt-1">{p.vehicle_color} · {p.vehicle_type} · {p.direction}</div>
               {(p.plugins_used || []).length > 0 && (

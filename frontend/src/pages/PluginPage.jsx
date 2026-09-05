@@ -264,10 +264,13 @@ function Field({ label, hint, children }) {
 // ═══════════════════════════════════════════════════════════════════
 // ANPR — Config globale + par caméra (ROI polygone, listes locales)
 // ═══════════════════════════════════════════════════════════════════
+// v3.47 · Suisse et Portugal ajoutés — demande explicite ("plaques pas
+// forcément toutes FR, mais aussi DE, EN, CH, BE, ES, PT, IT etc").
 const COUNTRIES = [
   { v: "fr", l: "France" }, { v: "de", l: "Allemagne" }, { v: "it", l: "Italie" },
   { v: "es", l: "Espagne" }, { v: "be", l: "Belgique" }, { v: "nl", l: "Pays-Bas" },
-  { v: "uk", l: "Royaume-Uni" }, { v: "us", l: "États-Unis" }, { v: "eu", l: "Europe (générique)" },
+  { v: "uk", l: "Royaume-Uni" }, { v: "ch", l: "Suisse" }, { v: "pt", l: "Portugal" },
+  { v: "us", l: "États-Unis" }, { v: "eu", l: "Europe (générique)" },
   { v: "other", l: "Autre" },
 ];
 

@@ -800,7 +800,7 @@ function VehicleCard({ v, onOpen, selectable = false, selected = false }) {
 
       {/* Plaque */}
       <div className="flex items-center gap-2">
-        <PlateBadge value={v.plate} status={v.list_status} />
+        <PlateBadge value={v.plate} status={v.list_status} country={v.country} />
         {v.vehicle_color && (
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{v.vehicle_color}</span>
         )}
@@ -850,7 +850,7 @@ export function VehicleDrawer({ plate, onClose, onWatchChanged }) {
       <SheetContent side="right" className="!w-full sm:!max-w-2xl overflow-y-auto p-0 bg-card" data-testid="vehicle-drawer">
         <SheetHeader className="border-b border-border p-4 sticky top-0 bg-card z-10">
           <SheetTitle className="font-head flex items-center gap-3">
-            {detail && <PlateBadge value={detail.plate} status={detail.list_status} />}
+            {detail && <PlateBadge value={detail.plate} status={detail.list_status} country={detail.country} />}
             {!detail && <span className="text-muted-foreground text-sm">{t("veh.loading")}</span>}
             {detail && (
               <span className="text-xs text-muted-foreground">
@@ -1784,7 +1784,7 @@ function VehicleListRow({ v, onOpen, selectable = false, selected = false }) {
         </div>
       )}
       <div className="shrink-0 w-28">
-        <PlateBadge value={v.plate} status={v.list_status} />
+        <PlateBadge value={v.plate} status={v.list_status} country={v.country} />
       </div>
       <div className="w-20 text-[11px] uppercase tracking-wider text-muted-foreground shrink-0">{v.vehicle_color || "—"}</div>
       <div className="flex-1 text-sm truncate min-w-0">
@@ -1797,11 +1797,24 @@ function VehicleListRow({ v, onOpen, selectable = false, selected = false }) {
   );
 }
 
-function PlateBadge({ value, status }) {
+// v3.47 · Demande explicite : les plaques ne sont pas forcément toutes
+// françaises (config ANPR pays/pays-surcharge déjà existante côté
+// backend, voir plugin_config.py) — le badge affichait "F" en dur quelle
+// que soit la plaque. Reflète désormais le vrai pays enregistré sur la
+// lecture (majorité des lectures de cette plaque), avec "F" comme repli
+// raisonnable (grande majorité du parc est français, et les lectures
+// anciennes n'ont pas toujours ce champ rempli).
+const COUNTRY_BADGE = {
+  fr: "F", de: "D", it: "I", es: "E", be: "B", nl: "NL", uk: "GB",
+  ch: "CH", pt: "P", us: "USA", eu: "EU", other: "?",
+};
+
+function PlateBadge({ value, status, country }) {
   const c = status === "black" ? "#FF3333" : status === "white" ? "#00E676" : "#1a1a1a";
+  const label = COUNTRY_BADGE[(country || "fr").toLowerCase()] || "F";
   return (
     <span className="inline-flex items-center mono font-semibold text-sm tracking-wider px-2 py-0.5 border-2 bg-white text-black" style={{ borderColor: c }} data-testid={`plate-${value}`}>
-      <span className="text-[7px] bg-[#0044FF] text-white px-0.5 mr-1 leading-none py-1">F</span>{value}
+      <span className="text-[7px] bg-[#0044FF] text-white px-0.5 mr-1 leading-none py-1">{label}</span>{value}
     </span>
   );
 }
