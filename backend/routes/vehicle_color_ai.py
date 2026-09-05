@@ -106,11 +106,15 @@ async def _ask_qwen_vision_color(vehicle_crop_data_uri: str) -> dict:
         ],
         "stream": False,
     }
-    # v3.45 · Endpoint OpenAI-compatible (/v1/chat/completions), pas
-    # /api/chat/completions (natif Open WebUI) — c'est le format qui
-    # accepte content=[...] avec image_url, vérifié en conditions réelles
-    # avant tout code (voir docstring module).
-    url = f"{cfg['base_url']}/v1/chat/completions"
+    # v3.45.1 · Corrigé après échec réel en prod (405) : /v1/chat/completions
+    # (testé directement contre Ollama sur le VM mgai, 127.0.0.1:11434)
+    # fonctionnait en local, mais `base_url` ici est le domaine WAN
+    # (ia.mginformatique.com) qui proxifie vers Open WebUI, pas Ollama
+    # brut — Open WebUI n'expose que /api/chat/completions (même endpoint
+    # que TOUS les autres plugins de ce fichier/projet : vehicle_dedup.py,
+    # anpr_tuning.py, vehicle_anomaly_ai.py, smart_search.py). Open WebUI
+    # accepte le même format multimodal content=[...] + image_url.
+    url = f"{cfg['base_url']}/api/chat/completions"
     async with httpx.AsyncClient(timeout=40.0) as client:
         resp = await client.post(url, json=payload, headers=headers)
         resp.raise_for_status()
