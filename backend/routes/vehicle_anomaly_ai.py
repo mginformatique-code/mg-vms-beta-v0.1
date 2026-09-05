@@ -74,6 +74,15 @@ _WAVE_SLOT_MIN = 15
 _WAVE_MULTIPLIER = 3.0
 _WAVE_MIN_COUNT = 3
 
+# Trajet inter-site minimum plausible — signal PUREMENT logique (aucune
+# vision requise, coût nul), voir _detect_cross_site_impossible. Pas de
+# coordonnées GPS configurées à ce jour (vérifié : lat/lng NULL sur toutes
+# les caméras) — une distance haversine précise nécessiterait de saisir
+# les coordonnées de chaque site, non fait aujourd'hui. 20 min reste une
+# valeur plancher très conservatrice : même deux sites voisins dans la
+# même ville prennent plus longtemps porte à porte.
+_CROSS_SITE_MIN_MINUTES = 20
+
 
 def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat()
@@ -95,13 +104,18 @@ async def _load_recent_plates() -> list[dict]:
     since = _iso(datetime.now(timezone.utc) - timedelta(days=_LOOKBACK_DAYS))
     return await db.plates.find(
         {"timestamp": {"$gte": since}},
-        {"_id": 0, "plate": 1, "camera_id": 1, "camera_name": 1, "timestamp": 1},
+        {"_id": 0, "plate": 1, "camera_id": 1, "camera_name": 1, "timestamp": 1, "site_id": 1},
     ).sort([("camera_id", 1), ("timestamp", 1)]).to_list(50000)
 
 
 async def _camera_site_map() -> dict[str, Optional[str]]:
     cams = await db.cameras.find({}, {"_id": 0, "id": 1, "site_id": 1}).to_list(2000)
     return {c["id"]: c.get("site_id") for c in cams}
+
+
+async def _site_name_map() -> dict[str, str]:
+    sites = await db.sites.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(2000)
+    return {s["id"]: s.get("name") or s["id"] for s in sites}
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -293,6 +307,15 @@ async def _ask_qwen_narrate(kind: str, facts: dict) -> dict:
             "véhicules distincts, probablement lue depuis des plaques dégradées/ambiguës qui "
             "convergent vers ce même texte. Explique ce constat en une phrase concrète, en "
             "citant les marques trouvées."
+        )
+    elif kind == "cross_site_impossible":
+        prompt = (
+            f"La plaque {facts['plate']} a été lue sur le site \"{facts['site_a_name']}\" "
+            f"à {facts['time_a']}, puis sur le site \"{facts['site_b_name']}\" à "
+            f"{facts['time_b']} — seulement {facts['gap_minutes']} minutes plus tard. "
+            "Ce sont deux sites clients géographiquement distincts (adresses différentes) : "
+            "un trajet aussi court entre les deux est physiquement implausible. Explique ce "
+            "constat en une phrase concrète, en citant les 2 sites et l'écart de temps réel."
         )
     else:
         raise ValueError(f"kind inconnu: {kind}")
@@ -501,6 +524,72 @@ async def _run_plate_confusions(site_map: dict) -> int:
     return created
 
 
+# ═══════════════════════════════════════════════════════════════════
+# Détection — trajet inter-site implausible (purement logique, coût nul)
+# ═══════════════════════════════════════════════════════════════════
+# v3.47 · Complément à plate_confusion, découvert sur le même cas réel
+# (plaque AA2307JA vue à Rieux ET Villeparisis). plate_confusion a besoin
+# du modèle vision (marques différentes) ; ce signal-ci ne coûte RIEN — il
+# ne fait que comparer site_id + timestamp, déjà stockés sur chaque
+# lecture. Se déclenche même AVANT que vehicle_make_ai ait eu le temps de
+# vérifier quoi que ce soit sur cette plaque.
+def _detect_cross_site_impossible(rows: list[dict]) -> list[dict]:
+    by_plate: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        if r.get("site_id"):
+            by_plate[r["plate"]].append(r)
+
+    out = []
+    for plate, reads in by_plate.items():
+        reads.sort(key=lambda r: r["timestamp"])
+        for i in range(len(reads) - 1):
+            a, b = reads[i], reads[i + 1]
+            if a["site_id"] == b["site_id"]:
+                continue
+            ta, tb = _iso_to_dt(a["timestamp"]), _iso_to_dt(b["timestamp"])
+            if ta is None or tb is None:
+                continue
+            gap_min = (tb - ta).total_seconds() / 60.0
+            if gap_min < _CROSS_SITE_MIN_MINUTES:
+                out.append({
+                    "plate": plate,
+                    "site_id_a": a["site_id"], "site_id_b": b["site_id"],
+                    "time_a": a["timestamp"], "time_b": b["timestamp"],
+                    "gap_minutes": round(gap_min, 1),
+                    "camera_ids": [a["camera_id"], b["camera_id"]],
+                })
+                break  # une preuve suffit par plaque pour ce run — évite le bruit de paires multiples
+    return out
+
+
+async def _run_cross_site_impossible(rows: list[dict]) -> int:
+    site_names = await _site_name_map()
+    created = 0
+    for cs in _detect_cross_site_impossible(rows):
+        key = f"cross_site:{cs['plate']}:{cs['site_id_a']}:{cs['site_id_b']}"
+        existing = await db.vehicle_anomaly_reports.find_one({"dedup_key": key}, {"_id": 0, "id": 1})
+        if existing:
+            continue
+        facts = {
+            **cs,
+            "site_a_name": site_names.get(cs["site_id_a"], cs["site_id_a"]),
+            "site_b_name": site_names.get(cs["site_id_b"], cs["site_id_b"]),
+        }
+        try:
+            verdict = await _ask_qwen_narrate("cross_site_impossible", facts)
+        except Exception:
+            logger.exception("anomaly_ai: échec narration cross_site_impossible %s", cs["plate"])
+            continue
+        await db.vehicle_anomaly_reports.insert_one({
+            "id": str(uuid.uuid4()), "kind": "cross_site_impossible", "dedup_key": key,
+            "plates": [cs["plate"]], "camera_ids": cs["camera_ids"], "site_id": cs["site_id_a"],
+            "facts": facts, "severity": verdict["severity"], "message": verdict["message"],
+            "created_at": _iso(datetime.now(timezone.utc)), "acknowledged": False,
+        })
+        created += 1
+    return created
+
+
 async def _run_anomaly_ai_batch() -> dict:
     site_map = await _camera_site_map()
     rows = await _load_recent_plates()
@@ -508,7 +597,9 @@ async def _run_anomaly_ai_batch() -> dict:
     n_wave = await _run_waves(rows, site_map)
     n_veh = await _run_per_vehicle(site_map)
     n_confusion = await _run_plate_confusions(site_map)
-    return {"convoys": n_conv, "waves": n_wave, "per_vehicle": n_veh, "plate_confusions": n_confusion}
+    n_cross_site = await _run_cross_site_impossible(rows)
+    return {"convoys": n_conv, "waves": n_wave, "per_vehicle": n_veh,
+            "plate_confusions": n_confusion, "cross_site": n_cross_site}
 
 
 async def anomaly_ai_batch_loop() -> None:
