@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import api from "@/lib/api";
-import { Loader2, Sparkles, Car, Users, TrendingUp, CheckCircle2, RefreshCw } from "lucide-react";
+import { Loader2, Sparkles, Car, Users, TrendingUp, CheckCircle2, RefreshCw, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -16,6 +16,7 @@ const KIND_META = {
   per_vehicle: { label: "Véhicule", icon: Car, hint: "Écart aux habitudes réelles de ce véhicule" },
   convoy: { label: "Convoi", icon: Users, hint: "Deux véhicules vus ensemble, de façon répétée" },
   wave: { label: "Vague", icon: TrendingUp, hint: "Pic de véhicules distincts inhabituel sur une caméra" },
+  plate_confusion: { label: "Plaque suspecte", icon: ShieldAlert, hint: "Plusieurs marques réelles différentes détectées sous la même plaque — probable confusion ANPR" },
 };
 
 const SEVERITY_STYLE = {
@@ -155,7 +156,7 @@ export default function AnomalyCenter() {
           ))}
         </div>
         <div className="flex border border-border">
-          {[["", "Tout type"], ["per_vehicle", "Véhicule"], ["convoy", "Convoi"], ["wave", "Vague"]].map(([v, l]) => (
+          {[["", "Tout type"], ["per_vehicle", "Véhicule"], ["convoy", "Convoi"], ["wave", "Vague"], ["plate_confusion", "Plaque suspecte"]].map(([v, l]) => (
             <button key={v || "all"} onClick={() => setKind(v)}
                     className={`px-3 py-1.5 text-xs ${kind === v ? "bg-[#0044FF] text-white" : "hover:bg-secondary"}`}
                     data-testid={`kind-filter-${v || "all"}`}>

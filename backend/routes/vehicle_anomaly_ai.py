@@ -283,6 +283,17 @@ async def _ask_qwen_narrate(kind: str, facts: dict) -> dict:
             f"{', '.join(facts['plates'])}. Explique en une phrase concrète pourquoi ce "
             "pic de trafic sort de l'ordinaire pour CETTE caméra précise, en citant les chiffres."
         )
+    elif kind == "plate_confusion":
+        prompt = (
+            f"La plaque {facts['plate']} est associée à {facts['sample_count']} lectures "
+            f"vérifiées par un modèle de vision (pas le simple OCR), mais ces lectures montrent "
+            f"{len(facts['makes'])} marques de véhicule RÉELLEMENT différentes : "
+            f"{', '.join(facts['makes'])}. Une même immatriculation ne peut pas porter plusieurs "
+            "marques réelles — c'est le signe d'une confusion de lecture ANPR entre plusieurs "
+            "véhicules distincts, probablement lue depuis des plaques dégradées/ambiguës qui "
+            "convergent vers ce même texte. Explique ce constat en une phrase concrète, en "
+            "citant les marques trouvées."
+        )
     else:
         raise ValueError(f"kind inconnu: {kind}")
     headers = {"Content-Type": "application/json"}
@@ -416,13 +427,88 @@ async def _run_waves(rows: list[dict], site_map: dict) -> int:
     return created
 
 
+# ═══════════════════════════════════════════════════════════════════
+# Détection — confusion de plaque (plusieurs marques réelles sous 1 texte)
+# ═══════════════════════════════════════════════════════════════════
+# v3.47 · Découvert le 05/09 en creusant un signalement utilisateur (plaque
+# "AA2307JA" vue à Rieux ET Villeparisis, géographiquement incompatible) :
+# 1004 lectures fast-alpr sous ce texte, confiance 0.55-0.85 (PAS basse —
+# un seuil de confiance ne filtrerait rien) sur 4 caméras/2 sites. Vérifié
+# directement via le modèle vision (vehicle_make_ai) sur 6 échantillons
+# espacés dans le temps : 3 marques RÉELLEMENT différentes trouvées
+# (Renault, Peugeot, Mercedes-Benz, confiance 0.95 chacune) — preuve
+# directe qu'il s'agit de plusieurs véhicules réels convergeant vers le
+# même texte OCR ("attracteur"), pas un seul véhicule mal classé. Ce
+# détecteur croise les marques déjà vision-vérifiées (vehicle_make_ai,
+# livré le 05/09) par plaque : une plaque associée à 2+ marques
+# RÉELLEMENT différentes (jamais "Inconnue", qui n'est pas un désaccord)
+# est un signal fiable de confusion ANPR — pas un ML entraîné, une
+# simple cohérence logique sur des données déjà vérifiées par la vision.
+_PLATE_CONFUSION_MIN_SAMPLES = 3
+_PLATE_CONFUSION_MIN_DISTINCT_MAKES = 2
+
+
+async def _detect_plate_confusions() -> list[dict]:
+    pipeline = [
+        {"$match": {"vehicle_make_source": "vision_ai", "vehicle_make": {"$ne": None}}},
+        {"$group": {
+            "_id": "$plate",
+            "makes": {"$addToSet": "$vehicle_make"},
+            "count": {"$sum": 1},
+            "camera_ids": {"$addToSet": "$camera_id"},
+            "last_seen": {"$max": "$timestamp"},
+        }},
+        {"$match": {"count": {"$gte": _PLATE_CONFUSION_MIN_SAMPLES}}},
+    ]
+    out = []
+    async for row in db.plates.aggregate(pipeline):
+        if len(row["makes"]) >= _PLATE_CONFUSION_MIN_DISTINCT_MAKES:
+            out.append({
+                "plate": row["_id"], "makes": sorted(row["makes"]),
+                "sample_count": row["count"], "camera_ids": row["camera_ids"],
+                "last_seen": row["last_seen"],
+            })
+    return out
+
+
+async def _run_plate_confusions(site_map: dict) -> int:
+    created = 0
+    for pc in await _detect_plate_confusions():
+        key = f"plate_confusion:{pc['plate']}"
+        existing = await db.vehicle_anomaly_reports.find_one({"dedup_key": key}, {"_id": 0, "facts.makes": 1})
+        # Ne re-narre que si la liste de marques a grandi depuis le dernier
+        # passage (nouvelle preuve) — évite de re-générer le même rapport à
+        # chaque run tant que rien de nouveau n'a été vérifié.
+        if existing and sorted((existing.get("facts") or {}).get("makes") or []) == pc["makes"]:
+            continue
+        try:
+            verdict = await _ask_qwen_narrate("plate_confusion", pc)
+        except Exception:
+            logger.exception("anomaly_ai: échec narration plate_confusion %s", pc["plate"])
+            continue
+        site_id = next((site_map.get(c) for c in pc["camera_ids"] if site_map.get(c)), None)
+        await db.vehicle_anomaly_reports.update_one(
+            {"dedup_key": key},
+            {"$set": {
+                "id": (existing or {}).get("id") or str(uuid.uuid4()), "kind": "plate_confusion", "dedup_key": key,
+                "plates": [pc["plate"]], "camera_ids": pc["camera_ids"], "site_id": site_id,
+                "facts": pc, "severity": verdict["severity"], "message": verdict["message"],
+                "created_at": _iso(datetime.now(timezone.utc)), "acknowledged": False,
+            }},
+            upsert=True,
+        )
+        created += 1
+    return created
+
+
 async def _run_anomaly_ai_batch() -> dict:
     site_map = await _camera_site_map()
     rows = await _load_recent_plates()
     n_conv = await _run_convoys(rows, site_map)
     n_wave = await _run_waves(rows, site_map)
     n_veh = await _run_per_vehicle(site_map)
-    return {"convoys": n_conv, "waves": n_wave, "per_vehicle": n_veh}
+    n_confusion = await _run_plate_confusions(site_map)
+    return {"convoys": n_conv, "waves": n_wave, "per_vehicle": n_veh, "plate_confusions": n_confusion}
 
 
 async def anomaly_ai_batch_loop() -> None:
