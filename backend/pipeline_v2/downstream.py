@@ -171,8 +171,15 @@ def _apply_hierarchical_anpr_fusion(cam: dict, result: dict) -> None:
 
 
 async def _get_global_anpr_country():
+    # v3.47 · Repli explicite sur "fr" (meme defaut que AnprGlobalConfig,
+    # plugin_config.py) -- avant ce correctif, tant que personne n a jamais
+    # sauvegarde la config ANPR via l UI, aucun doc settings n existe et
+    # cette fonction renvoyait None (pas le defaut documente), stockant
+    # country=None sur TOUTES les lectures (verifie en prod : 24932/24936
+    # documents). Le badge plaque frontend avait deja son propre repli sur
+    # F/fr, masquant ce trou -- corrige a la source desormais.
     doc = await _setting("anpr_config")
-    return ((doc or {}).get("value", {}) or {}).get("country")
+    return ((doc or {}).get("value", {}) or {}).get("country") or "fr"
 
 
 def _det_thumb(det: dict):
