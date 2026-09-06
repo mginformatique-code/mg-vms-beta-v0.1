@@ -45,8 +45,9 @@ const NAV = [
     // v1.0-rc4 · Fusion : la vue Véhicules vit dans Événements (chip « Plaques »)
     { key: "nav.events_root", icon: Zap, children: [
       { to: "/events", key: "nav.events_item", icon: Zap },
-      { to: "/alerts", key: "nav.alerts", icon: Bell },
-      { to: "/anomalies", key: "nav.anomalies", icon: AlertTriangle },
+      // v3.27 · Fusion Alertes + Anomalies IA en un seul menu (deux onglets
+      // dans AiAlertsCenter.jsx) — demande explicite.
+      { to: "/alerts", key: "nav.ai_alerts", icon: Bell },
     ]},
   ]},
   { group: "nav.intelligence", items: [

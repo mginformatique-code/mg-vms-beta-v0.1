@@ -28,12 +28,11 @@ import SessionsCenter from "@/pages/SessionsCenter";
 import RbacCenter from "@/pages/RbacCenter";
 import Events from "@/pages/Events";
 import VehicleSearch from "@/pages/VehicleSearch";
-import Alerts from "@/pages/Alerts";
+import AiAlertsCenter from "@/pages/AiAlertsCenter";
 import Audit from "@/pages/Audit";
 import Diagnostics from "@/pages/Diagnostics";
 import SystemLogs from "@/pages/SystemLogs";
 import LlmLogs from "@/pages/LlmLogs";
-import AnomalyCenter from "@/pages/AnomalyCenter";
 import HealthDashboard from "@/pages/HealthDashboard";
 import GPUStatus from "@/pages/GPUStatus";
 import AnprBenchmark from "@/pages/AnprBenchmark";
@@ -92,13 +91,14 @@ function AppRoutes() {
       {/* v1.0-rc4 · Fusion : Véhicules vit désormais dans Événements (chip Plaques) */}
       <Route path="/vehicles" element={<Navigate to="/events?filtre=plaques" replace />} />
       <Route path="/vehicles/search" element={<Protected><VehicleSearch /></Protected>} />
-      <Route path="/alerts" element={<Protected><Alerts /></Protected>} />
+      <Route path="/alerts" element={<Protected><AiAlertsCenter /></Protected>} />
       <Route path="/audit" element={<Protected><Audit /></Protected>} />
       <Route path="/diagnostics" element={<Protected><Diagnostics /></Protected>} />
       <Route path="/diagnostics/dashboard" element={<Protected><HealthDashboard /></Protected>} />
       <Route path="/logs-systeme" element={<Protected><SystemLogs /></Protected>} />
       <Route path="/logs-llm" element={<Protected><LlmLogs /></Protected>} />
-      <Route path="/anomalies" element={<Protected><AnomalyCenter /></Protected>} />
+      {/* v3.27 · Anomalies IA fusionnée dans /alerts (onglet) — redirection pour les liens existants */}
+      <Route path="/anomalies" element={<Navigate to="/alerts?tab=anomalies" replace />} />
       <Route path="/gpu" element={<Protected><GPUStatus /></Protected>} />
       <Route path="/anpr-benchmark" element={<Protected><AnprBenchmark /></Protected>} />
       <Route path="/pipeline" element={<Protected><PipelineVideo /></Protected>} />
