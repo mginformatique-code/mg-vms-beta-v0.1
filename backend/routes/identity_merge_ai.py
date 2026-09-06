@@ -83,19 +83,26 @@ def _min_plate_distance(plates_a: list[str], plates_b: list[str]) -> int:
     return best
 
 
-async def _identity_sample_thumb(plates: list[str]) -> str | None:
-    """id d'une lecture récente avec photo, pour permettre au frontend un
-    comparatif visuel (même principe que vehicle_dedup.py::_plate_stats —
-    demande explicite après un premier cas réel où deux plaques proches
-    textuellement s'avéraient être deux véhicules visiblement différents,
-    invisible sur le seul texte/attributs)."""
+async def _identity_sample(plates: list[str]) -> dict | None:
+    """id + photo réelle d'une lecture récente, pour (a) le comparatif
+    visuel côté frontend et (b) la comparaison visuelle Qwen ci-dessous
+    (v3.28 — remplace la comparaison texte marque/couleur seule, prouvée peu
+    fiable en prod : vérifié en direct sur un cas réel où le modèle vision
+    confirme "même véhicule" à 0.95 malgré des couleurs enregistrées
+    différentes des deux côtés)."""
     if not plates:
         return None
     doc = await db.plates.find(
         {"plate": {"$in": plates}, "vehicle_crop": {"$exists": True, "$ne": None}},
-        {"_id": 0, "id": 1, "timestamp": 1},
+        {"_id": 0, "id": 1, "vehicle_crop": 1, "timestamp": 1},
     ).sort("timestamp", -1).limit(1).to_list(1)
-    return doc[0]["id"] if doc else None
+    return doc[0] if doc else None
+
+
+async def _identity_sample_thumb(plates: list[str]) -> str | None:
+    """Rétrocompatibilité — id seul (voir _identity_sample pour id+photo)."""
+    sample = await _identity_sample(plates)
+    return sample.get("id") if sample else None
 
 
 async def _already_suggested_pairs() -> set[tuple[str, str]]:
@@ -215,33 +222,107 @@ async def _ask_qwen_same_identity(a: dict, b: dict, min_distance: int) -> dict:
     }
 
 
+async def _ask_qwen_visual_same_identity(crop_a: str, crop_b: str, name_a: str, name_b: str, min_distance: int) -> dict:
+    """v3.28 · Comparaison VISUELLE réelle (photos) plutôt que texte marque/
+    couleur seul — même principe que vehicle_dedup.py, vérifié en prod sur un
+    cas réel où le modèle vision confirme "même véhicule" à 0.95 de confiance
+    malgré des couleurs enregistrées différentes (biais du classifieur CV,
+    pas encore corrigé sur ces lectures précises)."""
+    from routes.llm_settings import get_vision_llm_config
+    cfg = await get_vision_llm_config()
+    if not cfg:
+        raise HTTPException(status_code=503, detail={"code": "IDENTITY_MERGE_AI_VISION_LLM_NOT_CONFIGURED",
+                                                        "message": "Modèle vision non configuré (Administration → LLM)."})
+    import httpx
+    system = (
+        "Tu compares deux PHOTOS de véhicules, candidates à représenter le même véhicule réel "
+        "identifié sous deux plaques légèrement différentes (confusion OCR). "
+        'Réponds UNIQUEMENT avec un objet JSON valide : {"same_vehicle": "oui"|"non", '
+        '"confidence": nombre entre 0 et 1, "reason": texte court}. '
+        "Base ton jugement sur la carrosserie, la couleur RÉELLE visible sur la photo, la forme, "
+        "les détails (rayures, autocollants, jantes, accessoires) — toute marque/couleur déjà "
+        "enregistrée peut être fausse (biais connu d'un classifieur automatique), fie-toi "
+        "uniquement à ce que tu VOIS sur les deux images. Aucun texte hors JSON."
+    )
+    prompt_text = (
+        f"Identité A \"{name_a}\" (première image). Identité B \"{name_b}\" (deuxième image). "
+        f"Distance d'édition minimale entre leurs plaques : {min_distance} (confusion OCR courante : "
+        "0/O, 1/I, 5/S, 8/B, 2/Z). Est-ce le MÊME véhicule réel ?"
+    )
+    headers = {"Content-Type": "application/json"}
+    if cfg.get("api_key"):
+        headers["Authorization"] = f"Bearer {cfg['api_key']}"
+    payload = {
+        "model": cfg["model"],
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": [
+                {"type": "text", "text": prompt_text},
+                {"type": "image_url", "image_url": {"url": crop_a}},
+                {"type": "image_url", "image_url": {"url": crop_b}},
+            ]},
+        ],
+        "stream": False,
+    }
+    url = f"{cfg['base_url']}/api/chat/completions"
+    from llm_call_log import log_llm_call
+    _t0 = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            body = resp.json()
+    except Exception as e:
+        await log_llm_call(source="identity_merge_ai_visual", url=url, model=payload.get("model"), request_payload=payload,
+                            status_code=getattr(getattr(e, "response", None), "status_code", None),
+                            error=f"{type(e).__name__}: {e}", latency_ms=int((time.monotonic() - _t0) * 1000))
+        raise
+    await log_llm_call(source="identity_merge_ai_visual", url=url, model=payload.get("model"), request_payload=payload,
+                        status_code=resp.status_code, response_body=body,
+                        latency_ms=int((time.monotonic() - _t0) * 1000))
+    raw = (body["choices"][0]["message"]["content"] or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw).strip()
+    parsed = json.loads(raw)
+    return {
+        "same_vehicle": parsed.get("same_vehicle") == "oui",
+        "confidence": float(parsed.get("confidence") or 0),
+        "reason": parsed.get("reason", ""),
+    }
+
+
 async def _run_identity_merge_batch(limit: int = _MAX_CANDIDATES_PER_RUN) -> int:
     candidates = await _find_candidates(limit)
     created = 0
     for a, b, dist in candidates:
+        # v3.28 · Comparaison VISUELLE en priorité (photo réelle, plus fiable
+        # qu'un texte marque/couleur potentiellement erroné — vérifié en
+        # prod : un cas réel confirmé "même véhicule" à 0.95 par la vision
+        # malgré des couleurs enregistrées différentes des deux côtés).
+        # Repli texte seulement si aucune photo n'est disponible.
+        sample_a = await _identity_sample(a.get("plates") or [])
+        sample_b = await _identity_sample(b.get("plates") or [])
         try:
-            verdict = await _ask_qwen_same_identity(a, b, dist)
+            if sample_a and sample_b:
+                verdict = await _ask_qwen_visual_same_identity(
+                    sample_a["vehicle_crop"], sample_b["vehicle_crop"], a["name"], b["name"], dist)
+                verdict["method"] = "visual"
+            else:
+                verdict = await _ask_qwen_same_identity(a, b, dist)
+                verdict["method"] = "text"
         except Exception:
             logger.exception("identity_merge_ai: échec comparaison %s / %s", a["id"], b["id"])
             continue
-        # v3.27.1 · Comparatif photo — demande explicite après un cas réel où
-        # deux plaques proches textuellement (confusion OCR plausible)
-        # correspondaient à deux véhicules visiblement DIFFÉRENTS sur les
-        # crops réels. Uniquement pour les suggestions retenues (jamais
-        # gaspillé sur celles que Qwen vient de rejeter).
-        sample_a = sample_b = None
-        if verdict.get("same_vehicle"):
-            sample_a = await _identity_sample_thumb(a.get("plates") or [])
-            sample_b = await _identity_sample_thumb(b.get("plates") or [])
         doc = {
             "id": str(uuid.uuid4()),
             "identity_a_id": a["id"], "identity_a_name": a["name"], "identity_a_plates": a.get("plates") or [],
-            "identity_a_sample_plate_id": sample_a,
+            "identity_a_sample_plate_id": sample_a.get("id") if sample_a else None,
             "identity_b_id": b["id"], "identity_b_name": b["name"], "identity_b_plates": b.get("plates") or [],
-            "identity_b_sample_plate_id": sample_b,
+            "identity_b_sample_plate_id": sample_b.get("id") if sample_b else None,
             "min_distance": dist,
             "same_vehicle": bool(verdict.get("same_vehicle")),
             "confidence": verdict.get("confidence"),
+            "confidence_method": verdict.get("method", "text"),
             "reason": verdict.get("reason", ""),
             # Même convention que vehicle_dedup.py : toute paire comparée est
             # enregistrée (jamais redemandée le lendemain), seules celles

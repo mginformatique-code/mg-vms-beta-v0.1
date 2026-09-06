@@ -68,13 +68,16 @@ async def _ask_qwen_vision_make(vehicle_crop_data_uri: str) -> dict:
     system = (
         "Tu es un analyste ANPR spécialisé en identification de véhicules. "
         'Réponds UNIQUEMENT avec un objet JSON valide respectant EXACTEMENT ce '
-        'schéma : {"marque": texte ou null, "confiance": nombre entre 0 et 1}. '
+        'schéma : {"marque": texte ou null, "modele": texte ou null, "confiance": nombre entre 0 et 1}. '
         f"Marques courantes en France (liste indicative, pas exhaustive) : {_SUGGESTED_MAKES}. "
-        "Base ton jugement sur le logo, la calandre, la silhouette générale — "
+        "Base ton jugement sur le logo, la calandre, la silhouette générale, les feux — "
         "cette identification reste valable même sur une image en niveaux de "
         "gris (infrarouge nocturne), l'information est dans la FORME pas la "
-        "couleur. Si le logo n'est pas clairement visible ou identifiable, "
-        'réponds {"marque": null, "confiance": 0} plutôt que de deviner. '
+        "couleur. `modele` : le modèle commercial précis si identifiable avec "
+        "certitude (ex. Clio, 308, C3, Golf) — null si seule la marque est sûre, "
+        "ne jamais deviner un modèle au hasard à partir de la seule marque. "
+        "Si le logo n'est pas clairement visible ou identifiable, "
+        'réponds {"marque": null, "modele": null, "confiance": 0} plutôt que de deviner. '
         "Aucun texte hors JSON."
     )
     headers = {"Content-Type": "application/json"}
@@ -116,7 +119,8 @@ async def _ask_qwen_vision_make(vehicle_crop_data_uri: str) -> dict:
         raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw).strip()
     parsed = json.loads(raw)
     marque = (parsed.get("marque") or "").strip() or None
-    return {"marque": marque, "confiance": float(parsed.get("confiance") or 0)}
+    modele = (parsed.get("modele") or "").strip() or None
+    return {"marque": marque, "modele": modele, "confiance": float(parsed.get("confiance") or 0)}
 
 
 async def _run_make_ai_batch() -> dict:
@@ -124,7 +128,7 @@ async def _run_make_ai_batch() -> dict:
     docs = await db.plates.find(
         {"timestamp": {"$gte": since}, "vehicle_crop": {"$exists": True, "$ne": None},
          "vehicle_make_ai_checked_at": {"$exists": False}},
-        {"_id": 0, "id": 1, "vehicle_crop": 1, "vehicle_make": 1},
+        {"_id": 0, "id": 1, "vehicle_crop": 1, "vehicle_make": 1, "vehicle_model": 1},
     ).sort("timestamp", -1).limit(_BATCH_SIZE).to_list(_BATCH_SIZE)  # v3.27 · du plus récent au plus ancien (demande explicite)
 
     checked = corrected = low_confidence = errors = 0
@@ -145,6 +149,13 @@ async def _run_make_ai_batch() -> dict:
             corrected += 1
         elif verdict["marque"] and verdict["confiance"] < _MIN_CONFIDENCE_TO_APPLY:
             low_confidence += 1
+        # v3.28 · Modèle (Clio/308/C3...) — même appel vision que la marque,
+        # aucun coût Qwen supplémentaire. Même seuil de confiance avant
+        # d'écraser une valeur déjà connue.
+        if verdict.get("modele") and verdict["confiance"] >= _MIN_CONFIDENCE_TO_APPLY \
+                and verdict["modele"] != doc.get("vehicle_model"):
+            update["vehicle_model"] = verdict["modele"]
+            update["vehicle_model_source"] = "vision_ai"
         await db.plates.update_one({"id": doc["id"]}, {"$set": update})
     return {"checked": checked, "corrected": corrected, "low_confidence": low_confidence, "errors": errors}
 

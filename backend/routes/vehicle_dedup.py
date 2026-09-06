@@ -128,6 +128,91 @@ async def _plate_stats(plate: str) -> dict:
     }
 
 
+async def _crop_for_sample(sample_plate_id: str | None) -> str | None:
+    """Photo réelle (data URI) d'une lecture, pour la comparaison VISUELLE
+    ci-dessous — distincte de `sample_plate_id` (qui ne sert qu'à construire
+    l'URL de miniature côté frontend)."""
+    if not sample_plate_id:
+        return None
+    doc = await db.plates.find_one({"id": sample_plate_id}, {"_id": 0, "vehicle_crop": 1})
+    return (doc or {}).get("vehicle_crop")
+
+
+async def _ask_qwen_visual_same_vehicle(crop_a: str, crop_b: str, plate_a: str, plate_b: str, dist: int) -> dict:
+    """v3.28 · Comparaison VISUELLE réelle plutôt que texte marque/couleur
+    seul — demande explicite après un cas réel confirmé (FG589ZL/FG568ZL,
+    distance 2, mêmes jantes/autocollants visibles sur les deux photos alors
+    que la couleur enregistrée différait : "Bleu" vs "Gris", biais connu du
+    classifieur CV pas encore corrigé par la vision sur ces lectures précises
+    — vérifié en direct : le modèle vision confirme "oui" à 0.95 de confiance
+    sur ces deux crops réels). Établit un seuil de confiance combiné : la
+    distance d'édition (déjà filtrée en amont par _find_candidates) sert de
+    garde-fou, la confiance visuelle devient le signal AUTORITAIRE — plus
+    fiable qu'un texte marque/couleur potentiellement obsolète ou erroné."""
+    from routes.llm_settings import get_vision_llm_config
+    cfg = await get_vision_llm_config()
+    if not cfg:
+        raise HTTPException(status_code=503, detail={"code": "DEDUP_VISION_LLM_NOT_CONFIGURED",
+                                                        "message": "Modèle vision non configuré (Administration → LLM)."})
+    import httpx
+    system = (
+        "Tu compares deux PHOTOS de véhicules capturées par des caméras de vidéosurveillance ANPR, "
+        "candidates à représenter le même véhicule réel mal lu deux fois par l'OCR. "
+        'Réponds UNIQUEMENT avec un objet JSON valide : {"same_vehicle": "oui"|"non", '
+        '"confidence": nombre entre 0 et 1, "reason": texte court}. '
+        "Base ton jugement sur la carrosserie, la couleur RÉELLE visible sur la photo, la forme, "
+        "les détails (rayures, autocollants, jantes, accessoires) — toute marque/couleur déjà "
+        "enregistrée dans le système peut être fausse (biais connu d'un classifieur automatique), "
+        "fie-toi uniquement à ce que tu VOIS sur les deux images. Aucun texte hors JSON."
+    )
+    prompt_text = (
+        f"Plaque A : \"{plate_a}\" (première image). Plaque B : \"{plate_b}\" (deuxième image). "
+        f"Distance d'édition entre les deux textes de plaque : {dist} (confusion OCR courante : "
+        "0/O, 1/I, 5/S, 8/B, 2/Z). Est-ce le MÊME véhicule réel ?"
+    )
+    headers = {"Content-Type": "application/json"}
+    if cfg.get("api_key"):
+        headers["Authorization"] = f"Bearer {cfg['api_key']}"
+    payload = {
+        "model": cfg["model"],
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": [
+                {"type": "text", "text": prompt_text},
+                {"type": "image_url", "image_url": {"url": crop_a}},
+                {"type": "image_url", "image_url": {"url": crop_b}},
+            ]},
+        ],
+        "stream": False,
+    }
+    url = f"{cfg['base_url']}/api/chat/completions"
+    from llm_call_log import log_llm_call
+    import time
+    _t0 = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            body = resp.json()
+    except Exception as e:
+        await log_llm_call(source="dedup_visual", url=url, model=payload.get("model"), request_payload=payload,
+                            status_code=getattr(getattr(e, "response", None), "status_code", None),
+                            error=f"{type(e).__name__}: {e}", latency_ms=int((time.monotonic() - _t0) * 1000))
+        raise
+    await log_llm_call(source="dedup_visual", url=url, model=payload.get("model"), request_payload=payload,
+                        status_code=resp.status_code, response_body=body,
+                        latency_ms=int((time.monotonic() - _t0) * 1000))
+    raw = (body["choices"][0]["message"]["content"] or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw).strip()
+    parsed = json.loads(raw)
+    return {
+        "same_vehicle": parsed.get("same_vehicle") == "oui",
+        "confidence": float(parsed.get("confidence") or 0),
+        "reason": parsed.get("reason", ""),
+    }
+
+
 async def _already_linked_plates() -> set[str]:
     linked: set[str] = set()
     async for ident in db.vehicle_identities.find({}, {"_id": 0, "plates": 1}):
@@ -396,7 +481,19 @@ async def _run_dedup_batch(limit: int = _MAX_CANDIDATES_PER_RUN) -> int:
         try:
             a = await _plate_stats(plate_a)
             b = await _plate_stats(plate_b)
-            verdict = await _ask_qwen_same_vehicle(a, b)
+            # v3.28 · Comparaison VISUELLE en priorité (photo réelle, plus
+            # fiable qu'un texte marque/couleur potentiellement erroné —
+            # vérifié en prod) ; repli texte seulement si aucune photo n'est
+            # disponible pour l'une des deux plaques.
+            crop_a = await _crop_for_sample(a.get("sample_plate_id"))
+            crop_b = await _crop_for_sample(b.get("sample_plate_id"))
+            if crop_a and crop_b:
+                dist = _levenshtein(plate_a, plate_b)
+                verdict = await _ask_qwen_visual_same_vehicle(crop_a, crop_b, plate_a, plate_b, dist)
+                verdict["method"] = "visual"
+            else:
+                verdict = await _ask_qwen_same_vehicle(a, b)
+                verdict["method"] = "text"
         except Exception:
             logger.exception("vehicle_dedup: échec comparaison %s / %s", plate_a, plate_b)
             continue
@@ -408,6 +505,7 @@ async def _run_dedup_batch(limit: int = _MAX_CANDIDATES_PER_RUN) -> int:
             "stats_b": b,
             "same_vehicle": bool(verdict.get("same_vehicle")),
             "confidence": verdict.get("confidence"),
+            "confidence_method": verdict.get("method", "text"),
             "reason": verdict.get("reason", ""),
             # v3.20 · Toute paire comparée est enregistrée (pour ne jamais la
             # redemander à Qwen le lendemain), mais seules celles jugées

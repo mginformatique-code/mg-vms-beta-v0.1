@@ -1535,7 +1535,11 @@ function DedupButton({ items, identities, admin, running, available, onRunNow, o
                             <span className="text-muted-foreground">({s.identity_b_plates.join(", ")})</span>
                           </div>
                           <div className="text-muted-foreground mt-1">
-                            distance {s.min_distance} · confiance {Math.round((s.confidence || 0) * 100)}% — {s.reason}
+                            distance {s.min_distance} · confiance {Math.round((s.confidence || 0) * 100)}%
+                            {s.confidence_method === "visual"
+                              ? <span className="text-[#00E676]"> (vérifiée par photo)</span>
+                              : <span className="text-[#FFB800]"> (texte seul, pas de photo dispo)</span>}
+                            {" — "}{s.reason}
                           </div>
                           <div className="text-muted-foreground/70 mt-0.5 text-[10px]">
                             Comparez les photos ci-contre avant de fusionner — un texte de plaque proche ne garantit pas le même véhicule.
@@ -1682,8 +1686,10 @@ function DedupRow({ s, onAccept, onReject }) {
         {s.reason && <div className="text-[10px] text-muted-foreground mt-0.5 truncate">{s.reason}</div>}
       </div>
       {s.confidence != null && (
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">
-          confiance {Math.round(s.confidence * 100)}%
+        <span className="text-[10px] uppercase tracking-wider shrink-0"
+              style={{ color: s.confidence_method === "visual" ? "#00E676" : "#FFB800" }}
+              title={s.confidence_method === "visual" ? "Confirmé par comparaison photo réelle" : "Texte seul — aucune photo disponible pour comparaison"}>
+          confiance {Math.round(s.confidence * 100)}% {s.confidence_method === "visual" ? "📷" : "texte"}
         </span>
       )}
       <button onClick={() => onAccept(s.id)} data-testid={`dedup-accept-${s.id}`}
