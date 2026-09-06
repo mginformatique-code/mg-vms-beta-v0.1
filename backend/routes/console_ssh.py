@@ -20,18 +20,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 
 import asyncssh
 import jwt
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
 
-from auth import JWT_ALGORITHM, get_jwt_secret, log_audit
+from auth import JWT_ALGORITHM, get_jwt_secret, log_audit, require_role
 from database import db
 
 console_router = APIRouter(prefix="/api/system/console", tags=["system-console"])
 logger = logging.getLogger("console_ssh")
 
 _SSH_HOST = "host.docker.internal"  # voir docker-compose.yml::backend.extra_hosts
+_HOST_LOG_TAIL = 200
+_DOCKER_LOG_TAIL = 150
 
 
 async def _auth_ws_admin(token: str) -> dict | None:
@@ -131,3 +135,48 @@ async def console_ws(ws: WebSocket, token: str = ""):
             await ws.close()
         except Exception:
             pass
+
+
+class HostLogsBody(BaseModel):
+    username: str
+    password: str
+
+
+@console_router.post("/host-logs")
+async def host_logs(body: HostLogsBody, user: dict = Depends(require_role("admin"))):
+    """v3.27 · Menu « Logs système » — n'affichait jusqu'ici jamais rien
+    (endpoint `/api/diagnostics/logs` appelé par le frontend inexistant côté
+    backend). Réutilise EXACTEMENT le même principe que la console shell
+    hôte ci-dessus : le conteneur backend n'a aucun accès privilégié à
+    l'hôte, une connexion SSH sortante ponctuelle est ouverte avec les
+    identifiants Linux réels de l'utilisateur, jamais stockés ni journalisés
+    (utilisés une seule fois puis oubliés). Retourne les derniers logs
+    Debian (journalctl) + les derniers logs de chaque conteneur Docker."""
+    if not body.username or not body.password:
+        raise HTTPException(400, "Identifiant et mot de passe requis")
+    try:
+        async with asyncssh.connect(
+            _SSH_HOST, username=body.username, password=body.password, known_hosts=None,
+        ) as conn:
+            syslog_res = await conn.run(
+                f"journalctl --no-pager -n {_HOST_LOG_TAIL} 2>&1 "
+                f"|| tail -n {_HOST_LOG_TAIL} /var/log/syslog 2>&1 "
+                f"|| echo '(aucun journal système accessible)'",
+                check=False,
+            )
+            containers_res = await conn.run("docker ps --format '{{.Names}}'", check=False)
+            names = [n.strip() for n in (containers_res.stdout or "").splitlines() if n.strip()]
+            docker_logs: dict[str, str] = {}
+            for name in names:
+                r = await conn.run(
+                    f"docker logs --tail {_DOCKER_LOG_TAIL} --timestamps {shlex.quote(name)} 2>&1",
+                    check=False,
+                )
+                docker_logs[name] = r.stdout or ""
+    except asyncssh.PermissionDenied:
+        raise HTTPException(401, "Identifiants Linux refusés")
+    except Exception as e:
+        logger.warning("console_ssh: échec host-logs %s — %s: %s", body.username, type(e).__name__, e)
+        raise HTTPException(502, f"Connexion SSH échouée — {type(e).__name__}")
+    await log_audit(user, "system_logs_fetched", f"linux_user={body.username}")
+    return {"syslog": syslog_res.stdout or "", "docker": docker_logs}

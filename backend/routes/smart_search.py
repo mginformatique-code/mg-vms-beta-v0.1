@@ -147,6 +147,9 @@ async def _parse_query_llm(query: str) -> dict:
     # -> 401 sans clé, donc bien le bon endpoint) — pas le chemin
     # OpenAI-compat standard /v1/... sur cette instance.
     url = f"{cfg['base_url']}/api/chat/completions"
+    from llm_call_log import log_llm_call
+    import time
+    _t0 = time.monotonic()
     try:
         # v3.19 · 120s (retenu après le premier signalement, quand qwen3:14b
         # tournait encore sur CPU par erreur — voir CHANGELOG) s'est avéré
@@ -168,9 +171,15 @@ async def _parse_query_llm(query: str) -> dict:
             resp.raise_for_status()
             body = resp.json()
         raw = body["choices"][0]["message"]["content"]
+        await log_llm_call(source="smart_search", url=url, model=payload.get("model"), request_payload=payload,
+                            status_code=resp.status_code, response_body=body,
+                            latency_ms=int((time.monotonic() - _t0) * 1000))
     except Exception as e:
         logger.warning("smart-search LLM failed: %s: %s", type(e).__name__, e)
         detail_msg = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__} (voir logs backend)"
+        await log_llm_call(source="smart_search", url=url, model=payload.get("model"), request_payload=payload,
+                            status_code=getattr(getattr(e, "response", None), "status_code", None),
+                            error=f"{type(e).__name__}: {e}", latency_ms=int((time.monotonic() - _t0) * 1000))
         raise HTTPException(status_code=502,
                             detail={"code": "SMART_SEARCH_LLM_ERROR",
                                     "error": "llm_error",

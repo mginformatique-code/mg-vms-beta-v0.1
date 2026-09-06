@@ -39,6 +39,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from auth import require_permission, require_role, log_audit, allowed_sites
 from database import db
@@ -333,10 +334,22 @@ async def _ask_qwen_narrate(kind: str, facts: dict) -> dict:
         "stream": False,
     }
     url = f"{cfg['base_url']}/api/chat/completions"
-    async with httpx.AsyncClient(timeout=25.0) as client:
-        resp = await client.post(url, json=payload, headers=headers)
-        resp.raise_for_status()
-        body = resp.json()
+    from llm_call_log import log_llm_call
+    import time
+    _t0 = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            body = resp.json()
+    except Exception as e:
+        await log_llm_call(source=f"anomaly_ai:{kind}", url=url, model=payload.get("model"), request_payload=payload,
+                            status_code=getattr(getattr(e, "response", None), "status_code", None),
+                            error=f"{type(e).__name__}: {e}", latency_ms=int((time.monotonic() - _t0) * 1000))
+        raise
+    await log_llm_call(source=f"anomaly_ai:{kind}", url=url, model=payload.get("model"), request_payload=payload,
+                        status_code=resp.status_code, response_body=body,
+                        latency_ms=int((time.monotonic() - _t0) * 1000))
     raw = (body["choices"][0]["message"]["content"] or "").strip()
     if "<think>" in raw:
         raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
@@ -672,3 +685,21 @@ async def acknowledge_report(report_id: str, user: dict = Depends(require_permis
     if res.matched_count == 0:
         raise HTTPException(404, "Rapport introuvable")
     return {"ok": True}
+
+
+class BulkAcknowledgeBody(BaseModel):
+    ids: list[str]
+
+
+@vehicle_anomaly_ai_router.post("/bulk-acknowledge")
+async def bulk_acknowledge_reports(body: BulkAcknowledgeBody, user: dict = Depends(require_permission("read_plates"))):
+    """v3.27 · Bouton « Tout sélectionner » (fenêtre Anomalies IA) — traite
+    en un seul appel réseau plutôt qu'une requête par carte cochée."""
+    if not body.ids:
+        return {"acknowledged": 0}
+    now = _iso(datetime.now(timezone.utc))
+    res = await db.vehicle_anomaly_reports.update_many(
+        {"id": {"$in": body.ids}},
+        {"$set": {"acknowledged": True, "acknowledged_by": user.get("email"), "acknowledged_at": now}},
+    )
+    return {"acknowledged": res.modified_count}

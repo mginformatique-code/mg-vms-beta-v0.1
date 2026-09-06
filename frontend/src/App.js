@@ -32,7 +32,7 @@ import Alerts from "@/pages/Alerts";
 import Audit from "@/pages/Audit";
 import Diagnostics from "@/pages/Diagnostics";
 import SystemLogs from "@/pages/SystemLogs";
-import AnprLog from "@/pages/AnprLog";
+import LlmLogs from "@/pages/LlmLogs";
 import AnomalyCenter from "@/pages/AnomalyCenter";
 import HealthDashboard from "@/pages/HealthDashboard";
 import GPUStatus from "@/pages/GPUStatus";
@@ -97,7 +97,7 @@ function AppRoutes() {
       <Route path="/diagnostics" element={<Protected><Diagnostics /></Protected>} />
       <Route path="/diagnostics/dashboard" element={<Protected><HealthDashboard /></Protected>} />
       <Route path="/logs-systeme" element={<Protected><SystemLogs /></Protected>} />
-      <Route path="/log-anpr" element={<Protected><AnprLog /></Protected>} />
+      <Route path="/logs-llm" element={<Protected><LlmLogs /></Protected>} />
       <Route path="/anomalies" element={<Protected><AnomalyCenter /></Protected>} />
       <Route path="/gpu" element={<Protected><GPUStatus /></Protected>} />
       <Route path="/anpr-benchmark" element={<Protected><AnprBenchmark /></Protected>} />

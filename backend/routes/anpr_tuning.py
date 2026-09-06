@@ -109,10 +109,22 @@ async def _ask_qwen_recommend_threshold(camera_name: str, stats: dict, current_t
         "stream": False,
     }
     url = f"{cfg['base_url']}/api/chat/completions"
-    async with httpx.AsyncClient(timeout=25.0) as client:
-        resp = await client.post(url, json=payload, headers=headers)
-        resp.raise_for_status()
-        body = resp.json()
+    from llm_call_log import log_llm_call
+    import time
+    _t0 = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            body = resp.json()
+    except Exception as e:
+        await log_llm_call(source="anpr_tuning", url=url, model=payload.get("model"), request_payload=payload,
+                            status_code=getattr(getattr(e, "response", None), "status_code", None),
+                            error=f"{type(e).__name__}: {e}", latency_ms=int((time.monotonic() - _t0) * 1000))
+        raise
+    await log_llm_call(source="anpr_tuning", url=url, model=payload.get("model"), request_payload=payload,
+                        status_code=resp.status_code, response_body=body,
+                        latency_ms=int((time.monotonic() - _t0) * 1000))
     raw = (body["choices"][0]["message"]["content"] or "").strip()
     if "<think>" in raw:
         raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()

@@ -50,6 +50,7 @@ from routes.devices import devices_router
 from routes.vehicles import vehicles_router
 from routes.smart_search import smart_search_router
 from routes.llm_settings import llm_settings_router
+from routes.llm_logs import llm_logs_router
 from routes.discovery import discovery_router
 from routes.system_admin import system_admin_router, auto_reboot_loop, ntp_resync_loop
 from routes.console_ssh import console_router
@@ -137,6 +138,7 @@ app.include_router(vehicle_anomaly_ai_router)  # v3.44 · doit précéder vehicl
 app.include_router(vehicles_router)
 app.include_router(smart_search_router)
 app.include_router(llm_settings_router)
+app.include_router(llm_logs_router)  # v3.27 · Logs LLM (remplace Log ANPR)
 app.include_router(discovery_router)
 app.include_router(api_router)
 app.include_router(notif_router)

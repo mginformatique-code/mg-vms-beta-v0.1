@@ -1,33 +1,53 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { RefreshCw, Terminal } from "lucide-react";
+import { Terminal, Loader2, LogOut, RefreshCw } from "lucide-react";
+import HoldToRevealInput from "@/components/ui/hold-to-reveal-input";
 
 /**
- * v3.22 · Logs système — déplacé depuis l'onglet Debug de Suivi des
- * performances (retour utilisateur : n'a rien à faire mêlé au diagnostic
- * du pipeline IA) vers son propre sous-menu, à côté de Rapports/Journal
- * d'audit/Journal de diagnostic.
+ * v3.27 · Logs système — n'affichait jusqu'ici jamais rien : le frontend
+ * appelait `/api/diagnostics/logs`, un endpoint qui n'a jamais existé côté
+ * backend. Reconstruit pour afficher les DERNIERS logs Debian (journalctl)
+ * + les derniers logs de chaque conteneur Docker, via le même principe que
+ * la console shell hôte (Suivi des performances → Debug) : identifiants
+ * Linux réels saisis ici, jamais stockés ni journalisés, utilisés une
+ * seule fois pour ouvrir une connexion SSH sortante ponctuelle vers
+ * l'hôte — voir backend/routes/console_ssh.py::host_logs.
  */
 export default function SystemLogs() {
   const { t } = useApp();
-  const [logs, setLogs] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState("form"); // form | loading | loaded | error
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [data, setData] = useState(null);
+  const [activeTab, setActiveTab] = useState("syslog");
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const fetchLogs = async (e) => {
+    e?.preventDefault();
+    if (!username || !password) return;
+    setStatus("loading");
+    setError("");
     try {
-      const r = await api.get("/diagnostics/logs?tail=200").catch(() => ({ data: "" }));
-      setLogs(typeof r.data === "string" ? r.data : JSON.stringify(r.data, null, 2));
-    } catch (e) {
-      setLogs("(endpoint indisponible sur ce backend)");
-    } finally {
-      setLoading(false);
+      const { data: res } = await api.post("/system/console/host-logs", { username, password });
+      setPassword(""); // effacé du state dès la réponse — jamais conservé plus longtemps que nécessaire
+      setData(res);
+      setActiveTab("syslog");
+      setStatus("loaded");
+    } catch (e2) {
+      setPassword("");
+      setError(e2.response?.data?.detail || "Échec de la récupération des logs");
+      setStatus("error");
     }
-  }, []);
-  useEffect(() => { load(); }, [load]);
+  };
+
+  const reset = () => {
+    setStatus("form"); setUsername(""); setPassword(""); setError(""); setData(null);
+  };
+
+  const containers = data ? Object.keys(data.docker || {}) : [];
+  const activeText = activeTab === "syslog" ? (data?.syslog || "") : (data?.docker?.[activeTab] || "");
 
   return (
     <div className="p-4 max-w-5xl" data-testid="system-logs-page">
@@ -35,19 +55,85 @@ export default function SystemLogs() {
         <h1 className="font-head font-bold text-2xl tracking-tight flex items-center gap-2">
           <Terminal size={22} /> {t("nav.system_logs")}
         </h1>
-        <p className="text-sm text-muted-foreground mt-1">Journal brut du backend (tail 200 lignes).</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Derniers logs Debian (journalctl) et de chaque conteneur Docker de l'hôte.
+        </p>
       </div>
 
       <Card className="p-4 space-y-3">
-        <div className="flex justify-between items-center">
-          <div className="text-sm text-muted-foreground">Logs récents</div>
-          <Button size="sm" variant="ghost" onClick={load} disabled={loading}>
-            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />Rafraîchir
-          </Button>
-        </div>
-        <pre className="text-xs font-mono bg-black/40 p-3 rounded max-h-[70vh] overflow-auto">
-          {logs || "…"}
-        </pre>
+        {status === "form" && (
+          <form onSubmit={fetchLogs} className="space-y-2 max-w-sm" data-testid="system-logs-login-form">
+            <p className="text-[11px] text-muted-foreground">
+              Identifiants Linux réels de la machine — jamais ceux de MG-VMS, jamais stockés (utilisés une seule fois pour la connexion SSH sortante).
+            </p>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Utilisateur</label>
+              <input value={username} onChange={(e) => setUsername(e.target.value)}
+                     autoComplete="off" data-testid="system-logs-username"
+                     className="w-full px-3 py-2 bg-background border border-input outline-none text-sm focus:border-[#0044FF]" />
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Mot de passe</label>
+              <HoldToRevealInput value={password} onChange={(e) => setPassword(e.target.value)}
+                     autoComplete="off" data-testid="system-logs-password"
+                     className="w-full px-3 py-2 bg-background border border-input outline-none text-sm focus:border-[#0044FF]" />
+            </div>
+            <button type="submit" disabled={!username || !password} data-testid="system-logs-fetch-btn"
+                    className="px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40">
+              Récupérer les logs
+            </button>
+          </form>
+        )}
+
+        {status === "loading" && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 size={15} className="animate-spin" /> Connexion SSH et récupération des logs…
+          </div>
+        )}
+
+        {status === "error" && (
+          <div className="space-y-2">
+            <p className="text-[12px] text-[#FF3333]">{typeof error === "string" ? error : JSON.stringify(error)}</p>
+            <button onClick={reset} data-testid="system-logs-retry"
+                    className="px-3 py-1.5 border border-border hover:bg-secondary text-xs">
+              Réessayer
+            </button>
+          </div>
+        )}
+
+        {status === "loaded" && (
+          <>
+            <div className="flex justify-between items-center flex-wrap gap-2">
+              <div className="flex flex-wrap border border-border">
+                <button onClick={() => setActiveTab("syslog")}
+                        className={`px-3 py-1.5 text-xs ${activeTab === "syslog" ? "bg-[#0044FF] text-white" : "hover:bg-secondary"}`}
+                        data-testid="system-logs-tab-syslog">
+                  Système (journalctl)
+                </button>
+                {containers.map((name) => (
+                  <button key={name} onClick={() => setActiveTab(name)}
+                          className={`px-3 py-1.5 text-xs font-mono ${activeTab === name ? "bg-[#0044FF] text-white" : "hover:bg-secondary"}`}
+                          data-testid={`system-logs-tab-${name}`}>
+                    {name}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={reset} className="text-[11px] flex items-center gap-1 px-2 py-1 border border-border hover:bg-secondary"
+                        data-testid="system-logs-refresh">
+                  <RefreshCw size={12} /> Rafraîchir (redemande les identifiants)
+                </button>
+                <button onClick={reset} data-testid="system-logs-disconnect"
+                        className="text-[11px] flex items-center gap-1 px-2 py-1 border border-border hover:bg-secondary">
+                  <LogOut size={12} /> Fermer
+                </button>
+              </div>
+            </div>
+            <pre className="text-xs font-mono bg-black/40 p-3 rounded max-h-[65vh] overflow-auto" data-testid="system-logs-content">
+              {activeText || "(aucune sortie)"}
+            </pre>
+          </>
+        )}
       </Card>
     </div>
   );

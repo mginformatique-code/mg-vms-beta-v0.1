@@ -1423,7 +1423,16 @@ function DedupButton({ items, identities, admin, running, available, onRunNow, o
                 </div>
                 {mergeMode && (
                   <div className="flex items-center justify-between gap-2 mb-2 p-2 border border-[#0044FF]/40 bg-[#0044FF]/5 text-[11px]" data-testid="identity-merge-bar">
-                    <span>{selectedIds.size} sélectionnée{selectedIds.size > 1 ? "s" : ""} — clique 2+ cartes ci-dessous.</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setSelectedIds(selectedIds.size === identities.length
+                          ? new Set() : new Set(identities.map((id) => id.id)))}
+                        className="px-2 py-1 border border-border text-[10px] uppercase tracking-wider hover:bg-secondary/60"
+                        data-testid="identity-select-all">
+                        {selectedIds.size === identities.length ? "Tout désélectionner" : "Tout sélectionner"}
+                      </button>
+                      <span>{selectedIds.size} sélectionnée{selectedIds.size > 1 ? "s" : ""} — clique 2+ cartes ci-dessous.</span>
+                    </div>
                     <button onClick={confirmMergeIdentities} disabled={selectedIds.size < 2 || merging}
                             className="flex items-center gap-1 px-2 py-1 bg-[#0044FF] text-white text-[10px] uppercase tracking-wider disabled:opacity-40"
                             data-testid="identity-merge-confirm">

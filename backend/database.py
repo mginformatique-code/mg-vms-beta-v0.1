@@ -118,3 +118,8 @@ async def create_indexes():
     # frontend puisse afficher "reconnu par fast-alpr" sur toutes les plaques.
     await db.plates.update_many({"engine": {"$exists": False}},
                                  {"$set": {"engine": "fast-alpr"}})
+
+    # ── Logs LLM (v3.27) — un doc par appel Qwen (couleur/marque/anomalies/
+    # dédoublonnage/réglage ANPR/recherche IA), purge auto après 14 jours ──
+    await _safe_index(db.llm_call_logs, "source")
+    await _safe_index(db.llm_call_logs, "ts", expireAfterSeconds=14 * 24 * 3600)

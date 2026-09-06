@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import api from "@/lib/api";
-import { Loader2, Sparkles, Car, Users, TrendingUp, CheckCircle2, RefreshCw, ShieldAlert, Ban } from "lucide-react";
+import { Loader2, Sparkles, Car, Users, TrendingUp, CheckCircle2, RefreshCw, ShieldAlert, Ban, CheckSquare, Square } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -31,7 +31,7 @@ function fmtDateTime(iso) {
   try { return new Date(iso).toLocaleString("fr-FR"); } catch { return iso; }
 }
 
-function ReportCard({ report, onAcknowledged }) {
+function ReportCard({ report, onAcknowledged, selected, onToggleSelect }) {
   const meta = KIND_META[report.kind] || KIND_META.per_vehicle;
   const sev = SEVERITY_STYLE[report.severity] || SEVERITY_STYLE.info;
   const Icon = meta.icon;
@@ -52,6 +52,10 @@ function ReportCard({ report, onAcknowledged }) {
          data-testid={`anomaly-report-${report.id}`}>
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
+          {!report.acknowledged && (
+            <input type="checkbox" checked={!!selected} onChange={() => onToggleSelect(report.id)}
+                   className="shrink-0" data-testid={`anomaly-select-${report.id}`} />
+          )}
           <Icon size={14} style={{ color: sev.border }} />
           <span className="text-[10px] uppercase tracking-wider font-medium" style={{ color: sev.border }}>
             {sev.label}
@@ -90,6 +94,8 @@ export default function AnomalyCenter() {
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [aiEnabled, setAiEnabled] = useState(true);
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -98,6 +104,7 @@ export default function AnomalyCenter() {
       if (kind) params.kind = kind;
       const { data } = await api.get("/vehicles/anomaly-ai", { params });
       setItems(data.items || []);
+      setSelected(new Set());
     } catch (e) {
       // 400 ANOMALY_AI_DISABLED n'est renvoyé que par /run, la liste répond toujours —
       // on lit juste la config LLM pour afficher le bon message si rien n'apparaît jamais.
@@ -108,6 +115,29 @@ export default function AnomalyCenter() {
   useEffect(() => {
     api.get("/settings/llm").then(({ data }) => setAiEnabled(!!data.anomaly_ai_enabled)).catch(() => {});
   }, []);
+
+  const pendingIds = items.filter((r) => !r.acknowledged).map((r) => r.id);
+  const allSelected = pendingIds.length > 0 && pendingIds.every((id) => selected.has(id));
+
+  const toggleSelectAll = () => setSelected(allSelected ? new Set() : new Set(pendingIds));
+  const toggleSelectOne = (id) => setSelected((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const bulkAcknowledge = async () => {
+    if (selected.size === 0) return;
+    setBulkBusy(true);
+    try {
+      await api.post("/vehicles/anomaly-ai/bulk-acknowledge", { ids: Array.from(selected) });
+      setItems((prev) => prev.filter((r) => !selected.has(r.id)));
+      setSelected(new Set());
+      toast.success(`${selected.size} rapport(s) traité(s)`);
+    } catch (e) {
+      toast.error("Échec du traitement groupé");
+    } finally { setBulkBusy(false); }
+  };
 
   const runNow = async () => {
     setRunning(true);
@@ -168,8 +198,30 @@ export default function AnomalyCenter() {
         {loading && <Loader2 size={14} className="animate-spin text-muted-foreground" />}
       </div>
 
+      {pendingIds.length > 0 && (
+        <div className="flex items-center gap-2 mb-3" data-testid="anomaly-bulk-toolbar">
+          <button onClick={toggleSelectAll}
+                  className="flex items-center gap-1.5 px-2 py-1 border border-border text-xs hover:bg-secondary/60"
+                  data-testid="anomaly-select-all-btn">
+            {allSelected ? <CheckSquare size={13} /> : <Square size={13} />}
+            {allSelected ? "Tout désélectionner" : "Tout sélectionner"}
+          </button>
+          {selected.size > 0 && (
+            <button onClick={bulkAcknowledge} disabled={bulkBusy}
+                    className="flex items-center gap-1.5 px-2 py-1 border border-border text-xs hover:bg-secondary/60 disabled:opacity-40"
+                    data-testid="anomaly-bulk-ack-btn">
+              {bulkBusy ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+              Traiter la sélection ({selected.size})
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="space-y-2">
-        {items.map((r) => <ReportCard key={r.id} report={r} onAcknowledged={onAcknowledged} />)}
+        {items.map((r) => (
+          <ReportCard key={r.id} report={r} onAcknowledged={onAcknowledged}
+                      selected={selected.has(r.id)} onToggleSelect={toggleSelectOne} />
+        ))}
         {items.length === 0 && !loading && (
           <div className="text-sm text-muted-foreground text-center py-8" data-testid="anomaly-empty">
             Aucun rapport {status === "pending" ? "en attente" : status === "acknowledged" ? "traité" : ""}.

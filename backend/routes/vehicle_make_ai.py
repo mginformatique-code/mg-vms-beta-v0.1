@@ -24,6 +24,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -94,10 +95,22 @@ async def _ask_qwen_vision_make(vehicle_crop_data_uri: str) -> dict:
     # pas /v1/chat/completions) — base_url pointe vers Open WebUI (WAN), pas
     # Ollama brut. Voir le correctif déjà vérifié sur le module couleur.
     url = f"{cfg['base_url']}/api/chat/completions"
-    async with httpx.AsyncClient(timeout=40.0) as client:
-        resp = await client.post(url, json=payload, headers=headers)
-        resp.raise_for_status()
-        body = resp.json()
+    from llm_call_log import log_llm_call
+    import time
+    _t0 = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=40.0) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            body = resp.json()
+    except Exception as e:
+        await log_llm_call(source="make_ai", url=url, model=payload.get("model"), request_payload=payload,
+                            status_code=getattr(getattr(e, "response", None), "status_code", None),
+                            error=f"{type(e).__name__}: {e}", latency_ms=int((time.monotonic() - _t0) * 1000))
+        raise
+    await log_llm_call(source="make_ai", url=url, model=payload.get("model"), request_payload=payload,
+                        status_code=resp.status_code, response_body=body,
+                        latency_ms=int((time.monotonic() - _t0) * 1000))
     raw = (body["choices"][0]["message"]["content"] or "").strip()
     if raw.startswith("```"):
         raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw).strip()
@@ -112,7 +125,7 @@ async def _run_make_ai_batch() -> dict:
         {"timestamp": {"$gte": since}, "vehicle_crop": {"$exists": True, "$ne": None},
          "vehicle_make_ai_checked_at": {"$exists": False}},
         {"_id": 0, "id": 1, "vehicle_crop": 1, "vehicle_make": 1},
-    ).limit(_BATCH_SIZE).to_list(_BATCH_SIZE)
+    ).sort("timestamp", -1).limit(_BATCH_SIZE).to_list(_BATCH_SIZE)  # v3.27 · du plus récent au plus ancien (demande explicite)
 
     checked = corrected = low_confidence = errors = 0
     for doc in docs:
@@ -137,18 +150,34 @@ async def _run_make_ai_batch() -> dict:
 
 
 async def make_ai_batch_loop() -> None:
-    """Même garde-fou anti-jamais-exécuté que les autres tâches périodiques."""
-    from routes.llm_settings import is_feature_enabled
+    """Même garde-fou anti-jamais-exécuté que les autres tâches périodiques.
+
+    v3.27 · Mode « synchro auto » planifiée à heure fixe — voir
+    vehicle_color_ai.py::color_ai_batch_loop (même mécanique, réglage
+    indépendant `make_ai_auto_sync_*`)."""
+    from routes.llm_settings import is_feature_enabled, get_make_ai_auto_sync_settings
     await asyncio.sleep(300)
+    last_triggered_date = None
+    last_interval_run = 0.0
     while True:
-        if await is_feature_enabled("make_ai_enabled"):
-            try:
-                counts = await _run_make_ai_batch()
-                if counts["checked"]:
-                    logger.info("make_ai: run terminé — %s", counts)
-            except Exception:
-                logger.exception("make_ai: erreur boucle make_ai_batch_loop")
-        await asyncio.sleep(_BATCH_INTERVAL_HOURS * 3600)
+        try:
+            if await is_feature_enabled("make_ai_enabled"):
+                sync = await get_make_ai_auto_sync_settings()
+                if sync["enabled"]:
+                    now = datetime.now()
+                    today_key = now.strftime("%Y-%m-%d")
+                    if now.strftime("%H:%M") == sync["time"] and last_triggered_date != today_key:
+                        counts = await _run_make_ai_batch()
+                        logger.info("make_ai: run planifié (%s) terminé — %s", sync["time"], counts)
+                        last_triggered_date = today_key
+                elif time.monotonic() - last_interval_run >= _BATCH_INTERVAL_HOURS * 3600:
+                    counts = await _run_make_ai_batch()
+                    if counts["checked"]:
+                        logger.info("make_ai: run terminé — %s", counts)
+                    last_interval_run = time.monotonic()
+        except Exception:
+            logger.exception("make_ai: erreur boucle make_ai_batch_loop")
+        await asyncio.sleep(60)
 
 
 @vehicle_make_ai_router.post("/run")

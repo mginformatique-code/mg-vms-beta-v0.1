@@ -18,6 +18,8 @@ const empty = {
   dedup_auto_approve_enabled: false, dedup_auto_approve_interval_min: 60,
   anomaly_ai_enabled: false,
   vision_model: "qwen2.5vl:7b", color_ai_enabled: false, make_ai_enabled: false,
+  color_ai_auto_sync_enabled: false, color_ai_auto_sync_time: "03:00",
+  make_ai_auto_sync_enabled: false, make_ai_auto_sync_time: "03:30",
 };
 
 const Inp = (p) => <input {...p} className="w-full px-3 py-2 bg-card border border-input outline-none text-sm focus:border-[#0044FF]" />;
@@ -100,6 +102,10 @@ export default function LlmSettings() {
         anomaly_ai_enabled: cfg.anomaly_ai_enabled,
         vision_model: cfg.vision_model, color_ai_enabled: cfg.color_ai_enabled,
         make_ai_enabled: cfg.make_ai_enabled,
+        color_ai_auto_sync_enabled: cfg.color_ai_auto_sync_enabled,
+        color_ai_auto_sync_time: cfg.color_ai_auto_sync_time,
+        make_ai_auto_sync_enabled: cfg.make_ai_auto_sync_enabled,
+        make_ai_auto_sync_time: cfg.make_ai_auto_sync_time,
       });
       setCfg({ ...empty, ...data });
       toast.success("Configuration LLM enregistrée");
@@ -233,17 +239,32 @@ export default function LlmSettings() {
             <Switch checked={cfg.color_ai_enabled} onCheckedChange={(v) => upd("color_ai_enabled", v)} data-testid="llm-color-ai-toggle" />
           </div>
           {cfg.color_ai_enabled && (
-            <div className="mt-2 flex items-center justify-between gap-2 pl-5">
-              {colorStatus ? (
-                <div className="text-[10px] text-muted-foreground mono" data-testid="llm-color-ai-status">
-                  {colorStatus.checked} / {colorStatus.total_eligible} lectures vérifiées (30j) · {colorStatus.corrected} corrigée{colorStatus.corrected > 1 ? "s" : ""}
+            <div className="mt-2 pl-5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-[11px] text-muted-foreground">Synchro auto à heure fixe (sinon : toutes les 6h)</div>
+                <Switch checked={cfg.color_ai_auto_sync_enabled} onCheckedChange={(v) => upd("color_ai_auto_sync_enabled", v)} data-testid="llm-color-ai-auto-sync-toggle" />
+              </div>
+              {cfg.color_ai_auto_sync_enabled && (
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-muted-foreground">Chaque jour à</span>
+                  <input type="time" value={cfg.color_ai_auto_sync_time}
+                         onChange={(e) => upd("color_ai_auto_sync_time", e.target.value)}
+                         className="px-2 py-1 bg-card border border-input outline-none text-xs focus:border-[#0044FF]"
+                         data-testid="llm-color-ai-auto-sync-time" />
                 </div>
-              ) : <span />}
-              <button onClick={runColorNow} disabled={colorRunning}
-                      className="shrink-0 flex items-center gap-1 px-2 py-1 border border-border text-[10px] uppercase tracking-wider hover:bg-secondary/60 disabled:opacity-40"
-                      data-testid="llm-color-ai-run-btn">
-                {colorRunning ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Vérifier maintenant
-              </button>
+              )}
+              <div className="flex items-center justify-between gap-2">
+                {colorStatus ? (
+                  <div className="text-[10px] text-muted-foreground mono" data-testid="llm-color-ai-status">
+                    {colorStatus.checked} / {colorStatus.total_eligible} lectures vérifiées (30j) · {colorStatus.corrected} corrigée{colorStatus.corrected > 1 ? "s" : ""}
+                  </div>
+                ) : <span />}
+                <button onClick={runColorNow} disabled={colorRunning}
+                        className="shrink-0 flex items-center gap-1 px-2 py-1 border border-border text-[10px] uppercase tracking-wider hover:bg-secondary/60 disabled:opacity-40"
+                        data-testid="llm-color-ai-run-btn">
+                  {colorRunning ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Vérifier maintenant
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -260,17 +281,32 @@ export default function LlmSettings() {
             <Switch checked={cfg.make_ai_enabled} onCheckedChange={(v) => upd("make_ai_enabled", v)} data-testid="llm-make-ai-toggle" />
           </div>
           {cfg.make_ai_enabled && (
-            <div className="mt-2 flex items-center justify-between gap-2 pl-5">
-              {makeStatus ? (
-                <div className="text-[10px] text-muted-foreground mono" data-testid="llm-make-ai-status">
-                  {makeStatus.checked} / {makeStatus.total_eligible} lectures vérifiées (30j) · {makeStatus.corrected} corrigée{makeStatus.corrected > 1 ? "s" : ""}
+            <div className="mt-2 pl-5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-[11px] text-muted-foreground">Synchro auto à heure fixe (sinon : toutes les 6h)</div>
+                <Switch checked={cfg.make_ai_auto_sync_enabled} onCheckedChange={(v) => upd("make_ai_auto_sync_enabled", v)} data-testid="llm-make-ai-auto-sync-toggle" />
+              </div>
+              {cfg.make_ai_auto_sync_enabled && (
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-muted-foreground">Chaque jour à</span>
+                  <input type="time" value={cfg.make_ai_auto_sync_time}
+                         onChange={(e) => upd("make_ai_auto_sync_time", e.target.value)}
+                         className="px-2 py-1 bg-card border border-input outline-none text-xs focus:border-[#0044FF]"
+                         data-testid="llm-make-ai-auto-sync-time" />
                 </div>
-              ) : <span />}
-              <button onClick={runMakeNow} disabled={makeRunning}
-                      className="shrink-0 flex items-center gap-1 px-2 py-1 border border-border text-[10px] uppercase tracking-wider hover:bg-secondary/60 disabled:opacity-40"
-                      data-testid="llm-make-ai-run-btn">
-                {makeRunning ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Vérifier maintenant
-              </button>
+              )}
+              <div className="flex items-center justify-between gap-2">
+                {makeStatus ? (
+                  <div className="text-[10px] text-muted-foreground mono" data-testid="llm-make-ai-status">
+                    {makeStatus.checked} / {makeStatus.total_eligible} lectures vérifiées (30j) · {makeStatus.corrected} corrigée{makeStatus.corrected > 1 ? "s" : ""}
+                  </div>
+                ) : <span />}
+                <button onClick={runMakeNow} disabled={makeRunning}
+                        className="shrink-0 flex items-center gap-1 px-2 py-1 border border-border text-[10px] uppercase tracking-wider hover:bg-secondary/60 disabled:opacity-40"
+                        data-testid="llm-make-ai-run-btn">
+                  {makeRunning ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Vérifier maintenant
+                </button>
+              </div>
             </div>
           )}
         </div>

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from auth import require_role, log_audit
@@ -60,6 +60,16 @@ class LlmConfigIn(BaseModel):
     # v3.46 · Identification marque véhicule — même modèle vision que la
     # couleur, interrupteur dédié séparé (voir vehicle_make_ai.py).
     make_ai_enabled: bool = False
+    # v3.27 · Synchro planifiée à heure fixe — demande explicite (plutôt que
+    # l'intervalle glissant 6h d'origine, dont l'heure de passage dépend du
+    # démarrage du conteneur). Même mécanique que system_admin.py::
+    # auto_reboot_loop (HH:MM, TZ conteneur/Europe/Paris, 1 déclenchement/j).
+    # Traite les lectures du plus récent au plus ancien (voir vehicle_color_ai.
+    # py/vehicle_make_ai.py::_run_*_ai_batch, tri desc sur `timestamp`).
+    color_ai_auto_sync_enabled: bool = False
+    color_ai_auto_sync_time: str = "03:00"
+    make_ai_auto_sync_enabled: bool = False
+    make_ai_auto_sync_time: str = "03:30"
 
 
 async def _load_raw() -> dict:
@@ -84,7 +94,20 @@ def _mask(v: dict) -> dict:
         "vision_model": v.get("vision_model") or "qwen2.5vl:7b",
         "color_ai_enabled": bool(v.get("color_ai_enabled", False)),
         "make_ai_enabled": bool(v.get("make_ai_enabled", False)),
+        "color_ai_auto_sync_enabled": bool(v.get("color_ai_auto_sync_enabled", False)),
+        "color_ai_auto_sync_time": v.get("color_ai_auto_sync_time") or "03:00",
+        "make_ai_auto_sync_enabled": bool(v.get("make_ai_auto_sync_enabled", False)),
+        "make_ai_auto_sync_time": v.get("make_ai_auto_sync_time") or "03:30",
     }
+
+
+def _check_hhmm(value: str) -> None:
+    """Même validation que system_admin.py::put_auto_reboot — HH:MM strict."""
+    try:
+        hh, mm = value.split(":")
+        assert 0 <= int(hh) <= 23 and 0 <= int(mm) <= 59
+    except Exception:
+        raise HTTPException(400, "Heure invalide (attendu HH:MM)")
 
 
 @llm_settings_router.get("")
@@ -114,7 +137,15 @@ async def put_llm_config(data: LlmConfigIn, user: dict = Depends(require_role("a
         "vision_model": (data.vision_model or "").strip() or "qwen2.5vl:7b",
         "color_ai_enabled": data.color_ai_enabled,
         "make_ai_enabled": data.make_ai_enabled,
+        "color_ai_auto_sync_enabled": data.color_ai_auto_sync_enabled,
+        "color_ai_auto_sync_time": data.color_ai_auto_sync_time,
+        "make_ai_auto_sync_enabled": data.make_ai_auto_sync_enabled,
+        "make_ai_auto_sync_time": data.make_ai_auto_sync_time,
     }
+    if data.color_ai_auto_sync_enabled:
+        _check_hhmm(data.color_ai_auto_sync_time)
+    if data.make_ai_auto_sync_enabled:
+        _check_hhmm(data.make_ai_auto_sync_time)
     await db.settings.update_one({"key": "llm_config"}, {"$set": {"key": "llm_config", "value": value}}, upsert=True)
     await log_audit(user, "llm_config_updated", value["base_url"])
     return _mask(value)
@@ -150,6 +181,24 @@ async def get_active_llm_config() -> Optional[dict]:
         "base_url": v["base_url"],
         "model": v.get("model") or _DEFAULT_MODEL,
         "api_key": decrypt_secret(v.get("api_key", "")),
+    }
+
+
+async def get_color_ai_auto_sync_settings() -> dict:
+    """Utilisé par vehicle_color_ai.py::color_ai_batch_loop."""
+    v = await _load_raw()
+    return {
+        "enabled": bool(v.get("color_ai_auto_sync_enabled", False)),
+        "time": v.get("color_ai_auto_sync_time") or "03:00",
+    }
+
+
+async def get_make_ai_auto_sync_settings() -> dict:
+    """Utilisé par vehicle_make_ai.py::make_ai_batch_loop."""
+    v = await _load_raw()
+    return {
+        "enabled": bool(v.get("make_ai_auto_sync_enabled", False)),
+        "time": v.get("make_ai_auto_sync_time") or "03:30",
     }
 
 
