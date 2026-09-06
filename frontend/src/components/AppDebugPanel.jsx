@@ -16,6 +16,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
+import * as DiagnosticsRegistry from "@/tracking/DiagnosticsRegistry";
 
 function decodeJwt(token) {
   try {
@@ -65,6 +66,18 @@ export default function AppDebugPanel() {
   useEffect(() => {
     if (!open || tab !== "network") return;
     const iv = setInterval(() => setNetRefresh((n) => n + 1), 500);
+    return () => clearInterval(iv);
+  }, [open, tab]);
+
+  // v3.37 · Onglet Tracking — les données étaient déjà collectées
+  // (DiagnosticsRegistry, alimenté par chaque tuile du Mur vidéo depuis
+  // v3.36) mais aucun onglet ne les affichait jamais : la seule façon de
+  // savoir si le lissage/tracking fonctionnait était de deviner. Même
+  // rafraîchissement que l'onglet Réseau.
+  const [trackRefresh, setTrackRefresh] = useState(0);
+  useEffect(() => {
+    if (!open || tab !== "tracking") return;
+    const iv = setInterval(() => setTrackRefresh((n) => n + 1), 500);
     return () => clearInterval(iv);
   }, [open, tab]);
 
@@ -277,6 +290,7 @@ export default function AppDebugPanel() {
         <div style={{ marginLeft: "auto", display: "flex", gap: "6px" }}>
           {tabBtn("session", "Session")}
           {tabBtn("network", "Réseau")}
+          {tabBtn("tracking", "Tracking")}
           {tabBtn("navigation", "Navigation")}
           {tabBtn("build", "Build")}
         </div>
@@ -443,6 +457,59 @@ export default function AppDebugPanel() {
                     )}
                   </div>
                 ))}
+              </div>
+            </div>
+          );
+        })()}
+
+        {tab === "tracking" && (() => {
+          // eslint-disable-next-line no-unused-vars
+          const _ = trackRefresh; // force le recalcul à chaque tick du useEffect ci-dessus
+          const snap = DiagnosticsRegistry.snapshotAll();
+          const rows = Object.entries(snap).sort((a, b) => (a[1].camName || "").localeCompare(b[1].camName || ""));
+          return (
+            <div data-testid="app-dbg-panel-tracking">
+              <div style={{ color: "#00E5FF", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "8px" }}>
+                Tracking par caméra ({rows.length} tuile{rows.length !== 1 ? "s" : ""} montée{rows.length !== 1 ? "s" : ""})
+              </div>
+              {rows.length === 0 ? (
+                <div style={{ color: "#555" }}>Aucune tuile caméra actuellement affichée — ouvrez le Mur vidéo dans un autre onglet/fenêtre pendant que ce panneau reste ouvert.</div>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "10px" }} data-testid="app-dbg-tracking-table">
+                  <thead>
+                    <tr style={{ color: "#888", textAlign: "left", borderBottom: "1px solid #333" }}>
+                      <th style={{ padding: "4px" }}>Caméra</th>
+                      <th style={{ padding: "4px" }}>Lissage</th>
+                      <th style={{ padding: "4px" }}>Détection FPS</th>
+                      <th style={{ padding: "4px" }}>Affichage FPS</th>
+                      <th style={{ padding: "4px" }}>Prédiction active</th>
+                      <th style={{ padding: "4px" }}>Âge dernière détection</th>
+                      <th style={{ padding: "4px" }}>Tracks suivis</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map(([camId, d]) => (
+                      <tr key={camId} style={{ borderBottom: "1px dashed #222" }} data-testid={`app-dbg-track-row-${camId}`}>
+                        <td style={{ padding: "4px", color: "#ddd" }}>{d.camName || camId}</td>
+                        <td style={{ padding: "4px", color: d.smoothingEnabled ? "#8f8" : "#f88" }}>{d.smoothingEnabled ? "actif" : "désactivé"}</td>
+                        <td style={{ padding: "4px", color: "#ddd" }}>{d.detectionFps ?? "—"}</td>
+                        <td style={{ padding: "4px", color: "#ddd" }}>{d.displayFps ?? "—"}</td>
+                        <td style={{ padding: "4px", color: d.predictionActive ? "#ffb800" : "#666" }}>{d.predictionActive ? "oui" : "non"}</td>
+                        <td style={{ padding: "4px", color: d.lastDetectionAgeMs > 1500 ? "#f88" : "#ddd" }}>
+                          {d.lastDetectionAgeMs != null ? `${Math.round(d.lastDetectionAgeMs)} ms` : "—"}
+                        </td>
+                        <td style={{ padding: "4px", color: "#ddd" }}>{d.trackedCount ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <div style={{ color: "#666", fontSize: "10px", marginTop: "10px", lineHeight: 1.5 }}>
+                Rafraîchi toutes les 500 ms tant que cet onglet reste ouvert. « Âge dernière détection » en rouge
+                au-delà de 1,5 s — si régulièrement au-dessus du délai de prédiction max de la caméra (souvent
+                800 ms, réglage <code>ai.smoothing.max_prediction_ms</code>), la position affichée se fige
+                jusqu'à la prochaine confirmation réelle du tracker : c'est la cause la plus probable d'un
+                tracking visuellement saccadé sur une caméra dont le débit d'analyse (Détection FPS) est bas.
               </div>
             </div>
           );
