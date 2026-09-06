@@ -1043,35 +1043,63 @@ function TabOverview({ d, onWatchChanged, onReload }) {
         </div>
       )}
 
-      {parkingSessions?.length > 0 && (
-        <div className="border border-border p-3 space-y-2" data-testid="parking-sessions-block">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            Historique stationnement ({parkingSessions.length})
-          </div>
-          <div className="space-y-1.5 max-h-64 overflow-y-auto">
-            {parkingSessions.map((s) => (
-              <div key={s.id} className="flex items-center gap-2 text-[11px]" data-testid={`parking-session-${s.id}`}>
-                {s.arrival_plate_reading_id ? (
-                  <img src={passageThumbUrl(s.arrival_plate_reading_id, "vehicle")} alt="arrivée" loading="lazy"
-                       className="w-10 h-8 object-cover border border-border shrink-0" />
-                ) : <div className="w-10 h-8 bg-secondary border border-border shrink-0" />}
-                <div className="flex-1 min-w-0">
-                  <div className="mono">
-                    {fmtDateTime(s.arrived_at)} → {s.departed_at ? fmtDateTime(s.departed_at) : "en cours"}
+      {parkingSessions?.length > 0 && (() => {
+        // v3.28 · Compilation par jour plutôt qu'une ligne par session
+        // (demande explicite) — détail au survol de la souris.
+        const byDay = new Map();
+        for (const s of parkingSessions) {
+          const day = (s.arrived_at || "").slice(0, 10);
+          if (!byDay.has(day)) byDay.set(day, []);
+          byDay.get(day).push(s);
+        }
+        const days = Array.from(byDay.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+        const fmtDay = (d) => { try { return new Date(d + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "short" }); } catch { return d; } };
+        const fmtTime = (iso) => { try { return new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); } catch { return "—"; } };
+        return (
+          <div className="border border-border p-3 space-y-2" data-testid="parking-sessions-block">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Historique stationnement ({parkingSessions.length} passage{parkingSessions.length > 1 ? "s" : ""} sur {days.length} jour{days.length > 1 ? "s" : ""})
+            </div>
+            <div className="space-y-1 max-h-64 overflow-y-auto">
+              {days.map(([day, sessions]) => {
+                const totalSec = sessions.reduce((sum, s) => sum + (s.duration_seconds || 0), 0);
+                return (
+                  <div key={day} className="relative group" data-testid={`parking-day-${day}`}>
+                    <div className="flex items-center justify-between text-[11px] py-1 px-1.5 hover:bg-secondary/60 cursor-default">
+                      <span className="mono font-medium">{fmtDay(day)}</span>
+                      <span className="text-muted-foreground">
+                        {sessions.length} passage{sessions.length > 1 ? "s" : ""} · {fmtDuration(totalSec)} cumulé
+                      </span>
+                    </div>
+                    <div className="hidden group-hover:block absolute z-20 right-0 top-full bg-black/90 border border-[#0044FF]/40 p-2 w-80 space-y-1.5"
+                         data-testid={`parking-day-detail-${day}`}>
+                      {sessions.map((s) => (
+                        <div key={s.id} className="flex items-center gap-2 text-[10px] text-white">
+                          {s.arrival_plate_reading_id ? (
+                            <img src={passageThumbUrl(s.arrival_plate_reading_id, "vehicle")} alt="arrivée" loading="lazy"
+                                 className="w-9 h-7 object-cover border border-border shrink-0" />
+                          ) : <div className="w-9 h-7 bg-secondary border border-border shrink-0" />}
+                          <div className="flex-1 min-w-0">
+                            <div className="mono">{fmtTime(s.arrived_at)} → {s.departed_at ? fmtTime(s.departed_at) : "en cours"}</div>
+                            <div className="text-white/60 truncate">
+                              {s.camera_name} — {fmtDuration(s.duration_seconds)}
+                              {(s.vehicle_make || s.vehicle_color) && ` · ${[s.vehicle_make, s.vehicle_color].filter(Boolean).join(" ")}`}
+                            </div>
+                          </div>
+                          {s.departure_plate_reading_id ? (
+                            <img src={passageThumbUrl(s.departure_plate_reading_id, "vehicle")} alt="départ" loading="lazy"
+                                 className="w-9 h-7 object-cover border border-border shrink-0" />
+                          ) : <div className="w-9 h-7 bg-secondary border border-border shrink-0" />}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="text-muted-foreground truncate">
-                    {s.camera_name}{s.site_name ? ` · ${s.site_name}` : ""} — {fmtDuration(s.duration_seconds)}
-                    {(s.vehicle_make || s.vehicle_color) && ` · ${[s.vehicle_make, s.vehicle_color].filter(Boolean).join(" ")}`}
-                  </div>
-                </div>
-                {s.departure_plate_reading_id ? (
-                  <img src={passageThumbUrl(s.departure_plate_reading_id, "vehicle")} alt="départ" loading="lazy"
-                       className="w-10 h-8 object-cover border border-border shrink-0" />
-                ) : <div className="w-10 h-8 bg-secondary border border-border shrink-0" />}
-              </div>
-            ))}
+                );
+              })}
+            </div>
           </div>
-        </div>
+        );
+      })()}
       )}
 
       <div className="grid grid-cols-2 gap-2 text-sm">
