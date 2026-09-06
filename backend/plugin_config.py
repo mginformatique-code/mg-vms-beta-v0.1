@@ -511,6 +511,22 @@ async def parking_delete(zone_id: str, user: dict = Depends(require_role("techni
     return {"ok": True}
 
 
+@plugin_config_router.get("/parking/occupancy")
+async def parking_occupancy(user: dict = Depends(get_current_user)):
+    """v3.27 · Occupation LIVE par zone — jusqu'ici ce plugin n'était qu'un
+    éditeur de zones (polygone + capacité), sans aucun moteur de comptage
+    réel derrière (le champ `occupied` du modèle restait toujours à 0).
+    Compte désormais les véhicules réellement IMMOBILES (pas juste de
+    passage) dans chaque polygone — voir smart_zones/engine.py::
+    track_zone_occupancy, alimenté depuis le pipeline à chaque cycle,
+    publié dans le snapshot Redis consolidé."""
+    from pipeline_snapshot import get_snapshot
+    snap = await get_snapshot()
+    if snap is None:
+        return {}
+    return snap.get("zone_occupancy") or {}
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Access Control — contrôleurs (barrières, portes, lecteurs)
 # ═══════════════════════════════════════════════════════════════════

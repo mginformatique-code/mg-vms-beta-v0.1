@@ -73,6 +73,11 @@ class SmartZonesEngine:
         self._track_stillness: dict[str, dict] = {}
         # camera_id → plate → {track_id, last_anpr_seen}
         self._plate_track_map: dict[str, dict[str, dict]] = {}
+        # v3.27 · Occupation zones de stationnement (polygone + capacité) —
+        # camera_id → [zone_dict] (cache DB) ; zone_id → {track_id → {since, plate}}
+        self._parking_zones: dict[str, list[dict]] = {}
+        self._parking_zones_ts: float = 0.0
+        self._zone_occupancy: dict[str, dict] = {}
 
     async def _load_zones(self) -> list[dict]:
         """Cache 15s pour éviter d'aller taper la DB à chaque frame."""
@@ -349,6 +354,89 @@ class SmartZonesEngine:
             "min_dwell_seconds": int(self._PARKING_MIN_DWELL_S),
             "grace_seconds": int(self._PARKING_GRACE_S),
         }
+
+    # ═══════════════════════════════════════════════════════════════
+    # v3.27 · Comptage d'occupation par zone de stationnement (polygone +
+    # capacité, db.parking_zones) — demande explicite : "système hybride qui
+    # combine un véhicule fixe [immobile] et un véhicule fixe dans un
+    # polygone". Le plugin "Zones de stationnement" (Administration →
+    # Plugins) n'était jusqu'ici qu'un éditeur de zones (polygone +
+    # capacité) SANS AUCUN moteur de comptage réel derrière — ceci comble ce
+    # trou. Réutilise le MÊME signal d'immobilité que le dwell par plaque
+    # ci-dessus (get_track_stillness) : un véhicule simplement DE PASSAGE
+    # dans le polygone ne compte pas comme "occupant une place", seul un
+    # véhicule réellement immobile compte — sinon une voiture qui traverse
+    # le polygone en roulant ferait clignoter le comptage.
+    # ═══════════════════════════════════════════════════════════════
+    _PARKING_ZONES_CACHE_TTL_S = 30.0
+
+    async def refresh_parking_zones(self) -> None:
+        """Cache 30s — évite d'aller taper la DB à chaque frame pour une
+        config qui ne change quasiment jamais."""
+        now = time.time()
+        if now - self._parking_zones_ts < self._PARKING_ZONES_CACHE_TTL_S and self._parking_zones:
+            return
+        try:
+            from database import db
+            zones = await db.parking_zones.find({}, {"_id": 0}).to_list(500)
+        except Exception as e:
+            logger.warning("parking_zones.load_error err=%s", e)
+            return
+        by_cam: dict[str, list[dict]] = {}
+        for z in zones:
+            by_cam.setdefault(z.get("camera_id"), []).append(z)
+        self._parking_zones = by_cam
+        self._parking_zones_ts = now
+
+    def track_zone_occupancy(self, camera_id: str, overlay_boxes: list) -> None:
+        """Un appel par cycle pipeline (même cadence que track_vehicle_
+        stillness/track_plate_dwell ci-dessus, mêmes overlay_boxes) — DOIT
+        être appelé APRÈS track_vehicle_stillness dans le même cycle pour
+        lire une immobilité à jour."""
+        zones = self._parking_zones.get(camera_id) or []
+        if not zones:
+            return
+        plate_by_track = {v["track_id"]: p for p, v in self._plate_track_map.get(camera_id, {}).items()}
+        for zone in zones:
+            zid = zone["id"]
+            polygon = zone.get("polygon") or []
+            occ = self._zone_occupancy.setdefault(zid, {})
+            seen_here = set()
+            for b in overlay_boxes:
+                tid = b.get("track_id")
+                bn = b.get("bbox_norm")
+                if tid is None or not bn or len(bn) != 4:
+                    continue
+                x1, y1, x2, y2 = bn
+                if not self._bbox_in_polygon((x1, y1, x2 - x1, y2 - y1), polygon):
+                    continue
+                stillness = self.get_track_stillness(camera_id, tid)
+                if stillness is None:
+                    continue  # présent mais en mouvement — ne compte pas comme "garé"
+                seen_here.add(tid)
+                if tid in occ:
+                    occ[tid]["plate"] = plate_by_track.get(tid) or occ[tid].get("plate")
+                else:
+                    occ[tid] = {"since": stillness["still_since"], "plate": plate_by_track.get(tid)}
+            for tid in [t for t in occ if t not in seen_here]:
+                occ.pop(tid, None)
+
+    def snapshot_zone_occupancy(self) -> dict:
+        """Lecture — occupation live par zone, calculée à partir de
+        l'immobilité live du moment (pas d'un compteur incrémenté)."""
+        out: dict[str, dict] = {}
+        for cam_id, zones in self._parking_zones.items():
+            for zone in zones:
+                zid = zone["id"]
+                occ = self._zone_occupancy.get(zid) or {}
+                out[zid] = {
+                    "camera_id": cam_id,
+                    "name": zone.get("name"),
+                    "capacity": zone.get("capacity"),
+                    "occupied": len(occ),
+                    "vehicles": [{"plate": v.get("plate"), "since": _iso(v["since"])} for v in occ.values()],
+                }
+        return out
 
     @staticmethod
     def _bbox_in_polygon(bbox, polygon: list[list[float]]) -> bool:

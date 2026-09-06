@@ -645,6 +645,11 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
         from smart_zones.engine import engine as _sz_engine
         _sz_engine.track_vehicle_stillness(cam["id"], result.get("overlay_boxes", []))
         _sz_engine.track_plate_dwell(cam["id"], result["plates"])
+        # v3.27 · Comptage d'occupation zones de stationnement (polygone +
+        # capacité) — doit tourner APRÈS track_vehicle_stillness ci-dessus
+        # (lit l'immobilité fraîchement mise à jour), même overlay_boxes.
+        await _sz_engine.refresh_parking_zones()
+        _sz_engine.track_zone_occupancy(cam["id"], result.get("overlay_boxes", []))
     except Exception:
         logger.exception("track_plate_dwell error")
 

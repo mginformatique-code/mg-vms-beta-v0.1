@@ -208,6 +208,14 @@ async def _build_snapshot() -> dict:
     except Exception:
         snap["parking"] = {"cameras": {}, "min_dwell_seconds": 120, "grace_seconds": 180}
 
+    # v3.27 · Occupation live des zones de stationnement (polygone +
+    # capacité) — lu côté API via GET /plugins/parking/occupancy.
+    try:
+        from smart_zones.engine import engine as _sz_engine
+        snap["zone_occupancy"] = _sz_engine.snapshot_zone_occupancy()
+    except Exception:
+        snap["zone_occupancy"] = {}
+
     return snap
 
 

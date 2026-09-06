@@ -691,11 +691,20 @@ function ParkingSettings({ onSaved }) {
   const [zones, setZones] = useState([]);
   const [cams, setCams] = useState([]);
   const [dialog, setDialog] = useState(null); // { mode: 'new'|'edit', zone }
+  // v3.27 · Occupation LIVE — ce plugin n'avait jusqu'ici aucun moteur de
+  // comptage réel derrière (voir plugin_config.py::parking_occupancy).
+  const [occupancy, setOccupancy] = useState({});
   const loadAll = async () => {
     const [z, c] = await Promise.all([api.get("/plugins/parking/zones"), api.get("/cameras")]);
     setZones(z.data); setCams(c.data);
   };
   useEffect(() => { loadAll().catch(() => {}); }, []);
+  useEffect(() => {
+    const loadOccupancy = () => api.get("/plugins/parking/occupancy").then((r) => setOccupancy(r.data || {})).catch(() => {});
+    loadOccupancy();
+    const iv = setInterval(loadOccupancy, 10000);
+    return () => clearInterval(iv);
+  }, []);
   const del = async (id) => {
     if (!confirm("Supprimer cette zone ?")) return;
     try { await api.delete(`/plugins/parking/zones/${id}`); loadAll(); toast.success("Zone supprimée"); onSaved?.(); }
@@ -709,18 +718,33 @@ function ParkingSettings({ onSaved }) {
           <button onClick={() => setDialog({ mode: "new" })} className="text-sm px-3 py-1.5 bg-[#0044FF] text-white flex items-center gap-1" data-testid="parking-new"><Plus size={12} /> Nouvelle zone</button>
         </div>
         <ul className="divide-y divide-border">
-          {zones.map((z) => (
+          {zones.map((z) => {
+            const occ = occupancy[z.id];
+            return (
             <li key={z.id} className="py-2 flex items-center justify-between text-sm">
               <div>
                 <span className="font-medium">{z.name}</span>
                 <span className="text-xs text-muted-foreground ml-2">· {z.camera_name} · {z.polygon?.length || 0} pts · capacité {z.capacity}</span>
+                {occ && (
+                  <div className="text-xs mt-0.5">
+                    <span className={occ.occupied >= z.capacity ? "text-[#FF3333]" : "text-[#00E676]"}>
+                      {occ.occupied} / {z.capacity} occupée{occ.occupied > 1 ? "s" : ""}
+                    </span>
+                    {occ.vehicles?.filter((v) => v.plate).length > 0 && (
+                      <span className="text-muted-foreground ml-2 mono">
+                        {occ.vehicles.filter((v) => v.plate).map((v) => v.plate).join(", ")}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => setDialog({ mode: "edit", zone: z })} className="text-xs px-2 py-1 border border-border hover:bg-secondary"><Edit3 size={11} /></button>
                 <button onClick={() => del(z.id)} className="text-[#FF3333]"><Trash2 size={14} /></button>
               </div>
             </li>
-          ))}
+            );
+          })}
           {zones.length === 0 && <li className="py-4 text-center text-muted-foreground">Aucune zone. Cliquez sur « Nouvelle zone » pour dessiner une zone sur une caméra.</li>}
         </ul>
       </div>
