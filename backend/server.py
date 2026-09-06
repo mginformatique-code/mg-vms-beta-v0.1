@@ -133,6 +133,7 @@ from routes.camera_api import camera_api_router
 app.include_router(camera_api_router)   # camera-api-v2.2 · HTTP/HTTPS layer (Reolink+)
 from routes.live_v3 import live_v3_router
 app.include_router(live_v3_router)   # video-engine-v3 · RTSP-native + aiortc WHEP
+app.include_router(vehicle_anomaly_ai_router)  # v3.44 · doit précéder vehicles_router : /api/vehicles/anomaly-ai collisionne sinon avec /api/vehicles/{plate}
 app.include_router(vehicles_router)
 app.include_router(smart_search_router)
 app.include_router(llm_settings_router)
@@ -154,7 +155,6 @@ app.include_router(console_router)  # v3.22 · Console shell hôte (Debug), admi
 app.include_router(live_layout_router)  # v3.22 · Disposition personnalisée du Mur vidéo
 app.include_router(vehicle_dedup_router)  # v3.20 · Doublons véhicule assistés par Qwen
 app.include_router(anpr_tuning_router)  # v3.20 · Seuil confiance ANPR auto-réglé par Qwen
-app.include_router(vehicle_anomaly_ai_router)  # v3.44 · IA anomalies vehicule (convoi/vague, narration Qwen)
 app.include_router(vehicle_color_ai_router)  # v3.45 · Correction couleur vehicule via modele vision
 app.include_router(vehicle_make_ai_router)  # v3.46 · Identification marque vehicule via modele vision
 
