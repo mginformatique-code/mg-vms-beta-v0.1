@@ -83,6 +83,21 @@ def _min_plate_distance(plates_a: list[str], plates_b: list[str]) -> int:
     return best
 
 
+async def _identity_sample_thumb(plates: list[str]) -> str | None:
+    """id d'une lecture récente avec photo, pour permettre au frontend un
+    comparatif visuel (même principe que vehicle_dedup.py::_plate_stats —
+    demande explicite après un premier cas réel où deux plaques proches
+    textuellement s'avéraient être deux véhicules visiblement différents,
+    invisible sur le seul texte/attributs)."""
+    if not plates:
+        return None
+    doc = await db.plates.find(
+        {"plate": {"$in": plates}, "vehicle_crop": {"$exists": True, "$ne": None}},
+        {"_id": 0, "id": 1, "timestamp": 1},
+    ).sort("timestamp", -1).limit(1).to_list(1)
+    return doc[0]["id"] if doc else None
+
+
 async def _already_suggested_pairs() -> set[tuple[str, str]]:
     pairs: set[tuple[str, str]] = set()
     async for s in db.identity_merge_suggestions.find({}, {"_id": 0, "identity_a_id": 1, "identity_b_id": 1}):
@@ -209,10 +224,21 @@ async def _run_identity_merge_batch(limit: int = _MAX_CANDIDATES_PER_RUN) -> int
         except Exception:
             logger.exception("identity_merge_ai: échec comparaison %s / %s", a["id"], b["id"])
             continue
+        # v3.27.1 · Comparatif photo — demande explicite après un cas réel où
+        # deux plaques proches textuellement (confusion OCR plausible)
+        # correspondaient à deux véhicules visiblement DIFFÉRENTS sur les
+        # crops réels. Uniquement pour les suggestions retenues (jamais
+        # gaspillé sur celles que Qwen vient de rejeter).
+        sample_a = sample_b = None
+        if verdict.get("same_vehicle"):
+            sample_a = await _identity_sample_thumb(a.get("plates") or [])
+            sample_b = await _identity_sample_thumb(b.get("plates") or [])
         doc = {
             "id": str(uuid.uuid4()),
             "identity_a_id": a["id"], "identity_a_name": a["name"], "identity_a_plates": a.get("plates") or [],
+            "identity_a_sample_plate_id": sample_a,
             "identity_b_id": b["id"], "identity_b_name": b["name"], "identity_b_plates": b.get("plates") or [],
+            "identity_b_sample_plate_id": sample_b,
             "min_distance": dist,
             "same_vehicle": bool(verdict.get("same_vehicle")),
             "confidence": verdict.get("confidence"),

@@ -1474,16 +1474,34 @@ function DedupButton({ items, identities, admin, running, available, onRunNow, o
                     {identitySuggestions.map((s) => (
                       <div key={s.id} className="border border-border p-2 text-[11px] flex items-center justify-between gap-2 flex-wrap"
                            data-testid={`identity-merge-suggestion-${s.id}`}>
-                        <div className="flex-1 min-w-[240px]">
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {s.identity_a_sample_plate_id ? (
+                            <img src={passageThumbUrl(s.identity_a_sample_plate_id, "vehicle")} alt={s.identity_a_name} loading="lazy"
+                                 className="w-16 h-12 object-cover border border-border" data-testid={`identity-merge-thumb-a-${s.id}`} />
+                          ) : (
+                            <div className="w-16 h-12 bg-secondary flex items-center justify-center text-[9px] text-muted-foreground border border-border">—</div>
+                          )}
+                          <GitMerge size={11} className="text-muted-foreground" />
+                          {s.identity_b_sample_plate_id ? (
+                            <img src={passageThumbUrl(s.identity_b_sample_plate_id, "vehicle")} alt={s.identity_b_name} loading="lazy"
+                                 className="w-16 h-12 object-cover border border-border" data-testid={`identity-merge-thumb-b-${s.id}`} />
+                          ) : (
+                            <div className="w-16 h-12 bg-secondary flex items-center justify-center text-[9px] text-muted-foreground border border-border">—</div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-[200px]">
                           <div className="flex items-center gap-1.5 flex-wrap mono">
                             <span className="font-medium">{s.identity_a_name}</span>
                             <span className="text-muted-foreground">({s.identity_a_plates.join(", ")})</span>
-                            <GitMerge size={11} className="text-muted-foreground" />
+                            <span className="text-muted-foreground">↔</span>
                             <span className="font-medium">{s.identity_b_name}</span>
                             <span className="text-muted-foreground">({s.identity_b_plates.join(", ")})</span>
                           </div>
                           <div className="text-muted-foreground mt-1">
                             distance {s.min_distance} · confiance {Math.round((s.confidence || 0) * 100)}% — {s.reason}
+                          </div>
+                          <div className="text-muted-foreground/70 mt-0.5 text-[10px]">
+                            Comparez les photos ci-contre avant de fusionner — un texte de plaque proche ne garantit pas le même véhicule.
                           </div>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
