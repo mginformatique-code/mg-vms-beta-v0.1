@@ -123,3 +123,17 @@ async def create_indexes():
     # dédoublonnage/réglage ANPR/recherche IA), purge auto après 14 jours ──
     await _safe_index(db.llm_call_logs, "source")
     await _safe_index(db.llm_call_logs, "ts", expireAfterSeconds=14 * 24 * 3600)
+
+    # v3.27 · Constaté en prod : GET /vehicles/color-ai/status et
+    # /vehicles/make-ai/status (3 count_documents chacun, `Administration →
+    # LLM`, pollés toutes les 30s par le frontend) mesurés à 30s CHACUN sur
+    # la fenêtre glissante de 30 jours (_LOOKBACK_DAYS) — l'index `timestamp`
+    # seul (déjà présent ci-dessus) borne la plage mais laisse chaque
+    # document du mois examiné individuellement pour le second filtre
+    # (vehicle_color_ai_checked_at/vehicle_color_source), faute d'index
+    # composé couvrant les deux. Même cause que la fiche véhicule lente
+    # (voir plus haut) et le même remède : composé (timestamp, champ IA).
+    await _safe_index(db.plates, [("timestamp", -1), ("vehicle_color_ai_checked_at", 1)])
+    await _safe_index(db.plates, [("timestamp", -1), ("vehicle_make_ai_checked_at", 1)])
+    await _safe_index(db.plates, "vehicle_color_source")
+    await _safe_index(db.plates, "vehicle_make_source")
