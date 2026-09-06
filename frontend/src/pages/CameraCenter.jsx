@@ -519,6 +519,12 @@ function AITab({ caps, cameraId }) {
   const [ai, setAi] = useState({});
   const [tuning, setTuning] = useState(null);
   const [tuningRunning, setTuningRunning] = useState(false);
+  // v3.27 · Auto-suspension qualité ANPR (v0.4.2, déjà en place côté
+  // pipeline — "pas de plaque > fausse plaque") — jusqu'ici sans AUCUNE
+  // trace côté interface : rien n'expliquait pourquoi les plaques
+  // s'arrêtaient net à la tombée de la nuit sur une caméra non spécialisée.
+  const [anprQuality, setAnprQuality] = useState(null);
+  const [resettingAnprQuality, setResettingAnprQuality] = useState(false);
   useEffect(() => {
     const load = async () => {
       const [cam, insp] = await Promise.all([
@@ -535,6 +541,23 @@ function AITab({ caps, cameraId }) {
   useEffect(() => {
     api.get(`/cameras/${cameraId}/anpr-tuning/history`).then((r) => setTuning(r.data)).catch(() => setTuning(null));
   }, [cameraId]);
+  const loadAnprQuality = () => {
+    api.get("/diagnostics/anpr-quality").then((r) => setAnprQuality(r.data)).catch(() => setAnprQuality(null));
+  };
+  useEffect(() => {
+    loadAnprQuality();
+    const iv = setInterval(loadAnprQuality, 15000);
+    return () => clearInterval(iv);
+  }, [cameraId]);
+  const resetAnprQuality = async () => {
+    setResettingAnprQuality(true);
+    try {
+      await api.post("/diagnostics/anpr-quality/reset", null, { params: { camera_id: cameraId } });
+      loadAnprQuality();
+      toast.success("Suspension ANPR réinitialisée — reprise immédiate");
+    } catch (e) { toast.error("Échec de la réinitialisation"); }
+    finally { setResettingAnprQuality(false); }
+  };
   const runTuningNow = async () => {
     setTuningRunning(true);
     try {
@@ -595,6 +618,50 @@ function AITab({ caps, cameraId }) {
           )}
         </Card>
       )}
+      {(() => {
+        const state = anprQuality?.cameras?.[cameraId];
+        if (!state) return null;
+        return (
+          <Card className="p-4 space-y-2 md:col-span-2" data-testid="cam-anpr-quality">
+            <div className="flex items-center justify-between">
+              <div className="text-xs uppercase tracking-wider text-muted-foreground">
+                Qualité ANPR — auto-suspension ("pas de plaque &gt; fausse plaque")
+              </div>
+              {state.suspended && !state.is_specialized && (
+                <Button size="sm" variant="outline" onClick={resetAnprQuality} disabled={resettingAnprQuality} data-testid="anpr-quality-reset">
+                  {resettingAnprQuality ? "…" : "Forcer la reprise"}
+                </Button>
+              )}
+            </div>
+            {state.is_specialized ? (
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">Toujours actif</Badge>
+                <span className="text-sm">{state.specialized_model} — caméra ANPR dédiée, l'auto-suspension ne s'applique pas.</span>
+              </div>
+            ) : state.suspended ? (
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <Badge variant="destructive">ANPR suspendu</Badge>
+                  <span className="text-sm">score qualité {Math.round((state.last_score || 0) * 100)}%</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {state.last_reason || "Conditions insuffisantes (luminosité/netteté/contraste)."}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Comportement normal sur une caméra standard hors des heures de jour — pour un fonctionnement 24/7,
+                  il faut un modèle ANPR dédié (Dahua ITC413/ITC237/ITC215, Hikvision DeepInView…), conçu pour gérer
+                  le bas éclairage lui-même. {state.total_suspensions > 1 && `${state.total_suspensions} suspensions au total.`}
+                </p>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">Actif</Badge>
+                <span className="text-sm">score qualité {Math.round((state.last_score || 0) * 100)}%</span>
+              </div>
+            )}
+          </Card>
+        );
+      })()}
     </div>
   );
 }
