@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import api from "@/lib/api";
-import { Loader2, Sparkles, Car, Users, TrendingUp, CheckCircle2, RefreshCw, ShieldAlert, Ban, CheckSquare, Square } from "lucide-react";
+import { Loader2, Sparkles, Car, Users, TrendingUp, CheckCircle2, RefreshCw, ShieldAlert, Ban, CheckSquare, Square, MapPin } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -18,6 +18,7 @@ const KIND_META = {
   wave: { label: "Vague", icon: TrendingUp, hint: "Pic de véhicules distincts inhabituel sur une caméra" },
   plate_confusion: { label: "Plaque suspecte", icon: ShieldAlert, hint: "Plusieurs marques réelles différentes détectées sous la même plaque — probable confusion ANPR" },
   cross_site_impossible: { label: "Trajet impossible", icon: Ban, hint: "Même plaque vue sur 2 sites distincts en un temps trop court pour être plausible" },
+  long_parking: { label: "Stationnement prolongé", icon: MapPin, hint: "Véhicule stationné sans interruption au-delà du seuil configuré" },
 };
 
 const SEVERITY_STYLE = {
@@ -187,7 +188,7 @@ export default function AnomalyCenter() {
           ))}
         </div>
         <div className="flex border border-border">
-          {[["", "Tout type"], ["per_vehicle", "Véhicule"], ["convoy", "Convoi"], ["wave", "Vague"], ["plate_confusion", "Plaque suspecte"], ["cross_site_impossible", "Trajet impossible"]].map(([v, l]) => (
+          {[["", "Tout type"], ["per_vehicle", "Véhicule"], ["convoy", "Convoi"], ["wave", "Vague"], ["plate_confusion", "Plaque suspecte"], ["cross_site_impossible", "Trajet impossible"], ["long_parking", "Stationnement prolongé"]].map(([v, l]) => (
             <button key={v || "all"} onClick={() => setKind(v)}
                     className={`px-3 py-1.5 text-xs ${kind === v ? "bg-[#0044FF] text-white" : "hover:bg-secondary"}`}
                     data-testid={`kind-filter-${v || "all"}`}>

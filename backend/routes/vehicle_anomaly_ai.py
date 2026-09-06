@@ -318,6 +318,17 @@ async def _ask_qwen_narrate(kind: str, facts: dict) -> dict:
             "un trajet aussi court entre les deux est physiquement implausible. Explique ce "
             "constat en une phrase concrète, en citant les 2 sites et l'écart de temps réel."
         )
+    elif kind == "long_parking":
+        vehicle_desc = " ".join(v for v in [facts.get("vehicle_make"), facts.get("vehicle_color")] if v)
+        prompt = (
+            f"Le véhicule {facts['plate']}"
+            + (f" ({vehicle_desc})" if vehicle_desc else "")
+            + f" est stationné sur la caméra {facts.get('camera_name') or '?'}"
+            + (f" ({facts['site_name']})" if facts.get("site_name") else "")
+            + f" depuis {facts['arrived_at']}, soit {int(facts['duration_seconds'] // 60)} minutes sans "
+            "interruption détectée. Explique ce constat en une phrase concrète, en citant la durée réelle "
+            "et le lieu — reste factuel, ne suppose jamais une infraction ou une intention sans preuve."
+        )
     else:
         raise ValueError(f"kind inconnu: {kind}")
     headers = {"Content-Type": "application/json"}
@@ -603,6 +614,46 @@ async def _run_cross_site_impossible(rows: list[dict]) -> int:
     return created
 
 
+# ═══════════════════════════════════════════════════════════════════
+# Détection — stationnement prolongé (demande explicite : "faire
+# fonctionner tout ça avec Qwen" au sujet de parking_sessions.py). Réutilise
+# le journal déjà persisté (aucun calcul d'immobilité dupliqué) — se
+# déclenche sur les sessions encore EN COURS dépassant le seuil, une seule
+# narration par session (dedup_key sur l'id de session, pas sur la plaque —
+# une même plaque peut légitimement dépasser le seuil plusieurs fois dans
+# le temps, sur des sessions différentes).
+# ═══════════════════════════════════════════════════════════════════
+_LONG_PARKING_THRESHOLD_S = 3600  # 1h — ajustable si trop/pas assez sensible en usage réel
+
+
+async def _run_long_parking() -> int:
+    created = 0
+    async for sess in db.parking_sessions.find(
+            {"status": "ongoing", "duration_seconds": {"$gte": _LONG_PARKING_THRESHOLD_S}}, {"_id": 0}):
+        key = f"long_parking:{sess['id']}"
+        existing = await db.vehicle_anomaly_reports.find_one({"dedup_key": key}, {"_id": 0, "id": 1})
+        if existing:
+            continue
+        facts = {
+            "plate": sess["plate"], "camera_name": sess.get("camera_name"), "site_name": sess.get("site_name"),
+            "arrived_at": sess["arrived_at"], "duration_seconds": sess["duration_seconds"],
+            "vehicle_make": sess.get("vehicle_make"), "vehicle_color": sess.get("vehicle_color"),
+        }
+        try:
+            verdict = await _ask_qwen_narrate("long_parking", facts)
+        except Exception:
+            logger.exception("anomaly_ai: échec narration long_parking %s", sess["plate"])
+            continue
+        await db.vehicle_anomaly_reports.insert_one({
+            "id": str(uuid.uuid4()), "kind": "long_parking", "dedup_key": key,
+            "plates": [sess["plate"]], "camera_ids": [sess["camera_id"]], "site_id": sess.get("site_id"),
+            "facts": facts, "severity": verdict["severity"], "message": verdict["message"],
+            "created_at": _iso(datetime.now(timezone.utc)), "acknowledged": False,
+        })
+        created += 1
+    return created
+
+
 async def _run_anomaly_ai_batch() -> dict:
     site_map = await _camera_site_map()
     rows = await _load_recent_plates()
@@ -611,8 +662,9 @@ async def _run_anomaly_ai_batch() -> dict:
     n_veh = await _run_per_vehicle(site_map)
     n_confusion = await _run_plate_confusions(site_map)
     n_cross_site = await _run_cross_site_impossible(rows)
+    n_long_parking = await _run_long_parking()
     return {"convoys": n_conv, "waves": n_wave, "per_vehicle": n_veh,
-            "plate_confusions": n_confusion, "cross_site": n_cross_site}
+            "plate_confusions": n_confusion, "cross_site": n_cross_site, "long_parking": n_long_parking}
 
 
 async def anomaly_ai_batch_loop() -> None:
