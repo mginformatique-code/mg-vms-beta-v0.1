@@ -2,6 +2,35 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.27-fusion-identites-stationnement-logs] — 2026-09-06 — Fusion identités par IA, historique stationnement, comptage par zone, Logs LLM/système, fusion Alertes+Anomalies
+
+### Added
+- **Fusion d'identités confirmées assistée par Qwen** (`identity_merge_ai.py`) — même architecture que le dédoublonnage plaques existant (distance d'édition, Qwen juge au cas par cas, jamais de fusion automatique sans validation, sauf auto-approbation optionnelle désactivée par défaut) mais au niveau IDENTITÉ déjà confirmée plutôt que plaque brute. Suggestions dans la fenêtre "Fusion & identités véhicule", avec **comparatif photo obligatoire** (véhicule A/B) — ajouté après un cas réel où deux plaques à 1 lettre de différence correspondaient à deux véhicules visiblement différents.
+- **Bouton "Tout sélectionner"** dans la fenêtre Anomalies IA (traitement groupé, un seul appel réseau) et dans la fenêtre Fusion & identités (identités confirmées).
+- **Menu "Logs LLM"** (remplace "Log ANPR", qui n'affichait qu'un tableau de plaques sans aucun rapport avec l'IA) — journal détaillé de chaque appel réseau vers Qwen (couleur, marque, anomalies, dédoublonnage, réglage ANPR, recherche IA), succès/échec, latence, requête/réponse consultables, purge auto 14 jours.
+- **Menu "Logs système" reconstruit** — n'affichait jusqu'ici jamais rien (endpoint jamais implémenté côté backend). Derniers logs Debian (journalctl) + par conteneur Docker, via une connexion SSH ponctuelle avec identifiants Linux réels jamais stockés (même principe que la console shell hôte).
+- **Synchro auto couleur/marque véhicule à heure fixe** (Administration → LLM) — en plus de l'intervalle 6h d'origine, choix d'une heure précise (HH:MM). Traite désormais les lectures du **plus récent au plus ancien** (était non trié).
+- **Auto-suspension qualité ANPR nocturne rendue visible** (Camera Center, onglet IA) — le mécanisme ("pas de plaque > fausse plaque", suspend l'OCR la nuit sauf caméra ANPR dédiée type Dahua ITC413/Hikvision DeepInView) existait déjà côté pipeline avec une API complète, mais rien ne l'affichait : l'utilisateur voyait juste "les plaques ne donnent plus rien" sans explication. Affiche désormais l'état (suspendu/actif), le score qualité, la raison exacte, et un bouton "Forcer la reprise".
+- **Réglage global YOLO/ALPR rendu visible** (Camera Center, onglet IA) — seuil de confiance/intervalle/device existaient déjà côté backend avec une UI correcte, mais seulement accessible via Plugins → IA détection, peu découvrable.
+- **Fusion des menus "Alertes" et "Anomalies IA"** en un seul menu à deux onglets (`AiAlertsCenter.jsx`) — les deux systèmes backend restent séparés (Alertes = ancien moteur `db.alerts`, Anomalies IA = moteur dédié `db.vehicle_anomaly_reports`), fusion volontairement côté interface seulement.
+- **Historique persistant des sessions de stationnement** (`parking_sessions.py`) — le badge "en stationnement" existant était un état live en mémoire (déjà fiable, dérivé de l'immobilité réelle du tracker) mais rien n'était conservé : aucun historique consultable, tout repart à zéro au redémarrage du pipeline. Nouveau journal : arrivée → confirmations → départ, avec une photo réelle à chaque bout. **Validation marque/couleur anti-attracteur OCR** : si la marque/couleur de la lecture la plus récente ne correspond pas à celles de l'arrivée, la session n'est pas prolongée (probable confusion OCR entre deux véhicules réels distincts) — close immédiatement, nouvelle session ouverte.
+- **Comptage d'occupation par zone de stationnement** (polygone + capacité) — le plugin "Zones de stationnement" n'avait jusqu'ici *aucun* moteur de comptage réel derrière (champ `occupied` toujours à 0). Nouveau moteur qui réutilise la même immobilité déjà fiable : un véhicule seulement de passage dans le polygone ne compte pas comme "occupant une place", associe la plaque quand connue. Fonctionne en complément du cas sans zone définie (historique par plaque ci-dessus, actif partout sans configuration).
+- **Nouveau signal Anomalies IA "Stationnement prolongé"** — Qwen explique automatiquement (durée réelle + lieu, jamais une supposition d'infraction) toute session de stationnement en cours dépassant 1h.
+
+### Fixed
+- **Menu "Anomalies IA" n'affichait jamais aucun rapport** malgré des cas réels détectés côté serveur — `vehicle_anomaly_ai_router` (route exacte `/api/vehicles/anomaly-ai`) était enregistré après la route générique `/api/vehicles/{plaque}`, qui l'interceptait en premier (404 silencieux). Réordonné.
+- **Administration → LLM et fenêtre Fusion & identités bloquées ~20-30s au chargement** — `total_eligible` (couleur/marque IA) filtrait sur l'existence du champ `vehicle_crop` (image en base64, non indexable, dépasse la limite de 1024 octets/clé de MongoDB) : ~7s Mongo à lui seul. Mis en cache 60s côté serveur.
+
+### Notes techniques
+- `identity_merge_ai.py` réutilise `vehicles.py::merge_identities` tel quel pour la fusion effective (même garde-fou de taille) — aucune logique dupliquée.
+- Comptage de zone branché dans `pipeline_v2/downstream.py` juste après le suivi d'immobilité existant (mêmes `overlay_boxes`, même cycle) — zéro nouvelle dépendance de tracking.
+
+### À venir / dette connue (audit du 06/09, non traité ce soir)
+- Décalage overlay ByteTrack / flux vidéo (deux pipelines indépendantes) — non traité depuis le 19/08.
+- Goulot d'étranglement pipeline IA (`asyncio.gather` aligne toutes les caméras sur la plus lente).
+- Plugin anti-vol retail — checklist de vérification Phase 1 jamais terminée, Phases 2-4 non commencées.
+- Audit `routers.py`, fenêtre pop-out second écran, visibilité réelle par plugin dans Camera Center.
+
 ## [v3.26-ia-vision-couleur-marque-anomalies] — 2026-09-05 — IA vision (couleur + marque), anomalies étendues (convoi/vague/plaque suspecte), fusion identités
 
 ### Added
