@@ -238,13 +238,31 @@ async def run_now(user: dict = Depends(require_role("admin"))):
     return {"started": True}
 
 
+# v3.27 · Constaté en prod : `total_eligible` ci-dessous (filtre sur
+# l'existence de `vehicle_crop`, qui stocke l'image en base64 — jusqu'à
+# plusieurs dizaines de Ko PAR document) mesuré à ~7s d'exécution Mongo à
+# lui seul pour 23919 documents — le champ n'est pas indexable (dépasse la
+# limite de 1024 octets par clé d'index de MongoDB), la lecture complète du
+# document est incompressible pour ce filtre précis. Frontend pollant ce
+# statut toutes les 30s (Administration → LLM) : mis en cache 60s plutôt
+# que recalculé à chaque appel (même idiome que vehicles.py::_list_cache).
+_STATUS_CACHE_TTL_S = 60.0
+_status_cache: tuple[float, dict] | None = None
+
+
 @vehicle_color_ai_router.get("/status")
 async def status(user: dict = Depends(require_permission("read_plates"))):
     """Volume de progression — combien de lectures récentes ont déjà été
     vérifiées/corrigées par la vision, pour donner une idée concrète de
     l'avancement de la "phase d'apprentissage" plutôt qu'une boîte noire."""
+    global _status_cache
+    now = time.monotonic()
+    if _status_cache and now - _status_cache[0] < _STATUS_CACHE_TTL_S:
+        return _status_cache[1]
     since = _iso(datetime.now(timezone.utc) - timedelta(days=_LOOKBACK_DAYS))
     total = await db.plates.count_documents({"timestamp": {"$gte": since}, "vehicle_crop": {"$exists": True, "$ne": None}})
     checked = await db.plates.count_documents({"timestamp": {"$gte": since}, "vehicle_color_ai_checked_at": {"$exists": True}})
     corrected = await db.plates.count_documents({"timestamp": {"$gte": since}, "vehicle_color_source": "vision_ai"})
-    return {"total_eligible": total, "checked": checked, "corrected": corrected}
+    result = {"total_eligible": total, "checked": checked, "corrected": corrected}
+    _status_cache = (now, result)
+    return result

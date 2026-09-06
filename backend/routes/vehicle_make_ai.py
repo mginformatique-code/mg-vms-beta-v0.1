@@ -200,10 +200,24 @@ async def run_now(user: dict = Depends(require_role("admin"))):
     return {"started": True}
 
 
+# v3.27 · Même correctif que vehicle_color_ai.py::status — `vehicle_crop`
+# stocke l'image en base64 (non indexable, dépasse la limite de 1024
+# octets/clé de MongoDB), le filtre d'existence mesuré ~7s pour 23919
+# documents. Mis en cache 60s (frontend polle toutes les 30s).
+_STATUS_CACHE_TTL_S = 60.0
+_status_cache: tuple[float, dict] | None = None
+
+
 @vehicle_make_ai_router.get("/status")
 async def status(user: dict = Depends(require_permission("read_plates"))):
+    global _status_cache
+    now = time.monotonic()
+    if _status_cache and now - _status_cache[0] < _STATUS_CACHE_TTL_S:
+        return _status_cache[1]
     since = _iso(datetime.now(timezone.utc) - timedelta(days=_LOOKBACK_DAYS))
     total = await db.plates.count_documents({"timestamp": {"$gte": since}, "vehicle_crop": {"$exists": True, "$ne": None}})
     checked = await db.plates.count_documents({"timestamp": {"$gte": since}, "vehicle_make_ai_checked_at": {"$exists": True}})
     corrected = await db.plates.count_documents({"timestamp": {"$gte": since}, "vehicle_make_source": "vision_ai"})
-    return {"total_eligible": total, "checked": checked, "corrected": corrected}
+    result = {"total_eligible": total, "checked": checked, "corrected": corrected}
+    _status_cache = (now, result)
+    return result
