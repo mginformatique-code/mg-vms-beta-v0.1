@@ -137,3 +137,9 @@ async def create_indexes():
     await _safe_index(db.plates, [("timestamp", -1), ("vehicle_make_ai_checked_at", 1)])
     await _safe_index(db.plates, "vehicle_color_source")
     await _safe_index(db.plates, "vehicle_make_source")
+
+    # ── Historique stationnement (v3.27) — journal persistant des sessions
+    # arrivée/départ, dérivé de l'état dwell live déjà en place ──
+    await _safe_index(db.parking_sessions, [("plate", 1), ("status", 1)])
+    await _safe_index(db.parking_sessions, "status")
+    await _safe_index(db.parking_sessions, [("plate", 1), ("arrived_at", -1)])

@@ -884,6 +884,11 @@ function TabOverview({ d, onWatchChanged, onReload }) {
   const [habits, setHabits] = useState(null);
   const [anomaly, setAnomaly] = useState(null);
   const [parking, setParking] = useState(null);
+  // v3.27 · Historique persistant des sessions (arrivée/départ + photo à
+  // chaque bout) — distinct du badge live ci-dessus (état en mémoire,
+  // remis à zéro à chaque redémarrage du pipeline, sans journal). Demande
+  // explicite : "l'info doit être fiable" avec un vrai journal consultable.
+  const [parkingSessions, setParkingSessions] = useState(null);
   const [wlSaving, setWlSaving] = useState(false);
   const [notifSending, setNotifSending] = useState(false);
   useEffect(() => {
@@ -895,6 +900,7 @@ function TabOverview({ d, onWatchChanged, onReload }) {
     loadParking();
     // Dwell temps réel côté pipeline — reste à jour tant que la fiche est ouverte.
     const iv = setInterval(loadParking, 15000);
+    api.get(`/vehicles/${encodeURIComponent(d.plate)}/parking-sessions`).then(({ data }) => setParkingSessions(data.items || [])).catch(() => {});
     return () => clearInterval(iv);
   }, [d.plate]);
 
@@ -1033,6 +1039,37 @@ function TabOverview({ d, onWatchChanged, onReload }) {
           </div>
           <div className="text-muted-foreground">
             {parking.camera_name}{parking.site_name ? ` · ${parking.site_name}` : ""} — depuis {fmtDateTime(parking.since)}
+          </div>
+        </div>
+      )}
+
+      {parkingSessions?.length > 0 && (
+        <div className="border border-border p-3 space-y-2" data-testid="parking-sessions-block">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            Historique stationnement ({parkingSessions.length})
+          </div>
+          <div className="space-y-1.5 max-h-64 overflow-y-auto">
+            {parkingSessions.map((s) => (
+              <div key={s.id} className="flex items-center gap-2 text-[11px]" data-testid={`parking-session-${s.id}`}>
+                {s.arrival_plate_reading_id ? (
+                  <img src={passageThumbUrl(s.arrival_plate_reading_id, "vehicle")} alt="arrivée" loading="lazy"
+                       className="w-10 h-8 object-cover border border-border shrink-0" />
+                ) : <div className="w-10 h-8 bg-secondary border border-border shrink-0" />}
+                <div className="flex-1 min-w-0">
+                  <div className="mono">
+                    {fmtDateTime(s.arrived_at)} → {s.departed_at ? fmtDateTime(s.departed_at) : "en cours"}
+                  </div>
+                  <div className="text-muted-foreground truncate">
+                    {s.camera_name}{s.site_name ? ` · ${s.site_name}` : ""} — {fmtDuration(s.duration_seconds)}
+                    {(s.vehicle_make || s.vehicle_color) && ` · ${[s.vehicle_make, s.vehicle_color].filter(Boolean).join(" ")}`}
+                  </div>
+                </div>
+                {s.departure_plate_reading_id ? (
+                  <img src={passageThumbUrl(s.departure_plate_reading_id, "vehicle")} alt="départ" loading="lazy"
+                       className="w-10 h-8 object-cover border border-border shrink-0" />
+                ) : <div className="w-10 h-8 bg-secondary border border-border shrink-0" />}
+              </div>
+            ))}
           </div>
         </div>
       )}
