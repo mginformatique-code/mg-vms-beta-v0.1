@@ -27,6 +27,7 @@ import useDeviceCapabilities from "@/hooks/useDeviceCapabilities";
 import LivePlayer from "@/components/video/LivePlayer";
 import RetailTrackingOverlay from "@/components/video/RetailTrackingOverlay";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
+import { AiDetectionSettings } from "@/pages/PluginPage";
 import {
   Camera, Wifi, Video, Layers, Cpu, Volume2, Sun, Bell, Move3d, Wrench,
   ScanLine, RefreshCw, AlertCircle, CircleCheck, ChevronLeft, ChevronRight,
@@ -571,6 +572,17 @@ function AITab({ caps, cameraId }) {
   const plugins = ai.cam?.enabled_plugins || [];
   const stages = ai.stages || {};
   return (
+    <div className="space-y-3">
+      {/* v3.27 · Réglage GLOBAL (toutes caméras/classes) — jusqu'ici visible
+          seulement sous Plugins → IA détection, peu découvrable pour un
+          réglage qui affecte directement la qualité des détections dont on
+          discute justement ici. Rendu plus visible, demande explicite. */}
+      <div data-testid="cam-ai-global-settings">
+        <div className="text-xs uppercase tracking-wider text-[#FFB800] mb-1">
+          Réglage global — s'applique à TOUTES les caméras et TOUTES les classes (pas seulement celle-ci)
+        </div>
+        <AiDetectionSettings />
+      </div>
     <div className="grid gap-3 md:grid-cols-2" data-testid="cam-ai">
       <Card className="p-4 space-y-2">
         <div className="text-xs uppercase tracking-wider text-muted-foreground">Pipeline actif</div>
@@ -662,6 +674,7 @@ function AITab({ caps, cameraId }) {
           </Card>
         );
       })()}
+    </div>
     </div>
   );
 }

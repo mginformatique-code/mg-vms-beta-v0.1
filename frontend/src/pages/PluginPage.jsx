@@ -105,7 +105,10 @@ const Stat = ({ label, value, small }) => (
   </div>
 );
 
-function AiDetectionSettings({ onSaved }) {
+// v3.27 · Exporté — réutilisé aussi dans Camera Center (onglet IA) : ce
+// réglage est GLOBAL (toutes caméras, toutes classes), demande explicite de
+// le rendre plus visible qu'enterré sous Plugins → IA détection.
+export function AiDetectionSettings({ onSaved }) {
   const { can } = useApp();
   const [cfg, setCfg] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -251,7 +254,7 @@ function MqttSettings({ onSaved }) {
   );
 }
 
-function Field({ label, hint, children }) {
+export function Field({ label, hint, children }) {
   return (
     <div>
       <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{label}</label>
