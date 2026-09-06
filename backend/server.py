@@ -56,6 +56,9 @@ from routes.system_admin import system_admin_router, auto_reboot_loop, ntp_resyn
 from routes.console_ssh import console_router
 from routes.live_layout import live_layout_router
 from routes.vehicle_dedup import vehicle_dedup_router, dedup_batch_loop, dedup_auto_approve_loop
+from routes.identity_merge_ai import (
+    identity_merge_ai_router, identity_merge_ai_batch_loop, identity_merge_ai_auto_approve_loop,
+)
 from routes.anpr_tuning import anpr_tuning_router, anpr_tuning_loop
 from routes.vehicle_anomaly_ai import vehicle_anomaly_ai_router, anomaly_ai_batch_loop
 from routes.vehicle_color_ai import vehicle_color_ai_router, color_ai_batch_loop
@@ -156,6 +159,7 @@ app.include_router(system_admin_router)  # v3.19 · Paramètres système (date/h
 app.include_router(console_router)  # v3.22 · Console shell hôte (Debug), admin uniquement
 app.include_router(live_layout_router)  # v3.22 · Disposition personnalisée du Mur vidéo
 app.include_router(vehicle_dedup_router)  # v3.20 · Doublons véhicule assistés par Qwen
+app.include_router(identity_merge_ai_router)  # v3.27 · Fusion identités confirmées assistée par Qwen
 app.include_router(anpr_tuning_router)  # v3.20 · Seuil confiance ANPR auto-réglé par Qwen
 app.include_router(vehicle_color_ai_router)  # v3.45 · Correction couleur vehicule via modele vision
 app.include_router(vehicle_make_ai_router)  # v3.46 · Identification marque vehicule via modele vision
@@ -271,6 +275,8 @@ async def on_startup():
         asyncio.create_task(ntp_resync_loop())
         asyncio.create_task(dedup_batch_loop())
         asyncio.create_task(dedup_auto_approve_loop())
+        asyncio.create_task(identity_merge_ai_batch_loop())
+        asyncio.create_task(identity_merge_ai_auto_approve_loop())
         asyncio.create_task(anomaly_ai_batch_loop())
         asyncio.create_task(color_ai_batch_loop())
         asyncio.create_task(make_ai_batch_loop())

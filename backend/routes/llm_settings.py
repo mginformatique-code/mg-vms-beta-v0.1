@@ -70,6 +70,11 @@ class LlmConfigIn(BaseModel):
     color_ai_auto_sync_time: str = "03:00"
     make_ai_auto_sync_enabled: bool = False
     make_ai_auto_sync_time: str = "03:30"
+    # v3.27 · Suggestions de fusion d'identités confirmées (identity_merge_ai.py)
+    # — même convention dédoublonnage/auto-approbation que dedup_enabled ci-dessus.
+    identity_merge_ai_enabled: bool = False
+    identity_merge_ai_auto_approve_enabled: bool = False
+    identity_merge_ai_auto_approve_interval_min: int = 60
 
 
 async def _load_raw() -> dict:
@@ -98,6 +103,9 @@ def _mask(v: dict) -> dict:
         "color_ai_auto_sync_time": v.get("color_ai_auto_sync_time") or "03:00",
         "make_ai_auto_sync_enabled": bool(v.get("make_ai_auto_sync_enabled", False)),
         "make_ai_auto_sync_time": v.get("make_ai_auto_sync_time") or "03:30",
+        "identity_merge_ai_enabled": bool(v.get("identity_merge_ai_enabled", False)),
+        "identity_merge_ai_auto_approve_enabled": bool(v.get("identity_merge_ai_auto_approve_enabled", False)),
+        "identity_merge_ai_auto_approve_interval_min": int(v.get("identity_merge_ai_auto_approve_interval_min") or 60),
     }
 
 
@@ -141,6 +149,9 @@ async def put_llm_config(data: LlmConfigIn, user: dict = Depends(require_role("a
         "color_ai_auto_sync_time": data.color_ai_auto_sync_time,
         "make_ai_auto_sync_enabled": data.make_ai_auto_sync_enabled,
         "make_ai_auto_sync_time": data.make_ai_auto_sync_time,
+        "identity_merge_ai_enabled": data.identity_merge_ai_enabled,
+        "identity_merge_ai_auto_approve_enabled": data.identity_merge_ai_auto_approve_enabled,
+        "identity_merge_ai_auto_approve_interval_min": max(5, int(data.identity_merge_ai_auto_approve_interval_min or 60)),
     }
     if data.color_ai_auto_sync_enabled:
         _check_hhmm(data.color_ai_auto_sync_time)
@@ -181,6 +192,15 @@ async def get_active_llm_config() -> Optional[dict]:
         "base_url": v["base_url"],
         "model": v.get("model") or _DEFAULT_MODEL,
         "api_key": decrypt_secret(v.get("api_key", "")),
+    }
+
+
+async def get_identity_merge_ai_auto_approve_settings() -> dict:
+    """Utilisé par identity_merge_ai.py::_maybe_auto_approve."""
+    v = await _load_raw()
+    return {
+        "enabled": bool(v.get("identity_merge_ai_auto_approve_enabled", False)),
+        "interval_min": max(5, int(v.get("identity_merge_ai_auto_approve_interval_min") or 60)),
     }
 
 

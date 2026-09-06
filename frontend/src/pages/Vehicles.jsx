@@ -1343,7 +1343,52 @@ function DedupButton({ items, identities, admin, running, available, onRunNow, o
   const [mergeMode, setMergeMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [merging, setMerging] = useState(false);
+  // v3.27 · Suggestions de fusion d'identités confirmées assistées par IA
+  // — demande explicite ("peut-on l'automatiser de manière intelligente ?
+  // avec une lecture IA ?") suite au constat que "Tout sélectionner" reste
+  // du 100% manuel. Auto-suffisant (fetch/actions propres) plutôt que de
+  // faire remonter encore plus de props par ce composant déjà chargé.
+  const [identitySuggestions, setIdentitySuggestions] = useState([]);
+  const [identityMergeAiRunning, setIdentityMergeAiRunning] = useState(false);
+
+  const loadIdentitySuggestions = () => {
+    api.get("/vehicles/identities/merge-ai/suggestions", { params: { status: "pending" } })
+       .then((r) => setIdentitySuggestions(r.data?.items || [])).catch(() => {});
+  };
+  useEffect(() => { if (open) loadIdentitySuggestions(); }, [open]);
+
   if (!admin && items.length === 0 && identities.length === 0) return null;
+
+  const runIdentityMergeAiNow = async () => {
+    setIdentityMergeAiRunning(true);
+    try {
+      await api.post("/vehicles/identities/merge-ai/run");
+      toast.success("Recherche de fusions d'identités lancée en arrière-plan.");
+      setTimeout(loadIdentitySuggestions, 15000);
+    } catch (e) {
+      toast.error(e.response?.data?.detail?.message || "Échec du lancement");
+    } finally { setIdentityMergeAiRunning(false); }
+  };
+
+  const acceptIdentitySuggestion = async (s) => {
+    try {
+      await api.post(`/vehicles/identities/merge-ai/suggestions/${s.id}/accept`);
+      setIdentitySuggestions((prev) => prev.filter((x) => x.id !== s.id));
+      toast.success("Identités fusionnées");
+      onMerged && onMerged();
+    } catch (e) {
+      toast.error(e.response?.data?.detail?.message || "Échec de la fusion");
+    }
+  };
+
+  const rejectIdentitySuggestion = async (s) => {
+    try {
+      await api.post(`/vehicles/identities/merge-ai/suggestions/${s.id}/reject`);
+      setIdentitySuggestions((prev) => prev.filter((x) => x.id !== s.id));
+    } catch (e) {
+      toast.error("Échec du rejet");
+    }
+  };
 
   const toggleSelect = (id) => {
     setSelectedIds((prev) => {
@@ -1408,6 +1453,57 @@ function DedupButton({ items, identities, admin, running, available, onRunNow, o
                 </div>
               )}
             </div>
+            {identities.length > 1 && (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Sparkles size={11} /> Suggestions de fusion d'identités (IA) {identitySuggestions.length > 0 && `(${identitySuggestions.length})`}
+                  </div>
+                  <button onClick={runIdentityMergeAiNow} disabled={identityMergeAiRunning} data-testid="identity-merge-ai-run-now"
+                          className="text-[10px] uppercase tracking-wider text-[#0044FF] hover:underline disabled:opacity-50 flex items-center gap-1">
+                    {identityMergeAiRunning && <Loader2 size={11} className="animate-spin" />}
+                    {identityMergeAiRunning ? "Recherche…" : "Rechercher maintenant"}
+                  </button>
+                </div>
+                {identitySuggestions.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    Aucune suggestion en attente — tâche automatique une fois par jour (si activée, Administration → LLM), ou lance-la manuellement.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {identitySuggestions.map((s) => (
+                      <div key={s.id} className="border border-border p-2 text-[11px] flex items-center justify-between gap-2 flex-wrap"
+                           data-testid={`identity-merge-suggestion-${s.id}`}>
+                        <div className="flex-1 min-w-[240px]">
+                          <div className="flex items-center gap-1.5 flex-wrap mono">
+                            <span className="font-medium">{s.identity_a_name}</span>
+                            <span className="text-muted-foreground">({s.identity_a_plates.join(", ")})</span>
+                            <GitMerge size={11} className="text-muted-foreground" />
+                            <span className="font-medium">{s.identity_b_name}</span>
+                            <span className="text-muted-foreground">({s.identity_b_plates.join(", ")})</span>
+                          </div>
+                          <div className="text-muted-foreground mt-1">
+                            distance {s.min_distance} · confiance {Math.round((s.confidence || 0) * 100)}% — {s.reason}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button onClick={() => acceptIdentitySuggestion(s)}
+                                  className="px-2 py-1 bg-[#0044FF] text-white text-[10px] uppercase tracking-wider"
+                                  data-testid={`identity-merge-suggestion-accept-${s.id}`}>
+                            Fusionner
+                          </button>
+                          <button onClick={() => rejectIdentitySuggestion(s)}
+                                  className="px-2 py-1 border border-border text-[10px] uppercase tracking-wider hover:bg-secondary"
+                                  data-testid={`identity-merge-suggestion-reject-${s.id}`}>
+                            Rejeter
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             {identities.length > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-2">

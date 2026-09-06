@@ -20,6 +20,8 @@ const empty = {
   vision_model: "qwen2.5vl:7b", color_ai_enabled: false, make_ai_enabled: false,
   color_ai_auto_sync_enabled: false, color_ai_auto_sync_time: "03:00",
   make_ai_auto_sync_enabled: false, make_ai_auto_sync_time: "03:30",
+  identity_merge_ai_enabled: false,
+  identity_merge_ai_auto_approve_enabled: false, identity_merge_ai_auto_approve_interval_min: 60,
 };
 
 const Inp = (p) => <input {...p} className="w-full px-3 py-2 bg-card border border-input outline-none text-sm focus:border-[#0044FF]" />;
@@ -43,6 +45,7 @@ export default function LlmSettings() {
   const [cfg, setCfg] = useState(empty);
   const [saving, setSaving] = useState(false);
   const [autoStatus, setAutoStatus] = useState(null);
+  const [identityMergeAutoStatus, setIdentityMergeAutoStatus] = useState(null);
   const [colorStatus, setColorStatus] = useState(null);
   const [colorRunning, setColorRunning] = useState(false);
   const [makeStatus, setMakeStatus] = useState(null);
@@ -50,6 +53,9 @@ export default function LlmSettings() {
 
   const loadAutoStatus = () => {
     api.get("/vehicles/dedup/auto-approve/status").then((r) => setAutoStatus(r.data)).catch(() => {});
+  };
+  const loadIdentityMergeAutoStatus = () => {
+    api.get("/vehicles/identities/merge-ai/auto-approve/status").then((r) => setIdentityMergeAutoStatus(r.data)).catch(() => {});
   };
   const loadColorStatus = () => {
     api.get("/vehicles/color-ai/status").then((r) => setColorStatus(r.data)).catch(() => {});
@@ -63,7 +69,8 @@ export default function LlmSettings() {
     loadAutoStatus();
     loadColorStatus();
     loadMakeStatus();
-    const iv = setInterval(() => { loadAutoStatus(); loadColorStatus(); loadMakeStatus(); }, 30000);
+    loadIdentityMergeAutoStatus();
+    const iv = setInterval(() => { loadAutoStatus(); loadColorStatus(); loadMakeStatus(); loadIdentityMergeAutoStatus(); }, 30000);
     return () => clearInterval(iv);
   }, []);
 
@@ -106,10 +113,14 @@ export default function LlmSettings() {
         color_ai_auto_sync_time: cfg.color_ai_auto_sync_time,
         make_ai_auto_sync_enabled: cfg.make_ai_auto_sync_enabled,
         make_ai_auto_sync_time: cfg.make_ai_auto_sync_time,
+        identity_merge_ai_enabled: cfg.identity_merge_ai_enabled,
+        identity_merge_ai_auto_approve_enabled: cfg.identity_merge_ai_auto_approve_enabled,
+        identity_merge_ai_auto_approve_interval_min: cfg.identity_merge_ai_auto_approve_interval_min,
       });
       setCfg({ ...empty, ...data });
       toast.success("Configuration LLM enregistrée");
       loadAutoStatus();
+      loadIdentityMergeAutoStatus();
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); } finally { setSaving(false); }
   };
 
@@ -206,6 +217,43 @@ export default function LlmSettings() {
                 {autoStatus.pending_count} en attente · dernier passage : {fmtDateTime(autoStatus.last_run_at)}
                 {autoStatus.last_approved_count != null && ` (${autoStatus.last_approved_count} approuvée${autoStatus.last_approved_count > 1 ? "s" : ""})`}
                 {autoStatus.next_run_at && ` · prochain : ${fmtDateTime(autoStatus.next_run_at)}`}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between py-2.5 border-b border-border">
+          <div>
+            <div className="text-sm">Fusion identités confirmées (Qwen)</div>
+            <div className="text-[11px] text-muted-foreground">Suggère de fusionner deux identités déjà confirmées dont les plaques se ressemblent (confusion OCR probable) — tâche quotidienne + bouton manuel sur la fenêtre "Fusion & identités véhicule". Ne fusionne jamais automatiquement sans validation manuelle, sauf auto-approbation ci-dessous.</div>
+          </div>
+          <Switch checked={cfg.identity_merge_ai_enabled} onCheckedChange={(v) => upd("identity_merge_ai_enabled", v)} data-testid="llm-identity-merge-ai-toggle" />
+        </div>
+
+        {cfg.identity_merge_ai_enabled && (
+          <div className="py-2.5 border-b border-border pl-3 border-l-2 border-l-[#0044FF]/30 space-y-2" data-testid="llm-identity-merge-ai-auto-approve-block">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm">Auto-approbation des fusions</div>
+                <div className="text-[11px] text-muted-foreground">Fusionne automatiquement TOUTES les suggestions en attente à l'intervalle choisi, sans validation manuelle — à utiliser avec prudence.</div>
+              </div>
+              <Switch checked={cfg.identity_merge_ai_auto_approve_enabled} onCheckedChange={(v) => upd("identity_merge_ai_auto_approve_enabled", v)} data-testid="llm-identity-merge-ai-auto-approve-toggle" />
+            </div>
+            {cfg.identity_merge_ai_auto_approve_enabled && (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground">Toutes les</span>
+                <Sel value={cfg.identity_merge_ai_auto_approve_interval_min}
+                     onChange={(e) => upd("identity_merge_ai_auto_approve_interval_min", Number(e.target.value))}
+                     data-testid="llm-identity-merge-ai-auto-approve-interval">
+                  {AUTO_APPROVE_INTERVALS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </Sel>
+              </div>
+            )}
+            {identityMergeAutoStatus?.enabled && (
+              <div className="text-[10px] text-muted-foreground mono" data-testid="llm-identity-merge-ai-auto-approve-status">
+                {identityMergeAutoStatus.pending_count} en attente · dernier passage : {fmtDateTime(identityMergeAutoStatus.last_run_at)}
+                {identityMergeAutoStatus.last_approved_count != null && ` (${identityMergeAutoStatus.last_approved_count} fusionnée${identityMergeAutoStatus.last_approved_count > 1 ? "s" : ""})`}
+                {identityMergeAutoStatus.next_run_at && ` · prochain : ${fmtDateTime(identityMergeAutoStatus.next_run_at)}`}
               </div>
             )}
           </div>
@@ -311,7 +359,7 @@ export default function LlmSettings() {
           )}
         </div>
 
-        {!cfg.enabled && (cfg.dedup_enabled || cfg.anpr_tuning_enabled || cfg.anomaly_ai_enabled || cfg.color_ai_enabled || cfg.make_ai_enabled) && (
+        {!cfg.enabled && (cfg.dedup_enabled || cfg.anpr_tuning_enabled || cfg.anomaly_ai_enabled || cfg.color_ai_enabled || cfg.make_ai_enabled || cfg.identity_merge_ai_enabled) && (
           <p className="text-[11px] text-[#FFB800] mt-3">La connexion ci-dessus est désactivée — ces fonctionnalités resteront inactives tant qu'elle ne l'est pas.</p>
         )}
       </div>
