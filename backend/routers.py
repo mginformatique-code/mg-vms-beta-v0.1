@@ -128,6 +128,14 @@ class CameraInput(BaseModel):
     ptz_enabled: bool = False
     record_enabled: bool = True
     detect_enabled: bool = False
+    # v3.48 · Override manuel — certaines caméras ANPR dédiées (IR/WDR
+    # adaptés à la lecture de plaque de nuit) ne sont pas reconnues par la
+    # détection automatique par modèle (SPECIALIZED_ANPR_MODELS, liste fermée
+    # de signatures Dahua ITC/Hikvision DeepInView/Axis). Cette case permet à
+    # l'utilisateur de forcer le même comportement (bypass total de
+    # l'auto-suspension qualité/nuit) pour un modèle non listé, sans attendre
+    # un ajout de signature côté code.
+    anpr_dedicated: bool = False
     # v3.1.3 · Pilote la résolution de décodage continu envoyée à YOLO/ANPR
     # (ai_engine._resolve_ai_resolution → frame_source.start()). "native"
     # résout la résolution réelle sondée sur la caméra (cam.resolution).
@@ -493,6 +501,27 @@ class SpeedCalibrationInput(BaseModel):
     width_m: float = Field(..., gt=0, le=200)
     length_m: float = Field(..., gt=0, le=500)
     max_reasonable_kmh: float = Field(180.0, gt=0, le=400)
+
+
+class AnprDedicatedInput(BaseModel):
+    enabled: bool
+
+
+@api_router.put("/cameras/{camera_id}/anpr-dedicated")
+async def set_anpr_dedicated(camera_id: str, data: AnprDedicatedInput,
+                              user: dict = Depends(require_role("technician"))):
+    """v3.48 · Override manuel "caméra ANPR dédiée" — bypass total de
+    l'auto-suspension qualité/nuit (pipeline_v2/anpr_quality.py), pour un
+    modèle non couvert par la détection automatique par signature. À
+    réserver aux caméras réellement conçues pour l'ANPR de nuit (IR/WDR
+    adaptés) — sur une caméra généraliste, ça réintroduit le risque de
+    fausses plaques que l'auto-suspension existe justement pour éviter.
+    """
+    existing = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "id": 1})
+    if not existing:
+        raise HTTPException(404, "Caméra introuvable")
+    await db.cameras.update_one({"id": camera_id}, {"$set": {"anpr_dedicated": bool(data.enabled)}})
+    return {"anpr_dedicated": bool(data.enabled)}
 
 
 @api_router.put("/cameras/{camera_id}/speed-calibration")

@@ -247,7 +247,10 @@ class AnprQualityController:
 
         state = self._states.setdefault(camera_id, AnprCameraState(camera_id=camera_id))
 
-        # Détecte caméra spécialisée (bypass auto-suspend)
+        # Détecte caméra spécialisée (bypass auto-suspend) — soit par modèle
+        # reconnu (signatures ci-dessus), soit par override manuel utilisateur
+        # (`anpr_dedicated`, case à cocher fiche caméra — v3.48, pour les
+        # modèles ANPR dédiés non couverts par la liste fermée de signatures).
         is_specialized = False
         specialized_model = ""
         for signature, label in SPECIALIZED_ANPR_MODELS.items():
@@ -255,6 +258,9 @@ class AnprQualityController:
                 is_specialized = True
                 specialized_model = label
                 break
+        if not is_specialized and (camera or {}).get("anpr_dedicated"):
+            is_specialized = True
+            specialized_model = "Déclarée dédiée manuellement (fiche caméra)"
         state.is_specialized = is_specialized
         state.specialized_model = specialized_model
 

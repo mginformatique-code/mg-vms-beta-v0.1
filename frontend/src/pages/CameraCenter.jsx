@@ -566,6 +566,17 @@ function AITab({ caps, cameraId }) {
     } catch (e) { toast.error("Échec de la réinitialisation"); }
     finally { setResettingAnprQuality(false); }
   };
+  const [savingAnprDedicated, setSavingAnprDedicated] = useState(false);
+  const setAnprDedicated = async (enabled) => {
+    setSavingAnprDedicated(true);
+    try {
+      await api.put(`/cameras/${cameraId}/anpr-dedicated`, { enabled });
+      setAi((prev) => ({ ...prev, cam: { ...prev.cam, anpr_dedicated: enabled } }));
+      loadAnprQuality();
+      toast.success(enabled ? "Caméra marquée ANPR dédiée — suspension auto désactivée" : "Suspension auto ANPR réactivée");
+    } catch (e) { toast.error("Échec de l'enregistrement"); }
+    finally { setSavingAnprDedicated(false); }
+  };
   const runTuningNow = async () => {
     setTuningRunning(true);
     try {
@@ -707,6 +718,11 @@ function AITab({ caps, cameraId }) {
                 </Button>
               )}
             </div>
+            <label className="flex items-center gap-2 text-xs cursor-pointer" data-testid="anpr-dedicated-toggle">
+              <input type="checkbox" checked={!!ai.cam?.anpr_dedicated} disabled={savingAnprDedicated}
+                     onChange={(e) => setAnprDedicated(e.target.checked)} />
+              Caméra ANPR dédiée (IR/WDR nocturne) — forcer l'ANPR en tout temps, désactiver l'auto-suspension
+            </label>
             {state.is_specialized ? (
               <div className="flex items-center gap-2">
                 <Badge variant="secondary">Toujours actif</Badge>
