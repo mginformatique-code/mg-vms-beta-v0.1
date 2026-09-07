@@ -54,23 +54,20 @@ GO2RTC_URL = os.environ.get("GO2RTC_URL", "http://localhost:1984")
 # réelles). Les deux verrous ont été fusionnés en un seul pour empêcher
 # tout accès GPU concurrent entre les deux moteurs.
 #
-# v3.38 · RE-DÉCOUPLÉS. Investigation "tracking saccadé sur toutes les
-# caméras, voitures ET piétons" : testé en direct sur le conteneur en
-# prod — `libcudnn.so.9` est absent de l'image, CUDAExecutionProvider
-# échoue silencieusement à l'init (onnxruntime ne lève pas d'exception,
-# retombe sur CPU) et fast-alpr tourne donc déjà en CPU, quoi qu'en dise
-# le log historique "LAPI locale chargée (fast-alpr, GPU-ONNX/CUDA)" —
-# confirmé faux via `.get_providers()` (voir _load_models ci-dessous).
-# Sans accès GPU réel côté ALPR, il n'y a plus de contexte CUDA partagé à
-# protéger : le verrou commun ne fait plus que bloquer les lots YOLO
-# (GPU, par batch_infer.py) derrière chaque lecture ANPR (CPU, 100ms-1s
-# PAR VÉHICULE) sur N'IMPORTE QUELLE caméra du parc — root cause du
-# ralentissement généralisé, indépendant de l'ANPR affiché sur l'écran
-# concerné. Si l'ANPR GPU est un jour restauré (cuDNN réinstallé), ce
-# découplage devra être réévalué — voir plan d'isolation dans un service
-# dédié (GPU séparé) pour le cas où l'ANPR GPU redevient réel.
+# v3.38 · Tentative de découplage (libcudnn.so.9 semblait absent, ALPR
+# croyait tourner en CPU) — ANNULÉE : un redémarrage serveur pour l'ajout
+# d'un second GPU (Quadro K620) a remis cuDNN en état, confirmé en prod
+# via nvidia-smi : YOLO ET ALPR tournent bien tous les deux, CONCURREMMENT,
+# sur le même GPU (T1000). Le risque de crash v3.19 est donc bien réel et
+# toujours d'actualité — le verrou reste fusionné. Objectif désormais :
+# isoler l'ANPR sur le second GPU (K620) via un service dédié dans son
+# propre conteneur (isolation Docker), PAS via un choix de device_id
+# dans ce process — testé en direct : `device_id` explicite passé à
+# onnxruntime échoue de façon non fiable ici (cuDNN introuvable même
+# pour le device par défaut quand il est demandé explicitement), la
+# séparation de conteneur est le chemin robuste, pas un paramètre local.
 YOLO_INFERENCE_LOCK = threading.Lock()
-ALPR_INFERENCE_LOCK = threading.Lock()
+ALPR_INFERENCE_LOCK = YOLO_INFERENCE_LOCK
 AI_INTERVAL = float(os.environ.get("AI_INTERVAL_SECONDS", "0.15"))  # v0.4.5.a · ~6-7 FPS/cam
 AI_CONFIDENCE = float(os.environ.get("AI_CONFIDENCE", "0.45"))
 AI_MIN_PLATE_PX = int(os.environ.get("AI_MIN_PLATE_PX", "24"))
