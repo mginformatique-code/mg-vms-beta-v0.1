@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import api from "@/lib/api";
 import {
   Zap, RefreshCw, Camera as CamIcon, Car, User, Truck, Bus as BusIcon,
-  Bike, PawPrint, CreditCard, LayoutGrid, Sparkles, Loader2, X as XIcon,
+  Bike, PawPrint, CreditCard, Sparkles, Loader2, X as XIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import EventViewer from "@/components/EventViewer";
@@ -72,9 +72,16 @@ function pickPrimary(members) {
 // v1.0-rc4 · Fusion Événements/Véhicules : UNE seule vue avec chips de filtre.
 // Le chip « Plaques » affiche l'intégralité de l'ancien module Véhicules
 // (recherche IA, identités, anomalies, fiche complète). Zéro perte de feature.
+//
+// v3.39 · Chips « Tous » et « Plaques » fusionnés en un seul « Informations
+// véhicules » (demande explicite) — le module véhicule complet (recherche
+// IA dédiée, fusion identités, fiches, actions groupées) devient LE
+// contenu de ce chip, remplaçant l'ancien flux générique « tous types
+// mélangés ». Le chip « Véhicules » (filtre événements par type) reste
+// séparé, inchangé — il complète toujours les autres filtres par type
+// (Personnes, Camions...), qui eux gardent le flux événements classique.
 const FILTERS = [
-  { id: "tous",       label: "Tous",       icon: LayoutGrid, types: null },
-  { id: "plaques",    label: "Plaques",    icon: CreditCard },
+  { id: "tous",       label: "Informations véhicules", icon: CreditCard, types: null },
   { id: "vehicules",  label: "Véhicules",  icon: Car,        types: ["Voiture", "Camion", "Bus", "Moto"] },
   { id: "personnes",  label: "Personnes",  icon: User,       types: ["Personne"] },
   { id: "camions",    label: "Camions",    icon: Truck,      types: ["Camion"] },
@@ -106,12 +113,15 @@ export default function Events() {
   const [smartLoading, setSmartLoading] = useState(false);
   const [smartResult, setSmartResult] = useState(null);
   // v3.19 · Voir le commentaire sur VehiclesSection/initialQuery — relie la
-  // recherche IA générale au chip Plaques quand la requête cible des
-  // véhicules.
+  // recherche IA générale au chip Informations véhicules (v3.39 : fusion
+  // Tous+Plaques) quand la requête cible des véhicules.
   const [plaquesQuery, setPlaquesQuery] = useState("");
 
   const activeFilter = FILTERS.find((f) => f.id === filtre) || FILTERS[0];
-  const isPlaques = filtre === "plaques";
+  // v3.39 · « tous » est désormais le chip « Informations véhicules »
+  // (voir FILTERS ci-dessus) — le nom de variable reste `isPlaques`
+  // (portée large dans ce fichier) mais désigne maintenant CE chip fusionné.
+  const isPlaques = filtre === "tous";
 
   const runSmartSearch = useCallback(async () => {
     const q = smart.trim();
@@ -247,8 +257,9 @@ export default function Events() {
       </div>
 
       {/* v1.0-rc4 · Recherche IA — toutes recherches confondues (personnes,
-          véhicules, caméra, horaire). Le chip Plaques a déjà sa recherche IA
-          dédiée (groupée par plaque) dans sa section. */}
+          véhicules, caméra, horaire). Le chip Informations véhicules
+          (v3.39 : fusion Tous+Plaques) a déjà sa recherche IA dédiée
+          (groupée par plaque) dans sa section. */}
       {!isPlaques && (
         <div className="flex items-center gap-2 max-w-3xl" data-testid="events-smart-search">
           <div className="relative flex-1">
@@ -310,11 +321,11 @@ export default function Events() {
           <CreditCard size={13} className="text-[#00E676] shrink-0" />
           <span>{smartResult.vehicles.length} véhicule(s) correspondent à « {smartResult.query} » — pas affichés ici (galerie événements).</span>
           <button
-            onClick={() => { setPlaquesQuery(smartResult.query); setFiltre("plaques"); }}
+            onClick={() => { setPlaquesQuery(smartResult.query); setFiltre("tous"); }}
             data-testid="events-smart-goto-plaques"
             className="ml-auto text-[10px] uppercase tracking-wider text-[#00E676] hover:underline shrink-0"
           >
-            Voir dans Plaques
+            Voir dans Informations véhicules
           </button>
         </div>
       )}

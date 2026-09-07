@@ -745,10 +745,15 @@ function VehicleCard({ v, onOpen, selectable = false, selected = false }) {
       data-testid={`vehicle-card-${v.plate}`}
       className={`text-left bg-card border transition-all group p-3 flex flex-col gap-3 relative ${
         selectable
-          ? selected ? "border-[#0044FF] ring-2 ring-[#0044FF]/40" : "border-border hover:border-[#0044FF]/50"
+          ? selected
+            ? "border-[#0044FF] ring-2 ring-[#0044FF]/40 opacity-100"
+            : "border-border hover:border-[#0044FF]/50 opacity-50 hover:opacity-80"
           : "border-border hover:border-[#0044FF]"
       }`}
     >
+      {/* v3.39 · Mode fusion/suppression : les fiches non sélectionnées se
+          grisent (opacity) pour faire ressortir la sélection en cours —
+          demande explicite, page Événements → Informations véhicules. */}
       {/* v3.18 · Mode fusion : case à cocher visuelle par-dessus la carte */}
       {selectable && (
         <div
@@ -1964,7 +1969,9 @@ function VehicleListRow({ v, onOpen, selectable = false, selected = false }) {
       onClick={onOpen}
       data-testid={`vehicle-row-${v.plate}`}
       className={`w-full text-left bg-card border-b border-border hover:bg-secondary/40 transition-colors flex items-center gap-4 px-3 py-2 ${
-        selectable && selected ? "bg-[#0044FF]/10" : ""
+        selectable
+          ? selected ? "bg-[#0044FF]/10 opacity-100" : "opacity-50 hover:opacity-80"
+          : ""
       }`}
     >
       {selectable && (
