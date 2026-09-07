@@ -98,26 +98,50 @@ function MiniBar({ label, value, icon: Icon }) {
 
 function GpuMiniBar({ gpu, onClick }) {
   // 3 états : (a) GPU actif → couleur selon util%, (b) GPU absent → gris "CPU"
+  // v3.38 · 2e GPU ajouté sur ce serveur (isolation ANPR) — sélecteur
+  // GPU0/GPU1 affiché UNIQUEMENT si gpu.devices en contient 2 ou plus
+  // (voir backend/gpu.py::gpu_summary). Comportement/rendu inchangés en
+  // mono-GPU (pas de dropdown, agrégat comme avant).
+  const [selIdx, setSelIdx] = useState(0);
   const isActive = !!(gpu?.available);
-  const util = isActive ? (gpu.gpu_util_pct || 0) : 0;
+  const devices = gpu?.devices || [];
+  const multi = devices.length > 1;
+  const selected = multi ? (devices[selIdx] || devices[0]) : null;
+  const util = isActive ? (multi ? (selected?.gpu_util_pct || 0) : (gpu.gpu_util_pct || 0)) : 0;
   const color = !isActive ? "#666" : (util > 80 ? "#FF3333" : util > 65 ? "#FFB800" : "#00E676");
   const label = isActive ? "GPU" : "CPU";
   const title = isActive
-    ? `${gpu.name || "GPU"} · VRAM ${gpu.vram_used_mb || 0}/${gpu.vram_total_mb || 0} MB · ${gpu.temperature_c || 0}°C`
+    ? (multi
+        ? `${selected?.name || "GPU"} · VRAM ${selected?.vram_used_mb || 0}/${selected?.vram_total_mb || 0} MB · ${selected?.temperature_c || 0}°C`
+        : `${gpu.name || "GPU"} · VRAM ${gpu.vram_used_mb || 0}/${gpu.vram_total_mb || 0} MB · ${gpu.temperature_c || 0}°C`)
     : `Aucun GPU NVIDIA détecté — pipeline IA sur CPU. ${gpu?.error || ""}`;
   return (
-    <button onClick={onClick} data-testid="metric-GPU" title={title}
-            className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-      <Zap size={14} strokeWidth={1.5} style={{ color: isActive ? color : "#666" }} />
-      <span className="text-[10px] uppercase tracking-wider hidden xl:inline"
-            style={{ color: isActive ? "#00E676" : "#FF3333" }}>{label}</span>
-      <div className="w-14 h-1.5 bg-secondary overflow-hidden">
-        <div style={{ width: `${util}%`, backgroundColor: color }} className="h-full transition-all" />
-      </div>
-      <span className="text-xs mono w-8" style={{ color: isActive ? undefined : "#FF3333" }}>
-        {isActive ? `${util}%` : "N/A"}
-      </span>
-    </button>
+    <div className="flex items-center gap-1.5">
+      {isActive && multi && (
+        <select
+          value={selIdx}
+          onChange={(e) => setSelIdx(Number(e.target.value))}
+          onClick={(e) => e.stopPropagation()}
+          data-testid="metric-GPU-select"
+          title="Choisir le GPU affiché"
+          className="text-[10px] mono bg-transparent border border-border/60 hover:border-border px-0.5 py-0 hidden xl:inline-block cursor-pointer"
+        >
+          {devices.map((d, i) => <option key={d.index ?? i} value={i}>GPU{d.index ?? i}</option>)}
+        </select>
+      )}
+      <button onClick={onClick} data-testid="metric-GPU" title={title}
+              className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+        <Zap size={14} strokeWidth={1.5} style={{ color: isActive ? color : "#666" }} />
+        <span className="text-[10px] uppercase tracking-wider hidden xl:inline"
+              style={{ color: isActive ? "#00E676" : "#FF3333" }}>{label}</span>
+        <div className="w-14 h-1.5 bg-secondary overflow-hidden">
+          <div style={{ width: `${util}%`, backgroundColor: color }} className="h-full transition-all" />
+        </div>
+        <span className="text-xs mono w-8" style={{ color: isActive ? undefined : "#FF3333" }}>
+          {isActive ? `${util}%` : "N/A"}
+        </span>
+      </button>
+    </div>
   );
 }
 

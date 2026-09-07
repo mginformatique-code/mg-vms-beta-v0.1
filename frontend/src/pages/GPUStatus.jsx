@@ -45,6 +45,9 @@ export default function GPUStatus({ embedded = false }) {
   const [full, setFull] = useState(null);
   const [loading, setLoading] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  // v3.38 · 2e GPU ajouté sur ce serveur (isolation ANPR) — sélecteur
+  // GPU0/GPU1 pour les métriques temps réel, affiché seulement si >1 GPU.
+  const [selectedGpuIdx, setSelectedGpuIdx] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,7 +68,8 @@ export default function GPUStatus({ embedded = false }) {
     return () => clearInterval(iv);
   }, [autoRefresh, load]);
 
-  const gpu = full?.devices?.[0];  // affiche le 1er GPU (multi-GPU listé en dessous)
+  const multiGpu = (full?.devices?.length || 0) > 1;
+  const gpu = full?.devices?.[multiGpu ? selectedGpuIdx : 0] || full?.devices?.[0];
   const isActive = !!full?.available;
   const yolo = !!full?.pipeline?.yolo_uses_gpu;
 
@@ -120,7 +124,21 @@ export default function GPUStatus({ embedded = false }) {
       {/* Métriques temps réel du GPU principal */}
       {isActive && gpu && (
         <div className="mb-4">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Métriques temps réel</div>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Métriques temps réel</div>
+            {multiGpu && (
+              <select
+                value={selectedGpuIdx}
+                onChange={(e) => setSelectedGpuIdx(Number(e.target.value))}
+                data-testid="gpu-select"
+                className="text-[11px] mono bg-card border border-border px-1.5 py-0.5"
+              >
+                {full.devices.map((d, i) => (
+                  <option key={d.index ?? i} value={i}>GPU{d.index ?? i} · {d.name}</option>
+                ))}
+              </select>
+            )}
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             <StatCard label="Utilisation GPU" value={gpu.gpu_util_pct} unit="%" testid="gpu-util"
                       color={gpu.gpu_util_pct > 80 ? "#FF3333" : gpu.gpu_util_pct > 60 ? "#FFB800" : "#00E676"} />
@@ -170,7 +188,9 @@ export default function GPUStatus({ embedded = false }) {
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Tous les GPU ({full.devices.length})</div>
           <div className="space-y-2">
             {full.devices.map((d, i) => (
-              <div key={i} className="border border-border p-3">
+              <div key={i}
+                   onClick={() => setSelectedGpuIdx(i)}
+                   className={`border p-3 cursor-pointer ${i === selectedGpuIdx ? "border-[#0044FF] bg-[#0044FF]/5" : "border-border hover:bg-secondary/40"}`}>
                 <div className="font-medium text-sm">GPU #{d.index} · {d.name}</div>
                 <div className="text-[10px] mono text-muted-foreground">{d.uuid}</div>
                 <div className="mt-1 grid grid-cols-4 gap-2 text-[11px] mono">

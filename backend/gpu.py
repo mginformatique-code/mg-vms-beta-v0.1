@@ -278,6 +278,22 @@ def gpu_summary() -> dict:
             "vram_total_mb": total,
             "vram_util_pct": round((used / total) * 100, 1) if total else 0,
             "temperature_c": temp,
+            # v3.38 · Détail léger par GPU — permet au header web d'afficher
+            # un sélecteur GPU0/GPU1 (au lieu du seul agrégat ci-dessus) dès
+            # que `count > 1`, sans repasser par le rapport complet
+            # (/system/gpu) à chaque poll de 5-10s. Champs volontairement
+            # réduits (pas d'encoder/decoder/clocks ici, voir gpu_full_info).
+            "devices": [
+                {
+                    "index": d.get("index"),
+                    "name": d.get("name"),
+                    "gpu_util_pct": d.get("gpu_util_pct", 0),
+                    "vram_used_mb": d.get("vram_used_mb", 0),
+                    "vram_total_mb": d.get("vram_total_mb", 0),
+                    "temperature_c": d.get("temperature_c", 0),
+                }
+                for d in devices
+            ],
         }
     else:
         # Aucun GPU NVIDIA — signale explicitement le mode CPU
@@ -291,6 +307,7 @@ def gpu_summary() -> dict:
             "vram_total_mb": 0,
             "vram_util_pct": 0,
             "temperature_c": 0,
+            "devices": [],
             "error": _NVML_ERROR or "Aucun GPU NVIDIA détecté",
         }
     _METRICS_CACHE["t"] = now
