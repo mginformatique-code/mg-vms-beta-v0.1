@@ -134,6 +134,19 @@ class CameraWorker:
         # de relancer les moteurs sur un crop quasi-identique du même
         # véhicule tracké (typique d'un véhicule stationné).
         self._crop_cache: dict[tuple, datetime] = {}
+        # v3.37 · Cache par track_id, vérifié AVANT d'appeler _ocr.recognize()
+        # (contrairement à _plate_cache/_crop_cache, qui n'évitent que le
+        # post-traitement APRÈS une lecture OCR déjà effectuée). Root cause
+        # confirmée d'un FPS IA anormalement bas sur les caméras avec
+        # plusieurs véhicules en permanence dans le champ (ex : portail
+        # filmant des véhicules garés) : fast-alpr tournait sur CHAQUE ROI à
+        # CHAQUE cycle, y compris pour des véhicules immobiles déjà lus et
+        # encore valides en cache — voir l'investigation tracking "sans
+        # latence, tout temps, immobile ou mobile". Ce cache ne remplace pas
+        # _plate_cache (toujours vérifié en aval pour les ROI non filtrées
+        # ici, ex track_id absent) — il évite simplement l'appel OCR coûteux
+        # quand on sait déjà, par le track_id, que ce serait du temps perdu.
+        self._track_plate_cache: dict = {}
         self._last_ts: float = 0.0
         # Squelette overlay (retail-suspicious-behavior) — throttle + cache
         # du dernier résultat par track_id pour éviter un squelette qui
@@ -393,6 +406,9 @@ class CameraWorker:
         for k, exp in list(self._plate_cache.items()):
             if exp <= now:
                 self._plate_cache.pop(k, None)
+        for k, (_txt, exp) in list(self._track_plate_cache.items()):
+            if exp <= now:
+                self._track_plate_cache.pop(k, None)
         cache_ttl = int(_ae._cfg("plate_cache_seconds", _ae.AI_PLATE_CACHE_SECONDS))
         min_side = int(_ae._cfg("min_plate_px", _ae.AI_MIN_PLATE_PX))
         min_conf = float(anpr_cfg.get("min_confidence", 0.0) or 0.0)
@@ -409,6 +425,13 @@ class CameraWorker:
         try:
             for roi in ctx.vehicle_rois:
                 cx1, cy1, cx2, cy2 = roi.bbox
+                if roi.track_id is not None and roi.track_id in self._track_plate_cache:
+                    _cached_plate, _exp = self._track_plate_cache[roi.track_id]
+                    if _exp > now:
+                        plate_debug.append({
+                            "plate": _cached_plate, "skipped": "cache_track_no_ocr",
+                            "expires_in": int((_exp - now).total_seconds())})
+                        continue
                 try:
                     # Le lock ALPR est appliqué en interne par le recognizer
                     # (v0.5.6 P0-1). Le pipeline ne connaît plus le lock.
@@ -460,6 +483,9 @@ class CameraWorker:
                             "expires_in": int((self._plate_cache[plate_text] - now).total_seconds())})
                         continue
                     self._plate_cache[plate_text] = now + timedelta(seconds=max(cache_ttl, 1))
+                    if roi.track_id is not None:
+                        self._track_plate_cache[roi.track_id] = (
+                            plate_text, now + timedelta(seconds=max(cache_ttl, 1)))
                     # v0.7.e · Wave C · extraction du crop plaque HD sur
                     # ``ctx.image`` (HD, jamais preview MJPEG) + gate qualité
                     # + amélioration (deskew/CLAHE/sharpen) si utile + cache
