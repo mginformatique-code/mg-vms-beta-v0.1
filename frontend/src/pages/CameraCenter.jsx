@@ -31,7 +31,7 @@ import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import { AiDetectionSettings } from "@/pages/PluginPage";
 import SpeedCalibrationEditor from "@/components/SpeedCalibrationEditor";
 import {
-  Camera, Wifi, Video, Layers, Cpu, Volume2, Sun, Bell, Move3d, Wrench,
+  Camera, Wifi, Video, Layers, Cpu, Volume2, Sun, Bell, Move3d,
   ScanLine, RefreshCw, AlertCircle, CircleCheck, ChevronLeft, ChevronRight,
   ArrowLeft, HardDrive, Activity, Download, Type, Loader2, Clock,
   Plus, Trash2, ArrowUp, ArrowDown, MapPin,
@@ -52,7 +52,6 @@ const TABS = [
   { id: "alarm",        label: "Alarm",        icon: Bell },
   { id: "sdcard",       label: "Carte SD",     icon: HardDrive },
   { id: "ptz",          label: "PTZ",          icon: Move3d },
-  { id: "maintenance",  label: "Maintenance",  icon: Wrench },
 ];
 
 // v0.5.0.b · Bandeau santé global (GPU/CPU/RAM/VRAM/Mongo/go2rtc/Capture/Pipeline)
@@ -162,7 +161,7 @@ export default function CameraCenter() {
       <Tabs value={tab} onValueChange={setTab} className="space-y-4">
         <TabsList className="flex flex-wrap h-auto justify-start"
                   data-testid="camera-center-tabs">
-          {TABS.map(({ id, label, icon: Icon }) => (
+          {TABS.filter(({ id }) => id !== "live" || !caps?.ptz).map(({ id, label, icon: Icon }) => (
             <TabsTrigger key={id} value={id} data-testid={`cam-tab-${id}`} className="gap-2">
               <Icon className="w-4 h-4" />
               {label}
@@ -171,7 +170,10 @@ export default function CameraCenter() {
         </TabsList>
 
         <TabsContent value="overview"><OverviewTab info={info} caps={caps} cameraId={cameraId} /></TabsContent>
-        <TabsContent value="live"><LiveTab cameraId={cameraId} /></TabsContent>
+        {/* v3.45 · Onglet Live masqué pour les caméras PTZ — l'onglet PTZ
+            affiche désormais sa propre vue live (voir PTZTab), le rendre
+            deux fois créerait 2 connexions vidéo concurrentes pour rien. */}
+        {!caps?.ptz && <TabsContent value="live"><LiveTab cameraId={cameraId} /></TabsContent>}
         <TabsContent value="network"><NetworkTab info={info} cameraId={cameraId} /></TabsContent>
         <TabsContent value="streams"><StreamsTab cameraId={cameraId} /></TabsContent>
         <TabsContent value="capabilities"><CapabilitiesTab caps={caps} /></TabsContent>
@@ -184,7 +186,6 @@ export default function CameraCenter() {
         <TabsContent value="alarm"><AlarmTab cameraId={cameraId} caps={caps} /></TabsContent>
         <TabsContent value="sdcard"><SdCardTab cameraId={cameraId} caps={caps} /></TabsContent>
         <TabsContent value="ptz"><PTZTab cameraId={cameraId} caps={caps} /></TabsContent>
-        <TabsContent value="maintenance"><MaintenanceTab cameraId={cameraId} /></TabsContent>
       </Tabs>
       </div>
     </div>
@@ -1193,6 +1194,7 @@ function SdCardTab({ cameraId, caps }) {
 
 // ─── PTZ ───
 function PTZTab({ cameraId, caps }) {
+  const { t } = useApp();
   const [cam, setCam] = useState(null);
   const [presets, setPresets] = useState([]);
   const [presetsLoading, setPresetsLoading] = useState(true);
@@ -1247,16 +1249,16 @@ function PTZTab({ cameraId, caps }) {
        .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
   const gotoPreset = (id) =>
     api.post(`/devices/${cameraId}/ptz/preset`, { id: Number(id) })
-       .then(() => toast.success(`Preset ${id}`))
+       .then(() => toast.success(id))
        .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
 
   const addPreset = () => {
-    const name = window.prompt("Nom du preset (optionnel) — sera créé à la position actuelle de la caméra :", "");
+    const name = window.prompt(t("ptz.preset_name_prompt"), "");
     if (name === null) return; // annulé
     setAddingPreset(true);
     api.post(`/devices/${cameraId}/ptz/presets`, { name: name.trim() || undefined })
        .then((r) => {
-         toast.success(`Preset "${r.data.name}" ajouté`);
+         toast.success(`${t("ptz.preset_added")} ${r.data.name}`);
          loadPresets();
        })
        .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"))
@@ -1264,10 +1266,10 @@ function PTZTab({ cameraId, caps }) {
   };
 
   const deletePreset = (preset) => {
-    if (!window.confirm(`Supprimer le preset "${preset.name}" ?`)) return;
+    if (!window.confirm(`${t("ptz.preset_delete_confirm")} "${preset.name}" ?`)) return;
     api.delete(`/devices/${cameraId}/ptz/presets/${preset.id}`)
        .then(() => {
-         toast.success("Preset supprimé");
+         toast.success(t("ptz.preset_deleted"));
          loadPresets();
          setPatrol((p) => ({ ...p, preset_ids: p.preset_ids.filter((id) => id !== preset.id) }));
        })
@@ -1307,7 +1309,7 @@ function PTZTab({ cameraId, caps }) {
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px] gap-4 items-start">
         <Card className="p-3 space-y-2" data-testid="cam-ptz-live">
           <div className="text-sm text-muted-foreground">
-            Vue live — positionne la caméra ici, puis "Ajouter preset ici" à droite
+            {t("ptz.live_hint")}
           </div>
           <div className="relative aspect-video bg-black">
             {cam ? (
@@ -1348,7 +1350,7 @@ function PTZTab({ cameraId, caps }) {
           <Button variant="outline" size="sm" onClick={addPreset} disabled={addingPreset}
                   className="w-full" data-testid="ptz-preset-add-inline">
             {addingPreset ? <Loader2 size={14} className="animate-spin mr-1" /> : <Plus size={14} className="mr-1" />}
-            Ajouter preset ici
+            {t("ptz.preset_add")}
           </Button>
         </Card>
       </div>
@@ -1356,12 +1358,12 @@ function PTZTab({ cameraId, caps }) {
       <Card className="p-4 space-y-3" data-testid="cam-ptz-presets">
         <div className="flex items-center justify-between">
           <div className="text-sm text-muted-foreground">
-            Presets — positionne la caméra puis "Ajouter" (aucune limite)
+            {t("ptz.presets_hint")}
           </div>
           <Button variant="outline" size="sm" onClick={addPreset} disabled={addingPreset}
                   data-testid="ptz-preset-add">
             {addingPreset ? <Loader2 size={14} className="animate-spin mr-1" /> : <Plus size={14} className="mr-1" />}
-            Ajouter preset ici
+            {t("ptz.preset_add")}
           </Button>
         </div>
         {presetsLoading ? (
@@ -1369,7 +1371,7 @@ function PTZTab({ cameraId, caps }) {
             <Loader2 size={14} className="animate-spin" /> Chargement…
           </div>
         ) : presets.length === 0 ? (
-          <div className="text-sm text-muted-foreground">Aucun preset enregistré pour cette caméra.</div>
+          <div className="text-sm text-muted-foreground">{t("ptz.no_presets")}</div>
         ) : (
           <div className="flex flex-wrap gap-2">
             {presets.map((p) => (
@@ -1377,12 +1379,12 @@ function PTZTab({ cameraId, caps }) {
                    data-testid={`ptz-preset-row-${p.id}`}>
                 <button onClick={() => gotoPreset(p.id)}
                         className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm hover:bg-secondary"
-                        title={`Aller au preset ${p.name}`}>
+                        title={`${t("ptz.goto_preset")} : ${p.name}`}>
                   <MapPin size={12} /> {p.name}
                 </button>
                 <button onClick={() => deletePreset(p)}
                         className="px-2 py-1.5 text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
-                        title="Supprimer ce preset" data-testid={`ptz-preset-delete-${p.id}`}>
+                        title={t("ptz.delete_preset")} data-testid={`ptz-preset-delete-${p.id}`}>
                   <Trash2 size={12} />
                 </button>
               </div>
@@ -1395,15 +1397,15 @@ function PTZTab({ cameraId, caps }) {
         <div className="flex items-center justify-between">
           <div>
             <div className="text-sm font-medium flex items-center gap-2">
-              Patrouille automatique
+              {t("ptz.patrol_title")}
               {patrol.enabled && (
                 <Badge variant={patrol.running ? "default" : "secondary"} className="text-[10px]">
-                  {patrol.running ? "en cours" : "en pause"}
+                  {patrol.running ? t("ptz.patrol_running") : t("ptz.patrol_paused")}
                 </Badge>
               )}
             </div>
             <div className="text-xs text-muted-foreground mt-0.5">
-              Enchaîne les presets cochés ci-dessous, dans l'ordre choisi, en boucle.
+              {t("ptz.patrol_desc")}
             </div>
           </div>
           <Switch checked={patrol.enabled} disabled={patrolLoading || patrolSaving}
@@ -1412,7 +1414,7 @@ function PTZTab({ cameraId, caps }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <Label className="text-xs text-muted-foreground whitespace-nowrap">Temps par preset (s)</Label>
+          <Label className="text-xs text-muted-foreground whitespace-nowrap">{t("ptz.dwell_seconds")}</Label>
           <Input type="number" min={2} max={600} value={patrol.dwell_seconds}
                  className="w-20 h-8 text-xs"
                  onChange={(e) => setPatrol((p) => ({ ...p, dwell_seconds: Number(e.target.value) || 8 }))}
@@ -1421,10 +1423,10 @@ function PTZTab({ cameraId, caps }) {
         </div>
 
         {presets.length === 0 ? (
-          <div className="text-xs text-muted-foreground">Ajoute d'abord au moins un preset ci-dessus.</div>
+          <div className="text-xs text-muted-foreground">{t("ptz.add_first")}</div>
         ) : (
           <div className="space-y-2">
-            <div className="text-xs text-muted-foreground">Presets disponibles — coche pour inclure dans la patrouille :</div>
+            <div className="text-xs text-muted-foreground">{t("ptz.available_presets")}</div>
             <div className="flex flex-wrap gap-2">
               {presets.map((p) => (
                 <label key={p.id}
@@ -1439,7 +1441,7 @@ function PTZTab({ cameraId, caps }) {
             {patrol.preset_ids.length > 0 && (
               <div>
                 <div className="text-xs text-muted-foreground mt-2 mb-1">
-                  Ordre de la tournée (défini manuellement — flèches pour réordonner) :
+                  {t("ptz.patrol_order")}
                 </div>
                 <div className="space-y-1">
                   {patrol.preset_ids.map((id, idx) => (
@@ -1467,23 +1469,3 @@ function PTZTab({ cameraId, caps }) {
   );
 }
 
-function MaintenanceTab({ cameraId }) {
-  const { t } = useApp();
-  const [status, setStatus] = useState(null);
-  useEffect(() => {
-    api.get(`/devices/${cameraId}/status`).then((r) => setStatus(r.data))
-       .catch(() => setStatus(null));
-  }, [cameraId]);
-  if (!status) return <Card className="p-6 text-sm">{t("camc.no_status")}</Card>;
-  return (
-    <Card className="p-4 space-y-1" data-testid="cam-maintenance">
-      <div className="grid grid-cols-2 gap-1 text-sm">
-        <div>En ligne</div><div>{status.online ? "Oui" : "Non"}</div>
-        <div>Batterie</div><div>{status.battery_percent ?? "—"}%</div>
-        <div>SD card</div><div>{status.sd_card_status || "—"}</div>
-        <div>SD usage</div><div>{status.sd_card_used_percent ?? "—"}%</div>
-        <div>Uptime</div><div>{status.uptime_s ?? "—"} s</div>
-      </div>
-    </Card>
-  );
-}
