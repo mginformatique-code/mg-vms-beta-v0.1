@@ -325,6 +325,15 @@ services:
       TZ: ${TZ:-Europe/Paris}
       NVIDIA_VISIBLE_DEVICES: ${MGVMS_ANPR_GPU_UUID:-GPU-4f124e92-a89d-8ac6-7aa8-3e028428561c}
       NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
+      # v3.38 · NE PAS forcer LD_LIBRARY_PATH vers les libs nvidia-*-cu12
+      # (testé) : cuDNN charge alors correctement, MAIS la Quadro K620
+      # (Maxwell, compute capability 5.0) n'a AUCUN noyau CUDA compilé pour
+      # elle dans onnxruntime-gpu 1.19.2/CUDA 12.4 — chaque inférence
+      # échoue en silence ("cudaErrorNoKernelImageForDevice"), fast-alpr
+      # renvoyant alors 0 résultat au lieu de la lecture CPU qui, elle,
+      # fonctionne. Incompatibilité matérielle réelle, pas un réglage —
+      # ce service reste volontairement en repli CPU (voir anpr_service.py)
+      # tant qu'aucun moteur ANPR compatible sm_50 n'est identifié.
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8100/health"]
       interval: 30s
