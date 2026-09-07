@@ -35,6 +35,23 @@ MIN_CONTRAST = 20.0             # écart-type des niveaux de gris
 MAX_SKEW_DEG = 15.0             # au delà : deskew agressif
 GOOD_ENOUGH_SHARPNESS = 60.0    # au dessus : pas besoin d'améliorer
 GOOD_ENOUGH_CONTRAST = 45.0     # idem
+# v3.48 · Seuil de sur-exposition (reflet IR sur plaque rétroréfléchissante,
+# surtout véhicules EN MOUVEMENT la nuit — confirmé sur crop réel en prod :
+# fraction de pixels quasi blancs (>=250/255) au delà de laquelle le texte
+# est physiquement effacé, quels que soient sharpness/contrast globaux du
+# crop (les bords crop/carrosserie sombre autour du reflet peuvent suffire
+# à faire illusion sur ces deux métriques alors que l'intérieur — les
+# caractères eux-mêmes — est cramé). fast-alpr n'a aucune notion
+# d'incertitude calibrée : sur ce type d'entrée dégradée, il HALLUCINE un
+# texte plausible avec une confiance normale (0.75-0.85 observé) plutôt que
+# de signaler un échec — cette vérification est donc la seule défense
+# possible en amont de l'OCR, la confiance en sortie ne suffit pas.
+# Calibré sur un cas réel confirmé (crop "AA2307JA", reflet IR nocturne) :
+# 74% de pixels >=250/255, percentile 50 déjà à 255 (médiane saturée) — 0.60
+# laisse une marge de sécurité sous ce cas réel tout en restant largement
+# au-dessus de ce qu'une plaque normalement exposée affiche (caractères
+# sombres occupant une part significative de la surface).
+MAX_OVEREXPOSED_RATIO = 0.60
 
 
 @dataclass
@@ -103,6 +120,8 @@ def assess_crop_quality(crop: np.ndarray,
     contrast = float(gray.std())
     # Skew : détection via moments (approximation légère)
     skew = _estimate_skew_deg(gray)
+    # v3.48 · Sur-exposition (reflet IR) — voir commentaire sur la constante.
+    overexposed_ratio = float(np.mean(gray >= 250))
 
     # Score composite pondéré (borne 0..1)
     sc_sharp = min(sharpness / GOOD_ENOUGH_SHARPNESS, 1.0)
@@ -114,7 +133,11 @@ def assess_crop_quality(crop: np.ndarray,
     skip = False
     should_enhance = False
     reason = "ok"
-    if sharpness < MIN_SHARPNESS and contrast < MIN_CONTRAST:
+    if overexposed_ratio >= MAX_OVEREXPOSED_RATIO:
+        skip = True
+        score = 0.0
+        reason = f"sur-exposé (reflet IR probable, {overexposed_ratio*100:.0f}% du crop quasi blanc)"
+    elif sharpness < MIN_SHARPNESS and contrast < MIN_CONTRAST:
         skip = True
         reason = f"crop trop dégradé (sharp={sharpness:.1f}, contrast={contrast:.1f})"
     elif sharpness < GOOD_ENOUGH_SHARPNESS or contrast < GOOD_ENOUGH_CONTRAST \

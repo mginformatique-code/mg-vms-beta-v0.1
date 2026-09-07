@@ -500,7 +500,34 @@ class CameraWorker:
                                                  crop_hash, save_debug_bundle)
                     raw_plate_crop = ctx.image[max(0, int(abs_y1)):int(abs_y2),
                                                 max(0, int(abs_x1)):int(abs_x2)]
-                    q = assess_crop_quality(raw_plate_crop)
+                    # v3.48 · `min_side` explicite : sans ça, `assess_crop_quality`
+                    # retombe sur son propre défaut interne (40px) au lieu du
+                    # seuil RÉELLEMENT configuré ligne 417 (`min_plate_px`,
+                    # 24px par défaut) déjà utilisé par le 1er filtre "trop
+                    # petit" ci-dessus (~ligne 452). Écart resté invisible
+                    # tant que `q.skip` n'était pas utilisé (voir plus bas) —
+                    # une fois branché, ce mismatch aurait rejeté à tort la
+                    # quasi-totalité des plaques réelles (hauteur typique
+                    # 24-39px, largeur normale ~2-4x la hauteur).
+                    q = assess_crop_quality(raw_plate_crop, min_side=min_side)
+                    # v3.48 · BUG CONFIRMÉ EN PROD : `q.skip` était calculé
+                    # mais JAMAIS utilisé pour rejeter — seulement pour ne
+                    # pas tenter d'améliorer un crop jugé perdu (ligne
+                    # `should_enhance`/`crop_premium` ci-dessous). Le texte
+                    # OCR, déjà obtenu plus haut via `_ocr.recognize()` AVANT
+                    # même ce contrôle qualité, poursuivait donc jusqu'à
+                    # `ctx.plates.append()` quelle que soit la qualité du
+                    # crop réel. Cas réel : crop de plaque totalement cramé
+                    # par un reflet IR (véhicule en mouvement de nuit),
+                    # fast-alpr sans notion d'incertitude calibrée
+                    # hallucinait un texte plausible ("AA2307JA", "AX217EM")
+                    # avec une confiance normale (0.75-0.85) — jamais
+                    # rejeté, ré-enregistré en base à chaque cycle malgré
+                    # suppression manuelle des lectures précédentes.
+                    if q.skip:
+                        plate_debug.append({"plate": plate_text, "skipped": q.reason,
+                                             "size": f"{pw}x{ph}"})
+                        continue
                     enhanced_crop = raw_plate_crop
                     crop_premium_meta = None  # v0.8-rc5 · trace CropPremium si escalade
                     if q.should_enhance and not q.skip:
