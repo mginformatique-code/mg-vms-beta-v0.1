@@ -138,6 +138,39 @@ class FastAlprRemoteRecognizer:
         return out
 
 
+_REMOTE_HEALTH_CACHE = {"ts": 0.0, "ok": False}
+_REMOTE_HEALTH_TTL_S = 30.0
+_REMOTE_HEALTH_TIMEOUT_S = 0.5
+
+
+def _remote_anpr_healthy() -> bool:
+    """Vrai si le service ANPR isolé (voir anpr_service.py) répond —
+    vérifié au plus une fois toutes les ``_REMOTE_HEALTH_TTL_S`` (14
+    caméras × plusieurs véhicules/cycle rendrait un ping systématique
+    bien trop fréquent), jamais à chaque lecture de plaque.
+
+    Timeout volontairement très court (0.5s) : sur un site sans 2e GPU
+    (immense majorité des déploiements), ce service n'existe simplement
+    pas — l'échec doit être quasi instantané, jamais une latence
+    perceptible ajoutée à chaque véhicule.
+    """
+    import time
+    now = time.monotonic()
+    if now - _REMOTE_HEALTH_CACHE["ts"] < _REMOTE_HEALTH_TTL_S:
+        return _REMOTE_HEALTH_CACHE["ok"]
+    url = os.environ.get("MGVMS_ANPR_SERVICE_URL", "http://anpr:8100")
+    ok = False
+    try:
+        import httpx
+        resp = httpx.get(f"{url}/health", timeout=_REMOTE_HEALTH_TIMEOUT_S)
+        ok = resp.status_code == 200
+    except Exception:
+        ok = False
+    _REMOTE_HEALTH_CACHE["ts"] = now
+    _REMOTE_HEALTH_CACHE["ok"] = ok
+    return ok
+
+
 # ═════════════════════════════════════════════════════════════════════════
 # Registry
 # ═════════════════════════════════════════════════════════════════════════
@@ -177,8 +210,24 @@ class PlateRecognizerRegistry:
         v0.5.6 Phase C · lecture de la config par caméra :
           ``cam_config['pipeline_config']['anpr'][0]`` (moteur core) — les
           suivants sont dispatchés par le plugin bus (multi-OCR).
+
+        v3.39 · Choix PAR DÉFAUT (aucune caméra n'a explicitement demandé
+        un moteur) rendu ADAPTATIF au matériel réellement présent : si le
+        service ANPR isolé (voir anpr_service.py — 2e GPU dédié, élimine
+        la contention de verrou avec YOLO, voir ai_engine.py commentaire
+        v3.38) répond, il devient le défaut effectif SANS AUCUNE
+        configuration par caméra. Indispensable pour un produit déployé
+        chez des clients avec des configurations matérielles variées :
+        un site mono-GPU (l'immense majorité) ne voit STRICTEMENT rien
+        changer (service absent → `_remote_anpr_healthy()` retourne False
+        en <1s, jamais de configuration à faire) ; un site avec le 2e GPU
+        en bénéficie automatiquement, sans intervention. Une caméra qui
+        demande explicitement un moteur (``pipeline_config.anpr`` réglé)
+        garde toujours la priorité — ce mécanisme ne s'applique qu'au
+        défaut, jamais à un choix explicite.
         """
         requested = self._default
+        explicit = False
         warning = None
         if cam_config:
             pc = (cam_config.get("pipeline_config") or {}) if isinstance(cam_config, dict) else {}
@@ -188,12 +237,15 @@ class PlateRecognizerRegistry:
                 if isinstance(wanted, str) and wanted:
                     if wanted in self._factories:
                         requested = wanted
+                        explicit = True
                     else:
                         warning = (
                             f"OCR core '{wanted}' demandé par la caméra mais "
                             f"non enregistré (connus: {self.known()}). "
                             f"Fallback vers '{self._default}'."
                         )
+        if not explicit and "fast-alpr-remote" in self._factories and _remote_anpr_healthy():
+            requested = "fast-alpr-remote"
         rec = self.get(requested)
         if rec is not None:
             return rec, requested, warning

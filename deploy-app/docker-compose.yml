@@ -310,20 +310,35 @@ services:
   # CUDA runtime diffèrent, confirmé sur cette machine) : c'est le SEUL
   # GPU visible depuis ce conteneur, le code n'a donc rien à choisir.
   #
-  # Désactivé par défaut : aucune caméra ne pointe encore dessus tant que
-  # son `pipeline_config.anpr` ne vaut pas ["fast-alpr-remote"] (rollout
-  # progressif, caméra par caméra — voir PUT /cameras/{id}/pipeline-config
-  # déjà existant, aucune route nouvelle nécessaire pour le toggle).
+  # v3.39 · Déploiement en production chez des clients aux configurations
+  # matérielles variées — ce service ne doit JAMAIS démarrer sur un
+  # serveur mono-GPU (l'immense majorité), sous peine d'échec au
+  # démarrage (UUID GPU inexistant) ou pire, de contribuer à saturer le
+  # seul GPU présent. Placé derrière le profil compose "dual-gpu" :
+  # absent de tout `docker compose up -d` normal, activé uniquement via
+  # `COMPOSE_PROFILES=dual-gpu` dans .env (auto-détecté et réglé par
+  # install.sh si un 2e GPU NVIDIA est présent — jamais par défaut).
+  # Côté choix du moteur ANPR par caméra : aucune configuration requise
+  # non plus — `plate_recognizer.py::get_active()` bascule automatiquement
+  # sur ce service dès qu'il répond (health-check caché, voir
+  # `_remote_anpr_healthy()`), et repli silencieux sur le chemin local
+  # sinon. "Par défaut" au sens propre : rien à régler par caméra, dans
+  # un sens comme dans l'autre.
   anpr:
     image: mgvms-backend:latest
     container_name: mgvms-anpr
     restart: unless-stopped
     runtime: nvidia
+    profiles: ["dual-gpu"]
     command: ["python3", "-m", "uvicorn", "anpr_service:app",
               "--host", "0.0.0.0", "--port", "8100", "--workers", "1", "--log-level", "info"]
     environment:
       TZ: ${TZ:-Europe/Paris}
-      NVIDIA_VISIBLE_DEVICES: ${MGVMS_ANPR_GPU_UUID:-GPU-4f124e92-a89d-8ac6-7aa8-3e028428561c}
+      # Pas de valeur par défaut ici volontairement — un UUID au hasard
+      # ferait échouer ce conteneur sur un serveur qui n'a pas EXACTEMENT
+      # cette carte. Doit venir de .env (MGVMS_ANPR_GPU_UUID), réglé par
+      # install.sh lors de la détection d'un 2e GPU, jamais deviné.
+      NVIDIA_VISIBLE_DEVICES: ${MGVMS_ANPR_GPU_UUID}
       NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
       # v3.38 · NE PAS forcer LD_LIBRARY_PATH vers les libs nvidia-*-cu12
       # (testé) : cuDNN charge alors correctement, MAIS la Quadro K620
@@ -345,7 +360,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["${MGVMS_ANPR_GPU_UUID:-GPU-4f124e92-a89d-8ac6-7aa8-3e028428561c}"]
+              device_ids: ["${MGVMS_ANPR_GPU_UUID}"]
               capabilities: [gpu]
     networks: [mgvms]
 

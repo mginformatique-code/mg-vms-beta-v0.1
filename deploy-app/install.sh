@@ -200,6 +200,29 @@ else
   warn "runtime NVIDIA non détecté — le backend démarrera mais l'IA tournera en CPU"
 fi
 
+# v3.39 · Détection d'un 2e GPU NVIDIA — permet d'isoler l'ANPR sur sa
+# propre carte (élimine une contention avec YOLO sur le GPU principal,
+# voir CHANGELOG v3.28). Concerne une minorité d'installations ; sur un
+# serveur mono-GPU (le cas normal), ces variables restent NON définies et
+# le service correspondant (profil compose "dual-gpu") ne démarre jamais
+# — comportement de base strictement inchangé.
+DUAL_GPU_UUID=""
+if command -v nvidia-smi >/dev/null 2>&1; then
+  GPU_COUNT=$(nvidia-smi --query-gpu=uuid --format=csv,noheader 2>/dev/null | wc -l)
+  if [ "${GPU_COUNT:-0}" -ge 2 ]; then
+    # Heuristique : dédie la carte avec le MOINS de VRAM à l'ANPR — celle
+    # ajoutée spécifiquement pour cet usage est la plus probable des deux
+    # à être la plus modeste (YOLO/tracking reste sur la carte principale,
+    # supposée plus capable). Ajustable après coup : MGVMS_ANPR_GPU_UUID
+    # dans .env.
+    DUAL_GPU_UUID=$(nvidia-smi --query-gpu=uuid,memory.total --format=csv,noheader,nounits 2>/dev/null \
+      | sort -t, -k2 -n | head -1 | cut -d, -f1 | tr -d ' ')
+    if [ -n "$DUAL_GPU_UUID" ]; then
+      ok "2 GPU NVIDIA détectés — ANPR isolé sur $DUAL_GPU_UUID (ajustable : MGVMS_ANPR_GPU_UUID dans .env)"
+    fi
+  fi
+fi
+
 # ══════════════════════════════════════════════════════════════════════
 # 4. Nettoyage pré-installation
 # ══════════════════════════════════════════════════════════════════════
@@ -362,6 +385,14 @@ else
   if [ -n "$RECORDINGS_PATH_CHOSEN" ]; then
     sed -i "s#^RECORDINGS_PATH=.*#RECORDINGS_PATH=$RECORDINGS_PATH_CHOSEN#" .env
     ok "Enregistrements vidéo → $RECORDINGS_PATH_CHOSEN"
+  fi
+  if [ -n "$DUAL_GPU_UUID" ]; then
+    # v3.39 · Décommente les 2 lignes déjà présentes dans .env.example
+    # (voir plus haut) plutôt que d'en ajouter de nouvelles — reste
+    # cohérent avec un .env réédité à la main plus tard.
+    sed -i "s#^# COMPOSE_PROFILES=dual-gpu#COMPOSE_PROFILES=dual-gpu#" .env
+    sed -i "s#^# MGVMS_ANPR_GPU_UUID=.*#MGVMS_ANPR_GPU_UUID=$DUAL_GPU_UUID#" .env
+    ok "ANPR isolé activé sur le 2e GPU ($DUAL_GPU_UUID)"
   fi
   warn ".env créé depuis .env.example — ADAPTEZ IP LAN + secrets :"
   warn "   nano $SCRIPT_DIR/.env  (CORS_ORIGINS, JWT_SECRET, ADMIN_PASSWORD)"
