@@ -16,8 +16,12 @@ Phase C via ``cam_config['pipeline_config']['anpr'][0]`` (moteur core).
 """
 from __future__ import annotations
 
+import logging
+import os
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
+
+logger = logging.getLogger("pipeline_v2.plate_recognizer")
 
 
 @dataclass
@@ -79,6 +83,57 @@ class FastAlprRecognizer:
                 bbox_in_roi=(float(bb.x1), float(bb.y1),
                               float(bb.x2), float(bb.y2)),
             ))
+        out.sort(key=lambda r: r.confidence, reverse=True)
+        return out
+
+
+class FastAlprRemoteRecognizer:
+    """Même contrat que ``FastAlprRecognizer``, mais délègue à un service
+    ANPR isolé (conteneur + GPU dédiés, voir backend/anpr_service.py et
+    deploy-app/docker-compose.yml — service ``anpr``) au lieu de tourner
+    dans le même process que YOLO.
+
+    v3.38 · Root cause investigation tracking : fast-alpr et YOLO
+    partageaient jusqu'ici un verrou GPU commun (nécessaire depuis v3.19
+    — deux runtimes CUDA concurrents sur le même GPU provoquaient des
+    crashs réels), ce qui bloquait TOUTE caméra du parc voulant lancer sa
+    détection YOLO pendant qu'une autre lisait une plaque. Ce chemin
+    isole l'ANPR sur son propre GPU (Quadro K620) — sélectionné PAR
+    CAMÉRA via ``pipeline_config.anpr[0] = "fast-alpr-remote"`` (même
+    mécanisme que le choix du moteur OCR core existant), pour un rollout
+    progressif caméra par caméra plutôt qu'un bascule globale.
+
+    Repli automatique et silencieux sur le chemin local (in-process,
+    verrou partagé) si le service est injoignable — jamais de plaque
+    perdue, jamais moins fiable que le chemin historique.
+    """
+
+    name = "fast-alpr-remote"
+
+    def __init__(self) -> None:
+        self._url = os.environ.get("MGVMS_ANPR_SERVICE_URL", "http://anpr:8100")
+        self._timeout_s = float(os.environ.get("MGVMS_ANPR_SERVICE_TIMEOUT_S", "3.0"))
+        self._local = FastAlprRecognizer()
+
+    def recognize(self, vehicle_crop_bgr) -> list[PlateOcrResult]:
+        if vehicle_crop_bgr is None:
+            return []
+        try:
+            import cv2
+            import httpx
+            ok, buf = cv2.imencode(".jpg", vehicle_crop_bgr, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            if not ok:
+                raise RuntimeError("encode JPEG échoué")
+            resp = httpx.post(f"{self._url}/recognize", content=buf.tobytes(),
+                               headers={"Content-Type": "image/jpeg"}, timeout=self._timeout_s)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            logger.warning("anpr_service injoignable (%s) — repli local", e)
+            return self._local.recognize(vehicle_crop_bgr)
+        out = [PlateOcrResult(text=r["text"], confidence=r["confidence"],
+                                bbox_in_roi=tuple(r["bbox_in_roi"]))
+               for r in data.get("results", [])]
         out.sort(key=lambda r: r.confidence, reverse=True)
         return out
 
@@ -162,3 +217,4 @@ _NULL_PLATE_RECOGNIZER = _NullPlateRecognizer()
 # Instance globale — importée par le pipeline (`_stage_anpr`).
 plate_registry = PlateRecognizerRegistry()
 plate_registry.register("fast-alpr", FastAlprRecognizer)
+plate_registry.register("fast-alpr-remote", FastAlprRemoteRecognizer)

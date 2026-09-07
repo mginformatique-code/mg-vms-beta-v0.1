@@ -293,6 +293,53 @@ services:
               capabilities: [gpu, video]
     networks: [mgvms]
 
+  # ─── Service ANPR isolé (GPU dédié) ───────────────────────────────
+  # v3.38 · fast-alpr tournait jusqu'ici dans le même process/GPU que
+  # YOLO (voir service `pipeline`), protégé par un verrou partagé —
+  # nécessaire depuis v3.19 (deux runtimes CUDA concurrents sur le même
+  # GPU provoquaient des crashs réels), mais qui bloquait TOUTE caméra
+  # du parc voulant lancer sa détection YOLO pendant qu'une autre lisait
+  # une plaque ANPR — root cause du ralentissement généralisé constaté
+  # sur toutes les caméras (voir ai_engine.py, commentaire v3.38).
+  #
+  # Isolé ici dans son propre conteneur avec son propre GPU (Quadro K620
+  # ajoutée sur ce serveur en 09/2026) — même image que `backend`/
+  # `pipeline` (fast-alpr déjà installé dedans), commande différente
+  # (anpr_service.py, pas server.py). NVIDIA_VISIBLE_DEVICES épinglé sur
+  # l'UUID de la K620 (pas un index — l'ordre nvidia-smi et l'énumération
+  # CUDA runtime diffèrent, confirmé sur cette machine) : c'est le SEUL
+  # GPU visible depuis ce conteneur, le code n'a donc rien à choisir.
+  #
+  # Désactivé par défaut : aucune caméra ne pointe encore dessus tant que
+  # son `pipeline_config.anpr` ne vaut pas ["fast-alpr-remote"] (rollout
+  # progressif, caméra par caméra — voir PUT /cameras/{id}/pipeline-config
+  # déjà existant, aucune route nouvelle nécessaire pour le toggle).
+  anpr:
+    image: mgvms-backend:latest
+    container_name: mgvms-anpr
+    restart: unless-stopped
+    runtime: nvidia
+    command: ["python3", "-m", "uvicorn", "anpr_service:app",
+              "--host", "0.0.0.0", "--port", "8100", "--workers", "1", "--log-level", "info"]
+    environment:
+      TZ: ${TZ:-Europe/Paris}
+      NVIDIA_VISIBLE_DEVICES: ${MGVMS_ANPR_GPU_UUID:-GPU-4f124e92-a89d-8ac6-7aa8-3e028428561c}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8100/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${MGVMS_ANPR_GPU_UUID:-GPU-4f124e92-a89d-8ac6-7aa8-3e028428561c}"]
+              capabilities: [gpu]
+    networks: [mgvms]
+
   # ─── Frontend React (build) + Nginx ──────────────────────────────
   frontend:
     build:
