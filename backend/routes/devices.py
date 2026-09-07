@@ -90,7 +90,16 @@ class PTZZoomBody(BaseModel):
 
 
 class PTZPresetBody(BaseModel):
-    id: int = Field(..., ge=1, le=255)
+    # v3.47 · str, PAS int — un token de preset ONVIF réel est une chaîne
+    # opaque ("000", "004", parfois non numérique selon le vendeur). Faire
+    # transiter ça par un int (ancien design, 6 boutons fixes 1-6) perdait
+    # les zéros de tête ("004" -> 4 -> "4"), envoyant un PresetToken qui ne
+    # correspond à AUCUN preset réel sur la caméra — bug confirmé en prod :
+    # la création/liste/suppression de presets fonctionnait (déjà des str),
+    # seul le "aller à" échouait silencieusement pour tout preset découvert
+    # dynamiquement (donc quasi tous, sauf les nombres à 1 chiffre par
+    # coïncidence).
+    id: str = Field(..., min_length=1, max_length=64)
 
 
 class PTZPresetCreateBody(BaseModel):

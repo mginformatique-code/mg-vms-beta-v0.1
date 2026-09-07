@@ -142,8 +142,14 @@ class CameraDriver(ABC):
         self._require("zoom")
         await self._ptz_zoom(value)
 
-    async def ptz_preset(self, preset_id: int) -> None:
-        """Rappel d'un preset PTZ enregistré côté caméra."""
+    async def ptz_preset(self, preset_id) -> None:
+        """Rappel d'un preset PTZ enregistré côté caméra.
+
+        v3.47 · `preset_id` est un token OPAQUE (str) — un preset ONVIF réel
+        peut être "000", "004", ou une chaîne non numérique selon le
+        vendeur. Ne JAMAIS le faire transiter par `int()` (perd les zéros
+        de tête, envoie un token qui ne correspond à rien sur la caméra).
+        """
         self._require("ptz")
         await self._ptz_preset(preset_id)
 
@@ -244,7 +250,7 @@ class CameraDriver(ABC):
     async def _ptz_zoom(self, value: float) -> None:
         raise UnsupportedCapabilityError("Zoom non implémenté par ce driver")
 
-    async def _ptz_preset(self, preset_id: int) -> None:
+    async def _ptz_preset(self, preset_id) -> None:
         raise UnsupportedCapabilityError("Presets PTZ non implémentés par ce driver")
 
     async def _ptz_list_presets(self) -> list[dict]:

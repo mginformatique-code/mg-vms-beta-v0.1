@@ -1248,7 +1248,10 @@ function PTZTab({ cameraId, caps }) {
        .then(() => {})
        .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
   const gotoPreset = (id) =>
-    api.post(`/devices/${cameraId}/ptz/preset`, { id: Number(id) })
+    // v3.47 · id est un token opaque ("000", "004"...) — surtout PAS
+    // Number(id), qui perdait les zéros de tête et envoyait un token qui
+    // ne correspond à aucun preset réel sur la caméra.
+    api.post(`/devices/${cameraId}/ptz/preset`, { id: String(id) })
        .then(() => toast.success(id))
        .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
 

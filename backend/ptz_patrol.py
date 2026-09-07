@@ -66,7 +66,12 @@ async def _loop(camera_id: str) -> None:
             preset_id = presets[idx]
             try:
                 drv = await svc.get_driver(camera_id)
-                await drv.ptz_preset(int(preset_id) if str(preset_id).isdigit() else preset_id)
+                # v3.47 · NE PAS convertir en int : un token ONVIF réel
+                # ("000", "004"...) perd ses zéros de tête via int() puis
+                # str(), et ne correspond alors plus à aucun preset réel
+                # sur la caméra — la patrouille "marchait" (aucune erreur)
+                # mais n'allait jamais au bon endroit.
+                await drv.ptz_preset(preset_id)
             except CameraDriverError as e:
                 logger.warning("ptz_patrol: échec goto preset %s caméra=%s (%s)",
                                preset_id, camera_id, e)

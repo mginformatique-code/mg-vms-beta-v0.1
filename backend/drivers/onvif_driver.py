@@ -379,7 +379,7 @@ class ONVIFDriver(CameraDriver):
         req.Velocity = {"Zoom": {"x": v}}
         await asyncio.to_thread(self._ptz.ContinuousMove, req)
 
-    async def _ptz_preset(self, preset_id: int) -> None:
+    async def _ptz_preset(self, preset_id) -> None:
         if self._ptz is None:
             raise UnsupportedCapabilityError("Service PTZ indispo")
         profiles = await asyncio.to_thread(self._media.GetProfiles)
