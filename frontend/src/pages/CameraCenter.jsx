@@ -1193,12 +1193,22 @@ function SdCardTab({ cameraId, caps }) {
 
 // ─── PTZ ───
 function PTZTab({ cameraId, caps }) {
+  const [cam, setCam] = useState(null);
   const [presets, setPresets] = useState([]);
   const [presetsLoading, setPresetsLoading] = useState(true);
   const [addingPreset, setAddingPreset] = useState(false);
   const [patrol, setPatrol] = useState({ enabled: false, dwell_seconds: 8, preset_ids: [], running: false });
   const [patrolLoading, setPatrolLoading] = useState(true);
   const [patrolSaving, setPatrolSaving] = useState(false);
+
+  // v3.45 · Visuel live indispensable pour placer un preset : sans lui
+  // l'utilisateur devait deviner la position en jonglant avec l'onglet
+  // "Live" séparé. Même pattern que LiveTab (GET /cameras/{id} + LivePlayer).
+  useEffect(() => {
+    let alive = true;
+    api.get(`/cameras/${cameraId}`).then((r) => { if (alive) setCam(r.data); }).catch(() => {});
+    return () => { alive = false; };
+  }, [cameraId]);
 
   const loadPresets = () => {
     setPresetsLoading(true);
@@ -1294,31 +1304,54 @@ function PTZTab({ cameraId, caps }) {
 
   return (
     <div className="space-y-4">
-      <Card className="p-4 space-y-4" data-testid="cam-ptz">
-        <div>
-          <div className="text-sm text-muted-foreground mb-2">Directions</div>
-          <div className="grid grid-cols-3 gap-1 w-48">
-            <Button variant="outline" onClick={() => move("upleft")}>↖</Button>
-            <Button variant="outline" onClick={() => move("up")} data-testid="ptz-up">↑</Button>
-            <Button variant="outline" onClick={() => move("upright")}>↗</Button>
-            <Button variant="outline" onClick={() => move("left")} data-testid="ptz-left">←</Button>
-            <Button variant="outline" onClick={() => move("stop")} data-testid="ptz-stop">■</Button>
-            <Button variant="outline" onClick={() => move("right")} data-testid="ptz-right">→</Button>
-            <Button variant="outline" onClick={() => move("downleft")}>↙</Button>
-            <Button variant="outline" onClick={() => move("down")} data-testid="ptz-down">↓</Button>
-            <Button variant="outline" onClick={() => move("downright")}>↘</Button>
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px] gap-4 items-start">
+        <Card className="p-3 space-y-2" data-testid="cam-ptz-live">
+          <div className="text-sm text-muted-foreground">
+            Vue live — positionne la caméra ici, puis "Ajouter preset ici" à droite
           </div>
-        </div>
-        {caps.zoom && (
+          <div className="relative aspect-video bg-black">
+            {cam ? (
+              <LivePlayer key={cameraId} camera={cam} hd={false}
+                          className="w-full h-full" dataTestId="ptz-live-player" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+                <Loader2 size={20} className="animate-spin" />
+              </div>
+            )}
+          </div>
+        </Card>
+
+        <Card className="p-4 space-y-4" data-testid="cam-ptz">
           <div>
-            <div className="text-sm text-muted-foreground mb-2">Zoom</div>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => zoom(-0.5)} data-testid="ptz-zoom-out">−</Button>
-              <Button variant="outline" onClick={() => zoom(0.5)} data-testid="ptz-zoom-in">+</Button>
+            <div className="text-sm text-muted-foreground mb-2">Directions</div>
+            <div className="grid grid-cols-3 gap-1 w-48">
+              <Button variant="outline" onClick={() => move("upleft")}>↖</Button>
+              <Button variant="outline" onClick={() => move("up")} data-testid="ptz-up">↑</Button>
+              <Button variant="outline" onClick={() => move("upright")}>↗</Button>
+              <Button variant="outline" onClick={() => move("left")} data-testid="ptz-left">←</Button>
+              <Button variant="outline" onClick={() => move("stop")} data-testid="ptz-stop">■</Button>
+              <Button variant="outline" onClick={() => move("right")} data-testid="ptz-right">→</Button>
+              <Button variant="outline" onClick={() => move("downleft")}>↙</Button>
+              <Button variant="outline" onClick={() => move("down")} data-testid="ptz-down">↓</Button>
+              <Button variant="outline" onClick={() => move("downright")}>↘</Button>
             </div>
           </div>
-        )}
-      </Card>
+          {caps.zoom && (
+            <div>
+              <div className="text-sm text-muted-foreground mb-2">Zoom</div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => zoom(-0.5)} data-testid="ptz-zoom-out">−</Button>
+                <Button variant="outline" onClick={() => zoom(0.5)} data-testid="ptz-zoom-in">+</Button>
+              </div>
+            </div>
+          )}
+          <Button variant="outline" size="sm" onClick={addPreset} disabled={addingPreset}
+                  className="w-full" data-testid="ptz-preset-add-inline">
+            {addingPreset ? <Loader2 size={14} className="animate-spin mr-1" /> : <Plus size={14} className="mr-1" />}
+            Ajouter preset ici
+          </Button>
+        </Card>
+      </div>
 
       <Card className="p-4 space-y-3" data-testid="cam-ptz-presets">
         <div className="flex items-center justify-between">
