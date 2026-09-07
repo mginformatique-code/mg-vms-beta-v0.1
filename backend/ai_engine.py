@@ -46,16 +46,31 @@ GO2RTC_URL = os.environ.get("GO2RTC_URL", "http://localhost:1984")
 #
 # v3.19 · ALPR_INFERENCE_LOCK pointait vers un second `threading.Lock()`
 # distinct : chaque moteur était bien sérialisé CONTRE LUI-MÊME, mais
-# YOLO (torch) et ALPR (fast-alpr, backend PaddleOCR) pouvaient toujours
-# tourner EN MÊME TEMPS sur le même GPU. À 14 caméras, ça a fini par
-# provoquer des "CUDA error: operation not permitted when stream is
-# capturing" suivis de segfaults fatals côté runtime C++ de Paddle
-# (process entier tué, conteneur redémarré — observé plusieurs fois/heure
-# en conditions réelles). Les deux noms restent distincts (contrat déjà
-# testé), mais pointent maintenant vers LE MÊME verrou : YOLO et ALPR ne
-# touchent plus jamais le GPU en même temps.
+# YOLO (torch) et ALPR (fast-alpr, backend ONNX Runtime/CUDA) pouvaient
+# toujours tourner EN MÊME TEMPS sur le même GPU. À 14 caméras, ça a fini
+# par provoquer des "CUDA error: operation not permitted when stream is
+# capturing" suivis de segfaults fatals côté runtime C++ (process entier
+# tué, conteneur redémarré — observé plusieurs fois/heure en conditions
+# réelles). Les deux verrous ont été fusionnés en un seul pour empêcher
+# tout accès GPU concurrent entre les deux moteurs.
+#
+# v3.38 · RE-DÉCOUPLÉS. Investigation "tracking saccadé sur toutes les
+# caméras, voitures ET piétons" : testé en direct sur le conteneur en
+# prod — `libcudnn.so.9` est absent de l'image, CUDAExecutionProvider
+# échoue silencieusement à l'init (onnxruntime ne lève pas d'exception,
+# retombe sur CPU) et fast-alpr tourne donc déjà en CPU, quoi qu'en dise
+# le log historique "LAPI locale chargée (fast-alpr, GPU-ONNX/CUDA)" —
+# confirmé faux via `.get_providers()` (voir _load_models ci-dessous).
+# Sans accès GPU réel côté ALPR, il n'y a plus de contexte CUDA partagé à
+# protéger : le verrou commun ne fait plus que bloquer les lots YOLO
+# (GPU, par batch_infer.py) derrière chaque lecture ANPR (CPU, 100ms-1s
+# PAR VÉHICULE) sur N'IMPORTE QUELLE caméra du parc — root cause du
+# ralentissement généralisé, indépendant de l'ANPR affiché sur l'écran
+# concerné. Si l'ANPR GPU est un jour restauré (cuDNN réinstallé), ce
+# découplage devra être réévalué — voir plan d'isolation dans un service
+# dédié (GPU séparé) pour le cas où l'ANPR GPU redevient réel.
 YOLO_INFERENCE_LOCK = threading.Lock()
-ALPR_INFERENCE_LOCK = YOLO_INFERENCE_LOCK
+ALPR_INFERENCE_LOCK = threading.Lock()
 AI_INTERVAL = float(os.environ.get("AI_INTERVAL_SECONDS", "0.15"))  # v0.4.5.a · ~6-7 FPS/cam
 AI_CONFIDENCE = float(os.environ.get("AI_CONFIDENCE", "0.45"))
 AI_MIN_PLATE_PX = int(os.environ.get("AI_MIN_PLATE_PX", "24"))
@@ -363,12 +378,23 @@ def _load_models():
                              detector_providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
                              ocr_model="european-plates-mobile-vit-v2-model",
                              ocr_device="cuda")
-                logger.info("LAPI locale chargée (fast-alpr, GPU-ONNX/CUDA)")
             except Exception as gpu_err:
                 logger.warning("fast-alpr GPU indisponible (%s) — repli CPU", gpu_err)
                 _alpr = ALPR(detector_model="yolo-v9-t-384-license-plate-end2end",
                              ocr_model="european-plates-mobile-vit-v2-model")
-                logger.info("LAPI locale chargée (fast-alpr, CPU-ONNX)")
+            # v3.38 · Le constructeur ALPR() n'échoue PAS si CUDAExecutionProvider
+            # ne peut pas s'initialiser (ex. libcudnn.so.9 absent de l'image) —
+            # onnxruntime retombe sur CPU en silence. Le log précédent affirmait
+            # "GPU-ONNX/CUDA" sur la seule foi de l'absence d'exception, ce qui
+            # s'est avéré FAUX en prod (confirmé : `.get_providers()` renvoyait
+            # CPUExecutionProvider seul). On lit désormais le provider RÉELLEMENT
+            # actif plutôt que celui demandé.
+            try:
+                _active_providers = _alpr.detector.detector.model.get_providers()
+            except Exception:
+                _active_providers = ["?"]
+            _effective = "GPU-ONNX/CUDA" if "CUDAExecutionProvider" in _active_providers else "CPU-ONNX"
+            logger.info("LAPI locale chargée (fast-alpr, %s — providers=%s)", _effective, _active_providers)
             _ai_health["alpr_loaded"] = True
             _ai_health["alpr_error"] = None
         except Exception as e:
