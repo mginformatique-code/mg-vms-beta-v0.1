@@ -41,6 +41,7 @@ export class TrackState {
         label: b.label,
         confidence: b.confidence,
         vehicle_color: b.vehicle_color,
+        speed_kmh: b.speed_kmh,
         keypoints_norm: b.keypoints_norm,
         bbox: b.bbox_norm,
         ts: timestampMs,

@@ -102,7 +102,7 @@ function OverlayCanvas({ cam, boxes, frameTs, showOverlay }) {
         ctx.setLineDash(b.predicted ? [5, 3] : []);
         ctx.strokeRect(rx, ry, rw, rh);
         ctx.setLineDash([]);
-        const label = `${b.label} ${(b.confidence * 100).toFixed(0)}%${b.vehicle_color ? " · " + b.vehicle_color : ""}${b.track_id ? " #" + b.track_id : ""}`;
+        const label = `${b.label} ${(b.confidence * 100).toFixed(0)}%${b.vehicle_color ? " · " + b.vehicle_color : ""}${b.speed_kmh != null ? " · " + b.speed_kmh + " km/h" : ""}${b.track_id ? " #" + b.track_id : ""}`;
         const metrics = ctx.measureText(label);
         const th = 15;
         ctx.fillStyle = color;

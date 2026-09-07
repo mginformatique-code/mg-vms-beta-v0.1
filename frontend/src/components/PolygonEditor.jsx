@@ -12,7 +12,7 @@ import { X, Undo2, Trash2, Save } from "lucide-react";
  *  - onCancel(): callback fermeture sans sauver
  *  - minPoints (default 3)
  */
-export default function PolygonEditor({ imageSrc, initialPolygon = [], onSave, onCancel, minPoints = 3, title = "Dessiner la zone" }) {
+export default function PolygonEditor({ imageSrc, initialPolygon = [], onSave, onCancel, minPoints = 3, maxPoints = Infinity, title = "Dessiner la zone" }) {
   const [points, setPoints] = useState(initialPolygon);
   const [size, setSize] = useState({ w: 640, h: 360 });
   const imgRef = useRef(null);
@@ -69,6 +69,7 @@ export default function PolygonEditor({ imageSrc, initialPolygon = [], onSave, o
     const [xn, yn] = getPt(e);
     const idx = findNearHandle(xn, yn);
     if (idx >= 0) { setDragIdx(idx); return; }
+    if (points.length >= maxPoints) return;
     setPoints((p) => [...p, [xn, yn]]);
   };
 
@@ -118,7 +119,9 @@ export default function PolygonEditor({ imageSrc, initialPolygon = [], onSave, o
                     data-testid="polygon-canvas" />
           </div>
           <p className="text-xs text-muted-foreground mt-2">
-            Cliquez pour ajouter un sommet · Glissez une poignée pour la déplacer · Minimum {minPoints} points · {points.length} point(s) actuellement
+            Cliquez pour ajouter un sommet · Glissez une poignée pour la déplacer ·{" "}
+            {Number.isFinite(maxPoints) ? `${minPoints} points requis` : `Minimum ${minPoints} points`} · {points.length}
+            {Number.isFinite(maxPoints) ? `/${maxPoints}` : ""} point(s) actuellement
           </p>
         </div>
         <div className="p-3 border-t border-border flex justify-end gap-2">

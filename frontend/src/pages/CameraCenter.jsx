@@ -28,6 +28,7 @@ import LivePlayer from "@/components/video/LivePlayer";
 import RetailTrackingOverlay from "@/components/video/RetailTrackingOverlay";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import { AiDetectionSettings } from "@/pages/PluginPage";
+import SpeedCalibrationEditor from "@/components/SpeedCalibrationEditor";
 import {
   Camera, Wifi, Video, Layers, Cpu, Volume2, Sun, Bell, Move3d, Wrench,
   ScanLine, RefreshCw, AlertCircle, CircleCheck, ChevronLeft, ChevronRight,
@@ -526,6 +527,9 @@ function AITab({ caps, cameraId }) {
   // s'arrêtaient net à la tombée de la nuit sur une caméra non spécialisée.
   const [anprQuality, setAnprQuality] = useState(null);
   const [resettingAnprQuality, setResettingAnprQuality] = useState(false);
+  // v3.37 · Vitesse calibrée (homographie) — voir set_speed_calibration
+  const [showSpeedCal, setShowSpeedCal] = useState(false);
+  const [clearingSpeedCal, setClearingSpeedCal] = useState(false);
   useEffect(() => {
     const load = async () => {
       const [cam, insp] = await Promise.all([
@@ -571,6 +575,19 @@ function AITab({ caps, cameraId }) {
   };
   const plugins = ai.cam?.enabled_plugins || [];
   const stages = ai.stages || {};
+  const speedCal = ai.cam?.pipeline_config?.ai?.speed_calibration;
+  const clearSpeedCal = async () => {
+    setClearingSpeedCal(true);
+    try {
+      await api.delete(`/cameras/${cameraId}/speed-calibration`);
+      setAi((prev) => ({
+        ...prev,
+        cam: { ...prev.cam, pipeline_config: { ...prev.cam.pipeline_config, ai: { ...(prev.cam.pipeline_config?.ai || {}), speed_calibration: undefined } } },
+      }));
+      toast.success("Calibration vitesse supprimée");
+    } catch (e) { toast.error("Échec de la suppression"); }
+    finally { setClearingSpeedCal(false); }
+  };
   return (
     <div className="space-y-3">
       {/* v3.27 · Réglage GLOBAL (toutes caméras/classes) — jusqu'ici visible
@@ -607,6 +624,48 @@ function AITab({ caps, cameraId }) {
           <div>Total</div><div className="font-mono">{fmtMs(stages.total)}</div>
         </div>
       </Card>
+      <Card className="p-4 space-y-2 md:col-span-2" data-testid="cam-speed-calibration">
+        <div className="flex items-center justify-between">
+          <div className="text-xs uppercase tracking-wider text-muted-foreground">
+            Vitesse calibrée (homographie)
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => setShowSpeedCal(true)} data-testid="speed-cal-open">
+              {speedCal?.enabled ? "Recalibrer" : "Calibrer"}
+            </Button>
+            {speedCal?.enabled && (
+              <Button size="sm" variant="outline" onClick={clearSpeedCal} disabled={clearingSpeedCal} data-testid="speed-cal-clear">
+                {clearingSpeedCal ? "…" : "Supprimer"}
+              </Button>
+            )}
+          </div>
+        </div>
+        {speedCal?.enabled ? (
+          <div className="text-sm">
+            Zone calibrée : {speedCal.width_m}m × {speedCal.length_m}m — chaque véhicule suivi affiche sa vitesse
+            réelle (km/h) sur le mur vidéo, à l'arrêt comme en mouvement.
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Non calibrée — tracez un rectangle de dimensions réelles connues au sol pour afficher la vitesse (km/h)
+            de chaque véhicule suivi par cette caméra.
+          </p>
+        )}
+      </Card>
+      {showSpeedCal && (
+        <SpeedCalibrationEditor
+          camera={ai.cam}
+          existing={speedCal}
+          onClose={() => setShowSpeedCal(false)}
+          onSaved={(cal) => {
+            setShowSpeedCal(false);
+            setAi((prev) => ({
+              ...prev,
+              cam: { ...prev.cam, pipeline_config: { ...prev.cam.pipeline_config, ai: { ...(prev.cam.pipeline_config?.ai || {}), speed_calibration: cal } } },
+            }));
+          }}
+        />
+      )}
       {tuning && (
         <Card className="p-4 space-y-2 md:col-span-2" data-testid="cam-anpr-tuning">
           <div className="flex items-center justify-between">

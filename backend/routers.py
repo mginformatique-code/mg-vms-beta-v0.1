@@ -483,6 +483,89 @@ async def get_pipeline_config_endpoint(camera_id: str,
     return {"pipeline_config": effective, "explicit": cfg}
 
 
+class SpeedCalibrationInput(BaseModel):
+    """4 points cliqués dans l'ordre proche-gauche, proche-droite, loin-droite,
+    loin-gauche sur un rectangle au sol de dimensions réelles connues
+    (largeur = distance proche-gauche→proche-droite, longueur = distance
+    proche→loin). Coordonnées normalisées 0-1, cohérentes avec bbox_norm
+    utilisé partout ailleurs dans le pipeline (voir tracking frontend)."""
+    image_points: List[List[float]] = Field(..., min_length=4, max_length=4)
+    width_m: float = Field(..., gt=0, le=200)
+    length_m: float = Field(..., gt=0, le=500)
+    max_reasonable_kmh: float = Field(180.0, gt=0, le=400)
+
+
+@api_router.put("/cameras/{camera_id}/speed-calibration")
+async def set_speed_calibration(camera_id: str, data: SpeedCalibrationInput,
+                                  user: dict = Depends(require_role("technician"))):
+    """v3.37 · Calibration vitesse par homographie — voir investigation
+    tracking "sans latence, tout temps, immobile ou mobile" (demande
+    explicite : reproduire YOLO+ByteTrack+transformation de perspective
+    pour une vitesse km/h fiable par véhicule, à l'arrêt comme en mouvement).
+
+    L'homographie est calculée UNE FOIS ici (pas à chaque cycle IA) et
+    stockée telle quelle — ai_engine.py l'applique ensuite au point de
+    contact au sol de chaque bbox trackée pour convertir un déplacement en
+    pixels normalisés en un déplacement réel en mètres.
+    """
+    import numpy as np
+    import cv2
+
+    existing = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Caméra introuvable")
+
+    src = np.array(data.image_points, dtype=np.float32)
+    dst = np.array([[0.0, 0.0], [data.width_m, 0.0],
+                     [data.width_m, data.length_m], [0.0, data.length_m]], dtype=np.float32)
+    homography, _ = cv2.findHomography(src, dst)
+    if homography is None:
+        raise HTTPException(400, "Points invalides (alignés ou dégénérés) — impossible de calculer l'homographie")
+
+    calibration = {
+        "enabled": True,
+        "image_points": data.image_points,
+        "width_m": data.width_m,
+        "length_m": data.length_m,
+        "homography": homography.tolist(),
+        "max_reasonable_kmh": data.max_reasonable_kmh,
+        "calibrated_at": datetime.now(timezone.utc).isoformat(),
+        "calibrated_by": user.get("email"),
+    }
+    current = existing.get("pipeline_config") or {}
+    current_ai = dict(current.get("ai") or {})
+    current_ai["speed_calibration"] = calibration
+    current["ai"] = current_ai
+    await db.cameras.update_one({"id": camera_id}, {"$set": {"pipeline_config": current}})
+    try:
+        from ai_engine import signal_camera_config_changed
+        signal_camera_config_changed(camera_id)
+    except Exception:
+        pass
+    await log_audit(user, "camera_speed_calibration_set", camera_id,
+                     details=f"{data.width_m}m x {data.length_m}m")
+    return {"ok": True, "calibration": calibration}
+
+
+@api_router.delete("/cameras/{camera_id}/speed-calibration")
+async def clear_speed_calibration(camera_id: str, user: dict = Depends(require_role("technician"))):
+    existing = await db.cameras.find_one({"id": camera_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Caméra introuvable")
+    current = existing.get("pipeline_config") or {}
+    current_ai = dict(current.get("ai") or {})
+    current_ai.pop("speed_calibration", None)
+    current["ai"] = current_ai
+    await db.cameras.update_one({"id": camera_id}, {"$set": {"pipeline_config": current}})
+    try:
+        from ai_engine import signal_camera_config_changed
+        signal_camera_config_changed(camera_id)
+    except Exception:
+        pass
+    await log_audit(user, "camera_speed_calibration_cleared", camera_id)
+    return {"ok": True}
+
+
 @api_router.put("/cameras/{camera_id}")
 async def update_camera(camera_id: str, data: CameraInput, user: dict = Depends(require_role("technician"))):
     existing = await db.cameras.find_one({"id": camera_id}, {"_id": 0})

@@ -147,6 +147,10 @@ class CameraWorker:
         # ici, ex track_id absent) — il évite simplement l'appel OCR coûteux
         # quand on sait déjà, par le track_id, que ce serait du temps perdu.
         self._track_plate_cache: dict = {}
+        # v3.37 · Vitesse par homographie — historique de position réelle
+        # (mètres) par track_id, alimenté à chaque cycle. Voir
+        # _estimate_speed_kmh / routers.py::set_speed_calibration.
+        self._speed_track_history: dict = {}
         self._last_ts: float = 0.0
         # Squelette overlay (retail-suspicious-behavior) — throttle + cache
         # du dernier résultat par track_id pour éviter un squelette qui
@@ -687,6 +691,57 @@ class CameraWorker:
         ctx.timings["pose_ms"] = round(ms, 1)
         inspector.record(self.camera_id, "pose", ms)
 
+    def _estimate_speed_kmh(self, track_id, bbox_norm, homography, now_ts: float,
+                             max_kmh: float) -> Optional[float]:
+        """Vitesse réelle (km/h) d'un véhicule tracké, par homographie
+        image→sol calibrée par caméra (voir routers.py::set_speed_calibration,
+        demande explicite : reproduire YOLO+ByteTrack+transformation de
+        perspective, fiable à l'arrêt comme en mouvement, sans latence).
+
+        Point de référence : centre BAS de la bbox (contact au sol) — le
+        centre géométrique dérive avec la hauteur du véhicule vu en
+        perspective, pas le point de contact avec la chaussée.
+
+        Lissage EMA (0.35) + zone morte sous 2 km/h : un véhicule immobile
+        ne doit jamais "ramper" à cause du bruit de détection pixel — c'est
+        le point qui a fait échouer l'extrapolation d'affichage plus tôt
+        dans cette investigation, on ne le reproduit pas ici.
+        """
+        import numpy as _np
+        x1, y1, x2, y2 = bbox_norm
+        gx, gy = (x1 + x2) / 2.0, y2
+        vec = homography @ _np.array([gx, gy, 1.0])
+        if abs(vec[2]) < 1e-9:
+            return None
+        wx, wy = float(vec[0] / vec[2]), float(vec[1] / vec[2])
+
+        prev = self._speed_track_history.get(track_id)
+        prev_ema = prev.get("kmh_ema") if prev else None
+        self._speed_track_history[track_id] = {"x": wx, "y": wy, "ts": now_ts, "kmh_ema": prev_ema}
+        if prev is None:
+            return None  # 1re confirmation de ce track — pas encore de déplacement mesurable
+
+        dt = now_ts - prev["ts"]
+        if dt < 0.05:
+            return round(prev_ema, 1) if prev_ema is not None else None
+
+        dist_m = ((wx - prev["x"]) ** 2 + (wy - prev["y"]) ** 2) ** 0.5
+        raw_kmh = (dist_m / dt) * 3.6
+        if raw_kmh > max_kmh:
+            # Lecture aberrante (ré-association ByteTrack, saut d'ID) —
+            # ignorée plutôt que lissée dans l'EMA (la corromprait pour
+            # plusieurs cycles vu le poids donné à chaque nouvelle mesure).
+            raw_kmh = prev_ema if prev_ema is not None else 0.0
+        ema = raw_kmh if prev_ema is None else (0.35 * raw_kmh + 0.65 * prev_ema)
+        if ema < 2.0:
+            ema = 0.0
+        self._speed_track_history[track_id]["kmh_ema"] = ema
+        return round(ema, 1)
+
+    def _purge_speed_history(self, seen_track_ids: set) -> None:
+        for tid in [t for t in self._speed_track_history if t not in seen_track_ids]:
+            self._speed_track_history.pop(tid, None)
+
     # ── Entrée principale (sync, appelée via asyncio.to_thread) ─────
 
     def analyze(self, frame_input, enabled_plugins: Optional[list] = None,
@@ -733,6 +788,14 @@ class CameraWorker:
         # Overlay LIVE : bboxes normalisées + track_id (+ squelette pose si
         # calculé par _stage_pose, retail-suspicious-behavior uniquement)
         w, h = ctx.width, ctx.height
+        # v3.37 · Vitesse calibrée (homographie) — voir set_speed_calibration
+        # (routers.py) et _estimate_speed_kmh ci-dessous. Coût nul sur une
+        # caméra non calibrée (aucune matrice à appliquer).
+        _speed_cal = ((camera or {}).get("pipeline_config") or {}).get("ai", {}).get("speed_calibration")
+        _speed_H = None
+        if _speed_cal and _speed_cal.get("enabled") and _speed_cal.get("homography"):
+            import numpy as _np
+            _speed_H = _np.array(_speed_cal["homography"], dtype=_np.float64)
         for d in ctx.detections:
             x1, y1, x2, y2 = d["_bbox"]
             box = {
@@ -744,8 +807,16 @@ class CameraWorker:
             }
             if d.get("_keypoints_norm"):
                 box["keypoints_norm"] = d["_keypoints_norm"]
+            if _speed_H is not None and box["track_id"] is not None and d["class"] in _ae.VEHICLE_CLASSES:
+                speed_kmh = self._estimate_speed_kmh(
+                    box["track_id"], box["bbox_norm"], _speed_H, ctx.timestamp,
+                    _speed_cal.get("max_reasonable_kmh", 180.0))
+                if speed_kmh is not None:
+                    box["speed_kmh"] = speed_kmh
             ctx.overlay_boxes.append(box)
             ctx.counts[d["label"]] = ctx.counts.get(d["label"], 0) + 1
+        if _speed_H is not None:
+            self._purge_speed_history({b["track_id"] for b in ctx.overlay_boxes if b.get("track_id") is not None})
 
         ctx.timings["total_ms"] = round((time.monotonic() - t_total) * 1000, 1)
         # v0.8-rc6 · Trace terminé : outcome = résumé de la détection

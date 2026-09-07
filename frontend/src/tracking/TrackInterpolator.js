@@ -76,7 +76,8 @@ export class TrackInterpolator {
       }
       boxes.push({
         cls: rec.cls, label: rec.label, confidence: rec.confidence,
-        vehicle_color: rec.vehicle_color, keypoints_norm: rec.keypoints_norm,
+        vehicle_color: rec.vehicle_color, speed_kmh: rec.speed_kmh,
+        keypoints_norm: rec.keypoints_norm,
         track_id: rec.id, bbox_norm: bbox, predicted,
       });
     }
