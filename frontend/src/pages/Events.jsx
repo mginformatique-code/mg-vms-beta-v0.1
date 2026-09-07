@@ -192,7 +192,6 @@ export default function Events() {
   };
 
   const load = useCallback(async () => {
-    if (isPlaques) return;
     setLoading(true);
     try {
       const r = await api.get("/events", { params: buildParams({ offset: 0 }) });
@@ -200,10 +199,9 @@ export default function Events() {
       setHasMore(r.data.length === PAGE_SIZE);
       setTotal(parseInt(r.headers["x-total-count"] || r.data.length, 10));
     } catch (e) {} finally { setLoading(false); }
-  }, [isPlaques, activeFilter, cameraId]);
+  }, [activeFilter, cameraId]);
 
   const poll = useCallback(async () => {
-    if (isPlaques) return;
     try {
       const r = await api.get("/events", { params: buildParams({ offset: 0 }) });
       setEvents((prev) => {
@@ -213,7 +211,7 @@ export default function Events() {
       });
       setTotal(parseInt(r.headers["x-total-count"] || 0, 10));
     } catch (e) {}
-  }, [isPlaques, activeFilter, cameraId]);
+  }, [activeFilter, cameraId]);
 
   const loadMore = async () => {
     setLoadingMore(true);
@@ -225,12 +223,16 @@ export default function Events() {
   };
 
   useEffect(() => { api.get("/cameras").then((r) => setCams(r.data)).catch(() => {}); }, []);
+  // v3.39 · Le chip "tous" (Informations véhicules) affiche DÉSORMAIS le
+  // module véhicule EN PLUS du flux d'événements (pas à sa place, demande
+  // explicite après un premier essai en remplacement pur) — le flux
+  // d'événements doit donc se charger pour ce chip aussi, plus seulement
+  // pour les autres filtres.
   useEffect(() => {
-    if (isPlaques) return;
     load();
     const iv = setInterval(poll, 15000);
     return () => clearInterval(iv);
-  }, [load, poll, isPlaques]);
+  }, [load, poll]);
 
   return (
     <div className="p-4 md:p-6 space-y-4" data-testid="events-page">
@@ -241,58 +243,54 @@ export default function Events() {
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {isPlaques
-              ? "Historique par plaque — recherche IA, identités, fiches véhicule complètes."
+              ? <>Recherche IA véhicules, identités, fiches complètes — et <span className="mono">{total}</span> événement(s) au total.</>
               : <>Détections IA temps réel — <span className="mono">{total}</span> au total</>}
           </p>
         </div>
-        {!isPlaques && (
-          <div className="flex items-center gap-2 flex-wrap">
-            <select data-testid="events-camera-filter" value={cameraId} onChange={(e) => setCameraId(e.target.value)} className="border border-border bg-card text-sm px-2 py-2 outline-none">
-              <option value="">Toutes les caméras</option>
-              {cams.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <button onClick={load} data-testid="events-refresh-btn" className="p-2 border border-border hover:bg-secondary"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button>
-          </div>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          <select data-testid="events-camera-filter" value={cameraId} onChange={(e) => setCameraId(e.target.value)} className="border border-border bg-card text-sm px-2 py-2 outline-none">
+            <option value="">Toutes les caméras</option>
+            {cams.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <button onClick={load} data-testid="events-refresh-btn" className="p-2 border border-border hover:bg-secondary"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button>
+        </div>
       </div>
 
       {/* v1.0-rc4 · Recherche IA — toutes recherches confondues (personnes,
           véhicules, caméra, horaire). Le chip Informations véhicules
           (v3.39 : fusion Tous+Plaques) a déjà sa recherche IA dédiée
           (groupée par plaque) dans sa section. */}
-      {!isPlaques && (
-        <div className="flex items-center gap-2 max-w-3xl" data-testid="events-smart-search">
-          <div className="relative flex-1">
-            <Sparkles size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#0044FF]" />
-            <input
-              value={smart}
-              onChange={(e) => setSmart(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && runSmartSearch()}
-              data-testid="events-smart-input"
-              placeholder="Recherche IA : « personne à 12h au téléphone », « voiture devant la cam 12 à 12h », « camions ce matin »…"
-              className="w-full pl-9 pr-8 py-2 bg-card border border-input outline-none text-sm focus:border-[#0044FF]"
-            />
-            {smart && (
-              <button onClick={clearSmart} data-testid="events-smart-clear"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                <XIcon size={13} />
-              </button>
-            )}
-          </div>
-          <button
-            onClick={runSmartSearch}
-            disabled={smartLoading || !smart.trim()}
-            data-testid="events-smart-btn"
-            className="flex items-center gap-1 px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40"
-          >
-            {smartLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={13} />}
-            Recherche IA
-          </button>
+      <div className="flex items-center gap-2 max-w-3xl" data-testid="events-smart-search">
+        <div className="relative flex-1">
+          <Sparkles size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#0044FF]" />
+          <input
+            value={smart}
+            onChange={(e) => setSmart(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && runSmartSearch()}
+            data-testid="events-smart-input"
+            placeholder="Recherche IA : « personne à 12h au téléphone », « voiture devant la cam 12 à 12h », « camions ce matin »…"
+            className="w-full pl-9 pr-8 py-2 bg-card border border-input outline-none text-sm focus:border-[#0044FF]"
+          />
+          {smart && (
+            <button onClick={clearSmart} data-testid="events-smart-clear"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              <XIcon size={13} />
+            </button>
+          )}
         </div>
-      )}
+        <button
+          onClick={runSmartSearch}
+          disabled={smartLoading || !smart.trim()}
+          data-testid="events-smart-btn"
+          className="flex items-center gap-1 px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40"
+        >
+          {smartLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={13} />}
+          Recherche IA
+        </button>
+      </div>
 
       {/* Filtres IA détectés + reset */}
-      {!isPlaques && smartResult && (
+      {smartResult && (
         <div className="border border-[#0044FF]/40 bg-[#0044FF]/5 p-2 text-[11px] mono flex flex-wrap gap-2 items-center" data-testid="events-smart-filters">
           <span className="text-[#0044FF] font-medium">
             {(smartResult.events || []).length} événement(s) pour « {smartResult.query} »
@@ -353,9 +351,20 @@ export default function Events() {
         })}
       </div>
 
-      {isPlaques ? (
-        <VehiclesSection embedded initialQuery={plaquesQuery} />
-      ) : shown.length === 0 ? (
+      {/* v3.39 · Fusion Tous+Plaques : le module véhicule s'ajoute EN PLUS
+          du flux d'événements ci-dessous (pas à sa place) — demande
+          explicite après un premier essai en remplacement pur. Un premier
+          passage avait tout basculé sur le module seul ; corrigé pour que
+          "Informations véhicules" montre les deux, le module en premier. */}
+      {isPlaques && <VehiclesSection embedded initialQuery={plaquesQuery} />}
+
+      {isPlaques && (
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground border-t border-border pt-3" data-testid="events-tiles-divider">
+          Tous les événements
+        </div>
+      )}
+
+      {shown.length === 0 ? (
         <div className="text-muted-foreground text-sm py-20 text-center" data-testid="events-empty">
           {smartResult ? "Aucun événement ne correspond à cette recherche IA." : "Aucun événement détecté pour ces filtres."}
         </div>
@@ -401,7 +410,7 @@ export default function Events() {
         </div>
       )}
 
-      {!isPlaques && !smartResult && hasMore && shown.length > 0 && (
+      {!smartResult && hasMore && shown.length > 0 && (
         <div className="flex justify-center pt-2">
           <button onClick={loadMore} disabled={loadingMore} data-testid="events-load-more"
                   className="flex items-center gap-2 px-4 py-2 border border-border text-xs uppercase tracking-wider text-muted-foreground hover:text-foreground hover:border-[#0044FF]/60 disabled:opacity-50">
