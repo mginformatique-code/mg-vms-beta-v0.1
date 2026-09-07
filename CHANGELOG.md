@@ -2,6 +2,24 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.44-perf-timeline-vehicules-ptz-patrouille] — 2026-09-07 — Timeline/Informations véhicules lentes corrigées, patrouille PTZ automatique
+
+### Fixed
+- **Page "Informations véhicules" très lente (dizaines de secondes).** La requête `list_vehicles` récupère jusqu'à 8000 lectures de plaques pour reconstruire la liste groupée par véhicule (nécessaire au calcul du nombre de passages, de la confiance moyenne, etc. sur CHAQUE lecture, pas seulement la dernière) ; `to_list(8000)` ne bornait que la matérialisation côté client, pas le curseur réseau, qui continuait à faire l'aller-retour par lots de ~101 documents. Mesuré en prod (25 900+ plaques) : 11,2s pour le seul fetch. Ajout de `.limit(8000).batch_size(8000)` (un seul aller-retour réseau) : 1,5-2s pour le même résultat, sans aucun changement de logique de fusion.
+- **Timeline (page dédiée) lente, jusqu'à plusieurs minutes.** Deux causes cumulées : (1) les 4 couches (événements, alertes, plaques, segments) étaient récupérées SÉQUENTIELLEMENT au lieu d'en parallèle ; (2) la requête "alertes" oubliait d'exclure le champ `thumbnail` (miniature embarquée, ~550 Ko/document, présent sur la quasi-totalité des 43 000+ alertes en base) — MongoDB devait le décompresser pour chaque document scanné même si jamais utilisé par cette vue (même catégorie de bug déjà corrigée sur `/vehicles` en v3.17, jamais généralisée à cette route). Mesuré : 8,4s séquentiel (dont 3-5s sur les seules alertes) sur une fenêtre 24h avec les 14 caméras -> ~1,5-2s en parallèle avec l'exclusion corrigée.
+
+### Added
+- **Patrouille PTZ automatique** (style Reolink), dans l'onglet PTZ de Camera Center :
+  - Création de presets ILLIMITÉS à la position actuelle de la caméra (ONVIF `SetPreset` sans token = création, la caméra choisit son propre identifiant) — jusque-là, seuls 6 boutons de rappel fixes (1-6) existaient, sans aucun moyen d'en créer depuis l'interface.
+  - Suppression de presets (ONVIF `RemovePreset`), retire aussi automatiquement le preset d'une éventuelle séquence de patrouille en cours.
+  - Séquence de patrouille configurable par caméra : cases à cocher pour choisir quels presets participent, ordre réorganisable librement (flèches haut/bas — pas de distinction technique entre "ordre pré-défini" et "ordre manuel", c'est le même champ, dans l'ordre choisi), temps d'arrêt réglable par preset.
+  - Boucle de patrouille (`backend/ptz_patrol.py`) : une tâche par caméra, relit sa config à chaque cycle (réagit immédiatement à un changement), reprise automatique au démarrage du conteneur API si une patrouille était active.
+  - **Anti-conflit avec l'opérateur** : toute commande PTZ manuelle (joystick ou rappel direct d'un preset) met la patrouille en pause 20s avant reprise automatique — évite qu'elle "arrache" la caméra des mains de l'utilisateur juste après un positionnement manuel.
+
+### Notes techniques
+- Presets et patrouille reposent sur le driver ONVIF générique (`drivers/onvif_driver.py`) — fonctionne sur toute caméra ONVIF Profile S/T conforme, indépendamment du fabricant, sans configuration supplémentaire.
+- Root cause identique sur `/vehicles` et `/timeline` (projection Mongo incomplète sur un champ image lourd) : à garder en tête pour toute future route qui lit `db.alerts`, `db.events` ou `db.plates` sans réutiliser une projection déjà auditée.
+
 ## [v3.28-anpr-isole-multi-gpu] — 2026-09-07 — Root cause tracking lent (verrou ANPR/YOLO), service ANPR isolé (2e GPU), vitesse calibrée, sélecteur multi-GPU
 
 ### Fixed
