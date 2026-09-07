@@ -1,49 +1,89 @@
 import React, { useState, useEffect } from "react";
 import { X, Gauge } from "lucide-react";
 import PolygonEditor from "@/components/PolygonEditor";
+import LivePlayer from "@/components/video/LivePlayer";
 import api from "@/lib/api";
 import { toast } from "sonner";
 
 /**
  * SpeedCalibrationEditor — v3.37 · Calibration vitesse par homographie.
  *
- * 4 points cliqués sur un snapshot (rectangle au sol, dimensions réelles
- * connues) -> l'utilisateur donne largeur/longueur réelles en mètres ->
- * le backend calcule l'homographie (routers.py::set_speed_calibration).
+ * 4 points cliqués sur une image de référence (rectangle au sol, dimensions
+ * réelles connues) -> l'utilisateur donne largeur/longueur réelles en
+ * mètres -> le backend calcule l'homographie (routers.py::set_speed_calibration).
  * Réutilise PolygonEditor tel quel (maxPoints=4) plutôt qu'un nouveau
  * composant de dessin — même mécanique clic/glisser déjà en prod pour les
  * zones intelligentes et le ROI ANPR.
  *
- * Snapshot source : GET /ai/debug/{id}.frame_preview (dernière frame
- * RÉELLEMENT analysée par le pipeline, en data URI déjà en base64) plutôt
- * que le helper /_helpers/camera-snapshot — celui-ci passe par
- * go2rtc /api/frame.jpeg, qui échoue en pratique sur les flux H265 (testé
- * en direct : 500 côté go2rtc sur une caméra H265 pourtant bien live).
- * frame_preview n'a pas ce problème : c'est déjà un JPEG décodé côté
- * pipeline, indépendant du codec source.
+ * Image de référence : capturée CÔTÉ CLIENT depuis le flux WebRTC déjà
+ * fonctionnel (LivePlayer, celui du Mur vidéo), pas via un snapshot
+ * backend — testé en direct, les deux routes existantes échouent en
+ * pratique : /_helpers/camera-snapshot (go2rtc frame.jpeg renvoie 500 sur
+ * un flux H265, confirmé sur rue_vers_centre bien qu'actif) et /ai/debug
+ * (_last_debug vit dans la mémoire du process mgvms-pipeline, jamais
+ * mgvms-backend qui sert cette route — deux containers séparés, aucune
+ * synchro pour ce champ). Le flux WebRTC, lui, fonctionne déjà partout :
+ * en capturer une frame est fiable indépendamment du codec source.
  */
 export default function SpeedCalibrationEditor({ camera, existing, onClose, onSaved }) {
-  const [step, setStep] = useState("points");
+  const [step, setStep] = useState("capture");
   const [points, setPoints] = useState(existing?.image_points || []);
   const [widthM, setWidthM] = useState(existing?.width_m ?? "");
   const [lengthM, setLengthM] = useState(existing?.length_m ?? "");
   const [saving, setSaving] = useState(false);
   const [snapshotUrl, setSnapshotUrl] = useState(null);
+  const [captureError, setCaptureError] = useState(false);
 
   useEffect(() => {
-    if (!camera?.id) return;
-    let cancelled = false;
-    api.get(`/ai/debug/${camera.id}`)
-      .then(({ data }) => {
-        if (cancelled) return;
-        if (data?.available && data.frame_preview) setSnapshotUrl(data.frame_preview);
-        else setSnapshotUrl(`${process.env.REACT_APP_BACKEND_URL}/api/plugins/_helpers/camera-snapshot/${camera.id}?_=${Date.now()}`);
-      })
-      .catch(() => {
-        if (!cancelled) setSnapshotUrl(`${process.env.REACT_APP_BACKEND_URL}/api/plugins/_helpers/camera-snapshot/${camera.id}?_=${Date.now()}`);
-      });
-    return () => { cancelled = true; };
-  }, [camera?.id]);
+    if (step !== "capture" || !camera?.id) return;
+    let attempts = 0;
+    const iv = setInterval(() => {
+      attempts += 1;
+      const video = document.querySelector('[data-testid="speed-cal-capture-video"]');
+      if (video && video.readyState >= 2 && video.videoWidth > 0) {
+        clearInterval(iv);
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          canvas.getContext("2d").drawImage(video, 0, 0);
+          setSnapshotUrl(canvas.toDataURL("image/jpeg", 0.85));
+          setStep("points");
+        } catch (e) {
+          setCaptureError(true);
+        }
+      } else if (attempts > 40) {
+        clearInterval(iv);
+        setCaptureError(true);
+      }
+    }, 500);
+    return () => clearInterval(iv);
+  }, [step, camera?.id]);
+
+  if (step === "capture") {
+    return (
+      <div className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4" data-testid="speed-calibration-capture">
+        <div className="bg-card border border-border w-full max-w-lg p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="font-head font-semibold text-sm flex items-center gap-2"><Gauge size={14} /> Capture du flux…</div>
+            <button onClick={onClose} className="p-1 hover:bg-secondary" data-testid="speed-calibration-close"><X size={14} /></button>
+          </div>
+          <div className="relative aspect-video bg-black overflow-hidden">
+            {camera?.id && <LivePlayer camera={camera} hd={false} dataTestId="speed-cal-capture" />}
+          </div>
+          {captureError ? (
+            <p className="text-xs text-[#FF3333]">
+              Flux indisponible — vérifiez que la caméra est en ligne, puis réessayez.
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Connexion au flux en cours pour capturer une image de référence…
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (step === "points") {
     return (
