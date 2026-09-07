@@ -36,6 +36,7 @@ const EMPTY_FORM = {
   profile_token: "", profile_name: "",
   resolution: "", fps: null, bitrate: null,
   ptz_enabled: false, record_enabled: true, detect_enabled: false,
+  anpr_dedicated: false,
   enabled_plugins: [],
   record_mode: "continuous", storage_pool_id: "", storage_max_size_gb: 0,
   rtsp_transport: "tcp", preferred_codec: "auto", stream_mode: "auto",
@@ -95,6 +96,7 @@ export default function Cameras() {
       profile_token: c.profile_token || "", profile_name: c.profile_name || "",
       resolution: c.resolution || "", fps: c.fps || null, bitrate: c.bitrate || null,
       ptz_enabled: !!c.ptz_enabled, record_enabled: c.record_enabled !== false, detect_enabled: !!c.detect_enabled,
+      anpr_dedicated: !!c.anpr_dedicated,
       enabled_plugins: Array.isArray(c.enabled_plugins) ? c.enabled_plugins : [],
       record_mode: c.record_mode || "continuous",
       storage_pool_id: c.storage_pool_id || "",
@@ -553,6 +555,12 @@ export default function Cameras() {
                 <input type="checkbox" checked={form.detect_enabled} onChange={(e) => setForm({ ...form, detect_enabled: e.target.checked })} />
                 Analyse IA activée
                 <span className="text-[10px] text-muted-foreground">{t("cam.ai_killswitch")}</span>
+              </label>
+              <label className="flex items-center gap-2 text-sm" data-testid="anpr-dedicated-toggle">
+                <input type="checkbox" checked={form.anpr_dedicated}
+                       onChange={(e) => setForm({ ...form, anpr_dedicated: e.target.checked })} />
+                Caméra ANPR dédiée
+                <span className="text-[10px] text-muted-foreground">force l'ANPR en tout temps (nuit incluse)</span>
               </label>
             </div>
 

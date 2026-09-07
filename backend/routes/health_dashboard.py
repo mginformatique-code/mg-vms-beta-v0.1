@@ -780,14 +780,47 @@ async def diagnostics_anpr_quality(user: dict = Depends(require_permission("view
 
     Le seuil et l'hystérésis sont configurables via
     ``PUT /api/diagnostics/anpr-quality/config``.
+
+    v3.48 · Enrichi de ``is_night``/``sunset_utc``/``sunrise_utc`` par
+    caméra — coucher/lever de soleil RÉEL (position caméra, sinon site,
+    sinon repli France), pas une heure fixe. Sert de rappel utilisateur
+    indépendant de ``suspended`` : une caméra peut ne pas être suspendue
+    (score qualité global correct, ex. éclairage public) tout en étant peu
+    fiable ponctuellement de nuit (reflet IR sur une plaque en mouvement,
+    voir CHANGELOG) — le rappel se base donc sur la tombée de la nuit
+    elle-même, pas uniquement sur l'état de suspension.
     """
     # v3.24 · Étape 2b : anpr_quality.config_dict()/.states() (catégorie b)
     # via snapshot Redis, plus d'import direct pipeline_v2.anpr_quality.
     from pipeline_snapshot import get_snapshot
+    from pipeline_v2.anpr_quality import is_night_now
     snap = await get_snapshot()
     if snap is None:
         return dict(_SNAPSHOT_UNAVAILABLE)
-    return snap["anpr_quality"]
+    result = dict(snap["anpr_quality"])
+    cameras = dict(result.get("cameras") or {})
+    if cameras:
+        cam_docs = await db.cameras.find(
+            {"id": {"$in": list(cameras.keys())}}, {"_id": 0, "id": 1, "lat": 1, "lng": 1, "site_id": 1}
+        ).to_list(len(cameras))
+        cam_by_id = {c["id"]: c for c in cam_docs}
+        site_ids = {c.get("site_id") for c in cam_docs if c.get("site_id")}
+        site_docs = await db.sites.find(
+            {"id": {"$in": list(site_ids)}}, {"_id": 0, "id": 1, "lat": 1, "lng": 1}
+        ).to_list(len(site_ids)) if site_ids else []
+        site_by_id = {s["id"]: s for s in site_docs}
+        now = datetime.now(timezone.utc)
+        for cam_id, state in cameras.items():
+            cam_doc = cam_by_id.get(cam_id) or {}
+            site_doc = site_by_id.get(cam_doc.get("site_id")) or {}
+            lat = cam_doc.get("lat") or site_doc.get("lat")
+            lng = cam_doc.get("lng") or site_doc.get("lng")
+            is_night, sunset, sunrise = is_night_now(lat, lng, now)
+            state["is_night"] = is_night
+            state["sunset_utc"] = sunset.isoformat() if sunset else None
+            state["sunrise_utc"] = sunrise.isoformat() if sunrise else None
+        result["cameras"] = cameras
+    return result
 
 
 @health_dashboard_router.put("/diagnostics/anpr-quality/config")

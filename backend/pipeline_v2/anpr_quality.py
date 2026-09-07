@@ -27,9 +27,10 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 logger = logging.getLogger("pipeline_v2.anpr_quality")
@@ -76,6 +77,65 @@ class QualityScore:
             "reasons_pass": list(self.reasons_pass),
             "reasons_fail": list(self.reasons_fail),
         }
+
+
+def sun_times_utc(lat: float, lng: float, date: Optional[datetime] = None) -> tuple:
+    """Calcule (lever, coucher) du soleil en UTC pour une date/position.
+
+    v3.48 · Demande explicite : le rappel "ANPR ne fonctionne pas après la
+    tombée de la nuit" doit se baser sur l'heure RÉELLE de coucher du
+    soleil (site géolocalisé), pas une heure fixe (l'ancien
+    ``night_hour_start=22`` était de toute façon déjà informatif, jamais
+    branché sur la décision réelle — voir ``should_run_anpr``, basé
+    uniquement sur la qualité mesurée de l'image).
+
+    Formule solaire standard (déclinaison + équation du temps), sans
+    dépendance externe — précision ~1-2 min, largement suffisante pour un
+    simple rappel utilisateur (pas un usage astronomique de précision).
+    Retourne ``(None, None)`` en cas de jour/nuit polaire (latitudes
+    extrêmes, ne devrait jamais arriver pour un déploiement MG-VMS réel).
+    """
+    date = date or datetime.now(timezone.utc)
+    n = date.timetuple().tm_yday
+    lat_rad = math.radians(lat)
+
+    b = math.radians(360.0 / 365.0 * (n - 81))
+    eot = 9.87 * math.sin(2 * b) - 7.53 * math.cos(b) - 1.5 * math.sin(b)  # minutes
+    decl = math.radians(23.45) * math.sin(math.radians(360.0 / 365.0 * (n - 81)))
+
+    cos_h = -math.tan(lat_rad) * math.tan(decl)
+    if cos_h < -1.0 or cos_h > 1.0:
+        return None, None
+    hour_angle = math.degrees(math.acos(cos_h))
+
+    solar_noon_utc_h = 12.0 - lng / 15.0 - eot / 60.0
+    sunrise_h = (solar_noon_utc_h - hour_angle / 15.0) % 24
+    sunset_h = (solar_noon_utc_h + hour_angle / 15.0) % 24
+
+    base = datetime(date.year, date.month, date.day, tzinfo=timezone.utc)
+    return base + timedelta(hours=sunrise_h), base + timedelta(hours=sunset_h)
+
+
+# Repli France (proche du centre géographique) — utilisé UNIQUEMENT quand ni
+# la caméra ni son site n'ont de lat/lng renseignées. Toute imprécision liée
+# à ce repli reste de l'ordre de quelques dizaines de minutes au pire (écart
+# de longitude/latitude typique en France métropolitaine), acceptable pour
+# un simple rappel utilisateur — bien mieux qu'une heure fixe type "22h".
+_FRANCE_FALLBACK_LAT, _FRANCE_FALLBACK_LNG = 46.6, 2.5
+
+
+def is_night_now(lat: Optional[float], lng: Optional[float],
+                  now: Optional[datetime] = None) -> tuple:
+    """Retourne ``(is_night, sunset_utc, sunrise_utc)`` pour l'instant présent."""
+    now = now or datetime.now(timezone.utc)
+    lat = lat if lat is not None else _FRANCE_FALLBACK_LAT
+    lng = lng if lng is not None else _FRANCE_FALLBACK_LNG
+    sunrise, sunset = sun_times_utc(lat, lng, now)
+    if sunrise is None:
+        return False, None, None
+    # Nuit = après le coucher du jour courant OU avant le lever du jour courant.
+    is_night = now >= sunset or now < sunrise
+    return is_night, sunset, sunrise
 
 
 @dataclass

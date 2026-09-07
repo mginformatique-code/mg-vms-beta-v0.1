@@ -112,22 +112,31 @@ function AnprSuspendedBanner({ cams }) {
   }, []);
   if (!states) return null;
   const camName = (id) => cams.find((c) => c.id === id)?.name || id;
-  const suspended = Object.values(states.cameras || {}).filter((s) => s.suspended && !s.is_specialized);
-  if (suspended.length === 0) return null;
+  // v3.48 · Deux signaux distincts, réunis dans le même bandeau :
+  // - `is_night` (coucher de soleil RÉEL, position caméra/site) — rappel
+  //   général : même quand le score qualité global reste correct
+  //   (éclairage public), un reflet IR ponctuel sur une plaque en
+  //   mouvement peut rester non fiable la nuit (voir CHANGELOG).
+  // - `suspended` — l'auto-suspension qualité a explicitement coupé l'OCR
+  //   (cas plus sévère, avec sa propre raison mesurée).
+  // Jamais affiché pour une caméra ANPR dédiée (is_specialized).
+  const concerned = Object.values(states.cameras || {}).filter((s) => (s.is_night || s.suspended) && !s.is_specialized);
+  if (concerned.length === 0) return null;
+  const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "?";
   return (
     <div className="border border-[#FFB800]/50 bg-[#FFB800]/10 p-2.5 text-xs flex items-start gap-2"
          data-testid="anpr-suspended-banner">
       <AlertTriangle size={14} className="text-[#FFB800] shrink-0 mt-0.5" />
       <div className="space-y-1">
         <div className="text-[#FFB800] font-medium">
-          Rappel : la lecture de plaques (ANPR) est suspendue sur {suspended.length} caméra{suspended.length > 1 ? "s" : ""} — sauf caméra ANPR dédiée, elle ne fonctionne pas en conditions nocturnes/faible luminosité.
+          Rappel : sur {concerned.length} caméra{concerned.length > 1 ? "s" : ""}, la lecture de plaques (ANPR) n'est pas fiable après la tombée de la nuit — sauf caméra ANPR dédiée (IR/WDR adapté).
         </div>
-        {suspended.map((s) => (
+        {concerned.map((s) => (
           <div key={s.camera_id} className="text-muted-foreground">
             <span className="text-foreground">{camName(s.camera_id)}</span>
-            {" — suspendue depuis "}
-            {s.suspended_since ? new Date(s.suspended_since * 1000).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "?"}
-            {" · "}{s.last_reason}
+            {s.suspended
+              ? <> — <span className="text-[#FF6666]">ANPR suspendu</span> depuis {s.suspended_since ? new Date(s.suspended_since * 1000).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "?"} · {s.last_reason}</>
+              : <> — nuit depuis {fmtTime(s.sunset_utc)}, lectures possiblement peu fiables (reflets IR)</>}
           </div>
         ))}
       </div>
