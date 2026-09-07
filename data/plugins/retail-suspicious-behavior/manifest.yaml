@@ -1,0 +1,28 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: retail-suspicious-behavior
+  displayName: "Comportement suspect (rayon)"
+  version: "1.0.0"
+  description: >
+    Détecte le comportement suspect en zone commerce : présence prolongée
+    (dwell-time) et passages répétés dans une zone, à partir des tracks
+    YOLO11 + ByteTrack déjà actifs sur la caméra (aucun modèle dédié requis
+    pour ce scénario). Phase 1 du chantier anti-vol MG-VMS.
+  author: "MG-VMS Team"
+  license: "MIT"
+  categories: [retail]
+  providerGroup: retail
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: RetailSuspiciousBehaviorPlugin
+  interface: PipelineConsumer
+  compatibility: {mgvms_core: ">=2.30.0,<4.0.0"}
+  capabilities: [camera.frame.read, event.write]
+  resources: {cpu_cores: 0.3, ram_mb: 64, gpu: none, disk_mb: 10}
+  dependencies:
+    python: []
+  config_schema: config/schema.json
+  bus:
+    order: 80

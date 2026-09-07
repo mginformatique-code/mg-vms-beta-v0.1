@@ -4,7 +4,7 @@ import api from "@/lib/api";
 import {
   X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCcw,
   Download, Copy, PlayCircle, Camera as CamIcon, MapPin, Clock, Puzzle, ShieldAlert,
-  ScanSearch, Loader2, History, GanttChartSquare,
+  ScanSearch, Loader2, History, GanttChartSquare, ThumbsUp, ThumbsDown,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -32,12 +32,15 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
   // v1.0-rc3 · Bouton "Analyser OCR" pour events sans plaque détectée
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrResult, setOcrResult] = useState(null);
+  // Boucle de feedback vrai/faux positif — events "retail.*" (plan anti-vol Phase 1)
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackSent, setFeedbackSent] = useState(item?.feedback || null);
   const imgRef = useRef(null);
   const containerRef = useRef(null);
   const videoRef = useRef(null);
 
   // Reset zoom on item change / close
-  useEffect(() => { setScale(1); setPan({ x: 0, y: 0 }); setRecInfo(null); setShowVideo(false); setOcrResult(null); }, [index]);
+  useEffect(() => { setScale(1); setPan({ x: 0, y: 0 }); setRecInfo(null); setShowVideo(false); setOcrResult(null); setFeedbackSent(item?.feedback || null); }, [index]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Escape + arrows
   useEffect(() => {
@@ -302,6 +305,55 @@ export default function EventViewer({ items, index, onClose, onIndex, onOpenPlat
               <div className="mono text-white font-bold text-base">{ocrResult.plate}</div>
               <div className="text-[10px] text-white/60 mono">Confiance {Math.round((ocrResult.confidence || 0) * 100)}%</div>
             </div>
+          )}
+
+          {/* Boucle de feedback vrai/faux positif — events plugin anti-vol
+              (type préfixé "retail."), sert de point de collecte pour un
+              futur ré-entraînement manuel du modèle. */}
+          {kind === "event" && item.id && (item.type || "").startsWith("retail.") && (
+            feedbackSent ? (
+              <div className="w-full flex items-center justify-center gap-2 px-3 py-2 border border-white/20 text-white/60 text-xs">
+                {feedbackSent === "true_positive" ? <ThumbsUp size={14} /> : <ThumbsDown size={14} />}
+                Marqué {feedbackSent === "true_positive" ? "vrai positif" : "faux positif"}
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <button
+                  onClick={async () => {
+                    setFeedbackLoading(true);
+                    try {
+                      await api.post(`/events/${item.id}/feedback`, { verdict: "true_positive" });
+                      setFeedbackSent("true_positive");
+                      toast.success("Marqué comme vrai positif");
+                    } catch (e) {
+                      toast.error(e.response?.data?.detail || "Feedback impossible");
+                    } finally { setFeedbackLoading(false); }
+                  }}
+                  disabled={feedbackLoading}
+                  data-testid="viewer-feedback-tp-btn"
+                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-[#00E676]/50 text-[#00E676] hover:bg-[#00E676]/10 disabled:opacity-50 text-xs"
+                >
+                  <ThumbsUp size={14} /> Vrai positif
+                </button>
+                <button
+                  onClick={async () => {
+                    setFeedbackLoading(true);
+                    try {
+                      await api.post(`/events/${item.id}/feedback`, { verdict: "false_positive" });
+                      setFeedbackSent("false_positive");
+                      toast.success("Marqué comme faux positif");
+                    } catch (e) {
+                      toast.error(e.response?.data?.detail || "Feedback impossible");
+                    } finally { setFeedbackLoading(false); }
+                  }}
+                  disabled={feedbackLoading}
+                  data-testid="viewer-feedback-fp-btn"
+                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-[#FF3B30]/50 text-[#FF3B30] hover:bg-[#FF3B30]/10 disabled:opacity-50 text-xs"
+                >
+                  <ThumbsDown size={14} /> Faux positif
+                </button>
+              </div>
+            )
           )}
 
           <button onClick={playAround} disabled={recLoading || showVideo} data-testid="viewer-play-video-btn"

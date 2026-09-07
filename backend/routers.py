@@ -1778,6 +1778,31 @@ async def ack_alert(alert_id: str, user: dict = Depends(require_role("client")))
     return {"ok": True}
 
 
+class EventFeedback(BaseModel):
+    verdict: str  # "true_positive" | "false_positive"
+
+
+@api_router.post("/events/{event_id}/feedback")
+async def event_feedback(event_id: str, body: EventFeedback, user: dict = Depends(require_role("client"))):
+    """Boucle de feedback humain sur les events plugin (ex. retail.*) — pas de
+    ré-entraînement automatique, juste le point de collecte des labels pour un
+    futur ré-entraînement manuel périodique (voir plan Phase 1 anti-vol)."""
+    if body.verdict not in ("true_positive", "false_positive"):
+        raise HTTPException(400, "verdict invalide")
+    res = await db.events.update_one(
+        {"id": event_id},
+        {"$set": {
+            "feedback": body.verdict,
+            "feedback_by": user.get("email", ""),
+            "feedback_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Événement introuvable")
+    await log_audit(user, "event_feedback", event_id, body.verdict)
+    return {"ok": True}
+
+
 class AlertCreate(BaseModel):
     message: str
     severity: str = "warning"
