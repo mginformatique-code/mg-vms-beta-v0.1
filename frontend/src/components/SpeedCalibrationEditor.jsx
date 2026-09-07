@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { X, Gauge } from "lucide-react";
 import PolygonEditor from "@/components/PolygonEditor";
 import api from "@/lib/api";
@@ -13,6 +13,14 @@ import { toast } from "sonner";
  * Réutilise PolygonEditor tel quel (maxPoints=4) plutôt qu'un nouveau
  * composant de dessin — même mécanique clic/glisser déjà en prod pour les
  * zones intelligentes et le ROI ANPR.
+ *
+ * Snapshot source : GET /ai/debug/{id}.frame_preview (dernière frame
+ * RÉELLEMENT analysée par le pipeline, en data URI déjà en base64) plutôt
+ * que le helper /_helpers/camera-snapshot — celui-ci passe par
+ * go2rtc /api/frame.jpeg, qui échoue en pratique sur les flux H265 (testé
+ * en direct : 500 côté go2rtc sur une caméra H265 pourtant bien live).
+ * frame_preview n'a pas ce problème : c'est déjà un JPEG décodé côté
+ * pipeline, indépendant du codec source.
  */
 export default function SpeedCalibrationEditor({ camera, existing, onClose, onSaved }) {
   const [step, setStep] = useState("points");
@@ -20,10 +28,22 @@ export default function SpeedCalibrationEditor({ camera, existing, onClose, onSa
   const [widthM, setWidthM] = useState(existing?.width_m ?? "");
   const [lengthM, setLengthM] = useState(existing?.length_m ?? "");
   const [saving, setSaving] = useState(false);
+  const [snapshotUrl, setSnapshotUrl] = useState(null);
 
-  const snapshotUrl = camera?.id
-    ? `${process.env.REACT_APP_BACKEND_URL}/api/plugins/_helpers/camera-snapshot/${camera.id}?_=${Date.now()}`
-    : null;
+  useEffect(() => {
+    if (!camera?.id) return;
+    let cancelled = false;
+    api.get(`/ai/debug/${camera.id}`)
+      .then(({ data }) => {
+        if (cancelled) return;
+        if (data?.available && data.frame_preview) setSnapshotUrl(data.frame_preview);
+        else setSnapshotUrl(`${process.env.REACT_APP_BACKEND_URL}/api/plugins/_helpers/camera-snapshot/${camera.id}?_=${Date.now()}`);
+      })
+      .catch(() => {
+        if (!cancelled) setSnapshotUrl(`${process.env.REACT_APP_BACKEND_URL}/api/plugins/_helpers/camera-snapshot/${camera.id}?_=${Date.now()}`);
+      });
+    return () => { cancelled = true; };
+  }, [camera?.id]);
 
   if (step === "points") {
     return (
