@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
@@ -33,6 +34,7 @@ import {
   Camera, Wifi, Video, Layers, Cpu, Volume2, Sun, Bell, Move3d, Wrench,
   ScanLine, RefreshCw, AlertCircle, CircleCheck, ChevronLeft, ChevronRight,
   ArrowLeft, HardDrive, Activity, Download, Type, Loader2, Clock,
+  Plus, Trash2, ArrowUp, ArrowDown, MapPin,
 } from "lucide-react";
 
 const TABS = [
@@ -1191,7 +1193,40 @@ function SdCardTab({ cameraId, caps }) {
 
 // ─── PTZ ───
 function PTZTab({ cameraId, caps }) {
+  const [presets, setPresets] = useState([]);
+  const [presetsLoading, setPresetsLoading] = useState(true);
+  const [addingPreset, setAddingPreset] = useState(false);
+  const [patrol, setPatrol] = useState({ enabled: false, dwell_seconds: 8, preset_ids: [], running: false });
+  const [patrolLoading, setPatrolLoading] = useState(true);
+  const [patrolSaving, setPatrolSaving] = useState(false);
+
+  const loadPresets = () => {
+    setPresetsLoading(true);
+    api.get(`/devices/${cameraId}/ptz/presets`)
+       .then((r) => setPresets(r.data.presets || []))
+       .catch(() => setPresets([]))
+       .finally(() => setPresetsLoading(false));
+  };
+  const loadPatrol = () => {
+    setPatrolLoading(true);
+    api.get(`/devices/${cameraId}/ptz/patrol`)
+       .then((r) => setPatrol({
+         enabled: !!r.data.enabled, dwell_seconds: r.data.dwell_seconds || 8,
+         preset_ids: r.data.preset_ids || [], running: !!r.data.running,
+       }))
+       .catch(() => {})
+       .finally(() => setPatrolLoading(false));
+  };
+
+  useEffect(() => {
+    if (!caps?.ptz) return;
+    loadPresets();
+    loadPatrol();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraId, caps?.ptz]);
+
   if (!caps?.ptz) return <NotSupported what="PTZ" />;
+
   const move = (direction) =>
     api.post(`/devices/${cameraId}/ptz/move`, { direction, speed: 0.5 })
        .then(() => {})
@@ -1200,45 +1235,202 @@ function PTZTab({ cameraId, caps }) {
     api.post(`/devices/${cameraId}/ptz/zoom`, { value })
        .then(() => {})
        .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
-  const preset = (id) =>
-    api.post(`/devices/${cameraId}/ptz/preset`, { id })
+  const gotoPreset = (id) =>
+    api.post(`/devices/${cameraId}/ptz/preset`, { id: Number(id) })
        .then(() => toast.success(`Preset ${id}`))
        .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
+
+  const addPreset = () => {
+    const name = window.prompt("Nom du preset (optionnel) — sera créé à la position actuelle de la caméra :", "");
+    if (name === null) return; // annulé
+    setAddingPreset(true);
+    api.post(`/devices/${cameraId}/ptz/presets`, { name: name.trim() || undefined })
+       .then((r) => {
+         toast.success(`Preset "${r.data.name}" ajouté`);
+         loadPresets();
+       })
+       .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"))
+       .finally(() => setAddingPreset(false));
+  };
+
+  const deletePreset = (preset) => {
+    if (!window.confirm(`Supprimer le preset "${preset.name}" ?`)) return;
+    api.delete(`/devices/${cameraId}/ptz/presets/${preset.id}`)
+       .then(() => {
+         toast.success("Preset supprimé");
+         loadPresets();
+         setPatrol((p) => ({ ...p, preset_ids: p.preset_ids.filter((id) => id !== preset.id) }));
+       })
+       .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
+  };
+
+  const savePatrol = (next) => {
+    setPatrolSaving(true);
+    api.put(`/devices/${cameraId}/ptz/patrol`, {
+      enabled: next.enabled, dwell_seconds: next.dwell_seconds, preset_ids: next.preset_ids,
+    }).then((r) => {
+      setPatrol({ ...next, running: !!r.data.running });
+    }).catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"))
+      .finally(() => setPatrolSaving(false));
+  };
+
+  const toggleInPatrol = (presetId) => {
+    const inList = patrol.preset_ids.includes(presetId);
+    const preset_ids = inList
+      ? patrol.preset_ids.filter((id) => id !== presetId)
+      : [...patrol.preset_ids, presetId];
+    savePatrol({ ...patrol, preset_ids });
+  };
+
+  const movePatrolStep = (idx, dir) => {
+    const target = idx + dir;
+    if (target < 0 || target >= patrol.preset_ids.length) return;
+    const preset_ids = [...patrol.preset_ids];
+    [preset_ids[idx], preset_ids[target]] = [preset_ids[target], preset_ids[idx]];
+    savePatrol({ ...patrol, preset_ids });
+  };
+
+  const presetName = (id) => presets.find((p) => p.id === id)?.name || id;
+
   return (
-    <Card className="p-4 space-y-4" data-testid="cam-ptz">
-      <div>
-        <div className="text-sm text-muted-foreground mb-2">Directions</div>
-        <div className="grid grid-cols-3 gap-1 w-48">
-          <Button variant="outline" onClick={() => move("upleft")}>↖</Button>
-          <Button variant="outline" onClick={() => move("up")} data-testid="ptz-up">↑</Button>
-          <Button variant="outline" onClick={() => move("upright")}>↗</Button>
-          <Button variant="outline" onClick={() => move("left")} data-testid="ptz-left">←</Button>
-          <Button variant="outline" onClick={() => move("stop")} data-testid="ptz-stop">■</Button>
-          <Button variant="outline" onClick={() => move("right")} data-testid="ptz-right">→</Button>
-          <Button variant="outline" onClick={() => move("downleft")}>↙</Button>
-          <Button variant="outline" onClick={() => move("down")} data-testid="ptz-down">↓</Button>
-          <Button variant="outline" onClick={() => move("downright")}>↘</Button>
-        </div>
-      </div>
-      {caps.zoom && (
+    <div className="space-y-4">
+      <Card className="p-4 space-y-4" data-testid="cam-ptz">
         <div>
-          <div className="text-sm text-muted-foreground mb-2">Zoom</div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => zoom(-0.5)} data-testid="ptz-zoom-out">−</Button>
-            <Button variant="outline" onClick={() => zoom(0.5)} data-testid="ptz-zoom-in">+</Button>
+          <div className="text-sm text-muted-foreground mb-2">Directions</div>
+          <div className="grid grid-cols-3 gap-1 w-48">
+            <Button variant="outline" onClick={() => move("upleft")}>↖</Button>
+            <Button variant="outline" onClick={() => move("up")} data-testid="ptz-up">↑</Button>
+            <Button variant="outline" onClick={() => move("upright")}>↗</Button>
+            <Button variant="outline" onClick={() => move("left")} data-testid="ptz-left">←</Button>
+            <Button variant="outline" onClick={() => move("stop")} data-testid="ptz-stop">■</Button>
+            <Button variant="outline" onClick={() => move("right")} data-testid="ptz-right">→</Button>
+            <Button variant="outline" onClick={() => move("downleft")}>↙</Button>
+            <Button variant="outline" onClick={() => move("down")} data-testid="ptz-down">↓</Button>
+            <Button variant="outline" onClick={() => move("downright")}>↘</Button>
           </div>
         </div>
-      )}
-      <div>
-        <div className="text-sm text-muted-foreground mb-2">Presets</div>
-        <div className="flex gap-2 flex-wrap">
-          {[1, 2, 3, 4, 5, 6].map((n) => (
-            <Button key={n} variant="outline" size="sm" onClick={() => preset(n)}
-                    data-testid={`ptz-preset-${n}`}>{n}</Button>
-          ))}
+        {caps.zoom && (
+          <div>
+            <div className="text-sm text-muted-foreground mb-2">Zoom</div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => zoom(-0.5)} data-testid="ptz-zoom-out">−</Button>
+              <Button variant="outline" onClick={() => zoom(0.5)} data-testid="ptz-zoom-in">+</Button>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <Card className="p-4 space-y-3" data-testid="cam-ptz-presets">
+        <div className="flex items-center justify-between">
+          <div className="text-sm text-muted-foreground">
+            Presets — positionne la caméra puis "Ajouter" (aucune limite)
+          </div>
+          <Button variant="outline" size="sm" onClick={addPreset} disabled={addingPreset}
+                  data-testid="ptz-preset-add">
+            {addingPreset ? <Loader2 size={14} className="animate-spin mr-1" /> : <Plus size={14} className="mr-1" />}
+            Ajouter preset ici
+          </Button>
         </div>
-      </div>
-    </Card>
+        {presetsLoading ? (
+          <div className="text-sm text-muted-foreground flex items-center gap-2">
+            <Loader2 size={14} className="animate-spin" /> Chargement…
+          </div>
+        ) : presets.length === 0 ? (
+          <div className="text-sm text-muted-foreground">Aucun preset enregistré pour cette caméra.</div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {presets.map((p) => (
+              <div key={p.id} className="flex items-center border border-border overflow-hidden"
+                   data-testid={`ptz-preset-row-${p.id}`}>
+                <button onClick={() => gotoPreset(p.id)}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm hover:bg-secondary"
+                        title={`Aller au preset ${p.name}`}>
+                  <MapPin size={12} /> {p.name}
+                </button>
+                <button onClick={() => deletePreset(p)}
+                        className="px-2 py-1.5 text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
+                        title="Supprimer ce preset" data-testid={`ptz-preset-delete-${p.id}`}>
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card className="p-4 space-y-3" data-testid="cam-ptz-patrol">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium flex items-center gap-2">
+              Patrouille automatique
+              {patrol.enabled && (
+                <Badge variant={patrol.running ? "default" : "secondary"} className="text-[10px]">
+                  {patrol.running ? "en cours" : "en pause"}
+                </Badge>
+              )}
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Enchaîne les presets cochés ci-dessous, dans l'ordre choisi, en boucle.
+            </div>
+          </div>
+          <Switch checked={patrol.enabled} disabled={patrolLoading || patrolSaving}
+                  onCheckedChange={(enabled) => savePatrol({ ...patrol, enabled })}
+                  data-testid="ptz-patrol-toggle" />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Label className="text-xs text-muted-foreground whitespace-nowrap">Temps par preset (s)</Label>
+          <Input type="number" min={2} max={600} value={patrol.dwell_seconds}
+                 className="w-20 h-8 text-xs"
+                 onChange={(e) => setPatrol((p) => ({ ...p, dwell_seconds: Number(e.target.value) || 8 }))}
+                 onBlur={() => savePatrol(patrol)}
+                 data-testid="ptz-patrol-dwell" />
+        </div>
+
+        {presets.length === 0 ? (
+          <div className="text-xs text-muted-foreground">Ajoute d'abord au moins un preset ci-dessus.</div>
+        ) : (
+          <div className="space-y-2">
+            <div className="text-xs text-muted-foreground">Presets disponibles — coche pour inclure dans la patrouille :</div>
+            <div className="flex flex-wrap gap-2">
+              {presets.map((p) => (
+                <label key={p.id}
+                       className="flex items-center gap-1.5 text-xs px-2 py-1 border border-border cursor-pointer">
+                  <input type="checkbox" checked={patrol.preset_ids.includes(p.id)}
+                         onChange={() => toggleInPatrol(p.id)}
+                         data-testid={`ptz-patrol-include-${p.id}`} />
+                  {p.name}
+                </label>
+              ))}
+            </div>
+            {patrol.preset_ids.length > 0 && (
+              <div>
+                <div className="text-xs text-muted-foreground mt-2 mb-1">
+                  Ordre de la tournée (défini manuellement — flèches pour réordonner) :
+                </div>
+                <div className="space-y-1">
+                  {patrol.preset_ids.map((id, idx) => (
+                    <div key={id} className="flex items-center gap-2 text-xs bg-secondary/50 px-2 py-1"
+                         data-testid={`ptz-patrol-order-${idx}`}>
+                      <span className="mono text-muted-foreground w-4">{idx + 1}.</span>
+                      <span className="flex-1">{presetName(id)}</span>
+                      <button onClick={() => movePatrolStep(idx, -1)} disabled={idx === 0}
+                              className="disabled:opacity-30 hover:text-[#0044FF]" title="Monter">
+                        <ArrowUp size={12} />
+                      </button>
+                      <button onClick={() => movePatrolStep(idx, 1)} disabled={idx === patrol.preset_ids.length - 1}
+                              className="disabled:opacity-30 hover:text-[#0044FF]" title="Descendre">
+                        <ArrowDown size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+    </div>
   );
 }
 

@@ -427,11 +427,19 @@ async def list_vehicles(
     # ⚠ Ce correctif avait déjà été appliqué et vérifié (2349ms -> 28ms) une
     # première fois ce soir, mais seulement patché à chaud sans commit — il
     # a été perdu au redéploiement suivant. Committé cette fois.
+    # v3.43 · `to_list(8000)` seul ne borne QUE la matérialisation côté
+    # client — le curseur Motor continue de faire l'aller-retour réseau par
+    # lots de départ ~101 documents (croissance progressive ensuite), soit
+    # ~8+ aller-retours pour 8000 docs. Mesuré en prod (25 900+ plaques) :
+    # 11,2s pour le seul fetch. `.limit(8000)` (borne aussi le curseur
+    # serveur, cohérent avec le commentaire ci-dessus) + `.batch_size(8000)`
+    # (un seul aller-retour) : 1,5-1,9s pour le même fetch, sans changement
+    # de résultat ni de logique de fusion aval.
     raw = await db.plates.find(match, {
         "_id": 0, "id": 1, "plate": 1, "camera_id": 1, "timestamp": 1,
         "confidence": 1, "vehicle_make": 1, "vehicle_model": 1,
         "vehicle_color": 1, "vehicle_type": 1, "list_status": 1, "country": 1,
-    }).sort("timestamp", -1).to_list(8000)
+    }).sort("timestamp", -1).limit(8000).batch_size(8000).to_list(8000)
 
     passages: dict[str, list[tuple[str, datetime]]] = {}
     by_plate: dict[str, list[dict]] = {}

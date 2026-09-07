@@ -251,6 +251,11 @@ async def on_startup():
         # video-engine-v3 · sync_all_streams (go2rtc) supprimé
         asyncio.create_task(camera_status_loop())
         asyncio.create_task(recorder_loop())
+        # v3.44 · Patrouille PTZ auto — reprend les caméras dont
+        # `ptz_patrol.enabled=True` en base (survit à un restart/redeploy
+        # du conteneur API sans que l'utilisateur ait à rouvrir la page).
+        import ptz_patrol
+        asyncio.create_task(ptz_patrol.startup_resume_all())
     if run_pipeline_tasks:
         asyncio.create_task(ai_loop())
         # v0.7.h · Wave I · Axe QoS · Surveillance permanente + alertes Ops Center

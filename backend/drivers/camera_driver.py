@@ -147,6 +147,27 @@ class CameraDriver(ABC):
         self._require("ptz")
         await self._ptz_preset(preset_id)
 
+    # ── Presets PTZ · CRUD (v3.44 · patrouille auto) ────────────────
+    async def ptz_list_presets(self) -> list[dict]:
+        """Liste les presets enregistrés côté caméra : [{id, name}, …]."""
+        self._require("ptz")
+        return await self._ptz_list_presets()
+
+    async def ptz_set_preset(self, name: Optional[str] = None) -> dict:
+        """Enregistre un NOUVEAU preset à la position PTZ actuelle.
+
+        Retourne ``{"id": ..., "name": ...}``. Aucune limite côté MG-VMS —
+        la seule borne est celle, propre à chaque caméra, du firmware ONVIF
+        (généralement 64 à 255 presets).
+        """
+        self._require("ptz")
+        return await self._ptz_set_preset(name)
+
+    async def ptz_remove_preset(self, preset_id: str) -> None:
+        """Supprime un preset enregistré côté caméra."""
+        self._require("ptz")
+        await self._ptz_remove_preset(preset_id)
+
     # ── Stockage local / enregistrements (v3.5) ───────────────────
     async def get_storage(self) -> list[dict]:
         """Liste les supports de stockage locaux (carte SD / eMMC / HDD)."""
@@ -225,6 +246,15 @@ class CameraDriver(ABC):
 
     async def _ptz_preset(self, preset_id: int) -> None:
         raise UnsupportedCapabilityError("Presets PTZ non implémentés par ce driver")
+
+    async def _ptz_list_presets(self) -> list[dict]:
+        raise UnsupportedCapabilityError("Liste des presets PTZ non implémentée par ce driver")
+
+    async def _ptz_set_preset(self, name: Optional[str]) -> dict:
+        raise UnsupportedCapabilityError("Création de preset PTZ non implémentée par ce driver")
+
+    async def _ptz_remove_preset(self, preset_id: str) -> None:
+        raise UnsupportedCapabilityError("Suppression de preset PTZ non implémentée par ce driver")
 
     # ── Utilitaires ──────────────────────────────────────────────
     def _require(self, cap: str) -> None:

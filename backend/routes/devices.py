@@ -16,7 +16,12 @@ Endpoints v0.4.6 :
   POST /api/devices/{camera_id}/audio/stop
   POST /api/devices/{camera_id}/ptz/move      · {direction, speed?}
   POST /api/devices/{camera_id}/ptz/zoom      · {value}
-  POST /api/devices/{camera_id}/ptz/preset    · {id}
+  POST /api/devices/{camera_id}/ptz/preset    · {id}          — goto (existant)
+  GET  /api/devices/{camera_id}/ptz/presets                   — liste (v3.44)
+  POST /api/devices/{camera_id}/ptz/presets   · {name?}        — créer à la position actuelle (v3.44)
+  DELETE /api/devices/{camera_id}/ptz/presets/{preset_id}      — supprimer (v3.44)
+  GET  /api/devices/{camera_id}/ptz/patrol                     — config + état patrouille (v3.44)
+  PUT  /api/devices/{camera_id}/ptz/patrol    · {enabled, dwell_seconds, preset_ids} (v3.44)
   GET  /api/devices/{camera_id}/storage       · supports SD/eMMC détectés
   GET  /api/devices/{camera_id}/recordings    · enregistrements locaux [start, end]
   GET  /api/devices/{camera_id}/recordings/stream?file=…   · proxy vidéo (ffmpeg, MP4)
@@ -86,6 +91,16 @@ class PTZZoomBody(BaseModel):
 
 class PTZPresetBody(BaseModel):
     id: int = Field(..., ge=1, le=255)
+
+
+class PTZPresetCreateBody(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=64)
+
+
+class PTZPatrolBody(BaseModel):
+    enabled: bool = False
+    dwell_seconds: int = Field(default=8, ge=2, le=600)
+    preset_ids: list[str] = Field(default_factory=list)
 
 
 # ── Wrapper — retourne un dict {success/error/message} sur erreur driver ─
@@ -311,6 +326,8 @@ async def device_audio_stop(camera_id: str,
 @devices_router.post("/{camera_id}/ptz/move")
 async def device_ptz_move(camera_id: str, body: PTZMoveBody,
                            user: dict = Depends(require_permission("manage_cameras"))):
+    import ptz_patrol
+    ptz_patrol.pause(camera_id)
     try:
         drv = await svc.get_driver(camera_id)
         await drv.ptz_move(body.direction, body.speed)
@@ -333,12 +350,84 @@ async def device_ptz_zoom(camera_id: str, body: PTZZoomBody,
 @devices_router.post("/{camera_id}/ptz/preset")
 async def device_ptz_preset(camera_id: str, body: PTZPresetBody,
                              user: dict = Depends(require_permission("manage_cameras"))):
+    import ptz_patrol
+    ptz_patrol.pause(camera_id)
     try:
         drv = await svc.get_driver(camera_id)
         await drv.ptz_preset(body.id)
         return {"success": True}
     except CameraDriverError as e:
         raise _driver_error_response(e)
+
+
+@devices_router.get("/{camera_id}/ptz/presets")
+async def device_ptz_list_presets(camera_id: str,
+                                   user: dict = Depends(require_permission("manage_cameras"))):
+    try:
+        drv = await svc.get_driver(camera_id)
+        presets = await drv.ptz_list_presets()
+        return {"presets": presets}
+    except CameraDriverError as e:
+        raise _driver_error_response(e)
+
+
+@devices_router.post("/{camera_id}/ptz/presets")
+async def device_ptz_create_preset(camera_id: str, body: PTZPresetCreateBody,
+                                    user: dict = Depends(require_permission("manage_cameras"))):
+    """Enregistre un preset à la position PTZ ACTUELLE de la caméra —
+    aucune limite côté MG-VMS ("j'ajoute un preset, autant que je veux")."""
+    try:
+        drv = await svc.get_driver(camera_id)
+        preset = await drv.ptz_set_preset(body.name)
+        return preset
+    except CameraDriverError as e:
+        raise _driver_error_response(e)
+
+
+@devices_router.delete("/{camera_id}/ptz/presets/{preset_id}")
+async def device_ptz_delete_preset(camera_id: str, preset_id: str,
+                                    user: dict = Depends(require_permission("manage_cameras"))):
+    try:
+        drv = await svc.get_driver(camera_id)
+        await drv.ptz_remove_preset(preset_id)
+        # Retire aussi ce preset d'une éventuelle séquence de patrouille en
+        # cours — un preset supprimé côté caméra ne doit jamais rester
+        # référencé dans `ptz_patrol.preset_ids` (la boucle échouerait à
+        # chaque passage dessus).
+        from database import db
+        await db.cameras.update_one(
+            {"id": camera_id}, {"$pull": {"ptz_patrol.preset_ids": preset_id}})
+        return {"success": True}
+    except CameraDriverError as e:
+        raise _driver_error_response(e)
+
+
+@devices_router.get("/{camera_id}/ptz/patrol")
+async def device_ptz_get_patrol(camera_id: str,
+                                 user: dict = Depends(require_permission("view_live"))):
+    import ptz_patrol
+    from database import db
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "ptz_patrol": 1})
+    if cam is None:
+        raise HTTPException(404, "Caméra introuvable")
+    patrol = cam.get("ptz_patrol") or {"enabled": False, "dwell_seconds": 8, "preset_ids": []}
+    patrol["running"] = ptz_patrol.is_running(camera_id)
+    return patrol
+
+
+@devices_router.put("/{camera_id}/ptz/patrol")
+async def device_ptz_set_patrol(camera_id: str, body: PTZPatrolBody,
+                                 user: dict = Depends(require_permission("manage_cameras"))):
+    import ptz_patrol
+    from database import db
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "id": 1})
+    if cam is None:
+        raise HTTPException(404, "Caméra introuvable")
+    config = body.model_dump()
+    await db.cameras.update_one({"id": camera_id}, {"$set": {"ptz_patrol": config}})
+    ptz_patrol.set_patrol(camera_id, body.enabled and bool(body.preset_ids))
+    config["running"] = ptz_patrol.is_running(camera_id)
+    return config
 
 
 # ── Codec du flux principal (v3.10) ───────────────────────────────

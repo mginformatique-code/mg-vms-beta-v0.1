@@ -388,6 +388,40 @@ class ONVIFDriver(CameraDriver):
         req.PresetToken = str(preset_id)
         await asyncio.to_thread(self._ptz.GotoPreset, req)
 
+    # ── Presets PTZ · CRUD (v3.44 · patrouille auto) ────────────────
+    async def _ptz_list_presets(self) -> list[dict]:
+        if self._ptz is None:
+            raise UnsupportedCapabilityError("Service PTZ indispo")
+        profiles = await asyncio.to_thread(self._media.GetProfiles)
+        req = self._ptz.create_type("GetPresets")
+        req.ProfileToken = profiles[0].token
+        presets = await asyncio.to_thread(self._ptz.GetPresets, req)
+        return [{"id": p.token, "name": getattr(p, "Name", None) or p.token}
+                for p in (presets or [])]
+
+    async def _ptz_set_preset(self, name: Optional[str]) -> dict:
+        """``SetPreset`` SANS ``PresetToken`` = création d'un nouveau preset
+        à la position PTZ courante (comportement standard ONVIF Profile S) ;
+        la caméra choisit elle-même le token et le renvoie."""
+        if self._ptz is None:
+            raise UnsupportedCapabilityError("Service PTZ indispo")
+        profiles = await asyncio.to_thread(self._media.GetProfiles)
+        req = self._ptz.create_type("SetPreset")
+        req.ProfileToken = profiles[0].token
+        if name:
+            req.PresetName = name
+        token = await asyncio.to_thread(self._ptz.SetPreset, req)
+        return {"id": str(token), "name": name or str(token)}
+
+    async def _ptz_remove_preset(self, preset_id: str) -> None:
+        if self._ptz is None:
+            raise UnsupportedCapabilityError("Service PTZ indispo")
+        profiles = await asyncio.to_thread(self._media.GetProfiles)
+        req = self._ptz.create_type("RemovePreset")
+        req.ProfileToken = profiles[0].token
+        req.PresetToken = str(preset_id)
+        await asyncio.to_thread(self._ptz.RemovePreset, req)
+
     # ── IR (bascule cut filter) ─────────────────────────────────
     async def _set_ir_mode(self, mode: IRMode) -> None:
         if self._imaging is None:
