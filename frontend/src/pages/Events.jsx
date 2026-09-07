@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import api from "@/lib/api";
 import {
   Zap, RefreshCw, Camera as CamIcon, Car, User, Truck, Bus as BusIcon,
-  Bike, PawPrint, CreditCard, Sparkles, Loader2, X as XIcon,
+  Bike, PawPrint, CreditCard, Sparkles, Loader2, X as XIcon, AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import EventViewer from "@/components/EventViewer";
@@ -89,6 +89,51 @@ const FILTERS = [
   { id: "deux-roues", label: "Deux roues", icon: Bike,       types: ["Moto", "Vélo"] },
   { id: "animaux",    label: "Animaux",    icon: PawPrint,   types: ["Animal"] },
 ];
+
+// v3.48 · Rappel visible "ANPR suspendu" — l'état existait déjà côté
+// pipeline (auto-suspension nuit/qualité, hystérésis N/M cycles, voir
+// pipeline_v2/anpr_quality.py) et était consultable, mais UNIQUEMENT en
+// allant chercher caméra par caméra dans Camera Center → IA. Résultat :
+// une plaque manquante la nuit ressemblait à un bug plutôt qu'à un
+// comportement attendu. Ce bandeau réutilise EXACTEMENT le même état
+// (`GET /diagnostics/anpr-quality`, déjà exposé pour cet écran de
+// diagnostic) — heure réelle de suspension par caméra (`suspended_since`),
+// pas une heure fixe type "22h" : la suspension dépend des conditions
+// réelles (luminosité/netteté/contraste), pas de l'horloge seule. Les
+// caméras ANPR dédiées (`is_specialized`, ex. Dahua ITC/Hikvision
+// DeepInView) ne sont jamais concernées — jamais listées ici.
+function AnprSuspendedBanner({ cams }) {
+  const [states, setStates] = useState(null);
+  useEffect(() => {
+    const load = () => api.get("/diagnostics/anpr-quality").then((r) => setStates(r.data)).catch(() => {});
+    load();
+    const iv = setInterval(load, 60000);
+    return () => clearInterval(iv);
+  }, []);
+  if (!states) return null;
+  const camName = (id) => cams.find((c) => c.id === id)?.name || id;
+  const suspended = Object.values(states.cameras || {}).filter((s) => s.suspended && !s.is_specialized);
+  if (suspended.length === 0) return null;
+  return (
+    <div className="border border-[#FFB800]/50 bg-[#FFB800]/10 p-2.5 text-xs flex items-start gap-2"
+         data-testid="anpr-suspended-banner">
+      <AlertTriangle size={14} className="text-[#FFB800] shrink-0 mt-0.5" />
+      <div className="space-y-1">
+        <div className="text-[#FFB800] font-medium">
+          Rappel : la lecture de plaques (ANPR) est suspendue sur {suspended.length} caméra{suspended.length > 1 ? "s" : ""} — sauf caméra ANPR dédiée, elle ne fonctionne pas en conditions nocturnes/faible luminosité.
+        </div>
+        {suspended.map((s) => (
+          <div key={s.camera_id} className="text-muted-foreground">
+            <span className="text-foreground">{camName(s.camera_id)}</span>
+            {" — suspendue depuis "}
+            {s.suspended_since ? new Date(s.suspended_since * 1000).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "?"}
+            {" · "}{s.last_reason}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function Events() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -255,6 +300,8 @@ export default function Events() {
           <button onClick={load} data-testid="events-refresh-btn" className="p-2 border border-border hover:bg-secondary"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button>
         </div>
       </div>
+
+      <AnprSuspendedBanner cams={cams} />
 
       {/* v1.0-rc4 · Recherche IA — toutes recherches confondues (personnes,
           véhicules, caméra, horaire). Le chip Informations véhicules
