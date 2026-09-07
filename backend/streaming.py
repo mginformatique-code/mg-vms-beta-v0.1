@@ -1190,6 +1190,31 @@ def needs_transcode_for_browser(path: str) -> bool:
 DEFAULT_CLIP_DURATION_SEC = 30.0
 
 
+def _nvenc_gpu_index() -> int:
+    """Index NVENC à passer à `h264_nvenc -gpu` pour l'ENCODAGE de sortie —
+    délibérément séparé du GPU utilisé pour le DÉCODAGE (`hevc_cuvid`
+    ci-dessous, resté par défaut). v3.38 · testé en direct sur un serveur
+    2 GPU (T1000 + Quadro K620 ajoutée pour l'isolation ANPR) : la K620 ne
+    décode PAS le HEVC (génération Maxwell 1, limite matérielle confirmée —
+    "Codec hevc_cuvid is not supported"), mais encode le H.264 sans
+    problème (vérifié : transcodage 4K réel, décodage HEVC sur la 1ère
+    carte + encodage H.264 sur la 2de, fichier de sortie valide). Dédier
+    la 2e carte à CET encodage, quand elle existe, libère la 1ère (qui
+    fait aussi tourner YOLO) au lieu de tout faire peser dessus.
+
+    Retourne -1 ("any", laisse NVENC choisir — comportement historique
+    inchangé) si un seul GPU est détecté : jamais un index qui n'existe
+    pas sur une install mono-GPU.
+    """
+    try:
+        from gpu import _nvml_devices
+        if len(_nvml_devices()) > 1:
+            return int(os.environ.get("MGVMS_ENCODE_GPU_INDEX", "1"))
+    except Exception:
+        pass
+    return -1
+
+
 async def transcode_to_temp_mp4(path: str, start_sec: float = 0.0,
                                  duration_sec: Optional[float] = DEFAULT_CLIP_DURATION_SEC) -> str:
     """Transcode HEVC→H264 vers un fichier temporaire COMPLET, pas un flux
@@ -1270,7 +1295,11 @@ async def transcode_to_temp_mp4(path: str, start_sec: float = 0.0,
             # segment, potentiellement 2 min que personne ne consultera.
             cmd += ["-t", str(duration_sec)]
         if gpu_encode:
-            cmd += ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "23"]
+            cmd += ["-c:v", "h264_nvenc"]
+            gpu_idx = _nvenc_gpu_index()
+            if gpu_idx >= 0:
+                cmd += ["-gpu", str(gpu_idx)]
+            cmd += ["-preset", "p4", "-rc", "vbr", "-cq", "23"]
         else:
             cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]
         # +faststart : réordonne le moov en tête de fichier une fois l'encodage
