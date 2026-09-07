@@ -792,6 +792,14 @@ async def _process_camera(cam: dict, frame=None) -> bool:
     if frame is None:
         logger.debug("IA · %s (%s) : frame indisponible (skip iteration)", cam["name"], cam["id"])
         return False
+    # v3.37 · Horodatage pris ICI (image en main) et non après l'inférence —
+    # investigation "tracking décalé ~1s" : yolo+alpr peut prendre 700ms-1.8s
+    # sur les caméras 4K les plus chargées (voir logs "rt=" ci-dessous), donc
+    # un timestamp pris après analyse fait déjà croire au frontend que la
+    # détection est plus fraîche qu'elle ne l'est. Utilisé par le frontend
+    # (LiveView.jsx) pour dater la boîte à son instant RÉEL de capture plutôt
+    # qu'à sa réception WS, afin que l'extrapolation compense le vrai retard.
+    frame_captured_at = datetime.now(timezone.utc)
     t_fetch_ms = (time.perf_counter() - t_start) * 1000
     _inspector.record(cam["id"], "fetch", t_fetch_ms)
 
@@ -827,7 +835,7 @@ async def _process_camera(cam: dict, frame=None) -> bool:
     try:
         from realtime import broadcast_ai_detections
         payload = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": frame_captured_at.isoformat(),
             "boxes": result.get("overlay_boxes", []),
             "counts": result.get("counts", {}),
             "motion_pct": result.get("motion_pct", 0.0),

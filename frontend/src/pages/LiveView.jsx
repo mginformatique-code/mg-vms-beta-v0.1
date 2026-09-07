@@ -29,7 +29,7 @@ const colorFor = (label) => CLASS_COLORS[label] || "#FF3333";
 // dessiner l'état qu'on lui donne. Une instance de TrackInterpolator par
 // tuile (créée une fois, réutilisée tant que le composant reste monté —
 // remonte avec la tuile si la caméra change, via la `key` posée par l'appelant).
-function OverlayCanvas({ cam, boxes, showOverlay }) {
+function OverlayCanvas({ cam, boxes, frameTs, showOverlay }) {
   const ref = useRef(null);
   const interpolatorRef = useRef(null);
   if (!interpolatorRef.current) interpolatorRef.current = new TrackInterpolator();
@@ -41,9 +41,25 @@ function OverlayCanvas({ cam, boxes, showOverlay }) {
   // Nouveau message de détection reçu -> alimente l'interpolateur. Toujours
   // appelé (même lissage désactivé) : TrackState a besoin du flux complet
   // pour retirer les pistes que ByteTrack a lâchées (voir TrackState.js).
+  //
+  // v3.37 · `frameTs` (backend, horodaté à la capture — voir ai_engine.py)
+  // sert à calculer le retard RÉEL déjà écoulé (pipeline IA + réseau) avant
+  // même que ce message n'arrive ici, et à l'appliquer comme un âge de
+  // départ dans le référentiel `performance.now()` (au lieu de faire
+  // repartir l'âge de zéro à la réception, ce qui masquait ce retard —
+  // cause du décalage vidéo/overlay ~1s observé sur les caméras 4K lentes).
+  // Repli sur `performance.now()` pur si `frameTs` absent ou invalide.
   useEffect(() => {
-    interpolatorRef.current.ingest(boxes || [], performance.now());
-  }, [boxes]);
+    let ts = performance.now();
+    if (frameTs) {
+      const capturedAtMs = Date.parse(frameTs);
+      if (!Number.isNaN(capturedAtMs)) {
+        const latencyMs = Math.max(0, Date.now() - capturedAtMs);
+        ts = performance.now() - latencyMs;
+      }
+    }
+    interpolatorRef.current.ingest(boxes || [], ts);
+  }, [boxes, frameTs]);
 
   // v3.36 · Diagnostics déplacés du canvas (incrustation par tuile,
   // signalée comme un chevauchement de plus) vers le panneau debug
@@ -139,7 +155,7 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
       {cam?.id ? (
         <>
           <LivePlayer camera={cam} hd={hd} className="w-full h-full" dataTestId="wall-player" />
-          {cam?.detect_enabled && <OverlayCanvas cam={cam} boxes={boxes} showOverlay={showOverlay} />}
+          {cam?.detect_enabled && <OverlayCanvas cam={cam} boxes={boxes} frameTs={aiState?.timestamp} showOverlay={showOverlay} />}
           {/* Overlay No Signal superposé — le player reste monté en dessous */}
           {!online && (
             <div className="absolute inset-0 flex items-center justify-center bg-[#0a0a0a]/85 pointer-events-none z-10" data-testid="feed-no-signal-overlay">
