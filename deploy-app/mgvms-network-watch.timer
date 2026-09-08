@@ -1,0 +1,10 @@
+[Unit]
+Description=MG-VMS - controle la configuration reseau toutes les 15s (fenetre de confirmation)
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=15s
+Unit=mgvms-network-watch.service
+
+[Install]
+WantedBy=timers.target

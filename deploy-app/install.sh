@@ -465,6 +465,27 @@ else
   warn "systemctl introuvable — le panneau « État des conteneurs » (Debug) restera vide"
 fi
 
+# v3.51 · Timer systemd hôte pour "Réseau → Paramètres réseau" (IP/DNS/
+# passerelle de la MACHINE/VM hôte, éditable depuis MG-VMS). Même principe
+# que les timers ci-dessus : le backend dépose une demande dans /logs, ce
+# timer (toutes les 15s) l'applique via nmcli ET restaure automatiquement
+# la config précédente si personne ne confirme depuis l'UI dans les 90s
+# (filet de sécurité type « netplan try » — évite de couper l'accès à la
+# machine sur une mauvaise IP/passerelle). Nécessite NetworkManager (nmcli).
+if command -v systemctl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 && command -v nmcli >/dev/null 2>&1; then
+  install -m 0755 network-watch.sh /opt/mg-vms-beta-v0.1/deploy-app/network-watch.sh
+  cp mgvms-network-watch.service mgvms-network-watch.timer /etc/systemd/system/
+  systemctl daemon-reload
+  systemctl enable --now mgvms-network-watch.timer >/dev/null 2>&1
+  ok "timer mgvms-network-watch.timer actif (Réseau → Paramètres réseau, avec confirmation 90s)"
+elif ! command -v nmcli >/dev/null 2>&1; then
+  warn "nmcli (NetworkManager) introuvable — « Réseau → Paramètres réseau » restera en lecture seule/indisponible."
+elif ! command -v jq >/dev/null 2>&1; then
+  warn "jq introuvable — « Réseau → Paramètres réseau » restera indisponible. Installez jq puis relancez install.sh."
+else
+  warn "systemctl introuvable — « Réseau → Paramètres réseau » restera indisponible"
+fi
+
 # v3.19 · MG-VMS comme serveur NTP pour le réseau caméras — beaucoup de
 # caméras IP ne savent pas maintenir l'heure seules ou la perdent après un
 # reboot. chrony tourne sur l'HÔTE (jamais dans un conteneur — service

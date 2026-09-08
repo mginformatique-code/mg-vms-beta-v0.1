@@ -112,6 +112,91 @@ async def get_container_status(user: dict = Depends(require_role("admin"))):
     }
 
 
+# ── Paramètres réseau machine/VM (Réseau → Paramètres réseau) ─────────
+# v3.51 · IP/passerelle/DNS de la MACHINE/VM qui héberge MG-VMS — PAS une
+# option de l'application. Même principe que le reboot ci-dessus : le
+# conteneur backend n'a jamais d'accès réseau à l'hôte (pas de NET_ADMIN,
+# pas de host networking) — il dépose une demande dans /logs, et
+# network-watch.sh (timer systemd hôte, 15s, voir install.sh) l'applique
+# via nmcli. Filet de sécurité : la nouvelle config n'est définitive que
+# si confirmée depuis l'UI sous 90s, sinon l'ancienne est restaurée
+# automatiquement (une IP/passerelle fausse ne doit jamais couper l'accès
+# à la machine sans retour en arrière possible).
+_NETWORK_STATUS_PATH = "/logs/network_status.json"
+_NETWORK_REQUEST_PATH = "/logs/host-network-requested.json"
+_NETWORK_CONFIRM_FLAG_PATH = "/logs/host-network-confirm.flag"
+_NETWORK_STATUS_STALE_AFTER_S = 30  # timer hôte tourne toutes les 15s
+
+
+class NetworkConfigIn(BaseModel):
+    method: str = Field(..., pattern="^(auto|manual)$")
+    ip: str = ""
+    prefix: int = Field(24, ge=1, le=32)
+    gateway: str = ""
+    dns: list[str] = Field(default_factory=list, max_length=4)
+
+    def validate_static(self) -> None:
+        import ipaddress
+        if self.method != "manual":
+            return
+        try:
+            ipaddress.ip_address(self.ip)
+            ipaddress.ip_address(self.gateway)
+            for d in self.dns:
+                ipaddress.ip_address(d)
+        except ValueError as e:
+            raise HTTPException(400, f"Adresse invalide : {e}")
+
+
+@system_admin_router.get("/network")
+async def get_network_status(user: dict = Depends(require_role("admin"))):
+    """État réseau réel de la machine/VM (lecture seule) + confirmation
+    en attente le cas échéant — voir network-watch.sh."""
+    try:
+        stat = os.stat(_NETWORK_STATUS_PATH)
+    except FileNotFoundError:
+        return {"available": False,
+                "error": "Aucun instantané disponible — le timer hôte "
+                         "mgvms-network-watch a-t-il été installé (nmcli requis) ?"}
+    age_s = time.time() - stat.st_mtime
+    try:
+        with open(_NETWORK_STATUS_PATH) as f:
+            snap = json.load(f)
+    except Exception:
+        return {"available": False, "error": "Instantané illisible (JSON invalide)"}
+    return {
+        "available": True,
+        "current": snap.get("current"),
+        "pending_confirm": snap.get("pending_confirm"),
+        "updated_at": snap.get("updated_at"),
+        "stale": age_s > _NETWORK_STATUS_STALE_AFTER_S,
+    }
+
+
+@system_admin_router.put("/network")
+async def request_network_config(data: NetworkConfigIn, user: dict = Depends(require_role("admin"))):
+    data.validate_static()
+    payload = data.model_dump()
+    payload["requested_at"] = datetime.now(timezone.utc).isoformat()
+    payload["requested_by"] = user.get("email", "?")
+    os.makedirs(os.path.dirname(_NETWORK_REQUEST_PATH), exist_ok=True)
+    with open(_NETWORK_REQUEST_PATH, "w") as f:
+        json.dump(payload, f)
+    await log_audit(user, "network_config_requested",
+                     f"method={data.method} ip={data.ip or '(dhcp)'} gateway={data.gateway}")
+    return {"ok": True, "confirm_timeout_seconds": 90}
+
+
+@system_admin_router.post("/network/confirm")
+async def confirm_network_config(user: dict = Depends(require_role("admin"))):
+    """Valide la config réseau appliquée — sans cet appel sous 90s,
+    network-watch.sh restaure automatiquement la config précédente."""
+    with open(_NETWORK_CONFIRM_FLAG_PATH, "w") as f:
+        f.write(datetime.now(timezone.utc).isoformat())
+    await log_audit(user, "network_config_confirmed", "confirmé depuis l'UI")
+    return {"ok": True}
+
+
 def _write_reboot_flag(reason: str) -> None:
     os.makedirs(os.path.dirname(_REBOOT_FLAG_PATH), exist_ok=True)
     with open(_REBOOT_FLAG_PATH, "w") as f:

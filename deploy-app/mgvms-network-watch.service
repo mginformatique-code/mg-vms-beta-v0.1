@@ -1,0 +1,6 @@
+[Unit]
+Description=MG-VMS - applique/surveille la configuration reseau demandee depuis l'interface
+
+[Service]
+Type=oneshot
+ExecStart=/opt/mg-vms-beta-v0.1/deploy-app/network-watch.sh
