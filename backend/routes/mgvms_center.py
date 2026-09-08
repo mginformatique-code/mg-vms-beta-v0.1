@@ -23,6 +23,7 @@ fonctionnement normal de ce déploiement.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -195,7 +196,6 @@ async def mgvms_center_report_loop() -> None:
     """Boucle de fond — no-op tant qu'aucune connexion n'est configurée
     (voir l'assistant ci-dessus). Toute erreur reste locale : un MG-VMS
     Center injoignable ne doit jamais affecter ce déploiement."""
-    import asyncio
     while True:
         try:
             await _send_report_once()
@@ -212,6 +212,7 @@ async def _send_report_once() -> None:
     from routes.welcome import _current_version
     from routes.tls import _read_domains
     from routes.system_admin import load_system_identity
+    from routes.health_dashboard import _system_metrics, _mongo_health, _ai_gpu_health, _plugins_health, _recorder_health
 
     camera_count = await db.cameras.count_documents({})
     local_sites = await db.sites.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
@@ -261,13 +262,45 @@ async def _send_report_once() -> None:
         https_port = int(os.environ.get("MGVMS_HTTPS_PORT", "443"))
     except ValueError:
         https_port = 443
+
+    # v3.52 · Télémétrie réelle pour MG-VMS Center — réutilise TEL QUEL les
+    # fonctions déjà utilisées par le propre tableau de bord de MG-VMS
+    # (topbar CPU/RAM/Stockage/GPU, panneau Diagnostics) plutôt que de
+    # recalculer quoi que ce soit ici. Chronométré avec une limite dure :
+    # un sous-système lent (constaté une fois avec un compte Mongo non
+    # borné sur une grosse collection, corrigé depuis) ne doit jamais faire
+    # rater un cycle de rapport entier — mieux vaut un health_summary
+    # partiel que pas de rapport du tout.
+    async def _safe(name, coro):
+        try:
+            return await asyncio.wait_for(coro, timeout=8)
+        except Exception as e:
+            return {"error": f"{type(e).__name__} (timeout ou échec sur {name})"}
+
+    health_summary = {
+        "system": await _safe("system", _system_metrics()),
+        "mongo": await _safe("mongo", _mongo_health()),
+        "ai": await _safe("ai", _ai_gpu_health()),
+        "plugins": await _safe("plugins", _plugins_health()),
+        "recorder": await _safe("recorder", _recorder_health()),
+    }
+
+    # v3.52 · Liste caméras légère pour l'onglet Caméras du Center — même
+    # projection que routes/site_manager.py::list_cameras_map (déjà
+    # débarrassée des champs sensibles : pas de mot de passe, pas d'URL RTSP).
+    cameras_report = await db.cameras.find({}, {
+        "_id": 0, "id": 1, "name": 1, "ip": 1, "manufacturer": 1, "model": 1,
+        "site_id": 1, "status": 1, "last_seen": 1,
+    }).to_list(1000)
+
     payload = {
         "version": _current_version(),
         "git_commit": os.environ.get("GIT_COMMIT"),
         "camera_count": camera_count,
         "sites": sites_report,
+        "cameras": cameras_report,
         "uptime_seconds": time.monotonic() - _process_started_at,
-        "health_summary": {"status": "ok"},
+        "health_summary": health_summary,
         "system_name": identity.get("system_name"),
         "machine_hostname": machine_hostname,
         "local_ip": local_ip,
@@ -294,6 +327,21 @@ async def _send_report_once() -> None:
                 "messages": body.get("messages", []),
             }},
         )
+
+        # v3.52 · Canal de commandes — architecture push-only préservée :
+        # le Center ne nous appelle jamais, il dépose la commande dans la
+        # RÉPONSE à notre propre rapport, consommée une seule fois côté
+        # Center (voir receive_report). Une seule commande existe pour
+        # l'instant : reboot, qui réutilise TEL QUEL le mécanisme déjà en
+        # place localement (routes/system_admin.py::_write_reboot_flag +
+        # deploy-app/reboot-watch.sh) — aucun accusé de réception séparé,
+        # le Center déduira le succès du prochain rapport (uptime proche
+        # de zéro), même logique "best-effort" que les messages diffusés.
+        pending_command = body.get("pending_command")
+        if pending_command and pending_command.get("type") == "reboot":
+            from routes.system_admin import _write_reboot_flag
+            _write_reboot_flag("Demandé depuis MG-VMS Center")
+            logger.warning("mgvms_center: redémarrage machine demandé depuis le Center — fichier marqueur déposé")
     except Exception as e:
         logger.warning("mgvms_center: échec du rapport (%s) — nouvelle tentative dans %ds",
                         type(e).__name__, REPORT_INTERVAL_S)

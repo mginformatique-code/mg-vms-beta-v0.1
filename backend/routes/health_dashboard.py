@@ -56,7 +56,17 @@ async def _system_metrics() -> dict:
 
 
 async def _mongo_health() -> dict:
-    """Ping MongoDB + counts."""
+    """Ping MongoDB + counts.
+
+    v3.52 · `count_documents({})` fait un COLLSCAN complet même avec un
+    filtre vide — indolore sur une petite collection, mais `events` a
+    dépassé 500k documents en prod (mgvms01) et ce compte à lui seul a
+    fait tourner cet endpoint plusieurs minutes (constaté en câblant la
+    réutilisation de cette fonction pour le rapport MG-VMS Center).
+    `estimated_document_count()` lit les métadonnées de la collection —
+    quasi instantané, une valeur approximative suffit largement pour un
+    tableau de bord de santé.
+    """
     try:
         t = time.perf_counter()
         await db.command("ping")
@@ -65,10 +75,10 @@ async def _mongo_health() -> dict:
             "status": "ok",
             "ping_ms": ping_ms,
             "collections": {
-                "cameras": await db.cameras.count_documents({}),
-                "events": await db.events.count_documents({}),
-                "recordings": await db.recordings.count_documents({}),
-                "diagnostics_events": await db.diagnostics_events.count_documents({}),
+                "cameras": await db.cameras.estimated_document_count(),
+                "events": await db.events.estimated_document_count(),
+                "recordings": await db.recordings.estimated_document_count(),
+                "diagnostics_events": await db.diagnostics_events.estimated_document_count(),
             },
         }
     except Exception as e:
