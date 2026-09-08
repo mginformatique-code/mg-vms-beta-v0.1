@@ -220,7 +220,19 @@ async def _send_report_once() -> None:
         sites_report.append({"id": site["id"], "name": site["name"], "camera_count": cam_count})
     identity = await load_system_identity()
     domains = await _read_domains()
-    hostname = domains.get("external") or domains.get("internal") or ""
+    # v3.51 · Le Center a besoin des DEUX adresses, pas d'une seule choisie
+    # arbitrairement : le nom d'hôte local (LAN/mDNS, utile sur site) et le
+    # nom DNS externe (utile à distance) répondent à des besoins différents
+    # selon d'où l'admin MG Informatique se connecte.
+    hostname_internal = domains.get("internal") or ""
+    hostname_external = domains.get("external") or ""
+    # v3.51 · Le port HTTPS réel (FRONTEND_HTTPS_PORT côté docker-compose,
+    # 3443 par défaut — jamais 443) doit accompagner le hostname : sans lui,
+    # "Ouvrir MG-VMS" côté Center pointerait vers le mauvais port.
+    try:
+        https_port = int(os.environ.get("MGVMS_HTTPS_PORT", "443"))
+    except ValueError:
+        https_port = 443
     payload = {
         "version": _current_version(),
         "git_commit": os.environ.get("GIT_COMMIT"),
@@ -229,7 +241,9 @@ async def _send_report_once() -> None:
         "uptime_seconds": time.monotonic() - _process_started_at,
         "health_summary": {"status": "ok"},
         "system_name": identity.get("system_name"),
-        "hostname": hostname,
+        "hostname_internal": hostname_internal,
+        "hostname_external": hostname_external,
+        "port": https_port,
     }
     api_key = decrypt_secret(s["api_key_encrypted"])
     try:

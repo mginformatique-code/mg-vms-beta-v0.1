@@ -172,6 +172,12 @@ services:
       BACKUP_PATH: /backups
       # v3.27 · Phase 3 — sélectionne le rôle API (voir server.py::on_startup).
       MGVMS_ROLE: api
+      # v3.51 · Port HTTPS réel exposé par le frontend (voir plus bas,
+      # service frontend) — nécessaire à routes/mgvms_center.py pour
+      # rapporter un lien "Ouvrir MG-VMS" correct côté Center (le port
+      # n'est JAMAIS 443 par défaut ici, contrairement à une URL web
+      # classique).
+      MGVMS_HTTPS_PORT: ${FRONTEND_HTTPS_PORT:-3443}
     ports:
       - "8001:8001"
     volumes:
