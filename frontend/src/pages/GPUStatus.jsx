@@ -126,17 +126,11 @@ export default function GPUStatus({ embedded = false }) {
         <div className="mb-4">
           <div className="flex items-center gap-2 mb-2">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Métriques temps réel</div>
+            {/* v3.54 · Sélecteur dropdown retiré (doublon avec les cartes
+                cliquables de "Tous les GPU" plus bas — même état
+                `selectedGpuIdx`, un seul moyen de sélection suffit). */}
             {multiGpu && (
-              <select
-                value={selectedGpuIdx}
-                onChange={(e) => setSelectedGpuIdx(Number(e.target.value))}
-                data-testid="gpu-select"
-                className="text-[11px] mono bg-card border border-border px-1.5 py-0.5"
-              >
-                {full.devices.map((d, i) => (
-                  <option key={d.index ?? i} value={i}>GPU{d.index ?? i} · {d.name}</option>
-                ))}
-              </select>
+              <span className="text-[11px] mono text-muted-foreground">GPU{gpu?.index ?? selectedGpuIdx} · {gpu?.name}</span>
             )}
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">

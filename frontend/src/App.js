@@ -82,7 +82,12 @@ function AppRoutes() {
       <Route path="/sites" element={<Protected><Sites /></Protected>} />
       <Route path="/map" element={<Protected><MapCenter /></Protected>} />
       <Route path="/security-center" element={<Protected><SecurityCenter /></Protected>} />
-      <Route path="/security-center/tls" element={<Protected><TlsSettings /></Protected>} />
+      {/* v3.54 · Certificat SSL déplacé de /security-center/tls vers /network/tls
+          — la page vit déjà dans le sous-menu Réseau côté sidebar, seule
+          l'URL trainait encore l'ancien préfixe. Redirect conservé pour les
+          liens/favoris existants. */}
+      <Route path="/network/tls" element={<Protected><TlsSettings /></Protected>} />
+      <Route path="/security-center/tls" element={<Navigate to="/network/tls" replace />} />
       <Route path="/network/config" element={<Protected><NetworkConfig /></Protected>} />
       <Route path="/diagnostics/pipeline-inspector" element={<Protected><PipelineInspectorLive /></Protected>} />
       <Route path="/security-center/mfa" element={<Protected><MfaCenter /></Protected>} />

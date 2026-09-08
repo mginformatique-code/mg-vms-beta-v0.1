@@ -87,7 +87,7 @@ export default function WelcomePopup() {
             <Section icon={ShieldAlert} title="Sécurité" accent="#FF3333">
               <p>Changez le mot de passe admin par défaut si ce n&apos;est pas déjà fait.</p>
               <p>Activez la <button onClick={() => go("/security-center/mfa")} className="text-[#0044FF] hover:underline">double authentification (MFA)</button> sur les comptes admin.</p>
-              <p>Vérifiez que votre <button onClick={() => go("/security-center/tls")} className="text-[#0044FF] hover:underline">certificat HTTPS</button> est valide et revoyez les <button onClick={() => go("/security-center/rbac")} className="text-[#0044FF] hover:underline">rôles utilisateurs</button> périodiquement.</p>
+              <p>Vérifiez que votre <button onClick={() => go("/network/tls")} className="text-[#0044FF] hover:underline">certificat HTTPS</button> est valide et revoyez les <button onClick={() => go("/security-center/rbac")} className="text-[#0044FF] hover:underline">rôles utilisateurs</button> périodiquement.</p>
               <p>Le <button onClick={() => go("/audit")} className="text-[#0044FF] hover:underline">journal d&apos;audit</button> trace toute action sensible — utile en cas de doute.</p>
             </Section>
 

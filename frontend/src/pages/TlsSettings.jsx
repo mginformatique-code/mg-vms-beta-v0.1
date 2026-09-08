@@ -10,11 +10,10 @@
  *   • Activation / suppression / export PEM (audité)
  */
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import api from "@/lib/api";
 import { toast } from "sonner";
 import {
-  ShieldCheck, ShieldAlert, ArrowLeft, Globe, Lock, Zap, Upload, KeyRound,
+  ShieldCheck, ShieldAlert, Globe, Lock, Zap, Upload, KeyRound,
   Sparkles, Trash2, Check, AlertTriangle, Copy, Download, Info, X, RefreshCw,
 } from "lucide-react";
 
@@ -453,14 +452,9 @@ export default function TlsSettings() {
     <div className="p-4 space-y-4 max-w-6xl mx-auto" data-testid="tls-settings">
       {/* Header */}
       <div className="flex items-end justify-between border-b border-border pb-3">
-        <div className="flex items-center gap-4">
-          <Link to="/network" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1" data-testid="tls-back">
-            <ArrowLeft size={13}/> Réseau
-          </Link>
-          <div>
-            <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground mb-1">Réseau · HTTPS / TLS</div>
-            <h1 className="font-head font-black text-3xl tracking-tight">Paramètres HTTPS &amp; certificats</h1>
-          </div>
+        <div>
+          <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground mb-1">Réseau · HTTPS / TLS</div>
+          <h1 className="font-head font-black text-3xl tracking-tight">Paramètres HTTPS &amp; certificats</h1>
         </div>
         <div className="flex items-center gap-2">
           {active

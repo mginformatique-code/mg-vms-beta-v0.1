@@ -30,7 +30,6 @@ import PipelineInspector from "./PipelineInspector";
 import AIPipelineMonitor from "./AIPipelineMonitor";
 import Hardware from "./Hardware";
 import GPUStatus from "./GPUStatus";
-import ContainerStatusPanel from "./ContainerStatusPanel";
 import SshConsolePanel from "./SshConsolePanel";
 import * as DiagnosticsRegistry from "@/tracking/DiagnosticsRegistry";
 
@@ -279,7 +278,9 @@ function WorkflowsPanel() {
 function DebugPanel() {
   return (
     <div className="space-y-4" data-testid="debug-panel">
-      <ContainerStatusPanel />
+      {/* v3.54 · "État des conteneurs" déplacé vers Réseau → Paramètres
+          réseau (demande explicite) — voir ContainerStatusPanel.jsx,
+          maintenant rendu depuis NetworkConfig.jsx. */}
       <TrackingDiagnosticsPanel />
       <SshConsolePanel />
     </div>

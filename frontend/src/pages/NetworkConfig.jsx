@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import api, { formatApiErrorDetail } from "@/lib/api";
-import { ArrowLeft, AlertTriangle, ShieldAlert, Wifi, Check, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, ShieldAlert, Wifi, Check, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import ContainerStatusPanel from "./ContainerStatusPanel";
 
 /**
  * NetworkConfig.jsx — Réseau → Paramètres réseau (v3.51).
@@ -90,14 +90,9 @@ export default function NetworkConfig() {
 
   return (
     <div className="p-4 space-y-4 max-w-3xl mx-auto" data-testid="network-config-page">
-      <div className="flex items-center gap-4 border-b border-border pb-3">
-        <Link to="/network" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
-          <ArrowLeft size={13} /> Réseau
-        </Link>
-        <div>
-          <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground mb-1">Réseau · Machine</div>
-          <h1 className="font-head font-black text-2xl tracking-tight">Paramètres réseau</h1>
-        </div>
+      <div className="border-b border-border pb-3">
+        <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground mb-1">Réseau · Machine</div>
+        <h1 className="font-head font-black text-2xl tracking-tight">Paramètres réseau</h1>
       </div>
 
       <div className="border border-[#FF3333]/50 bg-[#FF3333]/10 p-3 text-sm flex items-start gap-2">
@@ -151,6 +146,12 @@ export default function NetworkConfig() {
               <div className="col-span-2 md:col-span-4"><div className="text-[10px] uppercase text-muted-foreground">DNS</div><span className="mono">{(status.current?.dns || []).join(", ") || "—"}</span></div>
             </div>
           </div>
+
+          {/* v3.54 · Bloc "État des conteneurs" déplacé ici depuis Suivi des
+              performances → Debug (demande explicite) — vue seule (mêmes
+              données que là-bas, pas de duplication de logique), plus à sa
+              place à côté du reste de l'état réseau/machine. */}
+          <ContainerStatusPanel />
 
           <form onSubmit={submit} className="bg-card border border-border p-4 space-y-3">
             <h2 className="font-head font-black text-sm tracking-tight border-b border-border pb-2 mb-1">Modifier</h2>

@@ -84,7 +84,7 @@ const NAV = [
     // tout lien de navigation — relocalisée ici).
     { key: "nav.network", icon: Network, role: "client", children: [
       { to: "/network", key: "nav.network_overview", icon: Network, end: true },
-      { to: "/security-center/tls", key: "nav.network_ssl", icon: ShieldCheck, role: "admin" },
+      { to: "/network/tls", key: "nav.network_ssl", icon: ShieldCheck, role: "admin" },
       { to: "/network/config", key: "nav.network_config", icon: Settings, role: "admin" },
     ]},
     { to: "/mgvms-center", icon: Building2, key: "nav.mgvms_center", role: "admin" },
