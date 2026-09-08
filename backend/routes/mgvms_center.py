@@ -7,11 +7,14 @@ santé). Ce module gère UNIQUEMENT le côté MG-VMS de la relation :
   1. Assistant de connexion (admin MG Informatique authentifié par
      mot de passe + MFA — voir docstring de `connect_login` ci-dessous
      pour la raison de cette restriction) : sélection/création du
-     tenant+site, création du déploiement côté central, récupération de
-     la clé API.
+     tenant, création du déploiement côté central, récupération de
+     la clé API. Les sites ne se créent jamais depuis cet assistant :
+     un déploiement MG-VMS gère déjà ses propres sites en interne
+     (`db.sites`), le central se contente de les redécouvrir à chaque
+     rapport (voir `_send_report_once` ci-dessous).
   2. Rapport périodique (voir `mgvms_center_report_loop` dans server.py) :
-     pousse version/caméras/santé vers le central, encaisse en retour un
-     éventuel `update_available`.
+     pousse version/caméras/sites/santé vers le central, encaisse en
+     retour un éventuel `update_available`.
 
 Design "jamais de régression de connectivité" : toute erreur réseau vers
 MG-VMS Center est absorbée localement (log + `connected` reste tel quel
@@ -58,8 +61,6 @@ class ConnectFinishInput(BaseModel):
     pairing_token: str
     tenant_id: Optional[str] = None
     new_tenant_name: Optional[str] = None
-    site_id: Optional[str] = None
-    new_site_name: Optional[str] = None
     label: str
 
 
@@ -110,8 +111,7 @@ async def connect_mfa_verify(data: ConnectMfaInput, user: dict = Depends(require
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S) as client:
         headers = {"Authorization": f"Bearer {token}"}
         tenants = (await client.get(f"{_base_url(data.url)}/api/v1/tenants", headers=headers)).json()
-        sites = (await client.get(f"{_base_url(data.url)}/api/v1/sites", headers=headers)).json()
-    return {"pairing_token": token, "tenants": tenants, "sites": sites}
+    return {"pairing_token": token, "tenants": tenants}
 
 
 @mgvms_center_router.post("/connect/finish")
@@ -128,18 +128,8 @@ async def connect_finish(data: ConnectFinishInput, user: dict = Depends(require_
                 r.raise_for_status()
                 tenant_id = r.json()["id"]
 
-            site_id = data.site_id
-            if not site_id:
-                if not data.new_site_name:
-                    raise HTTPException(400, "Nom du site requis")
-                r = await client.post(f"{_base_url(data.url)}/api/v1/sites",
-                                       json={"tenant_id": tenant_id, "name": data.new_site_name},
-                                       headers=headers)
-                r.raise_for_status()
-                site_id = r.json()["id"]
-
             r = await client.post(f"{_base_url(data.url)}/api/v1/deployments",
-                                   json={"site_id": site_id, "label": data.label}, headers=headers)
+                                   json={"tenant_id": tenant_id, "label": data.label}, headers=headers)
             r.raise_for_status()
             deployment = r.json()
     except httpx.RequestError as e:
@@ -210,12 +200,16 @@ async def _send_report_once() -> None:
     from routes.welcome import _current_version
 
     camera_count = await db.cameras.count_documents({})
-    site_count_local = await db.sites.count_documents({})
+    local_sites = await db.sites.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
+    sites_report = []
+    for site in local_sites:
+        cam_count = await db.cameras.count_documents({"site_id": site["id"]})
+        sites_report.append({"id": site["id"], "name": site["name"], "camera_count": cam_count})
     payload = {
         "version": _current_version(),
         "git_commit": os.environ.get("GIT_COMMIT"),
         "camera_count": camera_count,
-        "site_count_local": site_count_local,
+        "sites": sites_report,
         "uptime_seconds": time.monotonic() - _process_started_at,
         "health_summary": {"status": "ok"},
     }
