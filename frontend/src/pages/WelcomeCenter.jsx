@@ -889,7 +889,7 @@ export default function WelcomeCenter() {
       <div className="flex items-end justify-between border-b border-border pb-3">
         <div>
           <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground mb-1">
-            MG-VMS · Welcome Center
+            MG-VMS · {t("nav.welcome")}
           </div>
           <h1 className="font-head font-black text-3xl sm:text-4xl tracking-tight">
             {greeting}
