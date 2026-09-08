@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
 import api from "@/lib/api";
-import { Loader2, Sparkles, Car, Users, TrendingUp, CheckCircle2, RefreshCw, ShieldAlert, Ban, CheckSquare, Square, MapPin } from "lucide-react";
+import { Loader2, Sparkles, Car, Users, TrendingUp, CheckCircle2, RefreshCw, ShieldAlert, Ban, CheckSquare, Square, MapPin, ZoomIn } from "lucide-react";
 import { toast } from "sonner";
+import { VehicleDrawer } from "@/pages/Vehicles";
 
 /**
  * v3.44 · Anomalies IA — menu dédié demandé explicitement (04/09), en
@@ -32,7 +33,7 @@ function fmtDateTime(iso) {
   try { return new Date(iso).toLocaleString("fr-FR"); } catch { return iso; }
 }
 
-function ReportCard({ report, onAcknowledged, selected, onToggleSelect }) {
+function ReportCard({ report, onAcknowledged, selected, onToggleSelect, onOpenPlate }) {
   const meta = KIND_META[report.kind] || KIND_META.per_vehicle;
   const sev = SEVERITY_STYLE[report.severity] || SEVERITY_STYLE.info;
   const Icon = meta.icon;
@@ -73,7 +74,12 @@ function ReportCard({ report, onAcknowledged, selected, onToggleSelect }) {
       <div className="flex items-center justify-between gap-2 pt-1">
         <div className="flex flex-wrap gap-1 text-[10px] mono text-muted-foreground">
           {(report.plates || []).map((p) => (
-            <span key={p} className="px-1.5 py-0.5 border border-border">{p}</span>
+            <button key={p} onClick={() => onOpenPlate(p)}
+                    className="flex items-center gap-1 px-1.5 py-0.5 border border-border hover:border-[#0044FF] hover:text-[#0044FF] transition-colors"
+                    title="Voir la fiche véhicule (photo HD, loupe, valider/modifier la plaque)"
+                    data-testid={`anomaly-plate-${p}`}>
+              <ZoomIn size={10} /> {p}
+            </button>
           ))}
         </div>
         {!report.acknowledged && (
@@ -97,6 +103,7 @@ export default function AnomalyCenter() {
   const [aiEnabled, setAiEnabled] = useState(true);
   const [selected, setSelected] = useState(() => new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [openPlate, setOpenPlate] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -221,7 +228,8 @@ export default function AnomalyCenter() {
       <div className="space-y-2">
         {items.map((r) => (
           <ReportCard key={r.id} report={r} onAcknowledged={onAcknowledged}
-                      selected={selected.has(r.id)} onToggleSelect={toggleSelectOne} />
+                      selected={selected.has(r.id)} onToggleSelect={toggleSelectOne}
+                      onOpenPlate={setOpenPlate} />
         ))}
         {items.length === 0 && !loading && (
           <div className="text-sm text-muted-foreground text-center py-8" data-testid="anomaly-empty">
@@ -229,6 +237,12 @@ export default function AnomalyCenter() {
           </div>
         )}
       </div>
+
+      {/* v3.48 · Fiche véhicule complète (photo HD, loupe, validation/edition
+          de plaque, blacklist/whitelist) — même composant que partout
+          ailleurs dans l'app (Events/Vehicles), ouvert depuis n'importe
+          quelle plaque citée dans un rapport d'anomalie, tous types confondus. */}
+      <VehicleDrawer plate={openPlate} onClose={() => setOpenPlate(null)} />
     </div>
   );
 }
