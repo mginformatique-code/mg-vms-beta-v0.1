@@ -8,9 +8,11 @@ import { toast } from "sonner";
  *
  * MG-VMS Center est un service SÉPARÉ hébergé par MG Informatique qui
  * centralise l'état de tous les déploiements clients. La connexion se
- * fait ici en un assistant guidé (URL -> login -> MFA -> choix
- * tenant/site) plutôt que par copier-coller manuel d'une clé API dans
- * un fichier .env.
+ * fait ici en un assistant guidé (URL -> login -> MFA -> choix du
+ * tenant) plutôt que par copier-coller manuel d'une clé API dans un
+ * fichier .env. Le site ne se choisit jamais ici : ce MG-VMS gère déjà
+ * ses propres sites en interne, ils apparaîtront automatiquement dans
+ * MG-VMS Center au premier rapport envoyé.
  *
  * Restriction volontaire : le login+MFA exigés sont ceux de MG-VMS
  * Center lui-même, qui n'a de comptes que pour le personnel MG
@@ -47,11 +49,8 @@ export default function MgvmsCenterSettings() {
 
   const [pairingToken, setPairingToken] = useState(null);
   const [tenants, setTenants] = useState([]);
-  const [sites, setSites] = useState([]);
   const [tenantChoice, setTenantChoice] = useState(""); // "" = nouveau
   const [newTenantName, setNewTenantName] = useState("");
-  const [siteChoice, setSiteChoice] = useState(""); // "" = nouveau
-  const [newSiteName, setNewSiteName] = useState("");
   const [label, setLabel] = useState("");
 
   const loadStatus = () => {
@@ -83,7 +82,6 @@ export default function MgvmsCenterSettings() {
       const { data } = await api.post("/mgvms-center/connect/mfa-verify", { url, mfa_token: mfaToken, code });
       setPairingToken(data.pairing_token);
       setTenants(data.tenants || []);
-      setSites(data.sites || []);
       setLabel(`${window.location.hostname} - MG-VMS`);
       setStep("pairing");
     } catch (e) {
@@ -98,7 +96,6 @@ export default function MgvmsCenterSettings() {
       await api.post("/mgvms-center/connect/finish", {
         url, pairing_token: pairingToken,
         tenant_id: tenantChoice || null, new_tenant_name: tenantChoice ? null : newTenantName,
-        site_id: siteChoice || null, new_site_name: siteChoice ? null : newSiteName,
         label,
       });
       toast.success("Connecté à MG-VMS Center");
@@ -117,8 +114,6 @@ export default function MgvmsCenterSettings() {
       loadStatus();
     } catch { toast.error("Échec de la déconnexion"); }
   };
-
-  const sitesForTenant = tenantChoice ? sites.filter((s) => s.tenant_id === tenantChoice) : [];
 
   return (
     <div className="p-4 max-w-2xl" data-testid="mgvms-center-page">
@@ -224,18 +219,9 @@ export default function MgvmsCenterSettings() {
                   </div>
                 )}
               </div>
-              <div className="mb-3">
-                <Lbl>Site</Lbl>
-                <Sel value={siteChoice} onChange={(e) => setSiteChoice(e.target.value)} disabled={!tenantChoice}>
-                  <option value="">— créer un nouveau site —</option>
-                  {sitesForTenant.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </Sel>
-                {!siteChoice && (
-                  <div className="mt-2">
-                    <Inp value={newSiteName} onChange={(e) => setNewSiteName(e.target.value)}
-                         placeholder="Nom du nouveau site" required />
-                  </div>
-                )}
+              <div className="text-xs text-muted-foreground mb-3 flex items-start gap-2 border border-border p-2.5">
+                <ShieldCheck size={14} className="text-muted-foreground shrink-0 mt-0.5" />
+                Les sites de ce déploiement apparaîtront automatiquement dans MG-VMS Center dès le premier rapport — rien à choisir ici.
               </div>
               <div className="mb-3">
                 <Lbl>Nom de ce déploiement</Lbl>

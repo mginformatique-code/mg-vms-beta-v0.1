@@ -41,6 +41,9 @@ logger = logging.getLogger("mgvms_center")
 mgvms_center_router = APIRouter(prefix="/api/mgvms-center", tags=["mgvms-center"])
 
 REQUEST_TIMEOUT_S = 10.0
+# MG-VMS Center est servi en HTTPS avec un certificat auto-signé (pas de
+# domaine public dédié) — verify=False assumé ici, cohérent avec le fait
+# que le pairing exige déjà une authentification MG Informatique (mdp+MFA).
 
 
 # ── Modèles ──────────────────────────────────────────────────────────
@@ -82,7 +85,7 @@ async def _get_settings() -> dict:
 @mgvms_center_router.post("/connect/login")
 async def connect_login(data: ConnectLoginInput, user: dict = Depends(require_role("admin"))):
     try:
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S) as client:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S, verify=False) as client:
             resp = await client.post(f"{_base_url(data.url)}/api/v1/auth/login",
                                       json={"email": data.email, "password": data.password})
     except httpx.RequestError as e:
@@ -99,7 +102,7 @@ async def connect_mfa_verify(data: ConnectMfaInput, user: dict = Depends(require
     l'assistant (choix tenant/site + création du déploiement), jamais
     persisté au-delà de cette session de configuration."""
     try:
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S) as client:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S, verify=False) as client:
             resp = await client.post(f"{_base_url(data.url)}/api/v1/auth/mfa-verify",
                                       json={"mfa_token": data.mfa_token, "code": data.code})
     except httpx.RequestError as e:
@@ -108,7 +111,7 @@ async def connect_mfa_verify(data: ConnectMfaInput, user: dict = Depends(require
         raise HTTPException(401, "Code MFA invalide")
     payload = resp.json()
     token = payload["access_token"]
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S) as client:
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S, verify=False) as client:
         headers = {"Authorization": f"Bearer {token}"}
         tenants = (await client.get(f"{_base_url(data.url)}/api/v1/tenants", headers=headers)).json()
     return {"pairing_token": token, "tenants": tenants}
@@ -118,7 +121,7 @@ async def connect_mfa_verify(data: ConnectMfaInput, user: dict = Depends(require
 async def connect_finish(data: ConnectFinishInput, user: dict = Depends(require_role("admin"))):
     headers = {"Authorization": f"Bearer {data.pairing_token}"}
     try:
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S) as client:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S, verify=False) as client:
             tenant_id = data.tenant_id
             if not tenant_id:
                 if not data.new_tenant_name:
@@ -215,7 +218,7 @@ async def _send_report_once() -> None:
     }
     api_key = decrypt_secret(s["api_key_encrypted"])
     try:
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S) as client:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S, verify=False) as client:
             resp = await client.post(f"{s['url']}/api/v1/report", json=payload,
                                       headers={"X-API-Key": api_key})
         resp.raise_for_status()
