@@ -20,7 +20,7 @@ import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from auth import require_role, get_current_user, log_audit
 from database import db
@@ -48,6 +48,37 @@ async def system_info(user: dict = Depends(get_current_user)):
         "timezone": str(now.tzinfo),
         "utc_offset": now.strftime("%z"),
     }
+
+
+# ── Identité système (menu Réseau > Certificat SSL) ───────────────────
+# v3.51 · Nom affiché, purement déclaratif (aucune modification de la
+# config réseau OS). Le nom d'hôte n'est PAS dupliqué ici : celui déjà
+# déclaré dans Réseau > Certificat SSL (domaine local/externe, voir
+# routes/tls.py::_read_domains) fait référence — évite deux réglages
+# concurrents pour la même notion.
+_DEFAULT_IDENTITY = {"system_name": "MG-VMS"}
+
+
+class SystemIdentityIn(BaseModel):
+    system_name: str = Field("", max_length=80)
+
+
+async def load_system_identity() -> dict:
+    doc = await db.settings.find_one({"key": "system_identity"}, {"_id": 0, "value": 1})
+    return {**_DEFAULT_IDENTITY, **((doc or {}).get("value") or {})}
+
+
+@system_admin_router.get("/identity")
+async def get_system_identity(user: dict = Depends(get_current_user)):
+    return await load_system_identity()
+
+
+@system_admin_router.put("/identity")
+async def put_system_identity(data: SystemIdentityIn, user: dict = Depends(require_role("admin"))):
+    value = {"system_name": data.system_name.strip() or _DEFAULT_IDENTITY["system_name"]}
+    await db.settings.update_one({"key": "system_identity"}, {"$set": {"key": "system_identity", "value": value}}, upsert=True)
+    await log_audit(user, "system_identity_updated", value["system_name"])
+    return value
 
 
 _CONTAINER_STATUS_PATH = "/logs/container_status.json"

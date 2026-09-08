@@ -201,6 +201,8 @@ async def _send_report_once() -> None:
         return
 
     from routes.welcome import _current_version
+    from routes.tls import _read_domains
+    from routes.system_admin import load_system_identity
 
     camera_count = await db.cameras.count_documents({})
     local_sites = await db.sites.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
@@ -208,6 +210,9 @@ async def _send_report_once() -> None:
     for site in local_sites:
         cam_count = await db.cameras.count_documents({"site_id": site["id"]})
         sites_report.append({"id": site["id"], "name": site["name"], "camera_count": cam_count})
+    identity = await load_system_identity()
+    domains = await _read_domains()
+    hostname = domains.get("external") or domains.get("internal") or ""
     payload = {
         "version": _current_version(),
         "git_commit": os.environ.get("GIT_COMMIT"),
@@ -215,6 +220,8 @@ async def _send_report_once() -> None:
         "sites": sites_report,
         "uptime_seconds": time.monotonic() - _process_started_at,
         "health_summary": {"status": "ok"},
+        "system_name": identity.get("system_name"),
+        "hostname": hostname,
     }
     api_key = decrypt_secret(s["api_key_encrypted"])
     try:

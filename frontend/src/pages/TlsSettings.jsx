@@ -386,6 +386,44 @@ function SelfSignedPanel({ onCreated, defaultDomain }) {
 // ────────────────────────────────────────────────────────────────
 // Page
 // ────────────────────────────────────────────────────────────────
+function SystemIdentityPanel() {
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    api.get("/system/identity").then(({ data }) => setName(data.system_name || "")).finally(() => setLoaded(true));
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try { await api.put("/system/identity", { system_name: name }); toast.success("Nom du système enregistré"); }
+    catch (e) { toast.error("Erreur enregistrement"); }
+    finally { setSaving(false); }
+  };
+
+  if (!loaded) return null;
+
+  return (
+    <div className="bg-card border border-border p-4 space-y-3" data-testid="tls-identity-panel">
+      <div className="flex items-center gap-2 border-b border-border pb-2">
+        <ShieldCheck size={14} className="text-[#0044FF]" />
+        <h2 className="font-head font-black text-sm tracking-tight">Identité du système</h2>
+      </div>
+      <div className="flex items-end gap-3">
+        <div className="flex-1">
+          <Field label="Nom du système" hint="Affiché dans MG-VMS et remonté à MG-VMS Center s'il est connecté" testid="tls-system-name">
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="MG-VMS" data-testid="tls-system-name-input" />
+          </Field>
+        </div>
+        <Btn onClick={save} disabled={saving} data-testid="tls-identity-save">
+          {saving ? "Enregistrement…" : (<><Check size={13} /> Enregistrer</>)}
+        </Btn>
+      </div>
+    </div>
+  );
+}
+
 export default function TlsSettings() {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -416,11 +454,11 @@ export default function TlsSettings() {
       {/* Header */}
       <div className="flex items-end justify-between border-b border-border pb-3">
         <div className="flex items-center gap-4">
-          <Link to="/security-center" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1" data-testid="tls-back">
-            <ArrowLeft size={13}/> Centre de sécurité
+          <Link to="/network" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1" data-testid="tls-back">
+            <ArrowLeft size={13}/> Réseau
           </Link>
           <div>
-            <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground mb-1">Sécurité · HTTPS / TLS</div>
+            <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground mb-1">Réseau · HTTPS / TLS</div>
             <h1 className="font-head font-black text-3xl tracking-tight">Paramètres HTTPS &amp; certificats</h1>
           </div>
         </div>
@@ -454,6 +492,7 @@ export default function TlsSettings() {
       </div>
 
       {/* Panneaux */}
+      <SystemIdentityPanel />
       <DomainsPanel config={config} onSave={saveDomains} />
       <CertificatesPanel config={config} onReload={load} />
 
