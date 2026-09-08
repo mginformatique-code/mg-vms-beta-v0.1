@@ -22,6 +22,7 @@ import InactivityWatcher from "@/components/InactivityWatcher";
 import AppDebugPanel from "@/components/AppDebugPanel";
 import SecurityCenter from "@/pages/SecurityCenter";
 import TlsSettings from "@/pages/TlsSettings";
+import NetworkConfig from "@/pages/NetworkConfig";
 import PipelineInspectorLive from "@/pages/PipelineInspectorLive";
 import MfaCenter from "@/pages/MfaCenter";
 import SessionsCenter from "@/pages/SessionsCenter";
@@ -80,6 +81,7 @@ function AppRoutes() {
       <Route path="/map" element={<Protected><MapCenter /></Protected>} />
       <Route path="/security-center" element={<Protected><SecurityCenter /></Protected>} />
       <Route path="/security-center/tls" element={<Protected><TlsSettings /></Protected>} />
+      <Route path="/network/config" element={<Protected><NetworkConfig /></Protected>} />
       <Route path="/diagnostics/pipeline-inspector" element={<Protected><PipelineInspectorLive /></Protected>} />
       <Route path="/security-center/mfa" element={<Protected><MfaCenter /></Protected>} />
       <Route path="/security-center/sessions" element={<Protected><SessionsCenter /></Protected>} />
