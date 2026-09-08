@@ -188,6 +188,10 @@ services:
       - ${LOGS_PATH:-/mnt/storage/logs}:/logs
       - ${CERTS_PATH:-/mnt/storage/certs}:/certificates
       - ${BACKUPS_PATH:-/mnt/storage/backups}:/backups
+      # v3.51 · Nom d'hôte RÉEL de la machine/VM (pas un nom de domaine
+      # saisi à la main) — utilisé pour l'identification du déploiement
+      # côté MG-VMS Center (voir routes/mgvms_center.py). Lecture seule.
+      - /etc/hostname:/etc/host_hostname:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/health"]
       interval: 30s

@@ -23,6 +23,7 @@ fonctionnement normal de ce déploiement.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -220,14 +221,41 @@ async def _send_report_once() -> None:
         sites_report.append({"id": site["id"], "name": site["name"], "camera_count": cam_count})
     identity = await load_system_identity()
     domains = await _read_domains()
-    # v3.51 · Le Center a besoin des DEUX adresses, pas d'une seule choisie
-    # arbitrairement : le nom d'hôte local (LAN/mDNS, utile sur site) et le
-    # nom DNS externe (utile à distance) répondent à des besoins différents
-    # selon d'où l'admin MG Informatique se connecte.
-    hostname_internal = domains.get("internal") or ""
-    hostname_external = domains.get("external") or ""
+
+    # v3.51 · Nom d'hôte RÉEL de la machine/VM (lu depuis /etc/hostname,
+    # monté en lecture seule — voir docker-compose.yml) — sert à
+    # l'identification du déploiement côté Center ("je me repère mieux
+    # dans les sites" — demande explicite). PAS le "domaine local" saisi
+    # à la main dans Réseau > Certificat SSL, qui reste un réglage TLS
+    # séparé, pas une identité machine.
+    try:
+        with open("/etc/host_hostname") as f:
+            machine_hostname = f.read().strip()
+    except Exception:
+        machine_hostname = ""
+
+    # v3.51 · Adresse locale réelle de la machine (IP, pas un nom DNS) —
+    # demande explicite : sur un lien VPN, un nom comme "mgvms.local" ne
+    # se résout généralement pas à travers le tunnel, alors que l'IP reste
+    # joignable si le VPN route ce sous-réseau. Lue depuis l'instantané
+    # écrit par network-watch.sh (voir routes/system_admin.py) quand ce
+    # timer hôte est installé ; sinon absente (jamais de valeur inventée).
+    local_ip = ""
+    try:
+        with open("/logs/network_status.json") as f:
+            local_ip = (json.load(f).get("current") or {}).get("ip") or ""
+    except Exception:
+        pass
+
+    # Domaine DNS externe (Internet public) — pour un accès distant "à
+    # l'ancienne" (port-forwarding/reverse proxy déjà en place côté
+    # client). Le vrai accès distant sans configuration réseau manuelle
+    # (VPN mesh Tailscale/WireGuard) est une pièce séparée, pas encore
+    # câblée ici — voir roadmap MG-VMS Center.
+    external_hostname = domains.get("external") or ""
+
     # v3.51 · Le port HTTPS réel (FRONTEND_HTTPS_PORT côté docker-compose,
-    # 3443 par défaut — jamais 443) doit accompagner le hostname : sans lui,
+    # 3443 par défaut — jamais 443) doit accompagner l'adresse : sans lui,
     # "Ouvrir MG-VMS" côté Center pointerait vers le mauvais port.
     try:
         https_port = int(os.environ.get("MGVMS_HTTPS_PORT", "443"))
@@ -241,8 +269,9 @@ async def _send_report_once() -> None:
         "uptime_seconds": time.monotonic() - _process_started_at,
         "health_summary": {"status": "ok"},
         "system_name": identity.get("system_name"),
-        "hostname_internal": hostname_internal,
-        "hostname_external": hostname_external,
+        "machine_hostname": machine_hostname,
+        "local_ip": local_ip,
+        "external_hostname": external_hostname,
         "port": https_port,
     }
     api_key = decrypt_secret(s["api_key_encrypted"])
