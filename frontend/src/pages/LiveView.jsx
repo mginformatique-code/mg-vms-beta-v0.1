@@ -851,6 +851,22 @@ export default function LiveView() {
             </button>
           </>
         )}
+        {/* v3.54 · Mode focus (1 caméra) : mêmes flèches flottantes que la
+            pagination grille — auparavant seuls les petits boutons de la
+            barre d'outils (focus-prev/focus-next) permettaient de changer
+            de caméra ici, beaucoup moins visibles (demande explicite). */}
+        {focusedCam && gridCams.filter((c) => c?.id).length > 1 && (
+          <>
+            <button onClick={() => gotoDelta(-1)} data-testid="focus-overlay-prev" title={t("lv.prev_camera")}
+                    className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 z-20 p-2 bg-black/60 text-white border border-white/20 hover:bg-black/80">
+              <ChevronLeft size={18} />
+            </button>
+            <button onClick={() => gotoDelta(+1)} data-testid="focus-overlay-next" title={t("lv.next_camera")}
+                    className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 z-20 p-2 bg-black/60 text-white border border-white/20 hover:bg-black/80">
+              <ChevronRight size={18} />
+            </button>
+          </>
+        )}
       </div>
 
       {previewEvent && (
