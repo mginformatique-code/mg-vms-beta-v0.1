@@ -64,13 +64,6 @@ const NAV = [
       { to: "/security-center/sessions", key: "nav.sessions_active", icon: Clock },
       { to: "/security-center/rbac", key: "nav.rbac", icon: Layers, role: "admin" },
     ]},
-    // v3.51 · Réseau devient un sous-menu : Supervision (topologie/équipements
-    // LAN) + Certificat SSL (routes/tls.py, page existante mais jusque-là
-    // orpheline de tout lien de navigation — relocalisée ici à la demande).
-    { key: "nav.network", icon: Network, role: "client", children: [
-      { to: "/network", key: "nav.network_overview", icon: Network, end: true },
-      { to: "/security-center/tls", key: "nav.network_ssl", icon: ShieldCheck, role: "admin" },
-    ]},
     { to: "/plugins", icon: Puzzle, key: "nav.plugins", role: "admin" },
     { to: "/llm-settings", icon: Brain, key: "nav.llm", role: "admin" },
   ]},
@@ -85,6 +78,14 @@ const NAV = [
     { to: "/storage", icon: HardDrive, key: "nav.storage" },
     { to: "/date-heure", icon: Clock, key: "nav.datetime" },
     { to: "/notifications", icon: BellRing, key: "nav.notifications", role: "technician" },
+    // v3.51 · Réseau déplacé de nav.admin vers Paramètres (demande
+    // explicite) : Supervision (topologie/équipements LAN) + Certificat
+    // SSL (routes/tls.py, page existante mais jusque-là orpheline de
+    // tout lien de navigation — relocalisée ici).
+    { key: "nav.network", icon: Network, role: "client", children: [
+      { to: "/network", key: "nav.network_overview", icon: Network, end: true },
+      { to: "/security-center/tls", key: "nav.network_ssl", icon: ShieldCheck, role: "admin" },
+    ]},
     { to: "/mgvms-center", icon: Building2, key: "nav.mgvms_center", role: "admin" },
   ]},
 ];
