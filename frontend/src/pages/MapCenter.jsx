@@ -17,6 +17,13 @@
  *
  * Prévu Phase 2+ : cônes FOV colorés (vert/jaune/rouge), overlays câbles,
  * switches, zones, portes, mesures, export PDF/PNG, audit.
+ *
+ * v3.54 · Carte interactive ("carte_live") : fond de carte navigable
+ * (OpenStreetMap / satellite Esri, gratuits, sans clé API) en alternative
+ * à l'image statique — voir LiveMapCanvas.jsx et lib/mapCenterHelpers.js.
+ * Additif : le canvas Konva/l'image statique restent inchangés pour tous
+ * les plans existants. Import PDF (rasterisé côté navigateur en PNG,
+ * pdfjs-dist) ajouté sur le même pipeline d'import que les images.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -26,22 +33,18 @@ import api from "@/lib/api";
 import { toast } from "sonner";
 import {
   Building2, Camera as CamIcon, ChevronDown, ChevronRight, Compass, ExternalLink,
-  FilePlus, FolderTree, HardDrive, Layers as LayersIcon, MapPin, Move,
+  FilePlus, FolderTree, HardDrive, Layers as LayersIcon, MapPin, Move, MapPinned,
   Plus, Save, Search, Settings2, Trash2, Upload, X, ZoomIn, ZoomOut, Activity,
 } from "lucide-react";
+import LiveMapCanvas from "./LiveMapCanvas";
+import {
+  DEFAULT_CAM, STATUS_COLOR, COVERAGE_COLOR, coverageQuality,
+  detectCameraRoles, ROLE_LABELS, ROLE_COLORS, auditCamera, AUDIT_LABEL,
+} from "@/lib/mapCenterHelpers";
 
 // ─────────────────────────────────────────────────────────────────────
 // Constantes visuelles
 // ─────────────────────────────────────────────────────────────────────
-const DEFAULT_CAM = {
-  x: 100, y: 100, rotation: 0, height_m: 3,
-  angle_h: 90, angle_v: 60, range_m: 20, color: "#0044FF",
-  fixture: "wall", lens_mm: 4,
-};
-
-const STATUS_COLOR = {
-  online: "#00E676", offline: "#FF3333", degraded: "#FFB800",
-};
 const FIXTURE_LABEL = { wall: "Mur", ceiling: "Plafond", pole: "Mât" };
 const PLAN_TYPES = [
   { id: "satellite", label: "Satellite" },
@@ -57,78 +60,6 @@ const PLAN_TYPES = [
 const STAGE_MIN_ZOOM = 0.15;
 const STAGE_MAX_ZOOM = 5;
 
-// v0.5.2.c · Phase 2 — heuristique qualité de couverture.
-// Le cône est coloré selon la combinaison (angle horizontal, portée) et la
-// hauteur d'installation. Ce n'est pas une simulation optique, juste un
-// signal visuel pour l'installateur.
-//   Vert  = couverture "correcte" (angle 60-100° · portée 15-30m · hauteur 2.5-4m)
-//   Jaune = couverture moyenne
-//   Rouge = limite (angle trop large, portée trop courte/longue)
-const COVERAGE_COLOR = {
-  good: "#00E676",
-  medium: "#FFB800",
-  poor: "#FF3333",
-};
-function coverageQuality(pos) {
-  const a = pos?.angle_h ?? DEFAULT_CAM.angle_h;
-  const r = pos?.range_m ?? DEFAULT_CAM.range_m;
-  const h = pos?.height_m ?? DEFAULT_CAM.height_m;
-  let score = 100;
-  if (a < 40 || a > 130) score -= 30; // trop étroit ou fisheye
-  else if (a < 60 || a > 110) score -= 15;
-  if (r < 8 || r > 40) score -= 30;
-  else if (r < 15 || r > 30) score -= 10;
-  if (h < 2 || h > 6) score -= 25;
-  else if (h < 2.5 || h > 4.5) score -= 10;
-  if (score >= 75) return "good";
-  if (score >= 45) return "medium";
-  return "poor";
-}
-
-// Détection des rôles caméra pour badges (heuristique légère)
-function detectCameraRoles(cam) {
-  const plugins = (cam.enabled_plugins || []).map((p) => p.toLowerCase());
-  const roles = [];
-  if (plugins.some((p) => p.includes("alpr") || p.includes("anpr"))) roles.push("anpr");
-  if ((cam.driver || "").toLowerCase().includes("ptz") ||
-      (cam.model || "").toLowerCase().includes("ptz") ||
-      cam.is_ptz) roles.push("ptz");
-  if ((cam.model || "").toLowerCase().includes("thermal") ||
-      plugins.includes("thermal")) roles.push("thermal");
-  if (cam.record_enabled) roles.push("rec");
-  if (cam.detect_enabled) roles.push("ai");
-  return roles;
-}
-const ROLE_LABELS = {
-  anpr: "ANPR", ptz: "PTZ", thermal: "TH", ai: "IA", rec: "REC",
-};
-const ROLE_COLORS = {
-  anpr: "#0044FF", ptz: "#A855F7", thermal: "#F97316",
-  ai: "#00A2FF", rec: "#FF3333",
-};
-
-// v0.5.2.c · Phase 3 — audit : détecte les caméras "incomplètes"
-function auditCamera(cam) {
-  const pos = cam.map_position || {};
-  const flags = [];
-  if (!cam.status || cam.status === "offline") flags.push("offline");
-  if (!(pos.photos && pos.photos.length)) flags.push("no_photo");
-  if (pos.height_m == null) flags.push("no_height");
-  if (pos.angle_h == null) flags.push("no_angle");
-  if (pos.x == null || pos.y == null) flags.push("no_place");
-  if (!cam.driver) flags.push("no_driver");
-  if (!cam.firmware) flags.push("no_firmware");
-  return flags;
-}
-const AUDIT_LABEL = {
-  offline: "Hors ligne",
-  no_photo: "Sans photo",
-  no_height: "Hauteur non renseignée",
-  no_angle: "Angle non renseigné",
-  no_place: "Non positionnée",
-  no_driver: "Sans driver",
-  no_firmware: "Firmware absent",
-};
 // Types de photos gérées
 const PHOTO_TYPES = [
   { id: "real", label: "Réelle" },
@@ -148,6 +79,28 @@ async function fileToDataUri(file) {
     r.onerror = reject;
     r.readAsDataURL(file);
   });
+}
+
+// v3.54 · Import PDF — rasterise la 1ère page en PNG côté navigateur
+// (pdfjs-dist) avant de réutiliser TEL QUEL le pipeline d'import image
+// existant (onFilePicked ci-dessous) : pas de nouvel endpoint, le backend
+// ne voit jamais de PDF, juste une image comme les autres.
+async function pdfFirstPageToDataUri(file) {
+  const pdfjsLib = await import("pdfjs-dist");
+  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+    "pdfjs-dist/build/pdf.worker.min.mjs",
+    import.meta.url
+  ).toString();
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 2 });
+  const canvas = document.createElement("canvas");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const ctx = canvas.getContext("2d");
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  return { dataUri: canvas.toDataURL("image/png"), width: viewport.width, height: viewport.height };
 }
 
 function useDebouncedCallback(fn, delay) {
@@ -453,7 +406,7 @@ function CameraPanel({ camera, onClose, onChange, onOpenInCenter }) {
 // ─────────────────────────────────────────────────────────────────────
 function SiteTree({
   sites, buildings, plans, selectedSite, selectedPlan,
-  onSelectSite, onSelectPlan, onCreateBuilding, onCreatePlan, onDeletePlan, cameraCounts,
+  onSelectSite, onSelectPlan, onCreateBuilding, onCreatePlan, onCreateLiveMap, onDeletePlan, cameraCounts,
 }) {
   const [expanded, setExpanded] = useState({}); // site_id → bool
   const [q, setQ] = useState("");
@@ -535,6 +488,12 @@ function SiteTree({
                       data-testid={`map-add-plan-${s.id}`}>
                       <FilePlus size={10} /> Plan
                     </button>
+                    <button onClick={() => onCreateLiveMap(s.id)}
+                      className="text-[10px] text-[#0044FF] hover:underline flex items-center gap-1 ml-2"
+                      title="Carte interactive (OpenStreetMap / satellite, gratuite)"
+                      data-testid={`map-add-livemap-${s.id}`}>
+                      <MapPinned size={10} /> Carte
+                    </button>
                   </div>
                 </div>
               )}
@@ -547,10 +506,11 @@ function SiteTree({
 }
 
 function PlanRow({ p, selected, onSelect, onDelete, count }) {
+  const Icon = p.type === "carte_live" ? MapPinned : LayersIcon;
   return (
     <div className={`group flex items-center gap-1.5 px-3 py-1 hover:bg-secondary/40 cursor-pointer ${selected ? "bg-[#0044FF]/15 border-l-2 border-[#0044FF]" : ""}`}
       onClick={onSelect} data-testid={`map-plan-${p.id}`}>
-      <LayersIcon size={11} className="text-muted-foreground" />
+      <Icon size={11} className="text-muted-foreground" />
       <span className="flex-1 truncate text-xs">{p.name}</span>
       <span className="text-[9px] mono text-muted-foreground">{count}</span>
       <button onClick={(e) => { e.stopPropagation(); onDelete(); }}
@@ -750,6 +710,11 @@ export default function MapCenter() {
   };
   const onCamDragEnd = (camId, pos) => saveCameraPos(camId, pos);
 
+  // v3.54 · Carte live — Leaflet ne notifie qu'à la fin du glisser (pas
+  // d'équivalent continu à onDragMove), donc on met à jour l'état local
+  // ET on persiste en un seul geste (onCamDrag seul ne suffirait pas ici).
+  const onLiveMapCamDragEnd = (camId, pos) => { onCamDrag(camId, pos); saveCameraPos(camId, pos); };
+
   const updateCameraDetails = useDebouncedCallback(async (camId, patch) => {
     try { await api.put(`/site-manager/cameras/${camId}/position`, patch); }
     catch (e) { toast.error("Sauvegarde caméra échouée"); }
@@ -780,21 +745,57 @@ export default function MapCenter() {
     if (!file) return;
     if (file.size > 20 * 1024 * 1024) { toast.error("Fichier > 20 MB"); return; }
     try {
-      const dataUri = await fileToDataUri(file);
+      let dataUri, width, height;
+      if (file.type === "application/pdf") {
+        const res = await pdfFirstPageToDataUri(file);
+        dataUri = res.dataUri; width = res.width; height = res.height;
+      } else {
+        dataUri = await fileToDataUri(file);
+        const img = new window.Image();
+        const done = new Promise((resolve) => { img.onload = resolve; img.onerror = resolve; });
+        img.src = dataUri;
+        await done;
+        width = img.width || null; height = img.height || null;
+      }
       const name = file.name.replace(/\.[^.]+$/, "");
-      const img = new window.Image();
-      const done = new Promise((resolve) => { img.onload = resolve; img.onerror = resolve; });
-      img.src = dataUri;
-      await done;
       const r = await api.post("/site-manager/plans", {
         site_id: siteId, name, type: "autre",
-        image_data_uri: dataUri,
-        width: img.width || null, height: img.height || null,
+        image_data_uri: dataUri, width, height,
       });
       await refreshAll();
       loadPlan(r.data.id);
       toast.success("Plan importé");
     } catch (e) { toast.error("Import plan refusé"); }
+  };
+
+  // v3.54 · Carte interactive (Leaflet/OSM+satellite gratuits) — additive,
+  // aucune image stockée (voir PlanInput côté backend). Centre initial :
+  // géolocalisation navigateur si autorisée, sinon saisie manuelle.
+  const createLiveMap = async (siteId) => {
+    const name = window.prompt("Nom de la carte ?", "Carte");
+    if (!name) return;
+    const applyCenter = async (lat, lng) => {
+      try {
+        const r = await api.post("/site-manager/plans", {
+          site_id: siteId, name, type: "carte_live",
+          center_lat: lat, center_lng: lng, zoom: 18,
+        });
+        await refreshAll();
+        loadPlan(r.data.id);
+        toast.success("Carte créée");
+      } catch (e) { toast.error("Création de la carte refusée"); }
+    };
+    if (navigator.geolocation && window.confirm("Centrer la carte sur votre position actuelle ? (Annuler pour saisir des coordonnées manuellement)")) {
+      navigator.geolocation.getCurrentPosition(
+        (p) => applyCenter(p.coords.latitude, p.coords.longitude),
+        () => { toast.error("Position indisponible — coordonnées par défaut"); applyCenter(46.6, 1.9); },
+        { timeout: 5000 }
+      );
+    } else {
+      const lat = parseFloat(window.prompt("Latitude initiale ?", "46.6")) || 46.6;
+      const lng = parseFloat(window.prompt("Longitude initiale ?", "1.9")) || 1.9;
+      applyCenter(lat, lng);
+    }
   };
 
   const deletePlan = async (planId) => {
@@ -815,12 +816,21 @@ export default function MapCenter() {
     }).catch(() => {});
   }, [selectedSite, cameras]);
 
+  // v3.54 · Centre courant de la carte live (mis à jour par LiveMapCanvas
+  // sur chaque déplacement) — sert uniquement à placer une NOUVELLE caméra
+  // au centre de la vue actuelle, comme le fait déjà le mode pixel avec le
+  // centre du plan (planSize.w/2, h/2) ; jamais persisté sur le plan lui-même.
+  const [liveMapCenter, setLiveMapCenter] = useState(null);
+
   const placeCameraOnPlan = async (camId) => {
     if (!selectedPlan) { toast.error("Sélectionnez un plan d'abord"); return; }
-    const cx = planSize.w / 2, cy = planSize.h / 2;
+    const isLiveMap = selectedPlan.type === "carte_live";
+    const placement = isLiveMap
+      ? { lat: liveMapCenter?.lat ?? selectedPlan.center_lat ?? 46.6, lng: liveMapCenter?.lng ?? selectedPlan.center_lng ?? 1.9 }
+      : { x: planSize.w / 2, y: planSize.h / 2 };
     try {
       await api.put(`/site-manager/cameras/${camId}/position`, {
-        plan_id: selectedPlan.id, x: cx, y: cy,
+        plan_id: selectedPlan.id, ...placement,
         rotation: 0, angle_h: DEFAULT_CAM.angle_h, angle_v: DEFAULT_CAM.angle_v,
         range_m: DEFAULT_CAM.range_m, height_m: DEFAULT_CAM.height_m, fixture: "wall",
       });
@@ -832,6 +842,10 @@ export default function MapCenter() {
 
   const selectedCam = cameras.find((c) => c.id === selectedCamId) || null;
   const camerasOnPlan = cameras;
+  // v3.54 · Mesure/export PNG/PDF restent hors périmètre v1 pour une carte
+  // live (mesure géo-référencée et export DOM/tuiles = calculs différents
+  // du mode pixel Konva) — CSV reste dispo, indépendant du rendu.
+  const isLiveMap = selectedPlan?.type === "carte_live";
 
   // Cameras du site pas encore placées sur ce plan
   const unplaced = availableCams.filter(
@@ -978,6 +992,7 @@ export default function MapCenter() {
         onSelectPlan={onSelectPlan}
         onCreateBuilding={createBuilding}
         onCreatePlan={createPlan}
+        onCreateLiveMap={createLiveMap}
         onDeletePlan={deletePlan}
         cameraCounts={cameraCounts}
       />
@@ -985,7 +1000,7 @@ export default function MapCenter() {
       {/* Hidden file inputs per site (used by "add plan") */}
       {sites.map((s) => (
         <input key={s.id} id={`hidden-plan-upload-${s.id}`} type="file"
-          accept="image/*"
+          accept="image/*,application/pdf"
           style={{ display: "none" }}
           onChange={(e) => onFilePicked(s.id, e.target.files?.[0])}
         />
@@ -1037,51 +1052,62 @@ export default function MapCenter() {
             )}
           </button>
 
-          {/* Outils de mesure */}
-          <div className="bg-card/90 backdrop-blur border border-border p-1 pointer-events-auto flex items-center gap-1" data-testid="map-measure">
-            {[
-              { id: "distance", label: "D", title: "Distance (2 clics)" },
-              { id: "surface", label: "S", title: "Surface (double-clic pour finir)" },
-              { id: "radius", label: "R", title: "Rayon (centre puis bord)" },
-            ].map((m) => (
-              <button key={m.id}
-                onClick={() => { setMeasureTool(measureTool === m.id ? null : m.id); setMeasurePts([]); }}
-                className={`px-2 py-1 text-[11px] mono ${measureTool === m.id ? "bg-[#0044FF] text-white" : "hover:bg-secondary"}`}
-                title={m.title} data-testid={`map-measure-${m.id}`}
-              >{m.label}</button>
-            ))}
-            {measurements.length > 0 && (
-              <button onClick={() => setMeasurements([])} className="px-2 py-1 text-[11px] text-[#FF3333]" title="Effacer">
-                <Trash2 size={11} />
-              </button>
-            )}
-          </div>
+          {/* Outils de mesure — hors périmètre v1 pour une carte live */}
+          {!isLiveMap && (
+            <div className="bg-card/90 backdrop-blur border border-border p-1 pointer-events-auto flex items-center gap-1" data-testid="map-measure">
+              {[
+                { id: "distance", label: "D", title: "Distance (2 clics)" },
+                { id: "surface", label: "S", title: "Surface (double-clic pour finir)" },
+                { id: "radius", label: "R", title: "Rayon (centre puis bord)" },
+              ].map((m) => (
+                <button key={m.id}
+                  onClick={() => { setMeasureTool(measureTool === m.id ? null : m.id); setMeasurePts([]); }}
+                  className={`px-2 py-1 text-[11px] mono ${measureTool === m.id ? "bg-[#0044FF] text-white" : "hover:bg-secondary"}`}
+                  title={m.title} data-testid={`map-measure-${m.id}`}
+                >{m.label}</button>
+              ))}
+              {measurements.length > 0 && (
+                <button onClick={() => setMeasurements([])} className="px-2 py-1 text-[11px] text-[#FF3333]" title="Effacer">
+                  <Trash2 size={11} />
+                </button>
+              )}
+            </div>
+          )}
 
-          {/* Exports */}
+          {/* Exports — PNG/PDF hors périmètre v1 pour une carte live (pas
+              de simple stage.toDataURL() Konva à capturer) ; CSV reste
+              disponible, indépendant du rendu. */}
           <div className="bg-card/90 backdrop-blur border border-border p-1 pointer-events-auto flex items-center gap-1" data-testid="map-exports">
-            <button onClick={exportPng} className="px-2 py-1 text-[11px] hover:bg-secondary" title="Export PNG" data-testid="map-export-png">PNG</button>
-            <button onClick={exportPdf} className="px-2 py-1 text-[11px] hover:bg-secondary" title="Rapport PDF (imprimable)" data-testid="map-export-pdf">PDF</button>
+            {!isLiveMap && (
+              <>
+                <button onClick={exportPng} className="px-2 py-1 text-[11px] hover:bg-secondary" title="Export PNG" data-testid="map-export-png">PNG</button>
+                <button onClick={exportPdf} className="px-2 py-1 text-[11px] hover:bg-secondary" title="Rapport PDF (imprimable)" data-testid="map-export-pdf">PDF</button>
+              </>
+            )}
             <button onClick={exportCameraCsv} className="px-2 py-1 text-[11px] hover:bg-secondary" title="CSV caméras" data-testid="map-export-csv">CSV</button>
             {auditMode && (
               <button onClick={exportAuditCsv} className="px-2 py-1 text-[11px] text-[#FFB800] hover:bg-secondary" title="Rapport audit CSV" data-testid="map-export-audit">AUDIT</button>
             )}
           </div>
 
-          <div className="ml-auto flex items-center gap-1 bg-card/90 backdrop-blur border border-border p-1 pointer-events-auto">
-            <button onClick={() => setScale((s) => Math.max(STAGE_MIN_ZOOM, s / 1.2))}
-              className="p-1 hover:bg-secondary" title="Zoom -" data-testid="map-zoom-out">
-              <ZoomOut size={14} />
-            </button>
-            <span className="mono text-xs px-2">{Math.round(scale * 100)}%</span>
-            <button onClick={() => setScale((s) => Math.min(STAGE_MAX_ZOOM, s * 1.2))}
-              className="p-1 hover:bg-secondary" title="Zoom +" data-testid="map-zoom-in">
-              <ZoomIn size={14} />
-            </button>
-            <button onClick={() => { setScale(1); setStagePos({ x: 0, y: 0 }); }}
-              className="p-1 hover:bg-secondary" title="Recentrer">
-              <Compass size={14} />
-            </button>
-          </div>
+          {/* Zoom — spécifique au canvas Konva, Leaflet a déjà les siens */}
+          {!isLiveMap && (
+            <div className="ml-auto flex items-center gap-1 bg-card/90 backdrop-blur border border-border p-1 pointer-events-auto">
+              <button onClick={() => setScale((s) => Math.max(STAGE_MIN_ZOOM, s / 1.2))}
+                className="p-1 hover:bg-secondary" title="Zoom -" data-testid="map-zoom-out">
+                <ZoomOut size={14} />
+              </button>
+              <span className="mono text-xs px-2">{Math.round(scale * 100)}%</span>
+              <button onClick={() => setScale((s) => Math.min(STAGE_MAX_ZOOM, s * 1.2))}
+                className="p-1 hover:bg-secondary" title="Zoom +" data-testid="map-zoom-in">
+                <ZoomIn size={14} />
+              </button>
+              <button onClick={() => { setScale(1); setStagePos({ x: 0, y: 0 }); }}
+                className="p-1 hover:bg-secondary" title="Recentrer">
+                <Compass size={14} />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Audit panel — liste des caméras avec problèmes */}
@@ -1142,57 +1168,72 @@ export default function MapCenter() {
           </div>
         )}
 
-        {/* Canvas */}
-        <Stage
-          ref={stageRef}
-          width={stageSize.w}
-          height={stageSize.h}
-          x={stagePos.x} y={stagePos.y}
-          scaleX={scale} scaleY={scale}
-          draggable={!measureTool}
-          onDragEnd={(e) => setStagePos({ x: e.target.x(), y: e.target.y() })}
-          onWheel={onWheel}
-          onMouseDown={onStageMouseDown}
-          onDblClick={(e) => {
-            // double-clic pour terminer une surface
-            if (measureTool === "surface") finishSurface();
-          }}
-        >
-          <Layer>
-            {selectedPlan?.image_data_uri && (
-              <PlanBackground src={selectedPlan.image_data_uri} onSize={(w, h) => setPlanSize({ w, h })} />
-            )}
-            {!selectedPlan && (
-              <Text text="Sélectionnez ou importez un plan pour commencer"
-                x={40} y={40} fontSize={16} fill="#71717a" />
-            )}
-            {selectedPlan && camerasOnPlan.length === 0 && (
-              <Text text="Aucune caméra sur ce plan. Cliquez sur une caméra dans la liste (en bas) pour la placer."
-                x={40} y={planSize.h / 2} fontSize={13} fill="#a1a1aa" width={planSize.w - 80} align="center" />
-            )}
-            {camerasOnPlan.map((c) => (
-              <CameraNode
-                key={c.id}
-                cam={c}
-                selected={selectedCamId === c.id}
-                layers={layers}
-                auditMode={auditMode}
-                auditFlags={auditIndex[c.id]}
-                onDrag={onCamDrag}
-                onDragEnd={onCamDragEnd}
-                onSelect={setSelectedCamId}
-                onDblClick={(id) => navigate(`/cameras?focus=${id}`)}
+        {/* Canvas — carte live (Leaflet) ou plan image/PDF (Konva) */}
+        {isLiveMap ? (
+          <LiveMapCanvas
+            plan={selectedPlan}
+            cameras={camerasOnPlan}
+            selectedCamId={selectedCamId}
+            layers={layers}
+            auditMode={auditMode}
+            auditIndex={auditIndex}
+            onSelectCamera={setSelectedCamId}
+            onCameraDragEnd={onLiveMapCamDragEnd}
+            onCenterChange={setLiveMapCenter}
+            onDblClickCamera={(id) => navigate(`/cameras?focus=${id}`)}
+          />
+        ) : (
+          <Stage
+            ref={stageRef}
+            width={stageSize.w}
+            height={stageSize.h}
+            x={stagePos.x} y={stagePos.y}
+            scaleX={scale} scaleY={scale}
+            draggable={!measureTool}
+            onDragEnd={(e) => setStagePos({ x: e.target.x(), y: e.target.y() })}
+            onWheel={onWheel}
+            onMouseDown={onStageMouseDown}
+            onDblClick={(e) => {
+              // double-clic pour terminer une surface
+              if (measureTool === "surface") finishSurface();
+            }}
+          >
+            <Layer>
+              {selectedPlan?.image_data_uri && (
+                <PlanBackground src={selectedPlan.image_data_uri} onSize={(w, h) => setPlanSize({ w, h })} />
+              )}
+              {!selectedPlan && (
+                <Text text="Sélectionnez ou importez un plan pour commencer"
+                  x={40} y={40} fontSize={16} fill="#71717a" />
+              )}
+              {selectedPlan && camerasOnPlan.length === 0 && (
+                <Text text="Aucune caméra sur ce plan. Cliquez sur une caméra dans la liste (en bas) pour la placer."
+                  x={40} y={planSize.h / 2} fontSize={13} fill="#a1a1aa" width={planSize.w - 80} align="center" />
+              )}
+              {camerasOnPlan.map((c) => (
+                <CameraNode
+                  key={c.id}
+                  cam={c}
+                  selected={selectedCamId === c.id}
+                  layers={layers}
+                  auditMode={auditMode}
+                  auditFlags={auditIndex[c.id]}
+                  onDrag={onCamDrag}
+                  onDragEnd={onCamDragEnd}
+                  onSelect={setSelectedCamId}
+                  onDblClick={(id) => navigate(`/cameras?focus=${id}`)}
+                />
+              ))}
+              <MeasureLayer
+                tool={measureTool}
+                measurements={measurements}
+                currentPts={measurePts}
+                setMeasurements={setMeasurements}
+                scaleMPerPx={selectedPlan?.scale_m_per_px}
               />
-            ))}
-            <MeasureLayer
-              tool={measureTool}
-              measurements={measurements}
-              currentPts={measurePts}
-              setMeasurements={setMeasurements}
-              scaleMPerPx={selectedPlan?.scale_m_per_px}
-            />
-          </Layer>
-        </Stage>
+            </Layer>
+          </Stage>
+        )}
       </div>
 
       {/* Camera panel */}
