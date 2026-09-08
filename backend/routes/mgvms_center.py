@@ -27,14 +27,17 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import time
+import uuid as _uuid
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from auth import require_role
+from auth import create_access_token, hash_password, log_audit, require_role
 from crypto_utils import decrypt_secret, encrypt_secret
 from database import db
 
@@ -185,6 +188,86 @@ async def messages():
     rapport (voir _send_report_once) — lecture seule, tout profil."""
     s = await _get_settings()
     return {"messages": (s or {}).get("messages", [])}
+
+
+# ── SSO « Ouvrir MG-VMS » (v3.53) ─────────────────────────────────────
+# Le Center ne peut pas fabriquer de session MG-VMS (JWT_SECRET propre à
+# ce déploiement, jamais connu du Center) — voir POST /sso-token côté
+# Center. Ce endpoint échange le code reçu sur la page publique /sso
+# contre une vraie session locale, en rappelant NOUS-MÊMES le Center pour
+# vérifier le code (jamais l'inverse — même sens que _send_report_once).
+class SsoRedeemInput(BaseModel):
+    code: str
+
+
+CENTER_SSO_EMAIL = "center-sso@mginformatique.local"
+
+
+async def _get_or_create_sso_user() -> dict:
+    user = await db.users.find_one({"email": CENTER_SSO_EMAIL}, {"_id": 0})
+    if user:
+        return user
+    doc = {
+        "id": str(_uuid.uuid4()),
+        "email": CENTER_SSO_EMAIL,
+        # Mot de passe aléatoire, jamais communiqué — ce compte ne se
+        # connecte jamais par mot de passe, uniquement via ce flux SSO.
+        "password_hash": hash_password(secrets.token_urlsafe(32)),
+        "name": "MG-VMS Center (SSO)",
+        "role": "admin",
+        "active": True,
+        "sso_managed": True,
+        "twofa_enabled": False,
+        "site_ids": [],
+        "permissions": {},
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.users.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@mgvms_center_router.post("/sso/redeem")
+async def sso_redeem(data: SsoRedeemInput, request: Request, response: Response):
+    """Endpoint PUBLIC — aucune session locale n'existe encore à ce stade
+    (même précédent que /status et /messages ci-dessus, seuls autres
+    endpoints de ce fichier sans Depends(require_role...)). Appelé par la
+    page /sso du frontend juste après avoir reçu ?code= de MG-VMS Center."""
+    s = await _get_settings()
+    if not s or not s.get("api_key_encrypted"):
+        raise HTTPException(400, "MG-VMS Center non connecté")
+    api_key = decrypt_secret(s["api_key_encrypted"])
+    try:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_S, verify=False) as client:
+            resp = await client.post(f"{s['url']}/api/v1/sso/verify", json={"code": data.code},
+                                      headers={"X-API-Key": api_key})
+    except httpx.RequestError as e:
+        raise HTTPException(502, f"MG-VMS Center injoignable : {type(e).__name__}")
+    if resp.status_code != 200:
+        raise HTTPException(401, "Code SSO invalide, expiré ou déjà utilisé")
+    admin_email = resp.json().get("admin_email") or "?"
+
+    user = await _get_or_create_sso_user()
+    if not user.get("active", True):
+        raise HTTPException(403, "Compte SSO désactivé")
+
+    ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "")
+    jti = str(_uuid.uuid4())
+    hours = 8
+    access = create_access_token(user["id"], user["email"], user["role"], hours=hours, jti=jti)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    exp_iso = (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
+    await db.sessions.insert_one({
+        "jti": jti, "user_id": user["id"], "email": user["email"],
+        "created_at": now_iso, "last_seen_at": now_iso, "expires_at": exp_iso,
+        "ip": ip, "user_agent": request.headers.get("user-agent", "")[:250],
+        "revoked": False,
+    })
+    response.set_cookie("access_token", access, httponly=True, secure=True, samesite="lax",
+                         max_age=hours * 3600, path="/")
+    await log_audit(user, "login_sso", user["email"],
+                     f"SSO via MG-VMS Center (compte Center : {admin_email})", ip)
+    return {"success": True, "access_token": access}
 
 
 # ── Rapport périodique (voir server.py::on_startup) ──────────────────

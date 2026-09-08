@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/sonner";
 import Layout from "@/components/Layout";
 import Login from "@/pages/Login";
 import ResetPassword from "@/pages/ResetPassword";
+import SsoRedirect from "@/pages/SsoRedirect";
 import Dashboard from "@/pages/Dashboard";
 import WelcomeCenter from "@/pages/WelcomeCenter";
 import LiveView from "@/pages/LiveView";
@@ -68,6 +69,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/sso" element={<SsoRedirect />} />
       <Route path="/" element={<Protected><WelcomeCenter /></Protected>} />
       <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
       <Route path="/welcome" element={<Protected><WelcomeCenter /></Protected>} />
