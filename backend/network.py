@@ -33,6 +33,19 @@ class EquipmentInput(BaseModel):
     parent_id: Optional[str] = None
 
 
+# v3.55 · Position sur la page Carte (site_manager.py) — un équipement
+# placé sur un plan reste le MÊME objet supervisé ici (ping réel, alertes),
+# pas une copie décorative. Mêmes conventions que cameras.map_position :
+# x/y pour un plan image, lat/lng pour une carte live ; plan_id=None
+# "retire du plan" sans supprimer l'équipement de l'inventaire.
+class EquipmentPositionInput(BaseModel):
+    plan_id: Optional[str] = None
+    x: Optional[float] = None
+    y: Optional[float] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+
+
 def _public(doc: dict) -> dict:
     doc.pop("_id", None)
     return doc
@@ -87,7 +100,8 @@ async def _real_ping(eq: dict) -> dict:
 # ============ CRUD ============
 @network_router.get("/equipment")
 async def list_equipment(type: Optional[str] = None, site_id: Optional[str] = None,
-                         status: Optional[str] = None, user: dict = Depends(get_current_user)):
+                         status: Optional[str] = None, plan_id: Optional[str] = None,
+                         user: dict = Depends(get_current_user)):
     q = {}
     if type:
         q["type"] = type
@@ -95,6 +109,8 @@ async def list_equipment(type: Optional[str] = None, site_id: Optional[str] = No
         q["site_id"] = site_id
     if status:
         q["status"] = status
+    if plan_id:
+        q["plan_id"] = plan_id
     site_scope(q, user)
     return await db.equipment.find(q, {"_id": 0}).sort("name", 1).to_list(1000)
 
@@ -180,6 +196,39 @@ async def delete_equipment(eq_id: str, user: dict = Depends(require_role("techni
     await db.equipment.delete_many({"parent_id": eq_id})  # détache/supprime les enfants
     await db.equipment.delete_one({"id": eq_id})
     await log_audit(user, "equipment_deleted", eq["name"] if eq else eq_id)
+    # v3.55 · Nettoie les connexions de la Carte pointant vers cet équipement
+    # (import tardif : site_manager dépend de network au démarrage, pas l'inverse).
+    from routes.site_manager import _delete_links_for_endpoint
+    await _delete_links_for_endpoint("equipment", eq_id)
+    return {"ok": True}
+
+
+# v3.55 · Position sur la page Carte — voir EquipmentPositionInput.
+@network_router.put("/equipment/{eq_id}/position")
+async def update_equipment_position(eq_id: str, payload: EquipmentPositionInput,
+                                     user: dict = Depends(require_role("technician"))):
+    eq = await db.equipment.find_one({"id": eq_id}, {"_id": 0})
+    if not eq:
+        raise HTTPException(404, "Équipement introuvable")
+    patch = {k: v for k, v in payload.model_dump(exclude_none=True).items()}
+    if not patch:
+        return {"ok": True, "equipment": eq}
+    await db.equipment.update_one({"id": eq_id}, {"$set": patch})
+    return {"ok": True, "equipment": {**eq, **patch}}
+
+
+@network_router.delete("/equipment/{eq_id}/position")
+async def clear_equipment_position(eq_id: str, user: dict = Depends(require_role("technician"))):
+    """« Retirer du plan » — garde l'équipement dans l'inventaire réseau
+    (ping/alertes inchangés), seulement sa position sur la Carte disparaît."""
+    eq = await db.equipment.find_one({"id": eq_id}, {"_id": 0})
+    if not eq:
+        raise HTTPException(404, "Équipement introuvable")
+    await db.equipment.update_one(
+        {"id": eq_id}, {"$unset": {"plan_id": "", "x": "", "y": "", "lat": "", "lng": ""}}
+    )
+    from routes.site_manager import _delete_links_for_endpoint
+    await _delete_links_for_endpoint("equipment", eq_id)
     return {"ok": True}
 
 

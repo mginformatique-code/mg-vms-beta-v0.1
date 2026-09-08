@@ -35,11 +35,14 @@ import {
   Building2, Camera as CamIcon, ChevronDown, ChevronRight, Compass, ExternalLink,
   FilePlus, FolderTree, HardDrive, Layers as LayersIcon, MapPin, Move, MapPinned,
   Plus, Save, Search, Settings2, Trash2, Upload, X, ZoomIn, ZoomOut, Activity,
+  Link2, Unlink, Pencil, Box as BoxIcon,
 } from "lucide-react";
 import LiveMapCanvas from "./LiveMapCanvas";
+import MapContextMenu from "@/components/MapContextMenu";
 import {
   DEFAULT_CAM, STATUS_COLOR, COVERAGE_COLOR, coverageQuality,
   detectCameraRoles, ROLE_LABELS, ROLE_COLORS, auditCamera, AUDIT_LABEL,
+  TYPE_ICON, EQUIPMENT_TYPES, LINK_TYPES,
 } from "@/lib/mapCenterHelpers";
 
 // ─────────────────────────────────────────────────────────────────────
@@ -72,6 +75,14 @@ const PHOTO_TYPES = [
 // ─────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────
+// v3.55 · Petit "icône" rond coloré pour le sélecteur de type de
+// connexion dans MapContextMenu (qui attend un composant `icon`).
+function colorDotIcon(color) {
+  return function ColorDot() {
+    return <span style={{ width: 10, height: 10, borderRadius: 5, background: color, display: "inline-block" }} />;
+  };
+}
+
 async function fileToDataUri(file) {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -126,7 +137,7 @@ function PlanBackground({ src, onSize }) {
 // ─────────────────────────────────────────────────────────────────────
 // Camera icon (Konva group)
 // ─────────────────────────────────────────────────────────────────────
-function CameraNode({ cam, selected, layers, auditMode, auditFlags, onDrag, onDragEnd, onSelect, onDblClick }) {
+function CameraNode({ cam, selected, layers, auditMode, auditFlags, onDrag, onDragEnd, onSelect, onDblClick, onContextMenu }) {
   const pos = cam.map_position || {};
   const rot = pos.rotation || 0;
   const range = pos.range_m ? pos.range_m * 4 : 60; // 4 px = 1 m visuel
@@ -150,10 +161,11 @@ function CameraNode({ cam, selected, layers, auditMode, auditFlags, onDrag, onDr
       draggable
       onDragMove={(e) => onDrag(cam.id, { x: e.target.x(), y: e.target.y() })}
       onDragEnd={(e) => onDragEnd(cam.id, { x: e.target.x(), y: e.target.y() })}
-      onClick={() => onSelect(cam.id)}
+      onClick={(e) => onSelect(cam.id, e.evt)}
       onTap={() => onSelect(cam.id)}
       onDblClick={() => onDblClick && onDblClick(cam.id)}
       onDblTap={() => onDblClick && onDblClick(cam.id)}
+      onContextMenu={(e) => { e.evt.preventDefault(); e.cancelBubble = true; onContextMenu && onContextMenu(cam.id, e.evt); }}
     >
       {showFov && (
         <Wedge
@@ -203,6 +215,62 @@ function CameraNode({ cam, selected, layers, auditMode, auditFlags, onDrag, onDr
       {/* Halo si sélectionné */}
       {selected && (
         <Circle radius={14} stroke="#00E676" strokeWidth={2} dash={[3, 3]} />
+      )}
+    </Group>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// v3.55 · Équipement réseau (switch/NVR/routeur/...) — même objet que
+// Réseau → Supervision réseau (db.equipment), juste positionné ici.
+// Pas de FOV/badges/audit (propres aux caméras) : icône + statut + nom.
+// ─────────────────────────────────────────────────────────────────────
+// v3.55 · Abréviation par type — un vrai rendu d'icône lucide-react DANS
+// le canvas Konva demanderait de sérialiser le SVG en image à la volée
+// (fragile, coût inutile pour un petit glyphe statique) ; le badge texte
+// est natif Konva, fiable, et déjà lisible à cette taille. La vraie icône
+// lucide reste utilisée partout ailleurs (tiroir, menu contextuel,
+// Network.jsx) — seul le glyphe SUR le canvas est simplifié.
+const TYPE_ABBR = { Switch: "SW", Routeur: "RT", NAS: "NAS", UPS: "UPS", Serveur: "SRV", NVR: "NVR", Générique: "?" };
+
+function EquipmentNode({ eq, selected, showName, showStatus, onDrag, onDragEnd, onSelect, onContextMenu }) {
+  const dotColor = STATUS_COLOR[eq.status] || "#71717a";
+  return (
+    <Group
+      x={eq.x || 0}
+      y={eq.y || 0}
+      draggable
+      onDragMove={(e) => onDrag(eq.id, { x: e.target.x(), y: e.target.y() })}
+      onDragEnd={(e) => onDragEnd(eq.id, { x: e.target.x(), y: e.target.y() })}
+      onClick={(e) => onSelect(eq.id, e.evt)}
+      onTap={() => onSelect(eq.id)}
+      onContextMenu={(e) => { e.evt.preventDefault(); e.cancelBubble = true; onContextMenu && onContextMenu(eq.id, e.evt); }}
+    >
+      <Rect x={-14} y={-9} width={28} height={18} cornerRadius={3} fill="#0d1117" stroke="#71717a" strokeWidth={2} />
+      <Text text={TYPE_ABBR[eq.type] || "?"} fontSize={8} fill="#e6e6e6" fontStyle="bold"
+            width={28} height={18} x={-14} y={-9} align="center" verticalAlign="middle" listening={false} />
+      {showStatus && <Circle x={14} y={-9} radius={3} fill={dotColor} />}
+      {showName && (
+        <Text text={eq.name || "—"} fontSize={11} fill="#e6e6e6" x={18} y={-6} listening={false} />
+      )}
+      {selected && <Rect x={-18} y={-13} width={36} height={26} cornerRadius={4} stroke="#00E676" strokeWidth={2} dash={[3, 3]} />}
+    </Group>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// v3.55 · Connexion typée (câble) entre deux éléments d'un plan.
+// ─────────────────────────────────────────────────────────────────────
+function LinkLine({ link, from, to, onContextMenu }) {
+  if (!from || !to) return null;
+  const meta = LINK_TYPES[link.link_type] || LINK_TYPES.other;
+  const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+  return (
+    <Group onContextMenu={(e) => { e.evt.preventDefault(); e.cancelBubble = true; onContextMenu && onContextMenu(link.id, e.evt); }}>
+      <Line points={[from.x, from.y, to.x, to.y]} stroke={meta.color} strokeWidth={2}
+            dash={meta.dashed ? [6, 4] : undefined} hitStrokeWidth={12} />
+      {link.label && (
+        <Text text={link.label} x={mid.x + 4} y={mid.y - 14} fontSize={10} fill={meta.color} listening={false} />
       )}
     </Group>
   );
@@ -600,6 +668,22 @@ export default function MapCenter() {
   const [cameras, setCameras] = useState([]); // cameras on current plan
   const [selectedCamId, setSelectedCamId] = useState(null);
 
+  // v3.55 · Équipements réseau + connexions du plan courant, et menu
+  // contextuel clic-droit — voir plan "Carte interactive : clic-droit,
+  // équipements réseau, connexions".
+  const [equipment, setEquipment] = useState([]); // équipements positionnés sur ce plan
+  const [selectedEqId, setSelectedEqId] = useState(null);
+  const [links, setLinks] = useState([]);
+  const [contextMenu, setContextMenu] = useState(null); // {x, y, items} | null
+  const [linkingFrom, setLinkingFrom] = useState(null); // {kind, id} | null
+
+  useEffect(() => {
+    if (!linkingFrom) return;
+    const onKey = (e) => { if (e.key === "Escape") setLinkingFrom(null); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [linkingFrom]);
+
   // Camera counts per plan (for tree)
   const [cameraCounts, setCameraCounts] = useState({});
 
@@ -652,13 +736,19 @@ export default function MapCenter() {
   // Load plan (with image) and its cameras
   const loadPlan = useCallback(async (planId) => {
     try {
-      const [rp, rc] = await Promise.all([
+      const [rp, rc, re, rl] = await Promise.all([
         api.get(`/site-manager/plans/${planId}`),
         api.get(`/site-manager/cameras?plan_id=${planId}`),
+        api.get(`/network/equipment?plan_id=${planId}`),
+        api.get(`/site-manager/plan-links?plan_id=${planId}`),
       ]);
       setSelectedPlan(rp.data);
       setCameras(rc.data || []);
+      setEquipment(re.data || []);
+      setLinks(rl.data || []);
       setSelectedCamId(null);
+      setSelectedEqId(null);
+      setLinkingFrom(null);
       setMeasurements([]); setMeasurePts([]); setMeasureTool(null);
       // Reset zoom & pan quand on change de plan
       setScale(1); setStagePos({ x: 0, y: 0 });
@@ -840,6 +930,133 @@ export default function MapCenter() {
     } catch (e) { toast.error("Placement caméra refusé"); }
   };
 
+  // v3.55 · "Retirer du plan" — geste qui existait déjà côté API
+  // (DELETE /cameras/{id}/position) mais jamais exposé en UI.
+  const retireCameraFromPlan = async (camId) => {
+    try {
+      await api.delete(`/site-manager/cameras/${camId}/position`);
+      if (selectedPlan) await loadPlan(selectedPlan.id);
+    } catch (e) { toast.error("Retrait refusé"); }
+  };
+
+  // ── Équipements réseau (db.equipment, backend/network.py) ─────────
+  const saveEquipmentPos = useDebouncedCallback(async (eqId, pos) => {
+    try { await api.put(`/network/equipment/${eqId}/position`, pos); }
+    catch (e) { toast.error("Sauvegarde position équipement échouée"); }
+  }, 400);
+  const onEqDrag = (eqId, pos) => {
+    setEquipment((es) => es.map((eq) => eq.id === eqId ? { ...eq, ...pos } : eq));
+  };
+  const onEqDragEnd = (eqId, pos) => saveEquipmentPos(eqId, pos);
+  const onLiveMapEqDragEnd = (eqId, pos) => { onEqDrag(eqId, pos); saveEquipmentPos(eqId, pos); };
+
+  const [availableEquipment, setAvailableEquipment] = useState([]);
+  const refreshAvailableEquipment = useCallback(() => {
+    if (!selectedSite) return;
+    api.get(`/network/equipment?site_id=${selectedSite}`).then((r) => {
+      setAvailableEquipment(r.data || []);
+    }).catch(() => {});
+  }, [selectedSite]);
+  useEffect(() => { refreshAvailableEquipment(); }, [refreshAvailableEquipment, equipment]);
+
+  const placeEquipmentOnPlan = async (eqId) => {
+    if (!selectedPlan) { toast.error("Sélectionnez un plan d'abord"); return; }
+    const placement = selectedPlan.type === "carte_live"
+      ? { lat: liveMapCenter?.lat ?? selectedPlan.center_lat ?? 46.6, lng: liveMapCenter?.lng ?? selectedPlan.center_lng ?? 1.9 }
+      : { x: planSize.w / 2, y: planSize.h / 2 };
+    try {
+      await api.put(`/network/equipment/${eqId}/position`, { plan_id: selectedPlan.id, ...placement });
+      await loadPlan(selectedPlan.id);
+      setSelectedEqId(eqId);
+    } catch (e) { toast.error("Placement équipement refusé"); }
+  };
+
+  // v3.55 · Clic-droit sur une zone vide → "Ajouter un équipement" — crée
+  // l'équipement (inventaire réseau réel, voir network.py) puis le
+  // positionne directement au point cliqué.
+  const createEquipmentAt = async (type, placement) => {
+    const name = window.prompt(`Nom du ${type} ?`, type);
+    if (!name || !selectedPlan) return;
+    try {
+      const r = await api.post("/network/equipment", { name, type, site_id: selectedSite });
+      await api.put(`/network/equipment/${r.data.id}/position`, { plan_id: selectedPlan.id, ...placement });
+      await loadPlan(selectedPlan.id);
+      setSelectedEqId(r.data.id);
+    } catch (e) { toast.error("Création équipement refusée"); }
+  };
+
+  const renameEquipment = async (eq) => {
+    const name = window.prompt("Nouveau nom ?", eq.name);
+    if (!name || name === eq.name) return;
+    try {
+      // PUT /network/equipment/{id} remplace le document (EquipmentInput) —
+      // on renvoie donc ses propres champs, seul le nom change.
+      await api.put(`/network/equipment/${eq.id}`, {
+        name, type: eq.type, site_id: eq.site_id, ip: eq.ip || "",
+        model: eq.model || "", vendor: eq.vendor || "", parent_id: eq.parent_id || null,
+      });
+      if (selectedPlan) await loadPlan(selectedPlan.id);
+    } catch (e) { toast.error("Renommage refusé"); }
+  };
+
+  const removeEquipmentFromPlan = async (eqId) => {
+    try {
+      await api.delete(`/network/equipment/${eqId}/position`);
+      if (selectedPlan) await loadPlan(selectedPlan.id);
+    } catch (e) { toast.error("Retrait refusé"); }
+  };
+
+  const deleteEquipmentEntirely = async (eq) => {
+    if (!window.confirm(`Supprimer définitivement « ${eq.name} » de l'inventaire réseau (pas juste de ce plan) ?`)) return;
+    try {
+      await api.delete(`/network/equipment/${eq.id}`);
+      if (selectedPlan) await loadPlan(selectedPlan.id);
+    } catch (e) { toast.error("Suppression refusée"); }
+  };
+
+  // ── Connexions (site_plan_links, backend/routes/site_manager.py) ──
+  const createLink = async (fromKind, fromId, toKind, toId, linkType) => {
+    try {
+      await api.post("/site-manager/plan-links", {
+        plan_id: selectedPlan.id, from_kind: fromKind, from_id: fromId,
+        to_kind: toKind, to_id: toId, link_type: linkType,
+      });
+      await loadPlan(selectedPlan.id);
+    } catch (e) { toast.error("Connexion refusée"); }
+  };
+  const renameLink = async (link) => {
+    const label = window.prompt("Nom de la connexion ?", link.label || "");
+    if (label == null) return;
+    try {
+      await api.put(`/site-manager/plan-links/${link.id}`, { label });
+      if (selectedPlan) await loadPlan(selectedPlan.id);
+    } catch (e) { toast.error("Renommage refusé"); }
+  };
+  const deleteLink = async (linkId) => {
+    try {
+      await api.delete(`/site-manager/plan-links/${linkId}`);
+      if (selectedPlan) await loadPlan(selectedPlan.id);
+    } catch (e) { toast.error("Suppression refusée"); }
+  };
+
+  // "Attacher une connexion" : clic sur la 1ère extrémité arme le mode
+  // (bandeau affiché), clic sur la 2e extrémité ouvre le petit sélecteur
+  // de type (réutilise MapContextMenu comme simple liste de choix).
+  const startLinking = (kind, id) => setLinkingFrom({ kind, id });
+  const openLinkTypePicker = (toKind, toId, clientX, clientY) => {
+    const from = linkingFrom;
+    setLinkingFrom(null);
+    if (!from || (from.kind === toKind && from.id === toId)) return;
+    setContextMenu({
+      x: clientX, y: clientY,
+      items: Object.entries(LINK_TYPES).map(([key, meta]) => ({
+        type: "item", label: meta.label,
+        icon: colorDotIcon(meta.color),
+        onClick: () => createLink(from.kind, from.id, toKind, toId, key),
+      })),
+    });
+  };
+
   const selectedCam = cameras.find((c) => c.id === selectedCamId) || null;
   const camerasOnPlan = cameras;
   // v3.54 · Mesure/export PNG/PDF restent hors périmètre v1 pour une carte
@@ -851,6 +1068,59 @@ export default function MapCenter() {
   const unplaced = availableCams.filter(
     (c) => !camerasOnPlan.some((cp) => cp.id === c.id)
   );
+  // v3.55 · Équipements du site pas encore placés sur ce plan.
+  const unplacedEquipment = availableEquipment.filter(
+    (eq) => !equipment.some((e) => e.id === eq.id)
+  );
+
+  // v3.55 · Position (pixels) d'une extrémité de connexion — utilisée pour
+  // tracer la ligne en mode Konva ; le mode Leaflet a son équivalent
+  // géographique dans LiveMapCanvas.jsx.
+  const resolveEndpointPos = useCallback((kind, id) => {
+    if (kind === "camera") {
+      const c = cameras.find((x) => x.id === id);
+      const p = c?.map_position;
+      return p && p.x != null && p.y != null ? { x: p.x, y: p.y } : null;
+    }
+    const eq = equipment.find((x) => x.id === id);
+    return eq && eq.x != null && eq.y != null ? { x: eq.x, y: eq.y } : null;
+  }, [cameras, equipment]);
+
+  // v3.55 · Constructeurs de menu contextuel — mêmes items dans les deux
+  // modes (Konva/Leaflet), MapContextMenu se charge de l'affichage.
+  const buildEquipmentSubmenu = (placement) => ({
+    type: "submenu", label: "Ajouter un équipement", icon: BoxIcon,
+    options: EQUIPMENT_TYPES.map((t) => ({
+      label: t, icon: TYPE_ICON[t], onClick: () => createEquipmentAt(t, placement),
+    })),
+  });
+  const cameraMenuItems = (camId, clientX, clientY) => [
+    { type: "item", label: "Attacher une connexion", icon: Link2, onClick: () => startLinking("camera", camId) },
+    { type: "item", label: "Retirer du plan", icon: Unlink, onClick: () => retireCameraFromPlan(camId) },
+    { type: "item", label: "Voir dans Camera Center", icon: ExternalLink, onClick: () => navigate(`/cameras?focus=${camId}`) },
+  ];
+  const equipmentMenuItems = (eq) => [
+    { type: "item", label: "Renommer", icon: Pencil, onClick: () => renameEquipment(eq) },
+    { type: "item", label: "Attacher une connexion", icon: Link2, onClick: () => startLinking("equipment", eq.id) },
+    { type: "item", label: "Retirer du plan", icon: Unlink, onClick: () => removeEquipmentFromPlan(eq.id) },
+    { type: "separator" },
+    { type: "item", label: "Supprimer définitivement", icon: Trash2, danger: true, onClick: () => deleteEquipmentEntirely(eq) },
+  ];
+  const linkMenuItems = (link) => [
+    { type: "item", label: "Renommer", icon: Pencil, onClick: () => renameLink(link) },
+    { type: "item", label: "Supprimer", icon: Trash2, danger: true, onClick: () => deleteLink(link.id) },
+  ];
+
+  // Clic (gauche) sur une caméra/un équipement pendant "Attacher une
+  // connexion" = choix de la 2e extrémité, sinon sélection normale.
+  const onSelectCamera = (camId, evt) => {
+    if (linkingFrom) { openLinkTypePicker("camera", camId, evt?.clientX ?? 0, evt?.clientY ?? 0); return; }
+    setSelectedCamId(camId); setSelectedEqId(null);
+  };
+  const onSelectEquipment = (eqId, evt) => {
+    if (linkingFrom) { openLinkTypePicker("equipment", eqId, evt?.clientX ?? 0, evt?.clientY ?? 0); return; }
+    setSelectedEqId(eqId); setSelectedCamId(null);
+  };
 
   // v0.5.2.c · Phase 3 — synthèse audit (nb caméras par flag)
   const auditIndex = useMemo(() => {
@@ -869,7 +1139,7 @@ export default function MapCenter() {
   // Handler clic canvas — outils de mesure
   const onStageMouseDown = (e) => {
     if (!measureTool) {
-      if (e.target === e.target.getStage()) setSelectedCamId(null);
+      if (e.target === e.target.getStage()) { setSelectedCamId(null); setSelectedEqId(null); }
       return;
     }
     const stage = e.target.getStage();
@@ -1147,24 +1417,51 @@ export default function MapCenter() {
           </div>
         )}
 
-        {/* Unplaced cameras drawer */}
-        {selectedPlan && unplaced.length > 0 && (
-          <div className="absolute bottom-2 left-2 z-10 bg-card/95 border border-border px-3 py-2 text-xs pointer-events-auto max-w-md" data-testid="map-unplaced">
-            <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-1 flex items-center gap-1">
-              <CamIcon size={11} /> Caméras à placer ({unplaced.length})
-            </div>
-            <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
-              {unplaced.slice(0, 20).map((c) => (
-                <button key={c.id} onClick={() => placeCameraOnPlan(c.id)}
-                  className="border border-border px-2 py-0.5 hover:bg-secondary/50 hover:border-[#0044FF] text-[11px]"
-                  data-testid={`map-place-cam-${c.id}`}>
-                  <span className="w-1.5 h-1.5 inline-block rounded-full mr-1"
-                    style={{ background: STATUS_COLOR[c.status] || "#71717a" }} />
-                  {c.name}
-                </button>
-              ))}
-              {unplaced.length > 20 && <span className="text-muted-foreground">+{unplaced.length - 20}</span>}
-            </div>
+        {/* Unplaced cameras/equipment drawers — empilés verticalement */}
+        {selectedPlan && (unplaced.length > 0 || unplacedEquipment.length > 0) && (
+          <div className="absolute bottom-2 left-2 z-10 flex flex-col gap-2 pointer-events-none">
+            {unplaced.length > 0 && (
+              <div className="bg-card/95 border border-border px-3 py-2 text-xs pointer-events-auto max-w-md" data-testid="map-unplaced">
+                <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-1 flex items-center gap-1">
+                  <CamIcon size={11} /> Caméras à placer ({unplaced.length})
+                </div>
+                <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+                  {unplaced.slice(0, 20).map((c) => (
+                    <button key={c.id} onClick={() => placeCameraOnPlan(c.id)}
+                      className="border border-border px-2 py-0.5 hover:bg-secondary/50 hover:border-[#0044FF] text-[11px]"
+                      data-testid={`map-place-cam-${c.id}`}>
+                      <span className="w-1.5 h-1.5 inline-block rounded-full mr-1"
+                        style={{ background: STATUS_COLOR[c.status] || "#71717a" }} />
+                      {c.name}
+                    </button>
+                  ))}
+                  {unplaced.length > 20 && <span className="text-muted-foreground">+{unplaced.length - 20}</span>}
+                </div>
+              </div>
+            )}
+
+            {/* v3.55 · Équipements réseau du site pas encore placés sur ce plan */}
+            {unplacedEquipment.length > 0 && (
+              <div className="bg-card/95 border border-border px-3 py-2 text-xs pointer-events-auto max-w-md" data-testid="map-unplaced-equipment">
+                <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-1 flex items-center gap-1">
+                  <BoxIcon size={11} /> Équipements à placer ({unplacedEquipment.length})
+                </div>
+                <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+                  {unplacedEquipment.slice(0, 20).map((eq) => {
+                    const Icon = TYPE_ICON[eq.type] || BoxIcon;
+                    return (
+                      <button key={eq.id} onClick={() => placeEquipmentOnPlan(eq.id)}
+                        className="border border-border px-2 py-0.5 hover:bg-secondary/50 hover:border-[#0044FF] text-[11px] flex items-center gap-1"
+                        data-testid={`map-place-eq-${eq.id}`}>
+                        <Icon size={11} />
+                        {eq.name}
+                      </button>
+                    );
+                  })}
+                  {unplacedEquipment.length > 20 && <span className="text-muted-foreground">+{unplacedEquipment.length - 20}</span>}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1174,13 +1471,23 @@ export default function MapCenter() {
             plan={selectedPlan}
             cameras={camerasOnPlan}
             selectedCamId={selectedCamId}
+            equipment={equipment}
+            selectedEqId={selectedEqId}
+            links={links}
+            linkingFrom={linkingFrom}
             layers={layers}
             auditMode={auditMode}
             auditIndex={auditIndex}
-            onSelectCamera={setSelectedCamId}
+            onSelectCamera={onSelectCamera}
+            onSelectEquipment={onSelectEquipment}
             onCameraDragEnd={onLiveMapCamDragEnd}
+            onEquipmentDragEnd={onLiveMapEqDragEnd}
             onCenterChange={setLiveMapCenter}
             onDblClickCamera={(id) => navigate(`/cameras?focus=${id}`)}
+            onContextMenuCamera={(id, evt) => setContextMenu({ x: evt.clientX, y: evt.clientY, items: cameraMenuItems(id) })}
+            onContextMenuEquipment={(eq, evt) => setContextMenu({ x: evt.clientX, y: evt.clientY, items: equipmentMenuItems(eq) })}
+            onContextMenuLink={(link, evt) => setContextMenu({ x: evt.clientX, y: evt.clientY, items: linkMenuItems(link) })}
+            onContextMenuEmpty={(placement, evt) => setContextMenu({ x: evt.clientX, y: evt.clientY, items: [buildEquipmentSubmenu(placement)] })}
           />
         ) : (
           <Stage
@@ -1197,6 +1504,15 @@ export default function MapCenter() {
               // double-clic pour terminer une surface
               if (measureTool === "surface") finishSurface();
             }}
+            onContextMenu={(e) => {
+              e.evt.preventDefault();
+              if (e.target !== e.target.getStage()) return; // géré par le nœud lui-même
+              if (!selectedPlan) return;
+              const stage = e.target.getStage();
+              const p = stage.getPointerPosition();
+              const placement = { x: (p.x - stage.x()) / stage.scaleX(), y: (p.y - stage.y()) / stage.scaleY() };
+              setContextMenu({ x: e.evt.clientX, y: e.evt.clientY, items: [buildEquipmentSubmenu(placement)] });
+            }}
           >
             <Layer>
               {selectedPlan?.image_data_uri && (
@@ -1206,10 +1522,17 @@ export default function MapCenter() {
                 <Text text="Sélectionnez ou importez un plan pour commencer"
                   x={40} y={40} fontSize={16} fill="#71717a" />
               )}
-              {selectedPlan && camerasOnPlan.length === 0 && (
-                <Text text="Aucune caméra sur ce plan. Cliquez sur une caméra dans la liste (en bas) pour la placer."
+              {selectedPlan && camerasOnPlan.length === 0 && equipment.length === 0 && (
+                <Text text="Aucune caméra sur ce plan. Cliquez sur une caméra dans la liste (en bas) pour la placer, ou clic-droit pour ajouter un équipement."
                   x={40} y={planSize.h / 2} fontSize={13} fill="#a1a1aa" width={planSize.w - 80} align="center" />
               )}
+              {links.map((link) => (
+                <LinkLine key={link.id} link={link}
+                  from={resolveEndpointPos(link.from_kind, link.from_id)}
+                  to={resolveEndpointPos(link.to_kind, link.to_id)}
+                  onContextMenu={(id, evt) => setContextMenu({ x: evt.clientX, y: evt.clientY, items: linkMenuItems(link) })}
+                />
+              ))}
               {camerasOnPlan.map((c) => (
                 <CameraNode
                   key={c.id}
@@ -1220,8 +1543,22 @@ export default function MapCenter() {
                   auditFlags={auditIndex[c.id]}
                   onDrag={onCamDrag}
                   onDragEnd={onCamDragEnd}
-                  onSelect={setSelectedCamId}
+                  onSelect={(id, evt) => onSelectCamera(id, evt)}
                   onDblClick={(id) => navigate(`/cameras?focus=${id}`)}
+                  onContextMenu={(id, evt) => setContextMenu({ x: evt.clientX, y: evt.clientY, items: cameraMenuItems(id) })}
+                />
+              ))}
+              {equipment.map((eq) => (
+                <EquipmentNode
+                  key={eq.id}
+                  eq={eq}
+                  selected={selectedEqId === eq.id}
+                  showName={layers?.name !== false}
+                  showStatus={layers?.status !== false}
+                  onDrag={onEqDrag}
+                  onDragEnd={onEqDragEnd}
+                  onSelect={(id, evt) => onSelectEquipment(id, evt)}
+                  onContextMenu={(id, evt) => setContextMenu({ x: evt.clientX, y: evt.clientY, items: equipmentMenuItems(eq) })}
                 />
               ))}
               <MeasureLayer
@@ -1235,6 +1572,19 @@ export default function MapCenter() {
           </Stage>
         )}
       </div>
+
+      {/* v3.55 · Bandeau "Attacher une connexion" */}
+      {linkingFrom && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 bg-card border border-[#0044FF] px-3 py-1.5 text-xs flex items-center gap-2">
+          <Link2 size={13} className="text-[#0044FF]" />
+          Cliquez sur l'élément à relier — <button className="underline" onClick={() => setLinkingFrom(null)}>Annuler (Échap)</button>
+        </div>
+      )}
+
+      {/* v3.55 · Menu contextuel clic-droit (Konva + Leaflet) */}
+      {contextMenu && (
+        <MapContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />
+      )}
 
       {/* Camera panel */}
       {selectedCam && (

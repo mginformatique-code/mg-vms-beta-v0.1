@@ -1,6 +1,9 @@
 // v3.54 · Extrait de MapCenter.jsx pour être partagé avec LiveMapCanvas.jsx
 // (fond de carte interactif) sans dupliquer la logique — comportement
 // strictement inchangé, juste déplacé.
+import {
+  Network as NetIcon, Router, HardDrive, BatteryCharging, Server, MonitorPlay, Cctv, Box,
+} from "lucide-react";
 
 export const DEFAULT_CAM = {
   x: 100, y: 100, rotation: 0, height_m: 3,
@@ -9,7 +12,27 @@ export const DEFAULT_CAM = {
 };
 
 export const STATUS_COLOR = {
-  online: "#00E676", offline: "#FF3333", degraded: "#FFB800",
+  online: "#00E676", offline: "#FF3333", degraded: "#FFB800", warning: "#FFB800",
+};
+
+// v3.55 · Équipements réseau (switch/NVR/routeur/...) placés sur la Carte
+// — MÊME bibliothèque d'icônes que Réseau → Supervision réseau
+// (frontend/src/pages/Network.jsx::TYPE_ICON) pour rester cohérent entre
+// les deux vues du même objet (`db.equipment`, backend/network.py).
+export const EQUIPMENT_TYPES = ["Switch", "Routeur", "NAS", "UPS", "Serveur", "NVR", "Générique"];
+export const TYPE_ICON = {
+  Switch: NetIcon, Routeur: Router, NAS: HardDrive, UPS: BatteryCharging,
+  Serveur: Server, NVR: MonitorPlay, Caméra: Cctv, Générique: Box,
+};
+
+// v3.55 · Connexions typées entre deux éléments d'un plan (caméra ou
+// équipement) — clic-droit "Attacher une connexion" sur la Carte.
+export const LINK_TYPES = {
+  ethernet: { label: "Ethernet", color: "#0044FF" },
+  fiber: { label: "Fibre optique", color: "#FFB800" },
+  poe: { label: "PoE", color: "#00E676" },
+  radio: { label: "Radio / Wi-Fi", color: "#A855F7", dashed: true },
+  other: { label: "Autre", color: "#71717a" },
 };
 
 // v0.5.2.c · Phase 2 — heuristique qualité de couverture.

@@ -33,15 +33,28 @@ Modèle de données (Mongo) :
     non positionnée. `lat`/`lng` (v3.54) remplacent `x`/`y` pour une
     caméra positionnée sur un plan `carte_live`.
 
+  - `site_plan_links` (nouvelle, v3.55) — une connexion entre deux
+    éléments d'un plan (caméra ou équipement réseau) :
+      { id, plan_id, from_kind: "camera"|"equipment", from_id,
+        to_kind: "camera"|"equipment", to_id,
+        link_type: "ethernet"|"fiber"|"poe"|"radio"|"other", label?,
+        created_at }
+    Les équipements réseau (switch/NVR/routeur/...) restent la
+    collection `equipment` de `backend/network.py` — un équipement placé
+    sur la Carte est le MÊME objet supervisé là-bas (ping réel, alertes),
+    juste doté de champs de position optionnels (`plan_id, x, y, lat,
+    lng`, mêmes conventions que `cameras.map_position`).
+
 Endpoints (préfixe `/api/site-manager/`) :
 
   - Bâtiments   : GET / POST / PUT / DELETE `/buildings`
   - Plans       : GET / POST / PUT / DELETE `/plans`
   - Caméras map : GET `/cameras`, PUT `/cameras/{id}/position`
+  - Connexions  : GET / POST / PUT / DELETE `/plan-links` (v3.55)
 
-Design évolutif : la couche `site_plans.overlays` (préparée sans
-endpoint pour l'instant) pourra héberger câbles, switches, NVR, baies,
-Wi-Fi, portes, zones d'intrusion sans refactor Phase 1.
+Équipements réseau positionnables : voir `PUT /api/network/equipment/
+{id}/position` et `DELETE .../position` dans `backend/network.py`
+(v3.55) — pas dupliqués ici, l'inventaire réseau reste la source unique.
 """
 from __future__ import annotations
 
@@ -323,6 +336,13 @@ async def delete_plan(
         {"map_position.plan_id": plan_id},
         {"$unset": {"map_position": ""}},
     )
+    # v3.55 · Idem pour les équipements réseau (garde l'inventaire, retire
+    # juste la position) et supprime les connexions de ce plan.
+    await db.equipment.update_many(
+        {"plan_id": plan_id},
+        {"$unset": {"plan_id": "", "x": "", "y": "", "lat": "", "lng": ""}},
+    )
+    await db.site_plan_links.delete_many({"plan_id": plan_id})
     return {"ok": True, "deleted": plan_id}
 
 
@@ -384,4 +404,85 @@ async def clear_camera_position(
         raise HTTPException(status_code=404, detail="Caméra introuvable")
     await _assert_site_access(cam["site_id"], user)
     await db.cameras.update_one({"id": camera_id}, {"$unset": {"map_position": ""}})
+    await _delete_links_for_endpoint("camera", camera_id)
     return {"ok": True, "cleared": camera_id}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Connexions (v3.55) — clic-droit "Attacher une connexion" sur la Carte
+# ═══════════════════════════════════════════════════════════════════
+
+class LinkInput(BaseModel):
+    plan_id: str
+    from_kind: str = Field(..., pattern="^(camera|equipment)$")
+    from_id: str
+    to_kind: str = Field(..., pattern="^(camera|equipment)$")
+    to_id: str
+    link_type: str = Field("ethernet", pattern="^(ethernet|fiber|poe|radio|other)$")
+    label: Optional[str] = None
+
+
+class LinkPatch(BaseModel):
+    label: Optional[str] = None
+    link_type: Optional[str] = None
+
+
+async def _delete_links_for_endpoint(kind: str, obj_id: str) -> None:
+    """Supprime toute connexion référençant cet élément (caméra ou
+    équipement) — appelé quand il est retiré d'un plan ou supprimé, pour
+    ne jamais laisser de lien fantôme pointant vers du vide."""
+    await db.site_plan_links.delete_many({
+        "$or": [
+            {"from_kind": kind, "from_id": obj_id},
+            {"to_kind": kind, "to_id": obj_id},
+        ]
+    })
+
+
+@site_manager_router.get("/plan-links")
+async def list_plan_links(plan_id: str, user: dict = Depends(get_current_user)):
+    plan = await db.site_plans.find_one({"id": plan_id}, {"_id": 0, "site_id": 1})
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan introuvable")
+    await _assert_site_access(plan["site_id"], user)
+    return await db.site_plan_links.find({"plan_id": plan_id}, {"_id": 0}).to_list(1000)
+
+
+@site_manager_router.post("/plan-links")
+async def create_plan_link(payload: LinkInput, user: dict = Depends(require_role("technician"))):
+    plan = await db.site_plans.find_one({"id": payload.plan_id}, {"_id": 0, "site_id": 1})
+    if not plan:
+        raise HTTPException(status_code=400, detail="Plan introuvable")
+    await _assert_site_access(plan["site_id"], user)
+    doc = payload.model_dump()
+    doc["id"] = str(uuid.uuid4())
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    await db.site_plan_links.insert_one(dict(doc))
+    doc.pop("_id", None)
+    return doc
+
+
+@site_manager_router.put("/plan-links/{link_id}")
+async def update_plan_link(link_id: str, patch: LinkPatch, user: dict = Depends(require_role("technician"))):
+    existing = await db.site_plan_links.find_one({"id": link_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Connexion introuvable")
+    plan = await db.site_plans.find_one({"id": existing["plan_id"]}, {"_id": 0, "site_id": 1})
+    if plan:
+        await _assert_site_access(plan["site_id"], user)
+    update = {k: v for k, v in patch.model_dump(exclude_none=True).items()}
+    if update:
+        await db.site_plan_links.update_one({"id": link_id}, {"$set": update})
+    return await db.site_plan_links.find_one({"id": link_id}, {"_id": 0})
+
+
+@site_manager_router.delete("/plan-links/{link_id}")
+async def delete_plan_link(link_id: str, user: dict = Depends(require_role("technician"))):
+    existing = await db.site_plan_links.find_one({"id": link_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Connexion introuvable")
+    plan = await db.site_plans.find_one({"id": existing["plan_id"]}, {"_id": 0, "site_id": 1})
+    if plan:
+        await _assert_site_access(plan["site_id"], user)
+    await db.site_plan_links.delete_one({"id": link_id})
+    return {"ok": True, "deleted": link_id}

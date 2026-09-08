@@ -5,13 +5,17 @@
 // positionnées en coordonnées réelles (lat/lng) au lieu de pixels ;
 // mêmes champs rotation/angle_h/range_m que le mode pixel pour le cône
 // FOV, recalculé en géométrie réelle (voir lib/mapCenterHelpers.js).
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, Marker, Polygon, useMap, useMapEvents } from "react-leaflet";
+//
+// v3.55 · Équipements réseau + connexions typées — même parité
+// fonctionnelle que le canvas Konva (MapCenter.jsx) : clic-droit sur un
+// élément ou le vide, glisser-déposer, "Attacher une connexion".
+import React, { useEffect, useMemo, useState } from "react";
+import { MapContainer, TileLayer, Marker, Polygon, Polyline, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
   STATUS_COLOR, COVERAGE_COLOR, coverageQuality, detectCameraRoles,
-  ROLE_LABELS, ROLE_COLORS, fovPolygon,
+  ROLE_LABELS, ROLE_COLORS, fovPolygon, LINK_TYPES,
 } from "@/lib/mapCenterHelpers";
 
 const TILE_LAYERS = {
@@ -24,6 +28,8 @@ const TILE_LAYERS = {
     attribution: "Tiles &copy; Esri &mdash; Esri, Maxar, Earthstar Geographics",
   },
 };
+
+const TYPE_ABBR = { Switch: "SW", Routeur: "RT", NAS: "NAS", UPS: "UPS", Serveur: "SRV", NVR: "NVR", Générique: "?" };
 
 function cameraDivIcon(cam, { selected, hasAuditIssue, layers }) {
   const pos = cam.map_position || {};
@@ -62,16 +68,45 @@ function cameraDivIcon(cam, { selected, hasAuditIssue, layers }) {
   });
 }
 
+// v3.55 · Icône équipement — même esprit que le badge Konva (abréviation
+// de type, pas d'icône lucide rendue sur la carte — voir MapCenter.jsx).
+function equipmentDivIcon(eq, { selected, showName, showStatus }) {
+  const dotColor = STATUS_COLOR[eq.status] || "#71717a";
+  return L.divIcon({
+    className: "mgvms-eq-marker",
+    html: `
+      <div style="position:relative;width:32px;height:22px;display:flex;align-items:center;justify-content:center">
+        <div style="position:absolute;inset:2px 5px;border-radius:3px;background:#0d1117;border:2px solid #71717a;
+                    display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:bold;color:#e6e6e6">
+          ${TYPE_ABBR[eq.type] || "?"}
+        </div>
+        ${showStatus ? `<div style="position:absolute;top:-2px;right:2px;width:6px;height:6px;border-radius:50%;background:${dotColor};border:1px solid #0d1117"></div>` : ""}
+        ${selected ? `<div style="position:absolute;inset:-4px;border-radius:5px;border:2px dashed #00E676"></div>` : ""}
+      </div>
+      ${showName ? `<div style="text-align:center;font-size:11px;color:#e6e6e6;text-shadow:0 1px 2px #000;white-space:nowrap;margin-top:1px">${eq.name || "—"}</div>` : ""}
+    `,
+    iconSize: [32, 22],
+    iconAnchor: [16, 11],
+  });
+}
+
 // v3.54 · Écoute les déplacements de la carte pour connaître son centre
 // courant (utilisé par MapCenter.jsx pour placer une nouvelle caméra au
 // centre de la vue actuelle, comme le fait déjà le mode pixel avec le
 // centre du plan) — doit être un enfant de <MapContainer>, useMapEvents
 // n'est utilisable que dans ce contexte.
-function CenterWatcher({ onCenterChange }) {
+// v3.55 · Gère aussi le clic-droit sur le fond de carte (zone vide) —
+// `e.latlng` donne directement la position géographique, pas besoin de
+// transformer des coordonnées pixel comme côté Konva.
+function MapEventsBridge({ onCenterChange, onContextMenuEmpty }) {
   const map = useMapEvents({
     moveend: () => {
       const c = map.getCenter();
       onCenterChange && onCenterChange({ lat: c.lat, lng: c.lng });
+    },
+    contextmenu: (e) => {
+      L.DomEvent.preventDefault(e.originalEvent);
+      onContextMenuEmpty && onContextMenuEmpty({ lat: e.latlng.lat, lng: e.latlng.lng }, e.originalEvent);
     },
   });
   useEffect(() => {
@@ -92,8 +127,10 @@ function RecenterOnPlanChange({ center, zoom }) {
 }
 
 export default function LiveMapCanvas({
-  plan, cameras, selectedCamId, layers, auditMode, auditIndex,
-  onSelectCamera, onCameraDragEnd, onCenterChange, onDblClickCamera,
+  plan, cameras, selectedCamId, equipment, selectedEqId, links, linkingFrom,
+  layers, auditMode, auditIndex,
+  onSelectCamera, onSelectEquipment, onCameraDragEnd, onEquipmentDragEnd, onCenterChange, onDblClickCamera,
+  onContextMenuCamera, onContextMenuEquipment, onContextMenuLink, onContextMenuEmpty,
 }) {
   const [tileKind, setTileKind] = useState("satellite");
   const initialCenter = useMemo(
@@ -101,6 +138,17 @@ export default function LiveMapCanvas({
     [plan.id] // eslint-disable-line react-hooks/exhaustive-deps
   );
   const initialZoom = plan.zoom || (plan.center_lat != null ? 18 : 5);
+
+  // v3.55 · Position géographique résolue d'une extrémité de connexion
+  // (caméra ou équipement) — retourne null si l'élément n'est pas
+  // positionné en lat/lng (plan mixte improbable mais pas impossible).
+  const resolveLatLng = (kind, id) => {
+    const list = kind === "camera" ? cameras : equipment;
+    const item = list.find((x) => x.id === id);
+    if (!item) return null;
+    const pos = kind === "camera" ? (item.map_position || {}) : item;
+    return pos.lat != null && pos.lng != null ? [pos.lat, pos.lng] : null;
+  };
 
   return (
     <div className="relative w-full h-full">
@@ -120,7 +168,22 @@ export default function LiveMapCanvas({
       >
         <TileLayer key={tileKind} url={TILE_LAYERS[tileKind].url} attribution={TILE_LAYERS[tileKind].attribution} maxZoom={19} />
         <RecenterOnPlanChange center={initialCenter} zoom={initialZoom} />
-        <CenterWatcher onCenterChange={onCenterChange} />
+        <MapEventsBridge onCenterChange={onCenterChange} onContextMenuEmpty={onContextMenuEmpty} />
+
+        {(links || []).map((link) => {
+          const from = resolveLatLng(link.from_kind, link.from_id);
+          const to = resolveLatLng(link.to_kind, link.to_id);
+          if (!from || !to) return null;
+          const meta = LINK_TYPES[link.link_type] || LINK_TYPES.other;
+          return (
+            <Polyline key={link.id} positions={[from, to]}
+              pathOptions={{ color: meta.color, weight: 2.5, dashArray: meta.dashed ? "6 4" : undefined }}
+              eventHandlers={{
+                contextmenu: (e) => { L.DomEvent.stop(e); onContextMenuLink && onContextMenuLink(link, e.originalEvent); },
+              }}
+            />
+          );
+        })}
 
         {cameras.map((cam) => {
           const pos = cam.map_position || {};
@@ -148,14 +211,46 @@ export default function LiveMapCanvas({
                     const { lat, lng } = e.target.getLatLng();
                     onCameraDragEnd(cam.id, { lat, lng });
                   },
-                  click: () => onSelectCamera(cam.id),
+                  click: (e) => onSelectCamera(cam.id, e.originalEvent),
                   dblclick: () => onDblClickCamera && onDblClickCamera(cam.id),
+                  contextmenu: (e) => { L.DomEvent.stop(e); onContextMenuCamera && onContextMenuCamera(cam.id, e.originalEvent); },
                 }}
               />
             </React.Fragment>
           );
         })}
+
+        {(equipment || []).map((eq) => {
+          if (eq.lat == null || eq.lng == null) return null;
+          return (
+            <Marker
+              key={eq.id}
+              position={[eq.lat, eq.lng]}
+              draggable
+              icon={equipmentDivIcon(eq, {
+                selected: selectedEqId === eq.id,
+                showName: layers?.name !== false, showStatus: layers?.status !== false,
+              })}
+              eventHandlers={{
+                dragend: (e) => {
+                  const { lat, lng } = e.target.getLatLng();
+                  onEquipmentDragEnd(eq.id, { lat, lng });
+                },
+                click: (e) => onSelectEquipment(eq.id, e.originalEvent),
+                contextmenu: (e) => { L.DomEvent.stop(e); onContextMenuEquipment && onContextMenuEquipment(eq, e.originalEvent); },
+              }}
+            />
+          );
+        })}
       </MapContainer>
+
+      {/* v3.55 · Bandeau "Attacher une connexion" (même comportement que
+          le canvas Konva, voir MapCenter.jsx) */}
+      {linkingFrom && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1000] bg-card border border-[#0044FF] px-3 py-1.5 text-xs">
+          Cliquez sur l'élément à relier — Annuler (Échap)
+        </div>
+      )}
 
       {/* Bascule fond de carte — Rues / Satellite */}
       <div className="absolute bottom-2 right-2 z-[1000] bg-card/90 backdrop-blur border border-border p-1 flex items-center gap-1 text-[11px]">
