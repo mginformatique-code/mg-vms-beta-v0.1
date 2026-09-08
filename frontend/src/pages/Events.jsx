@@ -104,13 +104,14 @@ const FILTERS = [
 // DeepInView) ne sont jamais concernées — jamais listées ici.
 function AnprSuspendedBanner({ cams }) {
   const [states, setStates] = useState(null);
+  const [dismissed, setDismissed] = useState(false);
   useEffect(() => {
     const load = () => api.get("/diagnostics/anpr-quality").then((r) => setStates(r.data)).catch(() => {});
     load();
     const iv = setInterval(load, 60000);
     return () => clearInterval(iv);
   }, []);
-  if (!states) return null;
+  if (!states || dismissed) return null;
   const camName = (id) => cams.find((c) => c.id === id)?.name || id;
   // v3.48 · Deux signaux distincts, réunis dans le même bandeau :
   // - `is_night` (coucher de soleil RÉEL, position caméra/site) — rappel
@@ -124,13 +125,22 @@ function AnprSuspendedBanner({ cams }) {
   if (concerned.length === 0) return null;
   const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "?";
   return (
-    <div className="border border-[#FFB800]/50 bg-[#FFB800]/10 p-2.5 text-xs flex items-start gap-2"
+    <div className="border border-[#FFB800]/50 bg-[#FFB800]/10 p-2.5 text-xs"
          data-testid="anpr-suspended-banner">
-      <AlertTriangle size={14} className="text-[#FFB800] shrink-0 mt-0.5" />
-      <div className="space-y-1">
-        <div className="text-[#FFB800] font-medium">
-          Rappel : sur {concerned.length} caméra{concerned.length > 1 ? "s" : ""}, la lecture de plaques (ANPR) n'est pas fiable après la tombée de la nuit — sauf caméra ANPR dédiée (IR/WDR adapté).
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <div className="flex items-start gap-2">
+          <AlertTriangle size={14} className="text-[#FFB800] shrink-0 mt-0.5" />
+          <div className="text-[#FFB800] font-medium">
+            Rappel : sur {concerned.length} caméra{concerned.length > 1 ? "s" : ""}, la lecture de plaques (ANPR) n'est pas fiable après la tombée de la nuit — sauf caméra ANPR dédiée (IR/WDR adapté).
+          </div>
         </div>
+        <button onClick={() => setDismissed(true)}
+                data-testid="anpr-suspended-dismiss"
+                className="text-[10px] text-muted-foreground hover:text-foreground uppercase tracking-wider shrink-0">
+          Masquer
+        </button>
+      </div>
+      <div className="space-y-1 pl-[22px]">
         {concerned.map((s) => (
           <div key={s.camera_id} className="text-muted-foreground">
             <span className="text-foreground">{camName(s.camera_id)}</span>
