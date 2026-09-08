@@ -788,9 +788,19 @@ function EventsTab({ cameraId }) {
              )} />
       <EventPanel title={t("camc.last_alerts")} items={ev.alerts}
              render={(a) => (
+               // v3.54 · Affichait juste `a.type` ("ai_scenario" pour TOUTES
+               // les alertes du moteur de règles, "anpr" pour les alertes
+               // liste noire) — deux sources d'alertes IA distinctes mais
+               // rendues identiques et sans détail. Le vrai texte utile
+               // (`a.message`, déjà composé côté backend avec le libellé du
+               // scénario/la plaque concernée) existe mais n'était jamais lu.
                <div>
-                 <div className="font-medium">{a.title || a.type || "Alerte"}</div>
-                 <div className="text-muted-foreground text-[10px]">{a.created_at?.slice(0, 19)?.replace("T", " ")}</div>
+                 <div className="font-medium">{a.message || a.title || "Alerte"}</div>
+                 <div className="text-muted-foreground text-[10px] flex items-center gap-1.5">
+                   {a.scenario && <span className="uppercase tracking-wide">IA · {a.scenario}</span>}
+                   {!a.scenario && a.type && a.type !== "ai_scenario" && <span className="uppercase tracking-wide">{a.type}</span>}
+                   <span>{(a.timestamp || a.created_at)?.slice(0, 19)?.replace("T", " ")}</span>
+                 </div>
                </div>
              )} />
       <EventPanel title={t("camc.last_errors")} items={ev.errors}

@@ -15,17 +15,23 @@ Modèle de données (Mongo) :
     optionnellement à un bâtiment + niveau).
       { id, site_id, building_id?, level_name?, name, type,
         image_data_uri, scale_m_per_px?, orientation_deg?, unit,
-        order }
+        order, center_lat?, center_lng?, zoom? }
     `type` ∈ {"satellite", "rdc", "etage", "parking", "entrepot",
-              "exterieur", "drone", "autre"}
+              "exterieur", "drone", "carte_live", "autre"}
+    `carte_live` (v3.54) : fond de carte interactif (Leaflet, tuiles
+    OSM/Esri gratuites, pas de clé API) au lieu d'une image statique —
+    pas d'`image_data_uri`, centre/zoom initial dans `center_lat/lng`/
+    `zoom` à la place. Additif : ne change rien aux plans image/PDF
+    existants (rendu Konva inchangé, voir MapCenter.jsx).
 
   - `cameras` (existante) — extension `map_position` (dict) :
-      { plan_id, x, y, rotation, height_m, angle_h, angle_v,
+      { plan_id, x, y, lat, lng, rotation, height_m, angle_h, angle_v,
         range_m, color, fixture, lens_mm,
         install_notes, technician, serial, install_date,
         real_height_m, real_angle, install_direction }
     Toutes ces clés sont optionnelles — un nil-plan ⇒ caméra
-    non positionnée.
+    non positionnée. `lat`/`lng` (v3.54) remplacent `x`/`y` pour une
+    caméra positionnée sur un plan `carte_live`.
 
 Endpoints (préfixe `/api/site-manager/`) :
 
@@ -74,16 +80,25 @@ class PlanInput(BaseModel):
     building_id: Optional[str] = None
     level_name: Optional[str] = None
     name: str = Field(..., min_length=1, max_length=120)
+    # v3.54 · "carte_live" ajouté — fond de carte interactif (Leaflet,
+    # tuiles OSM/Esri), additif au système d'image statique existant.
+    # Contrairement aux autres types, il n'a pas d'`image_data_uri` (voir
+    # `create_plan` : validation conditionnelle) mais un centre + zoom.
     type: str = Field("autre",
-                       pattern="^(satellite|rdc|etage|parking|entrepot|exterieur|drone|autre)$")
-    # data URI complet (data:image/png;base64,....) — validation par taille.
-    image_data_uri: str
+                       pattern="^(satellite|rdc|etage|parking|entrepot|exterieur|drone|carte_live|autre)$")
+    # data URI complet (data:image/png;base64,....) — requis sauf pour
+    # type="carte_live". Validation par taille dans create_plan.
+    image_data_uri: Optional[str] = None
     scale_m_per_px: Optional[float] = None
     orientation_deg: Optional[float] = None
     unit: str = "m"
     order: int = 0
     width: Optional[int] = None
     height: Optional[int] = None
+    # v3.54 · Uniquement significatifs pour type="carte_live".
+    center_lat: Optional[float] = None
+    center_lng: Optional[float] = None
+    zoom: Optional[int] = None
 
 
 class PlanPatch(BaseModel):
@@ -97,12 +112,19 @@ class PlanPatch(BaseModel):
     level_name: Optional[str] = None
     width: Optional[int] = None
     height: Optional[int] = None
+    center_lat: Optional[float] = None
+    center_lng: Optional[float] = None
+    zoom: Optional[int] = None
 
 
 class MapPositionInput(BaseModel):
     plan_id: Optional[str] = None
     x: Optional[float] = None
     y: Optional[float] = None
+    # v3.54 · Coordonnées réelles — utilisées à la place de x/y quand la
+    # caméra est positionnée sur un plan de type "carte_live".
+    lat: Optional[float] = None
+    lng: Optional[float] = None
     rotation: Optional[float] = None
     height_m: Optional[float] = None
     angle_h: Optional[float] = None
@@ -251,12 +273,15 @@ async def create_plan(
     user: dict = Depends(require_role("technician")),
 ):
     await _assert_site_access(payload.site_id, user)
-    # Validation image_data_uri : préfixe + taille max ~20 MB base64
+    # Validation image_data_uri : requise pour tout type SAUF carte_live
+    # (fond de carte interactif, pas d'image stockée — voir docstring
+    # PlanInput). Préfixe + taille max ~20 MB base64 sinon.
     uri = payload.image_data_uri
-    if not uri.startswith("data:image/") and not uri.startswith("data:application/pdf"):
-        raise HTTPException(status_code=400, detail="image_data_uri invalide")
-    if len(uri) > 30_000_000:
-        raise HTTPException(status_code=413, detail="Image trop grande (max 22MB)")
+    if payload.type != "carte_live":
+        if not uri or (not uri.startswith("data:image/") and not uri.startswith("data:application/pdf")):
+            raise HTTPException(status_code=400, detail="image_data_uri invalide")
+        if len(uri) > 30_000_000:
+            raise HTTPException(status_code=413, detail="Image trop grande (max 22MB)")
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
