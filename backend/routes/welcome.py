@@ -487,11 +487,18 @@ async def welcome_summary(user: dict = Depends(get_current_user)):
         new_entries.append(e)
     has_new_version = last_seen is not None and last_seen != version and len(new_entries) > 0
 
+    # v3.49 · `has_update`/`latest_known` reflètent désormais un vrai appel
+    # externe — le rapport périodique vers MG-VMS Center (voir
+    # routes/mgvms_center.py::mgvms_center_report_loop), qui écrit le
+    # résultat dans db.settings["mgvms_center"]. Sans connexion configurée,
+    # comportement inchangé (pas de régression : `has_update` reste False).
+    center_status = await db.settings.find_one({"key": "mgvms_center"}, {"_id": 0}) or {}
+
     return {
         "version": {
             "installed": version,
-            "latest_known": version,  # même moteur pour l'instant (pas de call externe)
-            "has_update": False,
+            "latest_known": center_status.get("latest_version") or version,
+            "has_update": bool(center_status.get("update_available")),
             "build_date": all_entries[0]["date"] if all_entries else None,
         },
         "health": health,

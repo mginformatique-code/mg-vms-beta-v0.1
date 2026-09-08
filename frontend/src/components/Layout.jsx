@@ -79,6 +79,7 @@ const NAV = [
     { to: "/storage", icon: HardDrive, key: "nav.storage" },
     { to: "/date-heure", icon: Clock, key: "nav.datetime" },
     { to: "/notifications", icon: BellRing, key: "nav.notifications", role: "technician" },
+    { to: "/mgvms-center", icon: Building2, key: "nav.mgvms_center", role: "admin" },
   ]},
 ];
 
@@ -237,6 +238,25 @@ function NavGroupItem({ item, t, can, hasPerm }) {
   );
 }
 
+function MgvmsCenterStatusRow({ t }) {
+  const [status, setStatus] = useState(null);
+  useEffect(() => {
+    api.get("/mgvms-center/status").then((r) => setStatus(r.data)).catch(() => {});
+  }, []);
+  if (!status) return null;
+  return (
+    <div className="border border-border p-3" data-testid="about-mgvms-center-status">
+      <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-2">
+        <Building2 size={14} /> {t("about.mgvms_center")}
+      </div>
+      <div className="flex items-center gap-1.5 text-xs">
+        <span className={`w-1.5 h-1.5 rounded-full ${status.connected ? "bg-[#00E676]" : "bg-muted-foreground"}`} />
+        {status.connected ? t("about.mgvms_center_connected") : t("about.mgvms_center_disconnected")}
+      </div>
+    </div>
+  );
+}
+
 function AboutDialog({ open, onOpenChange, t, isAdmin, lang }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -270,6 +290,7 @@ function AboutDialog({ open, onOpenChange, t, isAdmin, lang }) {
               mginformatique.com
             </a>
           </div>
+          <MgvmsCenterStatusRow t={t} />
           {/* Licence d'utilisation (EULA) — visible par TOUS les profils :
               c'est le cadre juridique d'usage du logiciel, pas un réglage
               d'administration. La clé de licence Gold ci-dessous, elle, reste

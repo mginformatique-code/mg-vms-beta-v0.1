@@ -60,6 +60,7 @@ from routes.identity_merge_ai import (
     identity_merge_ai_router, identity_merge_ai_batch_loop, identity_merge_ai_auto_approve_loop,
 )
 from routes.parking_sessions import parking_sessions_router, parking_sessions_loop
+from routes.mgvms_center import mgvms_center_router, mgvms_center_report_loop  # v3.49 · Connexion MG-VMS Center
 from routes.anpr_tuning import anpr_tuning_router, anpr_tuning_loop
 from routes.vehicle_anomaly_ai import vehicle_anomaly_ai_router, anomaly_ai_batch_loop
 from routes.vehicle_color_ai import vehicle_color_ai_router, color_ai_batch_loop
@@ -162,6 +163,7 @@ app.include_router(live_layout_router)  # v3.22 · Disposition personnalisée du
 app.include_router(vehicle_dedup_router)  # v3.20 · Doublons véhicule assistés par Qwen
 app.include_router(identity_merge_ai_router)  # v3.27 · Fusion identités confirmées assistée par Qwen
 app.include_router(parking_sessions_router)  # v3.27 · Historique des sessions de stationnement
+app.include_router(mgvms_center_router)  # v3.49 · Connexion MG-VMS Center
 app.include_router(anpr_tuning_router)  # v3.20 · Seuil confiance ANPR auto-réglé par Qwen
 app.include_router(vehicle_color_ai_router)  # v3.45 · Correction couleur vehicule via modele vision
 app.include_router(vehicle_make_ai_router)  # v3.46 · Identification marque vehicule via modele vision
@@ -256,6 +258,9 @@ async def on_startup():
         # du conteneur API sans que l'utilisateur ait à rouvrir la page).
         import ptz_patrol
         asyncio.create_task(ptz_patrol.startup_resume_all())
+        # v3.49 · Rapport périodique vers MG-VMS Center — no-op tant
+        # qu'aucune connexion n'est configurée (Réglages -> MG-VMS Center).
+        asyncio.create_task(mgvms_center_report_loop())
     if run_pipeline_tasks:
         asyncio.create_task(ai_loop())
         # v0.7.h · Wave I · Axe QoS · Surveillance permanente + alertes Ops Center

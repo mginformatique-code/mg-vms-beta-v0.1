@@ -48,6 +48,7 @@ import SettingsPage from "@/pages/Settings";
 import DateHeurePage from "@/pages/DateHeure";
 import Notifications from "@/pages/Notifications";
 import LlmSettings from "@/pages/LlmSettings";
+import MgvmsCenterSettings from "@/pages/MgvmsCenterSettings";
 import Plugins from "@/pages/PluginManagerNG";
 import PluginPage from "@/pages/PluginPage";
 import SmartZones from "@/pages/SmartZones";
@@ -114,6 +115,7 @@ function AppRoutes() {
       <Route path="/users" element={<Protected><UsersPage /></Protected>} />
       <Route path="/notifications" element={<Protected><Notifications /></Protected>} />
       <Route path="/llm-settings" element={<Protected><LlmSettings /></Protected>} />
+      <Route path="/mgvms-center" element={<Protected><MgvmsCenterSettings /></Protected>} />
       <Route path="/plugins" element={<Protected><Plugins /></Protected>} />
       <Route path="/plugins/:pluginId" element={<Protected><PluginPage /></Protected>} />
       <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
