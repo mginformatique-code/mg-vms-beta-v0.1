@@ -199,6 +199,64 @@ function HealthSection({ health, version }) {
   );
 }
 
+// v3.51 · Messages diffusés depuis MG-VMS Center (voir routes/mgvms_center.py
+// ::_send_report_once) — n'apparaît que si une connexion est active ET
+// qu'au moins un message ciblant ce déploiement (ou son tenant, ou "tous")
+// est actif. Masquage par message individuel (id), persistant via
+// localStorage : contrairement aux bandeaux ANPR/version, un message
+// diffusé reste valable après un rechangement de page.
+const MGVMS_CENTER_DISMISSED_KEY = "mgvms_center_dismissed_messages";
+
+function MgvmsCenterMessagesBanner() {
+  const [messages, setMessages] = useState([]);
+  const [dismissed, setDismissed] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(MGVMS_CENTER_DISMISSED_KEY) || "[]")); }
+    catch { return new Set(); }
+  });
+
+  useEffect(() => {
+    const load = () => api.get("/mgvms-center/messages").then((r) => setMessages(r.data.messages || [])).catch(() => {});
+    load();
+    const iv = setInterval(load, 60000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const dismiss = (id) => {
+    const next = new Set(dismissed); next.add(id); setDismissed(next);
+    try { localStorage.setItem(MGVMS_CENTER_DISMISSED_KEY, JSON.stringify([...next])); } catch {}
+  };
+
+  const visible = messages.filter((m) => !dismissed.has(m.id));
+  if (visible.length === 0) return null;
+
+  return (
+    <div className="space-y-1.5" data-testid="mgvms-center-messages">
+      {visible.map((m) => {
+        const color = SEVERITY_COLOR[m.severity] || SEVERITY_COLOR.info;
+        return (
+          <div key={m.id} className="border p-2.5 text-xs" style={{ borderColor: `${color}80`, background: `${color}1a` }}
+               data-testid="mgvms-center-message">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2">
+                {m.severity === "info" ? <Bell size={14} style={{ color }} className="shrink-0 mt-0.5" />
+                                        : <AlertTriangle size={14} style={{ color }} className="shrink-0 mt-0.5" />}
+                <div>
+                  <div className="font-medium" style={{ color }}>{m.title}</div>
+                  {m.body && <div className="text-muted-foreground mt-0.5">{m.body}</div>}
+                </div>
+              </div>
+              <button onClick={() => dismiss(m.id)} data-testid="mgvms-center-message-dismiss"
+                      className="text-[10px] text-muted-foreground hover:text-foreground uppercase tracking-wider shrink-0">
+                Masquer
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function VersionSection({ version, hasNewVersion, onOpenChangelog }) {
   return (
     <div className="bg-card border border-border p-4" data-testid="welcome-version">
@@ -910,6 +968,8 @@ export default function WelcomeCenter() {
           </div>
         </div>
       </div>
+
+      <MgvmsCenterMessagesBanner />
 
       {/* Ligne 1 : Health (2 cols) + Version */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">

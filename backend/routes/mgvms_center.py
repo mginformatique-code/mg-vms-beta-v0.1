@@ -177,6 +177,14 @@ async def status():
     }
 
 
+@mgvms_center_router.get("/messages")
+async def messages():
+    """Messages diffusés par MG-VMS Center, tels que reçus au dernier
+    rapport (voir _send_report_once) — lecture seule, tout profil."""
+    s = await _get_settings()
+    return {"messages": (s or {}).get("messages", [])}
+
+
 # ── Rapport périodique (voir server.py::on_startup) ──────────────────
 REPORT_INTERVAL_S = 30 * 60
 _process_started_at = time.monotonic()
@@ -237,6 +245,10 @@ async def _send_report_once() -> None:
                 "update_available": body.get("update_available", False),
                 "latest_version": body.get("latest_version"),
                 "release_notes_url": body.get("release_notes_url"),
+                # v3.51 · Reflète TOUJOURS l'état courant côté Center (un
+                # message retiré côté central disparaît ici au rapport
+                # suivant, sans action côté client) — jamais fusionné.
+                "messages": body.get("messages", []),
             }},
         )
     except Exception as e:
