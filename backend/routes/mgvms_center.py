@@ -37,6 +37,7 @@ import json
 import logging
 import os
 import secrets
+import ssl
 import time
 import uuid as _uuid
 from datetime import datetime, timedelta, timezone
@@ -495,7 +496,16 @@ async def mgvms_center_ws_loop() -> None:
         try:
             api_key = decrypt_secret(s["api_key_encrypted"])
             uri = _ws_url(s["url"])
+            # MG-VMS Center est servi en HTTPS avec un certificat auto-signé
+            # (même situation que les appels httpx(verify=False) ci-dessus) —
+            # sans ceci, websockets.connect() rejette la connexion en TLS.
+            ssl_ctx = None
+            if uri.startswith("wss://"):
+                ssl_ctx = ssl.create_default_context()
+                ssl_ctx.check_hostname = False
+                ssl_ctx.verify_mode = ssl.CERT_NONE
             async with websockets.connect(uri, extra_headers={"X-API-Key": api_key},
+                                           ssl=ssl_ctx,
                                            ping_interval=20, ping_timeout=20) as ws:
                 backoff = WS_BACKOFF_MIN_S
                 logger.info("mgvms_center_ws: connecté (%s)", uri)
