@@ -51,10 +51,22 @@ Endpoints (préfixe `/api/site-manager/`) :
   - Plans       : GET / POST / PUT / DELETE `/plans`
   - Caméras map : GET `/cameras`, PUT `/cameras/{id}/position`
   - Connexions  : GET / POST / PUT / DELETE `/plan-links` (v3.55)
+  - Rapport PDF : GET/PUT/DELETE `/camera-catalog` (v3.57, bibliothèque
+    photo/objectifs PAR MODÈLE de caméra), GET `/camera-catalog/lookup`,
+    GET/PUT `/report-template` (identité société + textes du PDF généré
+    depuis la Carte)
 
 Équipements réseau positionnables : voir `PUT /api/network/equipment/
 {id}/position` et `DELETE .../position` dans `backend/network.py`
 (v3.55) — pas dupliqués ici, l'inventaire réseau reste la source unique.
+
+`camera_model_catalog` (nouvelle, v3.57) — une entrée par (manufacturer,
+model), PAS par caméra installée :
+  { id, manufacturer, model, lens_count, photo_data_uri, updated_at }
+`db.settings{key:"report_template"}` (v3.57) — document unique :
+  { company_name, company_address, company_phone, company_email,
+    company_website, logo_data_uri, cover_title, cover_subtitle,
+    footer_text, updated_at }
 """
 from __future__ import annotations
 
@@ -128,6 +140,25 @@ class PlanPatch(BaseModel):
     center_lat: Optional[float] = None
     center_lng: Optional[float] = None
     zoom: Optional[int] = None
+
+
+class CameraCatalogInput(BaseModel):
+    manufacturer: str = Field(..., min_length=1, max_length=80)
+    model: str = Field(..., min_length=1, max_length=80)
+    lens_count: int = Field(1, ge=1, le=16)
+    photo_data_uri: Optional[str] = None
+
+
+class ReportTemplateInput(BaseModel):
+    company_name: Optional[str] = None
+    company_address: Optional[str] = None
+    company_phone: Optional[str] = None
+    company_email: Optional[str] = None
+    company_website: Optional[str] = None
+    logo_data_uri: Optional[str] = None
+    cover_title: Optional[str] = None
+    cover_subtitle: Optional[str] = None
+    footer_text: Optional[str] = None
 
 
 class MapPositionInput(BaseModel):
@@ -485,4 +516,78 @@ async def delete_plan_link(link_id: str, user: dict = Depends(require_role("tech
     if plan:
         await _assert_site_access(plan["site_id"], user)
     await db.site_plan_links.delete_one({"id": link_id})
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Rapport PDF (v3.57) — bibliothèque caméras + identité/textes du rapport
+# ═══════════════════════════════════════════════════════════════════
+# Global à l'instance MG-VMS (pas de scope par site) : `camera_model_catalog`
+# est une photo/caractéristique de MODÈLE de caméra (ex. "Dahua DHI-ITC413" =
+# une seule photo, un seul nombre d'objectifs, réutilisés pour TOUTES les
+# caméras de ce modèle) — à ne pas confondre avec `map_position.photos[]`,
+# qui sont des photos d'INSTALLATION réelles, différentes par caméra.
+# `report_template` est l'identité/les textes de couverture du PDF généré
+# depuis la Carte, réglés une fois pour toute l'installation.
+
+@site_manager_router.get("/camera-catalog")
+async def list_camera_catalog(user: dict = Depends(get_current_user)):
+    return await db.camera_model_catalog.find({}, {"_id": 0}).sort("manufacturer", 1).to_list(500)
+
+
+@site_manager_router.get("/camera-catalog/lookup")
+async def lookup_camera_catalog(manufacturer: str, model: str, user: dict = Depends(get_current_user)):
+    doc = await db.camera_model_catalog.find_one(
+        {"manufacturer": manufacturer, "model": model}, {"_id": 0}
+    )
+    return doc or {}
+
+
+@site_manager_router.put("/camera-catalog")
+async def upsert_camera_catalog(payload: CameraCatalogInput, user: dict = Depends(require_role("technician"))):
+    manufacturer = payload.manufacturer.strip()
+    model = payload.model.strip()
+    uri = payload.photo_data_uri
+    if uri:
+        if not uri.startswith("data:image/"):
+            raise HTTPException(status_code=400, detail="photo_data_uri invalide")
+        if len(uri) > 5_000_000:
+            raise HTTPException(status_code=413, detail="Photo trop grande (max ~3,5MB)")
+    existing = await db.camera_model_catalog.find_one({"manufacturer": manufacturer, "model": model}, {"_id": 0})
+    doc = {
+        "id": existing["id"] if existing else str(uuid.uuid4()),
+        "manufacturer": manufacturer,
+        "model": model,
+        "lens_count": payload.lens_count,
+        "photo_data_uri": uri if uri is not None else (existing or {}).get("photo_data_uri"),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.camera_model_catalog.update_one(
+        {"manufacturer": manufacturer, "model": model}, {"$set": doc}, upsert=True
+    )
+    return doc
+
+
+@site_manager_router.delete("/camera-catalog/{catalog_id}")
+async def delete_camera_catalog(catalog_id: str, user: dict = Depends(require_role("technician"))):
+    result = await db.camera_model_catalog.delete_one({"id": catalog_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Entrée introuvable")
+    return {"success": True}
+
+
+@site_manager_router.get("/report-template")
+async def get_report_template(user: dict = Depends(get_current_user)):
+    doc = await db.settings.find_one({"key": "report_template"}, {"_id": 0})
+    return doc or {"key": "report_template"}
+
+
+@site_manager_router.put("/report-template")
+async def set_report_template(payload: ReportTemplateInput, user: dict = Depends(require_role("technician"))):
+    if payload.logo_data_uri and len(payload.logo_data_uri) > 5_000_000:
+        raise HTTPException(status_code=413, detail="Logo trop grand (max ~3,5MB)")
+    update = {k: v for k, v in payload.model_dump().items() if v is not None}
+    update["key"] = "report_template"
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.settings.update_one({"key": "report_template"}, {"$set": update}, upsert=True)
+    return await db.settings.find_one({"key": "report_template"}, {"_id": 0})
     return {"ok": True, "deleted": link_id}
