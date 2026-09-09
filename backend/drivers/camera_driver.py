@@ -119,6 +119,16 @@ class CameraDriver(ABC):
         self._require("siren")
         await self._set_siren(enabled=enabled, duration=duration)
 
+    async def get_auto_tracking(self) -> bool:
+        """Suivi PTZ natif de la caméra (ex. "Auto Track" Reolink) — état actuel."""
+        self._require("ptz_tracking")
+        return await self._get_auto_tracking()
+
+    async def set_auto_tracking(self, enabled: bool) -> None:
+        """Active/désactive le suivi PTZ natif de la caméra."""
+        self._require("ptz_tracking")
+        await self._set_auto_tracking(enabled)
+
     async def start_audio(self) -> None:
         self._require("audio_output")
         await self._start_audio()
@@ -243,6 +253,12 @@ class CameraDriver(ABC):
 
     async def _talk_to_camera(self, pcm_bytes: bytes) -> None:
         raise UnsupportedCapabilityError("Talk-back non implémenté par ce driver")
+
+    async def _get_auto_tracking(self) -> bool:
+        raise UnsupportedCapabilityError("Suivi PTZ natif non implémenté par ce driver")
+
+    async def _set_auto_tracking(self, enabled: bool) -> None:
+        raise UnsupportedCapabilityError("Suivi PTZ natif non implémenté par ce driver")
 
     async def _ptz_move(self, direction: str, speed: float) -> None:
         raise UnsupportedCapabilityError("PTZ non implémenté par ce driver")

@@ -165,6 +165,17 @@ class ReolinkDriver(ONVIFDriver):
         caps.onboard_ai = bool(ai_feats)
         caps.onboard_ai_features = tuple(ai_feats)
 
+        # v3.59 · Suivi PTZ natif ("Auto Track" côté app Reolink) — pas de
+        # clé d'ability publique dédiée dans reolink-aio, mais
+        # `_auto_track_settings` n'est peuplé par `get_host_data()` QUE
+        # pour les channels qui supportent réellement cette fonction (les
+        # PTZ trackables) — même logique d'accès direct à un attribut
+        # privé de la librairie déjà utilisée juste au-dessus pour l'OSD.
+        try:
+            caps.ptz_tracking = _CHANNEL in (self._host_api._auto_track_settings or {})
+        except Exception:
+            caps.ptz_tracking = False
+
         try:
             caps.battery = self._host_api.battery_percentage(_CHANNEL) is not None
         except Exception:
@@ -227,6 +238,19 @@ class ReolinkDriver(ONVIFDriver):
             )
         except ApiError as e:
             raise CameraDriverError(f"Reolink SetSiren → {e}", code="device_error") from e
+
+    # ── Suivi PTZ natif (v3.59) ─────────────────────────────────
+    async def get_auto_tracking(self) -> bool:
+        try:
+            return bool(self._host_api.auto_track_enabled(_CHANNEL))
+        except Exception:
+            return False
+
+    async def set_auto_tracking(self, enabled: bool) -> None:
+        try:
+            await self._host_api.set_auto_tracking(_CHANNEL, enable=enabled)
+        except ApiError as e:
+            raise CameraDriverError(f"Reolink SetAutoTrack → {e}", code="device_error") from e
 
     # ── IR mode ───────────────────────────────────────────────────
     async def _set_ir_mode(self, mode: IRMode) -> None:

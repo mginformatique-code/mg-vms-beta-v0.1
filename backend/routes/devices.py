@@ -112,6 +112,10 @@ class PTZPatrolBody(BaseModel):
     preset_ids: list[str] = Field(default_factory=list)
 
 
+class PTZAutoTrackBody(BaseModel):
+    enabled: bool = False
+
+
 # ── Wrapper — retourne un dict {success/error/message} sur erreur driver ─
 def _driver_error_response(exc: CameraDriverError) -> HTTPException:
     payload = exc.to_dict()
@@ -437,6 +441,33 @@ async def device_ptz_set_patrol(camera_id: str, body: PTZPatrolBody,
     ptz_patrol.set_patrol(camera_id, body.enabled and bool(body.preset_ids))
     config["running"] = ptz_patrol.is_running(camera_id)
     return config
+
+
+# ── Suivi PTZ natif (v3.59) — ex. "Auto Track" Reolink ────────────
+# Bascule DIRECTE de la fonction embarquée de la caméra (`ptz_tracking`
+# dans CameraCapabilities) — distinct du suivi logiciel générique
+# "MG-VMS tracking" (voir /ptz/tracking ci-dessous), qui ne s'appuie sur
+# aucune fonction caméra et fonctionne aussi sur du matériel qui n'a pas
+# cette capacité native.
+@devices_router.get("/{camera_id}/ptz/auto-track")
+async def device_ptz_get_auto_track(camera_id: str,
+                                     user: dict = Depends(require_permission("view_live"))):
+    try:
+        drv = await svc.get_driver(camera_id)
+        return {"enabled": await drv.get_auto_tracking()}
+    except CameraDriverError as e:
+        raise _driver_error_response(e)
+
+
+@devices_router.put("/{camera_id}/ptz/auto-track")
+async def device_ptz_set_auto_track(camera_id: str, body: PTZAutoTrackBody,
+                                     user: dict = Depends(require_permission("manage_cameras"))):
+    try:
+        drv = await svc.get_driver(camera_id)
+        await drv.set_auto_tracking(body.enabled)
+        return {"enabled": body.enabled}
+    except CameraDriverError as e:
+        raise _driver_error_response(e)
 
 
 # ── Codec du flux principal (v3.10) ───────────────────────────────
