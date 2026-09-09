@@ -1,10 +1,14 @@
 """Route module — License activation (v3.3, août 2026).
 
-Vérifie et active des clés de licence "Gold Support" émises hors-ligne par le
-générateur de licences (service local séparé, non versionné, voir
-deploy-app/README pour le contexte). Ce module NE génère AUCUNE licence — il
-ne fait que vérifier une signature Ed25519 avec la clé PUBLIQUE embarquée
-ci-dessous et stocker l'état d'activation en base.
+Vérifie et active des clés de licence "Gold Support" émises par le
+générateur de licences hébergé sur mg-vms.com (panneau admin web + API
+REST protégée, voir /admin/api/licenses.php côté site — anciennement un
+service séparé sur 192.168.1.21, migré et décommissionné en août 2026).
+Ce module NE génère AUCUNE licence — il ne fait que vérifier une
+signature Ed25519 avec la clé PUBLIQUE embarquée ci-dessous et stocker
+l'état d'activation en base. Aucun appel réseau vers mg-vms.com : la clé
+de licence est copiée-collée manuellement ici après avoir été émise sur
+le site (ou depuis MG-VMS Center, qui relaie la même API).
 
 Format d'une clé de licence : base64url(JSON payload) + "." + base64url(signature)
 Payload JSON : {"license_id", "client", "type", "issued_at", "expires_at"}
