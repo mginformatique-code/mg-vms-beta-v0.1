@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import LiveMapCanvas from "./LiveMapCanvas";
 import MapContextMenu from "@/components/MapContextMenu";
+import { generateMapReportPdf } from "@/lib/mapReportPdf";
 import {
   DEFAULT_CAM, STATUS_COLOR, COVERAGE_COLOR, coverageQuality,
   detectCameraRoles, ROLE_LABELS, ROLE_COLORS, auditCamera, AUDIT_LABEL,
@@ -658,6 +659,7 @@ export default function MapCenter() {
   const navigate = useNavigate();
   const containerRef = useRef(null);
   const stageRef = useRef(null);
+  const [reportGenerating, setReportGenerating] = useState(false);
 
   // Data
   const [sites, setSites] = useState([]);
@@ -1212,41 +1214,36 @@ export default function MapCenter() {
     a.download = `audit-${selectedPlan?.name || "plan"}.csv`;
     a.click();
   };
+  // v3.57 · Remplace l'ancien export minimal (window.print() + une seule
+  // image aplatie) par un vrai rapport multi-pages "CCTV design tool"
+  // (page de garde, vue d'ensemble, une page détaillée par caméra, liste
+  // récapitulative) — voir lib/mapReportPdf.js. Identité/textes et
+  // bibliothèque photo/objectifs par modèle réglés depuis la nouvelle page
+  // /map/report-settings, chargés ici à la demande (pas de state global
+  // pour un contenu utilisé uniquement au moment de l'export).
   const exportPdf = async () => {
-    // Export PDF minimal via une nouvelle fenêtre imprimable
-    const uri = stageRef.current?.toDataURL({ pixelRatio: 2 });
-    if (!uri) return;
-    const w = window.open("", "_blank");
-    if (!w) { toast.error("Popup bloquée"); return; }
-    const cams = camerasOnPlan.map((c) => {
-      const p = c.map_position || {};
-      return `<tr>
-        <td>${c.name}</td><td>${c.ip || "—"}</td>
-        <td>${c.driver || "—"}</td>
-        <td>${p.height_m ?? "—"} m</td>
-        <td>${p.angle_h ?? "—"}°</td>
-        <td>${p.range_m ?? "—"} m</td>
-        <td>${p.lens_mm ?? "—"} mm</td>
-      </tr>`;
-    }).join("");
-    w.document.write(`<!doctype html><html><head><title>MG-VMS · ${selectedPlan?.name || "plan"}</title>
-      <style>body{font-family:sans-serif;margin:20px;color:#111}
-      h1{font-size:20px;margin-bottom:4px}
-      table{width:100%;border-collapse:collapse;margin-top:16px;font-size:11px}
-      th,td{border:1px solid #ccc;padding:4px 6px;text-align:left}
-      th{background:#f4f4f4}
-      img{max-width:100%;border:1px solid #ccc}
-      </style></head><body>
-      <h1>Rapport d'implantation — ${selectedPlan?.name || "plan"}</h1>
-      <div style="color:#666;font-size:12px">Généré par MG-VMS · ${new Date().toLocaleString()}</div>
-      <img src="${uri}" alt="Plan" />
-      <table><thead><tr>
-        <th>Caméra</th><th>IP</th><th>Driver</th><th>Hauteur</th>
-        <th>Angle H</th><th>Portée</th><th>Objectif</th>
-      </tr></thead><tbody>${cams}</tbody></table>
-      <script>setTimeout(()=>window.print(),400)</script>
-      </body></html>`);
-    w.document.close();
+    if (camerasOnPlan.length === 0) { toast.error("Aucune caméra positionnée sur ce plan"); return; }
+    setReportGenerating(true);
+    try {
+      const [tplRes, catalogRes] = await Promise.all([
+        api.get("/site-manager/report-template"),
+        api.get("/site-manager/camera-catalog"),
+      ]);
+      const siteName = sites.find((s) => s.id === selectedSite)?.name || "";
+      await generateMapReportPdf({
+        plan: selectedPlan,
+        siteName,
+        cameras: camerasOnPlan,
+        stageRef,
+        isLiveMap,
+        reportTemplate: tplRes.data,
+        catalogList: catalogRes.data,
+      });
+    } catch (e) {
+      toast.error("Échec de la génération du rapport PDF");
+    } finally {
+      setReportGenerating(false);
+    }
   };
 
   return (
@@ -1344,16 +1341,26 @@ export default function MapCenter() {
             </div>
           )}
 
-          {/* Exports — PNG/PDF hors périmètre v1 pour une carte live (pas
-              de simple stage.toDataURL() Konva à capturer) ; CSV reste
-              disponible, indépendant du rendu. */}
+          {/* Exports — PNG reste réservé aux plans image (simple
+              stage.toDataURL() Konva) ; le rapport PDF (v3.57) recompose
+              lui-même l'image pour une carte live (voir
+              lib/mapReportRenderer.js), donc disponible dans les deux
+              modes. CSV indépendant du rendu, disponible partout. */}
           <div className="bg-card/90 backdrop-blur border border-border p-1 pointer-events-auto flex items-center gap-1" data-testid="map-exports">
             {!isLiveMap && (
-              <>
-                <button onClick={exportPng} className="px-2 py-1 text-[11px] hover:bg-secondary" title="Export PNG" data-testid="map-export-png">PNG</button>
-                <button onClick={exportPdf} className="px-2 py-1 text-[11px] hover:bg-secondary" title="Rapport PDF (imprimable)" data-testid="map-export-pdf">PDF</button>
-              </>
+              <button onClick={exportPng} className="px-2 py-1 text-[11px] hover:bg-secondary" title="Export PNG" data-testid="map-export-png">PNG</button>
             )}
+            <button onClick={exportPdf} disabled={reportGenerating}
+              className="px-2 py-1 text-[11px] hover:bg-secondary disabled:opacity-50"
+              title="Rapport PDF détaillé (page de garde, vue d'ensemble, une page par caméra)"
+              data-testid="map-export-pdf">
+              {reportGenerating ? "Génération…" : "PDF"}
+            </button>
+            <button onClick={() => navigate("/map/report-settings")}
+              className="px-2 py-1 text-[11px] hover:bg-secondary" title="Réglages du rapport PDF"
+              data-testid="map-report-settings-link">
+              <Settings2 size={12} />
+            </button>
             <button onClick={exportCameraCsv} className="px-2 py-1 text-[11px] hover:bg-secondary" title="CSV caméras" data-testid="map-export-csv">CSV</button>
             {auditMode && (
               <button onClick={exportAuditCsv} className="px-2 py-1 text-[11px] text-[#FFB800] hover:bg-secondary" title="Rapport audit CSV" data-testid="map-export-audit">AUDIT</button>

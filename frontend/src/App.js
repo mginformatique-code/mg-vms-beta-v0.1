@@ -18,6 +18,7 @@ import Cameras from "@/pages/Cameras";
 import Sites from "@/pages/Sites";
 import MapView from "@/pages/MapView";
 import MapCenter from "@/pages/MapCenter";
+import ReportSettings from "@/pages/ReportSettings";
 import SessionExpiryWatcher from "@/components/SessionExpiryWatcher";
 import InactivityWatcher from "@/components/InactivityWatcher";
 import AppDebugPanel from "@/components/AppDebugPanel";
@@ -81,6 +82,7 @@ function AppRoutes() {
       <Route path="/cameras" element={<Protected><Cameras /></Protected>} />
       <Route path="/sites" element={<Protected><Sites /></Protected>} />
       <Route path="/map" element={<Protected><MapCenter /></Protected>} />
+      <Route path="/map/report-settings" element={<Protected><ReportSettings /></Protected>} />
       <Route path="/security-center" element={<Protected><SecurityCenter /></Protected>} />
       {/* v3.54 · Certificat SSL déplacé de /security-center/tls vers /network/tls
           — la page vit déjà dans le sous-menu Réseau côté sidebar, seule
