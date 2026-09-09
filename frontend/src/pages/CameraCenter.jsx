@@ -1308,6 +1308,18 @@ function PTZTab({ cameraId, caps }) {
     api.post(`/devices/${cameraId}/ptz/move`, { direction, speed: 0.5 })
        .then(() => {})
        .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
+  // v3.60 · `ptz/move` déclenche un mouvement CONTINU côté caméra (comme la
+  // quasi-totalité des PTZ ONVIF/Reolink) — un simple onClick l'envoyait
+  // sans jamais l'arrêter, obligeant à cliquer "■" à chaque fois. Bascule
+  // en "maintenir pour tourner" (appui = démarre, relâchement = stoppe),
+  // le comportement attendu d'un joystick PTZ.
+  const holdMove = (direction) => ({
+    onMouseDown: (e) => { e.preventDefault(); move(direction); },
+    onMouseUp: () => move("stop"),
+    onMouseLeave: () => move("stop"),
+    onTouchStart: (e) => { e.preventDefault(); move(direction); },
+    onTouchEnd: () => move("stop"),
+  });
   const zoom = (value) =>
     api.post(`/devices/${cameraId}/ptz/zoom`, { value })
        .then(() => {})
@@ -1400,9 +1412,6 @@ function PTZTab({ cameraId, caps }) {
     <div className="space-y-4">
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px] gap-4 items-start">
         <Card className="p-3 space-y-2" data-testid="cam-ptz-live">
-          <div className="text-sm text-muted-foreground">
-            {t("ptz.live_hint")}
-          </div>
           <div className="relative aspect-video bg-black">
             {cam ? (
               <LivePlayer key={cameraId} camera={cam} hd={false}
@@ -1419,15 +1428,15 @@ function PTZTab({ cameraId, caps }) {
           <div>
             <div className="text-sm text-muted-foreground mb-2">Directions</div>
             <div className="grid grid-cols-3 gap-1 w-48">
-              <Button variant="outline" onClick={() => move("upleft")}>↖</Button>
-              <Button variant="outline" onClick={() => move("up")} data-testid="ptz-up">↑</Button>
-              <Button variant="outline" onClick={() => move("upright")}>↗</Button>
-              <Button variant="outline" onClick={() => move("left")} data-testid="ptz-left">←</Button>
+              <Button variant="outline" {...holdMove("upleft")}>↖</Button>
+              <Button variant="outline" {...holdMove("up")} data-testid="ptz-up">↑</Button>
+              <Button variant="outline" {...holdMove("upright")}>↗</Button>
+              <Button variant="outline" {...holdMove("left")} data-testid="ptz-left">←</Button>
               <Button variant="outline" onClick={() => move("stop")} data-testid="ptz-stop">■</Button>
-              <Button variant="outline" onClick={() => move("right")} data-testid="ptz-right">→</Button>
-              <Button variant="outline" onClick={() => move("downleft")}>↙</Button>
-              <Button variant="outline" onClick={() => move("down")} data-testid="ptz-down">↓</Button>
-              <Button variant="outline" onClick={() => move("downright")}>↘</Button>
+              <Button variant="outline" {...holdMove("right")} data-testid="ptz-right">→</Button>
+              <Button variant="outline" {...holdMove("downleft")}>↙</Button>
+              <Button variant="outline" {...holdMove("down")} data-testid="ptz-down">↓</Button>
+              <Button variant="outline" {...holdMove("downright")}>↘</Button>
             </div>
           </div>
           {caps.zoom && (

@@ -3,7 +3,7 @@ import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import LivePlayer from "@/components/video/LivePlayer";
-import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, User, Car, Truck, Bike, PawPrint, ScanLine, Flame, AlertOctagon, HardHat, MapPin, Activity, Lightbulb, Moon, Siren, Volume2, RefreshCw, LayoutGrid, Save, RotateCcw, GripVertical, Play, Loader2 } from "lucide-react";
+import { Maximize2, Camera as CamIcon, Move, ZoomIn, ZoomOut, Circle, Eye, EyeOff, X, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, User, Car, Truck, Bike, PawPrint, ScanLine, Flame, AlertOctagon, HardHat, MapPin, Activity, Lightbulb, Moon, Siren, Volume2, RefreshCw, LayoutGrid, Save, RotateCcw, GripVertical, Play, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { TrackInterpolator } from "@/tracking/TrackInterpolator";
 import * as DiagnosticsRegistry from "@/tracking/DiagnosticsRegistry";
@@ -136,7 +136,28 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
   const [hover, setHover] = useState(false);
   const [showPtz, setShowPtz] = useState(false);
   const online = cam?.status === "online";
+  const [addingPreset, setAddingPreset] = useState(false);
   const ptz = async (command) => { try { await api.post(`/cameras/${cam.id}/ptz?command=${command}`); } catch (e) { /* ignore */ } };
+  // v3.60 · Ajouter un point de surveillance (preset) directement depuis la
+  // vue live — jusqu'ici il fallait quitter la vue live et aller dans
+  // Camera Center pour ça, alors que c'est justement en surveillant le
+  // flux en direct qu'on repère l'angle à mémoriser. Même endpoint que
+  // Camera Center (`POST /devices/{id}/ptz/presets`), même pattern
+  // (prompt du nom, nom auto si vide).
+  const addPreset = async (e) => {
+    e.stopPropagation();
+    const name = window.prompt("Nom du point de surveillance (optionnel)", "");
+    if (name === null) return;
+    setAddingPreset(true);
+    try {
+      const r = await api.post(`/devices/${cam.id}/ptz/presets`, { name: name.trim() || undefined });
+      toast.success(`Point de surveillance ajouté : ${r.data.name}`);
+    } catch (err) {
+      toast.error(err.response?.data?.detail?.message || err.response?.data?.detail || "Échec de l'ajout du point");
+    } finally {
+      setAddingPreset(false);
+    }
+  };
 
   const boxes = aiState?.boxes || [];
   const counts = aiState?.counts || {};
@@ -283,6 +304,11 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
               </button>
             </div>
           </div>
+          <button data-ptz-btn onClick={addPreset} disabled={addingPreset}
+                  className="mt-1 w-full flex items-center justify-center gap-1 h-7 bg-black/70 hover:bg-[#00E676] hover:text-black text-white text-[10px] uppercase tracking-wide transition-colors disabled:opacity-50"
+                  data-testid="ptz-add-preset" title="Ajouter un point de surveillance ici">
+            {addingPreset ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />} PDS
+          </button>
         </div>
       )}
     </div>

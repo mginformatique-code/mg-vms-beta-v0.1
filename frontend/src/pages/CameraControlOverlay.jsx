@@ -174,7 +174,7 @@ export default function CameraControlOverlay({ cam, footer = false, visible = tr
         </div>
         <div className="flex gap-0.5">{buttons}</div>
         {ttsOpen && (
-          <div className="absolute bottom-11 right-2 bg-black/90 border border-[#00E5FF]/40 p-2 w-64 backdrop-blur-sm"
+          <div className="absolute bottom-11 right-2 z-30 bg-black/90 border border-[#00E5FF]/40 p-2 w-64 backdrop-blur-sm"
                onClick={(e) => e.stopPropagation()} data-testid="tts-panel">
             <TtsPanel ttsText={ttsText} setTtsText={setTtsText} onClose={() => setTtsOpen(false)} onSend={sendTts} busy={busy === "tts"} />
           </div>
@@ -201,7 +201,7 @@ export default function CameraControlOverlay({ cam, footer = false, visible = tr
          data-testid={`camera-controls-${camId}`}>
       <div className="flex gap-0.5 bg-black/50 p-0.5 backdrop-blur-sm">{buttons}</div>
       {ttsOpen && (
-        <div className="absolute bottom-9 left-0 bg-black/90 border border-[#00E5FF]/40 p-2 w-64 backdrop-blur-sm"
+        <div className="absolute bottom-9 left-0 z-30 bg-black/90 border border-[#00E5FF]/40 p-2 w-64 backdrop-blur-sm"
              onClick={(e) => e.stopPropagation()} data-testid="tts-panel">
           <TtsPanel ttsText={ttsText} setTtsText={setTtsText} onClose={() => setTtsOpen(false)} onSend={sendTts} busy={busy === "tts"} />
         </div>
