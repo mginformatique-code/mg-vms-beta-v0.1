@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
-import { Loader2, Save, Clock, Power, Radio } from "lucide-react";
+import { Loader2, Save, Clock, Power, Radio, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -171,6 +171,7 @@ function NtpCard({ admin }) {
   const [resyncHours, setResyncHours] = useState(null);
   const [resyncCustom, setResyncCustom] = useState(false);
   const [savingResync, setSavingResync] = useState(false);
+  const [forcingSync, setForcingSync] = useState(false);
 
   useEffect(() => {
     api.get("/cameras").then((r) => setCams(r.data || [])).catch(() => setCams([]));
@@ -201,6 +202,25 @@ function NtpCard({ admin }) {
       toast.success(`Resynchronisation programmée toutes les ${data.hours}h`);
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
     finally { setSavingResync(false); }
+  };
+
+  // v3.60 · "Forcer la synchro" — repousse l'heure MAINTENANT à toutes les
+  // caméras `ntp_managed`, sans attendre le prochain cycle programmé
+  // (24h/48h/72h) — utile après un changement réseau ou pour vérifier
+  // qu'une caméra répond bien, sans devoir patienter.
+  const forceSyncNow = async () => {
+    setForcingSync(true);
+    try {
+      const { data } = await api.post("/system/ntp-resync-now");
+      const okCount = data.ok?.length || 0;
+      const errCount = data.errors?.length || 0;
+      if (errCount === 0) {
+        toast.success(okCount > 0 ? `${okCount} caméra(s) resynchronisée(s)` : "Aucune caméra à synchroniser");
+      } else {
+        toast.error(`${okCount} réussie(s), ${errCount} échec(s) — voir : ${data.errors.map((e) => e.camera).join(", ")}`);
+      }
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+    finally { setForcingSync(false); }
   };
 
   if (cams === null) return null;
@@ -246,6 +266,13 @@ function NtpCard({ admin }) {
             <span key={c.id} className="text-[10px] px-1.5 py-0.5 border border-border text-muted-foreground">{c.name}</span>
           ))}
         </div>
+      )}
+      {admin && managed.length > 0 && (
+        <button onClick={forceSyncNow} disabled={forcingSync} data-testid="ntp-force-sync"
+                className="flex items-center gap-2 px-4 py-2 border border-[#0044FF] text-[#0044FF] text-sm hover:bg-[#0044FF]/10 mb-3 disabled:opacity-50">
+          {forcingSync ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+          Forcer la synchro maintenant ({managed.length})
+        </button>
       )}
       <p className="text-[11px] text-muted-foreground leading-relaxed mb-4">
         Pour activer une caméra : Appareils → modifier la caméra (mode ONVIF) → "Définir comme serveur de temps".

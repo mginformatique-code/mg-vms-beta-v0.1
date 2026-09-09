@@ -300,6 +300,30 @@ async def put_ntp_resync_interval(data: NtpResyncIntervalIn, user: dict = Depend
 _NTP_RESYNC_CHECK_EVERY_S = 1800  # vérifie l'intervalle configuré toutes les 30 min
 
 
+async def _resync_all_ntp_cameras() -> dict:
+    """v3.60 · Repousse le serveur NTP MG-VMS à TOUTES les caméras `ntp_managed`,
+    immédiatement. Factorisé depuis `ntp_resync_loop` (même logique, appelée
+    aussi bien par la boucle périodique que par le bouton "Forcer la
+    synchro" — un seul chemin de code, pas de divergence possible entre
+    les deux déclencheurs."""
+    from routes.camera_control import dispatch_set_ntp, _get_cam_credentials
+    ok, errors = [], []
+    async for cam in db.cameras.find({"ntp_managed": True}, {"_id": 0, "id": 1, "name": 1}):
+        name = cam.get("name", cam["id"])
+        try:
+            _cam, ip, port, u, pwd = await _get_cam_credentials(cam["id"])
+            server = (_cam.get("ntp_server") or "").strip()
+            if not server:
+                continue
+            await dispatch_set_ntp(_cam, ip, port, u, pwd, server)
+            logger.info("system_admin · NTP resynchronisé : %s", name)
+            ok.append(name)
+        except Exception as e:
+            logger.exception("system_admin · échec resync NTP caméra %s", name)
+            errors.append({"camera": name, "error": str(e)[:200]})
+    return {"ok": ok, "errors": errors}
+
+
 async def ntp_resync_loop() -> None:
     """v3.19 · Repousse périodiquement le serveur NTP MG-VMS aux caméras
     marquées `ntp_managed` (voir POST /cameras/{id}/ntp) — les caméras
@@ -307,7 +331,6 @@ async def ntp_resync_loop() -> None:
     ponctuel ne suffit pas dans la durée. Intervalle configurable depuis
     Date et heure → Serveur de temps (24h/48h/72h/personnalisé), relu à
     chaque vérification pour qu'un changement s'applique sans redémarrage."""
-    from routes.camera_control import dispatch_set_ntp, _get_cam_credentials
     last_resync = 0.0
     while True:
         await asyncio.sleep(_NTP_RESYNC_CHECK_EVERY_S)
@@ -315,19 +338,20 @@ async def ntp_resync_loop() -> None:
             hours = await _load_ntp_resync_hours()
             if time.monotonic() - last_resync < hours * 3600:
                 continue
-            async for cam in db.cameras.find({"ntp_managed": True}, {"_id": 0, "id": 1, "name": 1}):
-                try:
-                    _cam, ip, port, u, pwd = await _get_cam_credentials(cam["id"])
-                    server = (_cam.get("ntp_server") or "").strip()
-                    if not server:
-                        continue
-                    await dispatch_set_ntp(_cam, ip, port, u, pwd, server)
-                    logger.info("system_admin · NTP resynchronisé : %s", cam.get("name", cam["id"]))
-                except Exception:
-                    logger.exception("system_admin · échec resync NTP caméra %s", cam.get("name", cam["id"]))
+            await _resync_all_ntp_cameras()
             last_resync = time.monotonic()
         except Exception:
             logger.exception("system_admin · erreur boucle ntp_resync_loop")
+
+
+@system_admin_router.post("/ntp-resync-now")
+async def force_ntp_resync_now(user: dict = Depends(require_role("admin"))):
+    """v3.60 · Bouton "Forcer la synchro" (Date et heure → Serveur de temps) —
+    repousse immédiatement l'heure à toutes les caméras `ntp_managed`, sans
+    attendre le prochain cycle programmé (24h/48h/72h)."""
+    result = await _resync_all_ntp_cameras()
+    await log_audit(user, "ntp_resync_forced", f"{len(result['ok'])} caméra(s), {len(result['errors'])} échec(s)")
+    return result
 
 
 async def auto_reboot_loop() -> None:
