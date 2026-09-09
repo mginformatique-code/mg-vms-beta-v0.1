@@ -63,6 +63,15 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
       pcRef.current = pc;
 
       pc.addTransceiver("video", { direction: "recvonly" });
+      // v3.59 · Corrige l'absence de son : côté serveur, go2rtc pull déjà
+      // l'audio en Opus sur le sous-flux `_preview` (voir streaming.py,
+      // v3.19 · #audio=opus) et le bouton couper/activer le son existe déjà
+      // ici — mais l'offre SDP n'a jamais demandé de piste audio (un seul
+      // addTransceiver, "video"). En SDP offer/answer, c'est l'OFFRANT (ce
+      // navigateur) qui doit déclarer les m-lines qu'il veut recevoir ;
+      // sans celle-ci, go2rtc ne renvoie jamais d'audio, quoi qu'il ait à
+      // offrir — le bouton son n'avait donc jamais rien à couper/activer.
+      pc.addTransceiver("audio", { direction: "recvonly" });
       pc.ontrack = (event) => {
         if (cancelled) return;
         if (videoRef.current && !videoRef.current.srcObject) {
