@@ -60,7 +60,7 @@ from routes.identity_merge_ai import (
     identity_merge_ai_router, identity_merge_ai_batch_loop, identity_merge_ai_auto_approve_loop,
 )
 from routes.parking_sessions import parking_sessions_router, parking_sessions_loop
-from routes.mgvms_center import mgvms_center_router, mgvms_center_report_loop  # v3.49 · Connexion MG-VMS Center
+from routes.mgvms_center import mgvms_center_router, mgvms_center_report_loop, mgvms_center_ws_loop  # v3.49/3.56 · Connexion MG-VMS Center
 from routes.anpr_tuning import anpr_tuning_router, anpr_tuning_loop
 from routes.vehicle_anomaly_ai import vehicle_anomaly_ai_router, anomaly_ai_batch_loop
 from routes.vehicle_color_ai import vehicle_color_ai_router, color_ai_batch_loop
@@ -261,6 +261,10 @@ async def on_startup():
         # v3.49 · Rapport périodique vers MG-VMS Center — no-op tant
         # qu'aucune connexion n'est configurée (Réglages -> MG-VMS Center).
         asyncio.create_task(mgvms_center_report_loop())
+        # v3.56 · Connexion WebSocket permanente vers MG-VMS Center — purement
+        # additive au rapport ci-dessus (jamais remplacé) : détection de panne
+        # quasi instantanée + vérification continue de la licence active.
+        asyncio.create_task(mgvms_center_ws_loop())
     if run_pipeline_tasks:
         asyncio.create_task(ai_loop())
         # v0.7.h · Wave I · Axe QoS · Surveillance permanente + alertes Ops Center

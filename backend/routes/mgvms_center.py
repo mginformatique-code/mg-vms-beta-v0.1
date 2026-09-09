@@ -15,6 +15,15 @@ santé). Ce module gère UNIQUEMENT le côté MG-VMS de la relation :
   2. Rapport périodique (voir `mgvms_center_report_loop` dans server.py) :
      pousse version/caméras/sites/santé vers le central, encaisse en
      retour un éventuel `update_available`.
+  3. Connexion WebSocket permanente (v3.56, voir `mgvms_center_ws_loop`) :
+     purement additive au rapport 30 min ci-dessus (jamais remplacé) —
+     détection de panne quasi instantanée côté Center + vérification
+     continue de la licence active auprès de mg-vms.com (relayée par le
+     Center, voir son onglet Licences). Si le Center signale une licence
+     invalide/expirée, seul un bandeau d'avertissement local est posé
+     (`db.settings["license_center_warning"]`) — AUCUNE désactivation
+     automatique, pour ne jamais pénaliser un client à cause d'une simple
+     coupure réseau vers Center ou mg-vms.com.
 
 Design "jamais de régression de connectivité" : toute erreur réseau vers
 MG-VMS Center est absorbée localement (log + `connected` reste tel quel
@@ -34,6 +43,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
+import websockets
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
@@ -432,3 +442,82 @@ async def _send_report_once() -> None:
             {"key": "mgvms_center"},
             {"$set": {"last_report_at": time.time(), "last_report_ok": False}},
         )
+
+
+# ── Connexion WebSocket permanente (v3.56, voir server.py::on_startup) ──
+# Purement additive au rapport 30 min ci-dessus (jamais remplacé, jamais
+# modifié) — sert deux besoins que le rapport périodique ne peut pas
+# couvrir : détection de panne quasi instantanée côté Center, et
+# vérification CONTINUE (pas seulement à l'activation) que la licence
+# active de ce déploiement est toujours valide auprès de mg-vms.com.
+WS_HEARTBEAT_INTERVAL_S = 20
+WS_BACKOFF_MIN_S = 1
+WS_BACKOFF_MAX_S = 30
+
+
+def _ws_url(base_url: str) -> str:
+    if base_url.startswith("https://"):
+        return "wss://" + base_url[len("https://"):] + "/api/v1/ws"
+    if base_url.startswith("http://"):
+        return "ws://" + base_url[len("http://"):] + "/api/v1/ws"
+    return base_url + "/api/v1/ws"
+
+
+async def _apply_license_center_warning(valid: Optional[bool]) -> None:
+    if valid is False:
+        await db.settings.update_one(
+            {"key": "license_center_warning"},
+            {"$set": {"key": "license_center_warning",
+                      "checked_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
+    elif valid is True:
+        await db.settings.delete_one({"key": "license_center_warning"})
+    # valid is None (indéterminé : pas de licence active, clé API du
+    # générateur non configurée côté Center, ou mg-vms.com/Center
+    # injoignable) -> on ne touche à rien, ni pose ni levée d'alerte, pour
+    # ne jamais pénaliser un client sur une simple coupure réseau tierce
+    # (confirmé avec l'utilisateur : avertissement seul, jamais bloquant).
+
+
+async def mgvms_center_ws_loop() -> None:
+    """Boucle de fond — no-op tant qu'aucune connexion n'est configurée
+    (même garde que mgvms_center_report_loop). Reconnexion automatique avec
+    backoff (1s -> 30s) sur toute erreur : même philosophie "jamais de
+    régression de connectivité" que le reste de ce fichier — une panne de
+    ce canal ne doit jamais affecter le fonctionnement normal de MG-VMS."""
+    backoff = WS_BACKOFF_MIN_S
+    while True:
+        s = await _get_settings()
+        if not s or not s.get("api_key_encrypted"):
+            await asyncio.sleep(WS_HEARTBEAT_INTERVAL_S)
+            continue
+        try:
+            api_key = decrypt_secret(s["api_key_encrypted"])
+            uri = _ws_url(s["url"])
+            async with websockets.connect(uri, extra_headers={"X-API-Key": api_key},
+                                           ping_interval=20, ping_timeout=20) as ws:
+                backoff = WS_BACKOFF_MIN_S
+                logger.info("mgvms_center_ws: connecté (%s)", uri)
+                while True:
+                    license_doc = await db.license.find_one({"_id": "current"}, {"_id": 0})
+                    heartbeat = {
+                        "type": "heartbeat",
+                        "uptime_seconds": time.monotonic() - _process_started_at,
+                        "license_id": (license_doc or {}).get("license_id"),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                    await ws.send(json.dumps(heartbeat))
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=5)
+                        reply = json.loads(raw)
+                        if reply.get("type") == "license_status":
+                            await _apply_license_center_warning(reply.get("valid"))
+                    except asyncio.TimeoutError:
+                        pass
+                    await asyncio.sleep(WS_HEARTBEAT_INTERVAL_S)
+        except Exception as e:
+            logger.warning("mgvms_center_ws: connexion perdue (%s) — nouvelle tentative dans %ds",
+                            type(e).__name__, backoff)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, WS_BACKOFF_MAX_S)
