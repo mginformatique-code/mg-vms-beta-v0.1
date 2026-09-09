@@ -105,6 +105,39 @@ def _build_rtsp_url(cam: dict) -> str:
     return url
 
 
+def _build_onvif_backchannel_url(cam: dict) -> str:
+    """v3.60 · Source `onvif://` dédiée au canal audio retour (haut-parleur caméra).
+
+    Root cause du TTS "envoyé mais inaudible" (session réelle) : une source
+    `rtsp://` brute (même quand sa SDP annonce une piste `audio, sendonly,
+    PCMU/8000`) ne suffit PAS à faire jouer le son sur le haut-parleur — le
+    client RTSP natif de go2rtc en tire un back-channel « can't find
+    consumer » silencieux, ou un flux réellement transmis (paquets RTP
+    comptés, 200 OK) mais jamais restitué par la caméra. Confirmé par un
+    guide externe (communauté go2rtc/Home Assistant) : go2rtc a besoin
+    d'une source `onvif://` explicite pour négocier correctement ce canal
+    — vérifié en conditions réelles sur une Reolink E1 Outdoor Pro
+    (écoute audible confirmée après ajout de cette source, alors que la
+    même caméra via `rtsp://` brut restait totalement silencieuse).
+
+    Source purement PARESSEUSE côté go2rtc (aucune connexion tant que rien
+    ne la sollicite, constaté en conditions réelles) — l'ajouter à toutes
+    les caméras ONVIF ne coûte rien tant que le TTS n'est pas déclenché.
+
+    Retourne "" si la caméra n'a pas de port ONVIF déclaré (mode RTSP pur).
+    """
+    onvif_port = cam.get("onvif_port")
+    ip = (cam.get("ip") or "").strip()
+    if not onvif_port or not ip:
+        return ""
+    user = (cam.get("username") or "").strip()
+    from crypto_utils import decrypt_secret
+    pwd = decrypt_secret(cam.get("password") or "")
+    u_enc = urlquote(str(user), safe="")
+    p_enc = urlquote(str(pwd), safe="")
+    return f"onvif://{u_enc}:{p_enc}@{ip}:{int(onvif_port)}/"
+
+
 #: Largeur minimale acceptable pour un flux d'aperçu — en dessous, l'image
 #: est trop dégradée pour être exploitable dans le mur vidéo.
 _PREVIEW_MIN_WIDTH = 320
@@ -443,7 +476,15 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
     # ont besoin en pleine résolution) et on n'allège QUE l'aperçu.
     preview = pick_preview_stream(cam)
     preview_source_name = name
-    desired = {name: rtsp_source}
+    # v3.60 · `name` porte désormais potentiellement DEUX sources : le flux
+    # vidéo/audio existant (`rtsp_source`, inchangé) + une source `onvif://`
+    # dédiée au canal audio retour (voir _build_onvif_backchannel_url) —
+    # nécessaire pour que le TTS soit réellement audible sur le
+    # haut-parleur (pas seulement "envoyé sans erreur", voir docstring).
+    onvif_backchannel = _build_onvif_backchannel_url(cam)
+    desired: dict[str, "str | list[str]"] = {
+        name: [rtsp_source, onvif_backchannel] if onvif_backchannel else rtsp_source
+    }
     if preview and preview.get("url"):
         preview_url = build_preview_rtsp_url(cam)
         if preview_url and preview_url != rtsp_url:
@@ -488,7 +529,8 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
             elif isinstance(entry, dict):
                 prods = entry.get("producers") or entry.get("sources") or []
                 actual_srcs = [str(p.get("url") if isinstance(p, dict) else p) for p in prods]
-            if wanted_src not in actual_srcs:
+            wanted_list = wanted_src if isinstance(wanted_src, list) else [wanted_src]
+            if not all(w in actual_srcs for w in wanted_list):
                 all_match = False
                 break
         if all_match:
@@ -525,8 +567,9 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
             # la chaîne stockée est exactement celle voulue — y compris les
             # identifiants percent-encodés et les query params RTSP.
             for stream_name, src_value in desired.items():
+                srcs = src_value if isinstance(src_value, list) else [src_value]
                 r = await client.put(f"{GO2RTC_URL}/api/streams",
-                                      params=[("name", stream_name), ("src", src_value)])
+                                      params=[("name", stream_name)] + [("src", s) for s in srcs])
                 r.raise_for_status()
         if not await _stream_registered(name):
             logger.warning("go2rtc: flux %s introuvable après enregistrement", name)

@@ -2,6 +2,24 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.60-tts-piper-onvif-backchannel] — 2026-09-09 — TTS réel (Piper + haut-parleur caméra), corrections plugin bus
+
+### Added
+- **TTS enfin fonctionnel sur le haut-parleur des caméras** : le chantier v3.20 avait livré le routage (`POST /cameras/{id}/audio/tts`) mais jamais le plugin `tts-notifier` réellement écrit — comblé ici. Synthèse vocale locale et gratuite via **Piper** (invoqué en sous-processus, licence GPL-3.0-or-later, arm's-length), voix féminine (Siwis) ou masculine (UPMC) au choix, vitesse de parole réglable (0.5×–2×) — réglages par défaut dans le Plugin Center, ou surchargeables par appel (`voice`, `speed`).
+- **Root cause réelle trouvée pour la livraison audio** : une source go2rtc `rtsp://` brute (même quand sa SDP annonce un canal audio retour) ne suffit pas à faire jouer le son sur le haut-parleur — go2rtc a besoin d'une source **`onvif://`** dédiée pour négocier correctement le back-channel ONVIF Profile T. Chaque caméra ONVIF reçoit désormais automatiquement cette seconde source (purement paresseuse côté go2rtc — aucune connexion tant que le TTS n'est pas utilisé, aucun impact sur le flux vidéo/enregistrement existant).
+- **Blip silencieux de préconnexion** avant chaque message réel : la session ONVIF back-channel s'ouvre à la demande (jamais tenue ouverte en continu) — un message court partait en partie ou en totalité avant que la session soit prête. Un blip jetable de 1.5s absorbe ce temps d'établissement.
+- **Détection propre des caméras sans haut-parleur** (ex. Reolink RLC-820A — micro seul, pas de two-way audio, confirmé par la doc constructeur) : message d'erreur clair au lieu d'un échec go2rtc cryptique ("can't find consumer"), sans gaspiller de synthèse vocale.
+- **Garde-fou anti-rafale** : un 2e message TTS sur la même caméra dans les 15s suivant le précédent est refusé avec un message explicite plutôt que d'échouer silencieusement — constaté en conditions réelles qu'un message trop rapproché du précédent ne joue pas (la session audio a besoin d'un temps de repos).
+
+### Fixed
+- **`smart_zones/actuators.py::_run_plugin`** ignorait silencieusement le résultat réel de tout plugin `EventConsumer` (`ConsumerResult`) — l'API renvoyait toujours `ok:true` même en cas d'échec du plugin. Concerne tous les plugins de notification (Telegram, Discord, SMTP, TTS...), pas seulement le TTS.
+- **Délai du bus de plugins trop court pour le TTS** (5s par défaut, 15s au niveau de `dispatch_action`) : synthèse Piper + connexion ONVIF à froid + tentative de codec peuvent dépasser ce délai en conditions réelles — timeout spécifique de 30s pour l'action `tts`.
+- **Jeton de service WAV à usage unique** (`routes/tts_audio.py`) alors que go2rtc lit la source deux fois (sondage des codecs puis lecture réelle) — la 2e lecture échouait systématiquement (404), faisant échouer tout le push (500). Le fichier reste maintenant disponible pendant toute sa fenêtre de vie (TTL 60s).
+- **Codec audio figé sur PCMA** alors que le back-channel réel d'une Reolink E1 Outdoor Pro annonce PCMU/8000 — fallback PCMU puis PCMA, le codec réellement supporté variant selon le modèle/fabricant.
+
+### Known limitation
+- Une fraction des messages espacés normalement échoue encore silencieusement (aucune erreur, aucune trace différenciable dans les journaux go2rtc/MG-VMS) — confirmé correspondre à un problème ouvert et non résolu en amont, spécifique à la combinaison go2rtc + back-channel Reolink ([issue GitHub #2007](https://github.com/AlexxIT/go2rtc/issues/2007)). Diagnostiquer plus loin demanderait une capture réseau radio (WiFi) entre go2rtc et la caméra, hors de portée sans accès physique au réseau.
+
 ## [v3.56-websocket-permanent-licence] — 2026-09-09 — Connexion WebSocket permanente MG-VMS ↔ Center (panne quasi instantanée + vérification licence continue)
 
 ### Added

@@ -366,7 +366,7 @@ async def play_tts(camera_id: str,
 
     Route l'ordre via le plugin `tts-notifier` (à installer par l'utilisateur — non
     fourni par défaut car dépend du hardware audio). L'opérateur passe :
-      {"text": "...", "voice"?: "...", "language"?: "fr-FR"}
+      {"text": "...", "voice"?: "...", "language"?: "fr-FR", "speed"?: 1.0}
 
     Le plugin TTS est libre de générer l'audio via ElevenLabs / Piper / Google TTS
     puis de le publier sur le haut-parleur (via MQTT, HTTP, ONVIF SetAudioOutput…).
@@ -385,6 +385,7 @@ async def play_tts(camera_id: str,
             "text": text,
             "voice": (body or {}).get("voice"),
             "language": (body or {}).get("language") or "fr-FR",
+            "speed": (body or {}).get("speed"),
             "plugin_name": (body or {}).get("plugin_name") or "tts-notifier",
         },
     }, {"camera_id": camera_id, "camera_name": cam.get("name")})

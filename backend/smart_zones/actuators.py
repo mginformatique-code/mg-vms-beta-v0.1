@@ -145,7 +145,7 @@ async def _run_tuya(config: dict, context: dict) -> dict:
             "status": r2.status_code, "response": r2.json()}
 
 
-async def _run_plugin(config: dict, context: dict) -> dict:
+async def _run_plugin(config: dict, context: dict, timeout_s: float | None = None) -> dict:
     """Envoie un événement synthétique vers un plugin EventConsumer nommé.
     Config : {plugin_name, event_type?, message?, data?}.
     """
@@ -169,7 +169,7 @@ async def _run_plugin(config: dict, context: dict) -> dict:
     entry = bus._entries[name]
     if not entry.is_dispatchable():
         return {"ok": False, "error": f"plugin '{name}' non dispatchable ({entry.state})"}
-    result = await bus._call_one(entry, lambda inst, e=ev: inst.on_event(e))
+    result = await bus._call_one(entry, lambda inst, e=ev: inst.on_event(e), timeout_s=timeout_s)
     if result is None:
         return {"ok": False, "error": f"plugin '{name}' : erreur ou timeout (voir logs)", "plugin": name}
     if not getattr(result, "handled", True):
@@ -185,12 +185,18 @@ async def _run_tts(config: dict, context: dict) -> dict:
     text = _interpolate(config.get("text") or "", context)
     if not text:
         return {"ok": False, "error": "text requis"}
+    # v3.60 · Délai bus par défaut (5s) trop court : synthèse Piper + connexion
+    # ONVIF à froid vers la caméra (établie à la demande, jamais tenue ouverte
+    # en continu) + jusqu'à 2 tentatives de codec (pcmu/pcma) côté go2rtc
+    # peuvent dépasser 5s en conditions réelles — constaté (timeout rapporté
+    # alors que l'audio était réellement diffusé). 25s couvre le pire cas
+    # (2 x 15s coté httpx) sans bloquer indéfiniment le bus de plugins.
     return await _run_plugin({
         "plugin_name": config.get("plugin_name") or "tts-notifier",
         "event_type": "zone.tts",
         "message": text,
-        "data": {"text": text, "voice": config.get("voice"), "language": config.get("language")},
-    }, context)
+        "data": {"text": text, "voice": config.get("voice"), "language": config.get("language"), "speed": config.get("speed")},
+    }, context, timeout_s=25.0)
 
 
 ACTUATORS = {
@@ -231,6 +237,15 @@ def _flatten(d: dict, parent: str = "") -> dict:
     return out
 
 
+#: v3.60 · Le TTS a besoin de plus que le délai générique 15s : synthèse
+#: Piper + blip de préconnexion ONVIF (délai de stabilisation volontaire,
+#: voir plugin.py::_WARMUP_SETTLE_S) + envoi du message réel — dépasse 15s
+#: en conditions réelles (constaté : "actuator.timeout type=tts" alors que
+#: le message partait bien juste après la coupure).
+_ACTUATOR_TIMEOUT_S = {"tts": 30}
+_DEFAULT_ACTUATOR_TIMEOUT_S = 15
+
+
 async def dispatch_action(action: dict, context: dict) -> dict:
     """Point d'entrée unique — dispatch une action selon son type.
 
@@ -240,8 +255,9 @@ async def dispatch_action(action: dict, context: dict) -> dict:
     fn = ACTUATORS.get(atype)
     if not fn:
         return {"type": atype, "ok": False, "error": f"type d'action inconnu : {atype}"}
+    timeout = _ACTUATOR_TIMEOUT_S.get(atype, _DEFAULT_ACTUATOR_TIMEOUT_S)
     try:
-        result = await asyncio.wait_for(fn(action.get("config") or {}, context), timeout=15)
+        result = await asyncio.wait_for(fn(action.get("config") or {}, context), timeout=timeout)
         return {"type": atype, **(result or {})}
     except asyncio.TimeoutError:
         logger.warning("actuator.timeout type=%s", atype)

@@ -5,8 +5,18 @@
     "voice_model": {
       "type": "string",
       "title": "Voix (modèle Piper)",
-      "description": "Nom du modèle de voix Piper à utiliser (téléchargé automatiquement au premier usage).",
+      "description": "Voix par défaut, téléchargée automatiquement au premier usage. Un appel peut passer sa propre voix (\"voice\") pour ignorer ce réglage ponctuellement.",
+      "enum": ["fr_FR-siwis-medium", "fr_FR-upmc-medium"],
+      "enumNames": ["Voix féminine (Siwis)", "Voix masculine (UPMC)"],
       "default": "fr_FR-siwis-medium"
+    },
+    "speech_rate": {
+      "type": "number",
+      "title": "Vitesse de parole",
+      "description": "1.0 = normal, 1.5 = 50% plus rapide, 0.7 = plus lent. Un appel peut passer sa propre vitesse (\"speed\") pour ignorer ce réglage ponctuellement.",
+      "minimum": 0.5,
+      "maximum": 2.0,
+      "default": 1.0
     }
   },
   "required": []
