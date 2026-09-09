@@ -60,6 +60,12 @@ Endpoints (préfixe `/api/site-manager/`) :
 {id}/position` et `DELETE .../position` dans `backend/network.py`
 (v3.55) — pas dupliqués ici, l'inventaire réseau reste la source unique.
 
+Géocodage d'adresse (v3.58, `GET /geocode`) — proxifie Nominatim
+(OpenStreetMap, gratuit, sans clé API) : un appel direct DEPUIS LE
+NAVIGATEUR échoue (Nominatim ne renvoie aucun en-tête
+Access-Control-Allow-Origin, vérifié en direct), donc le backend relaie
+l'appel côté serveur, où le CORS ne s'applique pas.
+
 `camera_model_catalog` (nouvelle, v3.57) — une entrée par (manufacturer,
 model), PAS par caméra installée :
   { id, manufacturer, model, lens_count, photo_data_uri, updated_at }
@@ -74,6 +80,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -590,4 +597,43 @@ async def set_report_template(payload: ReportTemplateInput, user: dict = Depends
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.settings.update_one({"key": "report_template"}, {"$set": update}, upsert=True)
     return await db.settings.find_one({"key": "report_template"}, {"_id": 0})
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Géocodage d'adresse (v3.58) — création d'une carte live par adresse
+# ═══════════════════════════════════════════════════════════════════
+# Demande explicite : proposer une adresse (avec suggestions au fil de la
+# frappe) plutôt que de saisir latitude/longitude à la main pour centrer
+# une nouvelle carte live. Nominatim (OpenStreetMap) ne renvoie AUCUN
+# en-tête Access-Control-Allow-Origin (vérifié en direct via curl) — un
+# appel direct depuis le navigateur est donc bloqué par le CORS. Ce proxy
+# serveur contourne cette limite (le CORS ne s'applique qu'aux requêtes
+# navigateur) sans clé API ni coût, dans le respect de la politique
+# d'usage de Nominatim (User-Agent identifiable, un seul appel par
+# recherche déclenchée côté frontend, pas de requêtes en rafale).
+_NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+_NOMINATIM_USER_AGENT = "MG-VMS/1.0 (+https://mginformatique.com)"
+
+
+@site_manager_router.get("/geocode")
+async def geocode_address(q: str, user: dict = Depends(get_current_user)):
+    query = (q or "").strip()
+    if len(query) < 3:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            resp = await client.get(
+                _NOMINATIM_URL,
+                params={"format": "json", "limit": 5, "q": query},
+                headers={"User-Agent": _NOMINATIM_USER_AGENT, "Accept-Language": "fr"},
+            )
+    except httpx.RequestError:
+        raise HTTPException(status_code=502, detail="Service de géocodage injoignable")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Échec de la recherche d'adresse")
+    return [
+        {"place_id": r.get("place_id"), "display_name": r.get("display_name"),
+         "lat": r.get("lat"), "lon": r.get("lon")}
+        for r in resp.json()
+    ]
     return {"ok": True, "deleted": link_id}

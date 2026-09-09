@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import LiveMapCanvas from "./LiveMapCanvas";
 import MapContextMenu from "@/components/MapContextMenu";
+import AddressPickerModal from "@/components/AddressPickerModal";
 import { generateMapReportPdf } from "@/lib/mapReportPdf";
 import {
   DEFAULT_CAM, STATUS_COLOR, COVERAGE_COLOR, coverageQuality,
@@ -326,9 +327,16 @@ function CameraPanel({ camera, onClose, onChange, onOpenInCenter }) {
           <div><span className="text-muted-foreground">Statut : </span>
             <span className="mono" style={{ color: STATUS_COLOR[camera.status] || "#71717a" }}>{camera.status || "—"}</span>
           </div>
-          <div><span className="text-muted-foreground">Marque : </span>{camera.brand || "—"}</div>
+          {/* v3.58 · Corrige "Marque" qui lisait `camera.brand` — un champ
+              qui n'existe pas sur le document caméra (voir db.cameras,
+              le vrai champ est `manufacturer`) — donc toujours vide,
+              signalé par l'utilisateur en comparant avec Camera Center
+              (qui, lui, lit déjà le bon champ). "Driver" aligné sur le
+              même repli que Camera Center (CameraCenter.jsx) : pas de
+              champ dédié en base, toujours "onvif" en pratique. */}
+          <div><span className="text-muted-foreground">Marque : </span>{camera.manufacturer || "—"}</div>
           <div><span className="text-muted-foreground">Modèle : </span>{camera.model || "—"}</div>
-          <div><span className="text-muted-foreground">Driver : </span>{camera.driver || "—"}</div>
+          <div><span className="text-muted-foreground">Driver : </span>{camera.driver || "onvif"}</div>
           <div><span className="text-muted-foreground">MAC : </span><span className="mono">{camera.mac || "—"}</span></div>
           <div className="col-span-2"><span className="text-muted-foreground">Firmware : </span>{camera.firmware || "—"}</div>
         </div>
@@ -660,6 +668,8 @@ export default function MapCenter() {
   const containerRef = useRef(null);
   const stageRef = useRef(null);
   const [reportGenerating, setReportGenerating] = useState(false);
+  const [addressPickerOpen, setAddressPickerOpen] = useState(false);
+  const pendingLiveMapRef = useRef(null);
 
   // Data
   const [sites, setSites] = useState([]);
@@ -861,33 +871,31 @@ export default function MapCenter() {
   };
 
   // v3.54 · Carte interactive (Leaflet/OSM+satellite gratuits) — additive,
-  // aucune image stockée (voir PlanInput côté backend). Centre initial :
-  // géolocalisation navigateur si autorisée, sinon saisie manuelle.
-  const createLiveMap = async (siteId) => {
+  // aucune image stockée (voir PlanInput côté backend).
+  // v3.58 · Emplacement initial demandé par ADRESSE (avec suggestions au
+  // fil de la frappe, voir AddressPickerModal) plutôt que par
+  // latitude/longitude saisies à la main — demande explicite. La
+  // géolocalisation navigateur reste proposée dans ce même écran plutôt
+  // que comme une étape séparée.
+  const applyLiveMapCenter = async (lat, lng) => {
+    const pending = pendingLiveMapRef.current;
+    if (!pending) return;
+    try {
+      const r = await api.post("/site-manager/plans", {
+        site_id: pending.siteId, name: pending.name, type: "carte_live",
+        center_lat: lat, center_lng: lng, zoom: 18,
+      });
+      await refreshAll();
+      loadPlan(r.data.id);
+      toast.success("Carte créée");
+    } catch (e) { toast.error("Création de la carte refusée"); }
+    finally { pendingLiveMapRef.current = null; }
+  };
+  const createLiveMap = (siteId) => {
     const name = window.prompt("Nom de la carte ?", "Carte");
     if (!name) return;
-    const applyCenter = async (lat, lng) => {
-      try {
-        const r = await api.post("/site-manager/plans", {
-          site_id: siteId, name, type: "carte_live",
-          center_lat: lat, center_lng: lng, zoom: 18,
-        });
-        await refreshAll();
-        loadPlan(r.data.id);
-        toast.success("Carte créée");
-      } catch (e) { toast.error("Création de la carte refusée"); }
-    };
-    if (navigator.geolocation && window.confirm("Centrer la carte sur votre position actuelle ? (Annuler pour saisir des coordonnées manuellement)")) {
-      navigator.geolocation.getCurrentPosition(
-        (p) => applyCenter(p.coords.latitude, p.coords.longitude),
-        () => { toast.error("Position indisponible — coordonnées par défaut"); applyCenter(46.6, 1.9); },
-        { timeout: 5000 }
-      );
-    } else {
-      const lat = parseFloat(window.prompt("Latitude initiale ?", "46.6")) || 46.6;
-      const lng = parseFloat(window.prompt("Longitude initiale ?", "1.9")) || 1.9;
-      applyCenter(lat, lng);
-    }
+    pendingLiveMapRef.current = { siteId, name };
+    setAddressPickerOpen(true);
   };
 
   const deletePlan = async (planId) => {
@@ -1248,6 +1256,12 @@ export default function MapCenter() {
 
   return (
     <div className="h-[calc(100vh-40px)] flex" data-testid="map-center">
+      <AddressPickerModal
+        open={addressPickerOpen}
+        onClose={() => setAddressPickerOpen(false)}
+        onPick={applyLiveMapCenter}
+      />
+
       {/* Sidebar tree */}
       <SiteTree
         sites={sites}
