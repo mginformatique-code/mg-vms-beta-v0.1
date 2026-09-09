@@ -2,6 +2,42 @@
 
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
+## [v3.56-websocket-permanent-licence] — 2026-09-09 — Connexion WebSocket permanente MG-VMS ↔ Center (panne quasi instantanée + vérification licence continue)
+
+### Added
+- **Connexion WebSocket permanente entre chaque MG-VMS et MG-VMS Center**, en plus (jamais à la place) du rapport poussé toutes les 30 min déjà en place : jusqu'ici, une panne d'un déploiement n'était détectée côté Center qu'après un délai pouvant aller jusqu'à ~2h. MG-VMS ouvre désormais une connexion sortante permanente vers `POST /api/v1/ws` (Center héberge le point d'écoute, ne se connecte jamais à un déploiement — même principe push-only que le rapport), avec heartbeat toutes les ~20s et reconnexion automatique (backoff 1s→30s) en cas de coupure. Purement additif : aucun changement du rapport 30 min existant.
+- **Vérification continue de la licence active auprès de mg-vms.com**, portée par ce même canal : à chaque heartbeat, MG-VMS transmet l'identifiant de sa licence active (`db.license`) et Center la vérifie en relayant l'appel déjà utilisé par l'onglet Licences (`GET /admin/api/license.php`). Si la licence est signalée invalide/expirée, MG-VMS affiche un simple bandeau d'avertissement sur la page d'accueil (`db.settings["license_center_warning"]`) — **aucune désactivation automatique** (décision explicite) : une coupure réseau vers Center ou mg-vms.com ne doit jamais pénaliser un client dont la licence est en réalité valide.
+- **Détection de panne en moins d'une minute côté MG-VMS Center** (`deploymentStatusToken()`) : un déploiement ayant déjà établi cette connexion bascule en "injoignable" dès que son dernier heartbeat date de plus de ~60s, au lieu d'attendre le seuil de 2h basé sur le rapport ; ce seuil de 2h reste le filet de sécurité pour un déploiement encore sur une version antérieure au WebSocket. Un petit indicateur (éclair) distingue, dans la table des déploiements et sur la fiche déploiement, un site "vu via le dernier rapport" d'un site "connecté en direct".
+
+### Fixed
+- **Documentation obsolète de `backend/routes/license.py`** : le commentaire d'en-tête décrivait encore l'ancien générateur de licences (service séparé sur 192.168.1.21, décommissionné) au lieu du panneau web + API REST désormais hébergé sur mg-vms.com. Mise à jour de la documentation uniquement — le mécanisme de vérification (signature Ed25519 hors-ligne, aucun appel réseau après activation) est inchangé et reste vérifié fonctionnel de bout en bout (licence "Migration Test" active identique des deux côtés).
+- **Sous-menu de la carte interactive débordant hors écran** près du bord droit (clic-droit → "Ajouter un équipement"/"Attacher une connexion") — le sous-menu s'ouvrait toujours à droite du menu parent, coupant les libellés quand celui-ci était proche du bord de l'écran. Bascule désormais à gauche automatiquement selon la position du clic.
+
+## [v3.55-console-mgvms-center-carte-interactive] — 2026-09-08 — Console MG-VMS Center (connexion, télémétrie, SSO), carte interactive avec équipements réseau, corrections diverses
+
+### Added
+- **Assistant de connexion à MG-VMS Center simplifié** : l'appairage ne demande plus de sélectionner un site au préalable (auto-découverte au premier rapport, comme tous les rapports suivants) ; certificat auto-signé de Center accepté explicitement côté client (`verify=False`), cohérent avec l'absence de domaine public dédié pour cette liaison interne.
+- **Télémétrie réelle remontée à MG-VMS Center** : CPU/RAM/disque/services (Mongo, pipeline IA, enregistreur, plugins) et liste des caméras (nom, IP, statut — projection déjà filtrée des champs sensibles), réutilisant telles quelles les fonctions déjà utilisées par le propre tableau de bord de MG-VMS. Nom d'hôte machine réel et IP locale remontés séparément du domaine TLS saisi à la main (utile en particulier sur un lien VPN, où un nom `.local` ne se résout pas à travers le tunnel), avec le port HTTPS réel de l'instance.
+- **Canal de commande à distance (redémarrage machine)** : MG-VMS Center peut déposer une demande de redémarrage dans la réponse au rapport périodique (jamais un appel entrant), consommée une seule fois côté MG-VMS via le mécanisme de redémarrage hôte déjà existant (fichier marqueur + timer systemd).
+- **Bandeau de messages diffusés par MG-VMS Center** sur la page d'accueil de MG-VMS (annonces MG Informatique côté client), masquable par message.
+- **SSO « Ouvrir MG-VMS » depuis MG-VMS Center** : un clic sur "Ouvrir" dans la console centrale mint un code opaque à usage unique (60s de validité), que la page publique `/sso` de MG-VMS échange contre une vraie session locale — MG-VMS reste toujours le seul à pouvoir créer sa propre session (son `JWT_SECRET` n'est jamais partagé avec Center), via un compte dédié `center-sso@mginformatique.local` tracé dans les logs d'audit avec l'email du véritable admin Center à l'origine de la connexion.
+- **Carte interactive (page Carte) — fond de carte live gratuit** : nouveau type de plan "Carte" basé sur Leaflet (fond OpenStreetMap ou satellite Esri, gratuits, sans clé API), en plus des plans image existants (jamais à leur place). Les caméras placées sur ce type de plan utilisent des coordonnées GPS réelles ; leur cône de champ de vision est recalculé en géométrie réelle (formule de destination haversine) à partir des mêmes réglages hauteur/angle/portée déjà saisis pour un plan image.
+- **Import PDF comme fond de plan** : un PDF importé est automatiquement rasterisé (1ère page) côté navigateur avant de suivre le pipeline d'import image existant — aucun nouvel endpoint.
+- **Équipements réseau et connexions typées sur la carte** (clic-droit, façon Cisco Packet Tracer) : possibilité de placer switch/routeur/NAS/onduleur/serveur/NVR sur un plan, en réutilisant directement l'inventaire réseau déjà existant (`db.equipment`, supervision ping réelle) plutôt qu'un système parallèle — un équipement placé sur la carte reste un vrai objet supervisé. Connexions typées (Ethernet/Fibre/PoE/Radio/Autre) traçables entre deux caméras/équipements quelconques, avec renommage et suppression.
+
+### Fixed
+- **Alertes IA imprécises dans Camera Center** : le panneau d'événements n'affichait que le type générique `ai_scenario` sans détail exploitable, alors que le message réel de l'alerte était déjà disponible. Affiche désormais le message réel, avec le type/scénario en complément.
+- **Page audit incorrecte pour une caméra positionnée en GPS** (carte live) : le contrôle "caméra non positionnée" ne vérifiait que les coordonnées pixel (x/y), ignorant les coordonnées GPS (lat/lng) — une caméra bien placée sur une carte live était donc signalée à tort comme non positionnée.
+- **Superposition de la barre d'outils par la carte Leaflet** après un zoom/dézoom : le conteneur de la carte n'établissait pas son propre contexte d'empilement CSS, laissant les panneaux internes de Leaflet passer devant la barre d'outils. Correction par un `z-index` explicite.
+- **Certificat SSL classé sous la mauvaise rubrique** : la page vivait sous "Certificats" alors qu'elle concerne les réglages réseau — déplacée sous `/network`, avec redirection depuis l'ancienne URL.
+- **Boutons "Retour" inutiles** supprimés (page Identité du système, page Paramètres réseau) — navigation déjà assurée par le menu latéral.
+- **Bloc "État des conteneurs" mal placé** — déplacé depuis la page Identité du système vers Paramètres réseau (lecture seule, inchangé sinon).
+- **Doublon de sélection GPU** — un même choix de GPU actif était proposé à la fois via un menu déroulant et une case à cocher séparée ; un seul sélecteur conservé.
+- **Absence de bascule caméra en mode focus (1 caméra)** — ajout de flèches précédent/suivant flottantes en mode focus, réutilisant le style déjà existant en mode mosaïque.
+
+### Added — Réseau
+- **Nouvelle page "Paramètres réseau"** (IP/DNS/passerelle de la machine, appliqués via `nmcli`) avec avertissement explicite et confirmation obligatoire sous 90s — un changement non confirmé est automatiquement annulé (auto-revert), pour ne jamais laisser la machine injoignable après une IP mal saisie. Menu "Réseau" réorganisé en sous-menu (Supervision + Certificat SSL + Paramètres réseau) et déplacé de la rubrique Administration vers Paramètres ; nom du système désormais configurable et remonté à MG-VMS Center.
+
 ## [v3.44-perf-timeline-vehicules-ptz-patrouille] — 2026-09-07 — Timeline/Informations véhicules lentes corrigées, patrouille PTZ automatique
 
 ### Fixed

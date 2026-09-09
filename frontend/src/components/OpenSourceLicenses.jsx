@@ -40,6 +40,11 @@ const GROUPS = [
       { name: "cryptography", version: "43.0.1", license: "Apache-2.0 / BSD-3-Clause", url: "https://cryptography.io" },
       { name: "passlib", version: "1.7.4", license: "BSD", url: "https://passlib.readthedocs.io" },
       { name: "python-jose", version: "3.3.0", license: "MIT", url: "https://github.com/mpdavis/python-jose" },
+      // v3.56 · Client de la connexion WebSocket permanente vers MG-VMS
+      // Center (backend/routes/mgvms_center.py) — déjà présent dans l'image
+      // depuis plus longtemps pour le canal temps réel du frontend
+      // (realtime.py), mais jamais listé ici.
+      { name: "websockets", version: "13.1", license: "BSD-3-Clause", url: "https://github.com/python-websockets/websockets" },
     ],
   },
   {
@@ -94,6 +99,38 @@ const GROUPS = [
       { name: "lucide-react", version: "0.x", license: "ISC", url: "https://lucide.dev" },
       { name: "Recharts", version: "3.x", license: "MIT", url: "https://recharts.org" },
       { name: "axios", version: "1.x", license: "MIT", url: "https://axios-http.com" },
+      // v3.55 · Carte interactive (page Carte) — fond de carte live et
+      // import PDF, ajoutés avec le type de plan carte_live.
+      { name: "Leaflet", version: "1.9.4", license: "BSD-2-Clause", url: "https://leafletjs.com" },
+      { name: "react-leaflet", version: "5.0.0", license: "MIT", url: "https://react-leaflet.js.org" },
+      { name: "pdfjs-dist", version: "4.7.76", license: "Apache-2.0", url: "https://mozilla.github.io/pdf.js/" },
+    ],
+  },
+  {
+    // v3.56 · MG-VMS Center est un service séparé (hébergé par MG
+    // Informatique, pas déployé chez le client) mais communique directement
+    // avec chaque MG-VMS — ses propres dépendances sont listées ici pour la
+    // même raison de transparence que le reste de cette page.
+    key: "center",
+    label: { fr: "MG-VMS Center (console centrale)", en: "MG-VMS Center (central console)" },
+    items: [
+      { name: "FastAPI", version: "0.115.0", license: "MIT", url: "https://fastapi.tiangolo.com" },
+      { name: "Starlette", version: "0.38.6", license: "BSD", url: "https://www.starlette.io" },
+      { name: "Uvicorn", version: "0.30.6", license: "BSD", url: "https://www.uvicorn.org" },
+      { name: "Pydantic", version: "2.9.2", license: "MIT", url: "https://docs.pydantic.dev" },
+      { name: "Motor / PyMongo", version: "3.5.1 / 4.8.0", license: "Apache-2.0", url: "https://www.mongodb.com/docs/drivers/motor/" },
+      { name: "MongoDB", version: "7.0", license: "SSPL-1.0", url: "https://www.mongodb.com" },
+      { name: "httpx", version: "0.27.2", license: "BSD", url: "https://www.python-httpx.org" },
+      { name: "python-jose", version: "3.3.0", license: "MIT", url: "https://github.com/mpdavis/python-jose" },
+      { name: "passlib", version: "1.7.4", license: "BSD", url: "https://passlib.readthedocs.io" },
+      { name: "bcrypt", version: "4.0.1", license: "Apache-2.0", url: "https://github.com/pyca/bcrypt" },
+      { name: "pyotp", version: "2.9.0", license: "MIT", url: "https://github.com/pyauth/pyotp" },
+      { name: "qrcode (Python)", version: "7.4.2", license: "BSD", url: "https://github.com/lincolnloop/python-qrcode" },
+      { name: "qrcode (JS)", version: "1.5.4", license: "MIT", url: "https://github.com/soldair/node-qrcode" },
+      { name: "React", version: "18.3.1", license: "MIT", url: "https://react.dev" },
+      { name: "react-router-dom", version: "6.26.2", license: "MIT", url: "https://reactrouter.com" },
+      { name: "lucide-react", version: "0.446.0", license: "ISC", url: "https://lucide.dev" },
+      { name: "Vite", version: "5.4.6", license: "MIT", url: "https://vitejs.dev" },
     ],
   },
 ];
