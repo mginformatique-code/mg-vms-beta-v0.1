@@ -1228,6 +1228,21 @@ function PTZTab({ cameraId, caps }) {
   const [patrol, setPatrol] = useState({ enabled: false, dwell_seconds: 8, preset_ids: [], running: false });
   const [patrolLoading, setPatrolLoading] = useState(true);
   const [patrolSaving, setPatrolSaving] = useState(false);
+  // v3.59 · Suivi natif (ex. "Auto Track" Reolink) — bascule directe de
+  // la fonction embarquée de la caméra, distincte du suivi logiciel
+  // ci-dessous.
+  const [autoTrack, setAutoTrack] = useState({ enabled: false });
+  const [autoTrackLoading, setAutoTrackLoading] = useState(true);
+  const [autoTrackSaving, setAutoTrackSaving] = useState(false);
+  // v3.59 · Suivi logiciel générique "MG-VMS tracking" — pour le matériel
+  // sans suivi natif (ou en complément, sur une caméra qui n'a pas
+  // `ptz_tracking` côté capacités).
+  const [tracking, setTracking] = useState({
+    enabled: false, target_classes: ["person"], deadzone: 0.08,
+    max_speed: 0.5, home_preset_id: null, running: false,
+  });
+  const [trackingLoading, setTrackingLoading] = useState(true);
+  const [trackingSaving, setTrackingSaving] = useState(false);
 
   // v3.45 · Visuel live indispensable pour placer un preset : sans lui
   // l'utilisateur devait deviner la position en jonglant avec l'onglet
@@ -1256,12 +1271,36 @@ function PTZTab({ cameraId, caps }) {
        .finally(() => setPatrolLoading(false));
   };
 
+  const loadAutoTrack = () => {
+    setAutoTrackLoading(true);
+    api.get(`/devices/${cameraId}/ptz/auto-track`)
+       .then((r) => setAutoTrack({ enabled: !!r.data.enabled }))
+       .catch(() => {})
+       .finally(() => setAutoTrackLoading(false));
+  };
+  const loadTracking = () => {
+    setTrackingLoading(true);
+    api.get(`/devices/${cameraId}/ptz/tracking`)
+       .then((r) => setTracking({
+         enabled: !!r.data.enabled,
+         target_classes: r.data.target_classes || ["person"],
+         deadzone: r.data.deadzone ?? 0.08,
+         max_speed: r.data.max_speed ?? 0.5,
+         home_preset_id: r.data.home_preset_id || null,
+         running: !!r.data.running,
+       }))
+       .catch(() => {})
+       .finally(() => setTrackingLoading(false));
+  };
+
   useEffect(() => {
     if (!caps?.ptz) return;
     loadPresets();
     loadPatrol();
+    if (caps?.ptz_tracking) loadAutoTrack();
+    loadTracking();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cameraId, caps?.ptz]);
+  }, [cameraId, caps?.ptz, caps?.ptz_tracking]);
 
   if (!caps?.ptz) return <NotSupported what="PTZ" />;
 
@@ -1313,6 +1352,30 @@ function PTZTab({ cameraId, caps }) {
       setPatrol({ ...next, running: !!r.data.running });
     }).catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"))
       .finally(() => setPatrolSaving(false));
+  };
+
+  const saveAutoTrack = (enabled) => {
+    setAutoTrackSaving(true);
+    api.put(`/devices/${cameraId}/ptz/auto-track`, { enabled })
+       .then((r) => setAutoTrack({ enabled: !!r.data.enabled }))
+       .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"))
+       .finally(() => setAutoTrackSaving(false));
+  };
+
+  const saveTracking = (next) => {
+    setTrackingSaving(true);
+    api.put(`/devices/${cameraId}/ptz/tracking`, {
+      enabled: next.enabled, target_classes: next.target_classes,
+      deadzone: next.deadzone, max_speed: next.max_speed,
+      home_preset_id: next.home_preset_id,
+    }).then((r) => {
+      setTracking({ ...next, running: !!r.data.running });
+      // v3.59 · Le suivi met la patrouille en pause côté serveur
+      // (exclusion mutuelle) — on recharge son état pour que le toggle
+      // patrouille reflète bien qu'elle est désormais arrêtée.
+      if (next.enabled) loadPatrol();
+    }).catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"))
+      .finally(() => setTrackingSaving(false));
   };
 
   const toggleInPatrol = (presetId) => {
@@ -1493,6 +1556,81 @@ function PTZTab({ cameraId, caps }) {
             )}
           </div>
         )}
+      </Card>
+
+      {/* v3.59 · Suivi natif — visible uniquement si la caméra déclare
+          réellement cette capacité (ex. Reolink pilotée via reolink-aio,
+          voir CameraCapabilities.ptz_tracking). */}
+      {caps?.ptz_tracking && (
+        <Card className="p-4 space-y-2" data-testid="cam-ptz-autotrack">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium">{t("ptz.autotrack_title")}</div>
+              <div className="text-xs text-muted-foreground mt-0.5">{t("ptz.autotrack_desc")}</div>
+            </div>
+            <Switch checked={autoTrack.enabled} disabled={autoTrackLoading || autoTrackSaving}
+                    onCheckedChange={(enabled) => saveAutoTrack(enabled)}
+                    data-testid="ptz-autotrack-toggle" />
+          </div>
+        </Card>
+      )}
+
+      {/* v3.59 · Suivi logiciel générique "MG-VMS tracking" — pour le
+          matériel sans suivi natif, ou en complément. Boucle de
+          correction pan/tilt pilotée par les détections IA déjà en place
+          (voir backend/ptz_tracking.py). */}
+      <Card className="p-4 space-y-3" data-testid="cam-ptz-tracking">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium flex items-center gap-2">
+              {t("ptz.tracking_title")}
+              {tracking.enabled && (
+                <Badge variant={tracking.running ? "default" : "secondary"} className="text-[10px]">
+                  {tracking.running ? t("ptz.patrol_running") : t("ptz.patrol_paused")}
+                </Badge>
+              )}
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">{t("ptz.tracking_desc")}</div>
+          </div>
+          <Switch checked={tracking.enabled} disabled={trackingLoading || trackingSaving}
+                  onCheckedChange={(enabled) => saveTracking({ ...tracking, enabled })}
+                  data-testid="ptz-tracking-toggle" />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground whitespace-nowrap">{t("ptz.tracking_target")}</Label>
+            <select
+              className="h-8 text-xs bg-background border border-border px-2"
+              value={tracking.target_classes[0] || "person"}
+              onChange={(e) => saveTracking({ ...tracking, target_classes: [e.target.value] })}
+              data-testid="ptz-tracking-target">
+              <option value="person">{t("ptz.tracking_target_person")}</option>
+              <option value="vehicle">{t("ptz.tracking_target_vehicle")}</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground whitespace-nowrap">{t("ptz.tracking_sensitivity")}</Label>
+            <Input type="number" min={0.02} max={0.3} step={0.02} value={tracking.deadzone}
+                   className="w-20 h-8 text-xs"
+                   onChange={(e) => setTracking((p) => ({ ...p, deadzone: Number(e.target.value) || 0.08 }))}
+                   onBlur={() => saveTracking(tracking)}
+                   data-testid="ptz-tracking-deadzone" />
+          </div>
+          {presets.length > 0 && (
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground whitespace-nowrap">{t("ptz.tracking_home")}</Label>
+              <select
+                className="h-8 text-xs bg-background border border-border px-2"
+                value={tracking.home_preset_id || ""}
+                onChange={(e) => saveTracking({ ...tracking, home_preset_id: e.target.value || null })}
+                data-testid="ptz-tracking-home">
+                <option value="">{t("ptz.tracking_home_none")}</option>
+                {presets.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+          )}
+        </div>
       </Card>
     </div>
   );
