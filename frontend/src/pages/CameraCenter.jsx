@@ -1231,7 +1231,7 @@ function PTZTab({ cameraId, caps }) {
   // v3.59 · Suivi natif (ex. "Auto Track" Reolink) — bascule directe de
   // la fonction embarquée de la caméra, distincte du suivi logiciel
   // ci-dessous.
-  const [autoTrack, setAutoTrack] = useState({ enabled: false });
+  const [autoTrack, setAutoTrack] = useState({ enabled: false, method: null });
   const [autoTrackLoading, setAutoTrackLoading] = useState(true);
   const [autoTrackSaving, setAutoTrackSaving] = useState(false);
   // v3.59 · Suivi logiciel générique "MG-VMS tracking" — pour le matériel
@@ -1274,7 +1274,7 @@ function PTZTab({ cameraId, caps }) {
   const loadAutoTrack = () => {
     setAutoTrackLoading(true);
     api.get(`/devices/${cameraId}/ptz/auto-track`)
-       .then((r) => setAutoTrack({ enabled: !!r.data.enabled }))
+       .then((r) => setAutoTrack({ enabled: !!r.data.enabled, method: r.data.method || null }))
        .catch(() => {})
        .finally(() => setAutoTrackLoading(false));
   };
@@ -1354,10 +1354,10 @@ function PTZTab({ cameraId, caps }) {
       .finally(() => setPatrolSaving(false));
   };
 
-  const saveAutoTrack = (enabled) => {
+  const saveAutoTrack = (enabled, method) => {
     setAutoTrackSaving(true);
-    api.put(`/devices/${cameraId}/ptz/auto-track`, { enabled })
-       .then((r) => setAutoTrack({ enabled: !!r.data.enabled }))
+    api.put(`/devices/${cameraId}/ptz/auto-track`, { enabled, method: method ?? autoTrack.method })
+       .then((r) => setAutoTrack({ enabled: !!r.data.enabled, method: r.data.method || null }))
        .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"))
        .finally(() => setAutoTrackSaving(false));
   };
@@ -1562,16 +1562,39 @@ function PTZTab({ cameraId, caps }) {
           réellement cette capacité (ex. Reolink pilotée via reolink-aio,
           voir CameraCapabilities.ptz_tracking). */}
       {caps?.ptz_tracking && (
-        <Card className="p-4 space-y-2" data-testid="cam-ptz-autotrack">
+        <Card className="p-4 space-y-3" data-testid="cam-ptz-autotrack">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm font-medium">{t("ptz.autotrack_title")}</div>
+              <div className="text-sm font-medium flex items-center gap-2">
+                {t("ptz.autotrack_title")}
+                {autoTrack.enabled && (
+                  <Badge variant="default" className="text-[10px]">{t("ptz.patrol_running")}</Badge>
+                )}
+              </div>
               <div className="text-xs text-muted-foreground mt-0.5">{t("ptz.autotrack_desc")}</div>
             </div>
             <Switch checked={autoTrack.enabled} disabled={autoTrackLoading || autoTrackSaving}
                     onCheckedChange={(enabled) => saveAutoTrack(enabled)}
                     data-testid="ptz-autotrack-toggle" />
           </div>
+          {/* v3.59 · Comportement du 2e objectif (téléobjectif) sur les
+              modèles double-capteur (ex. TrackMix) — n'apparaît que si la
+              caméra a réellement remonté un mode (auto_track_method). */}
+          {autoTrack.method && (
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground whitespace-nowrap">{t("ptz.autotrack_method")}</Label>
+              <select
+                className="h-8 text-xs bg-background border border-border px-2"
+                value={autoTrack.method}
+                disabled={autoTrackSaving}
+                onChange={(e) => saveAutoTrack(autoTrack.enabled, e.target.value)}
+                data-testid="ptz-autotrack-method">
+                <option value="digital">{t("ptz.autotrack_method_digital")}</option>
+                <option value="digitalfirst">{t("ptz.autotrack_method_digitalfirst")}</option>
+                <option value="pantiltfirst">{t("ptz.autotrack_method_pantiltfirst")}</option>
+              </select>
+            </div>
+          )}
         </Card>
       )}
 

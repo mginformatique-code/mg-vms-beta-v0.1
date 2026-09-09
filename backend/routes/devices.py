@@ -114,6 +114,9 @@ class PTZPatrolBody(BaseModel):
 
 class PTZAutoTrackBody(BaseModel):
     enabled: bool = False
+    # v3.59 · Comportement du 2e objectif sur les modèles double-capteur
+    # (ex. TrackMix) — None = ne change pas le réglage actuel de la caméra.
+    method: Optional[str] = Field(default=None, pattern="^(digital|digitalfirst|pantiltfirst)$")
 
 
 class PTZTrackingBody(BaseModel):
@@ -469,7 +472,10 @@ async def device_ptz_get_auto_track(camera_id: str,
                                      user: dict = Depends(require_permission("view_live"))):
     try:
         drv = await svc.get_driver(camera_id)
-        return {"enabled": await drv.get_auto_tracking()}
+        # v3.59 · Reflète l'état RÉEL lu sur la caméra (jamais une valeur
+        # supposée) — demande explicite : le menu doit reconnaître ce qui
+        # est déjà activé nativement, pas repartir d'un toggle à zéro.
+        return await drv.get_auto_tracking()
     except CameraDriverError as e:
         raise _driver_error_response(e)
 
@@ -479,8 +485,8 @@ async def device_ptz_set_auto_track(camera_id: str, body: PTZAutoTrackBody,
                                      user: dict = Depends(require_permission("manage_cameras"))):
     try:
         drv = await svc.get_driver(camera_id)
-        await drv.set_auto_tracking(body.enabled)
-        return {"enabled": body.enabled}
+        await drv.set_auto_tracking(body.enabled, body.method)
+        return await drv.get_auto_tracking()
     except CameraDriverError as e:
         raise _driver_error_response(e)
 

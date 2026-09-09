@@ -119,15 +119,20 @@ class CameraDriver(ABC):
         self._require("siren")
         await self._set_siren(enabled=enabled, duration=duration)
 
-    async def get_auto_tracking(self) -> bool:
-        """Suivi PTZ natif de la caméra (ex. "Auto Track" Reolink) — état actuel."""
+    async def get_auto_tracking(self) -> dict:
+        """Suivi PTZ natif de la caméra (ex. "Auto Track" Reolink) — état
+        actuel : {"enabled": bool, "method": str|None}. `method` reflète le
+        comportement du 2e objectif sur les modèles double-capteur
+        (digital/digitalfirst/pantiltfirst) — None si non applicable."""
         self._require("ptz_tracking")
         return await self._get_auto_tracking()
 
-    async def set_auto_tracking(self, enabled: bool) -> None:
-        """Active/désactive le suivi PTZ natif de la caméra."""
+    async def set_auto_tracking(self, enabled: bool, method: Optional[str] = None) -> None:
+        """Active/désactive le suivi PTZ natif de la caméra. `method`
+        optionnel (voir get_auto_tracking) — ignoré par les drivers qui ne
+        distinguent pas de mode."""
         self._require("ptz_tracking")
-        await self._set_auto_tracking(enabled)
+        await self._set_auto_tracking(enabled, method)
 
     async def start_audio(self) -> None:
         self._require("audio_output")
@@ -254,10 +259,10 @@ class CameraDriver(ABC):
     async def _talk_to_camera(self, pcm_bytes: bytes) -> None:
         raise UnsupportedCapabilityError("Talk-back non implémenté par ce driver")
 
-    async def _get_auto_tracking(self) -> bool:
+    async def _get_auto_tracking(self) -> dict:
         raise UnsupportedCapabilityError("Suivi PTZ natif non implémenté par ce driver")
 
-    async def _set_auto_tracking(self, enabled: bool) -> None:
+    async def _set_auto_tracking(self, enabled: bool, method: Optional[str] = None) -> None:
         raise UnsupportedCapabilityError("Suivi PTZ natif non implémenté par ce driver")
 
     async def _ptz_move(self, direction: str, speed: float) -> None:

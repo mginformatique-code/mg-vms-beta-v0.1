@@ -240,15 +240,27 @@ class ReolinkDriver(ONVIFDriver):
             raise CameraDriverError(f"Reolink SetSiren → {e}", code="device_error") from e
 
     # ── Suivi PTZ natif (v3.59) ─────────────────────────────────
-    async def get_auto_tracking(self) -> bool:
-        try:
-            return bool(self._host_api.auto_track_enabled(_CHANNEL))
-        except Exception:
-            return False
+    # `method` couvre le comportement du 2e objectif (téléobjectif) sur
+    # les modèles double-capteur (ex. TrackMix) : "digital" = zoom
+    # numérique pour suivre la cible, "pantiltfirst" = priorité au moteur
+    # PTZ (zoom seulement si la cible sort de portée), "digitalfirst" =
+    # l'inverse — confirmé via reolink-aio (TrackMethodEnum), pas une
+    # fonction séparée de l'auto-tracking mais un paramètre du même appel.
+    _TRACK_METHODS = {2: "digital", 3: "digitalfirst", 4: "pantiltfirst"}
 
-    async def set_auto_tracking(self, enabled: bool) -> None:
+    async def _get_auto_tracking(self) -> dict:
         try:
-            await self._host_api.set_auto_tracking(_CHANNEL, enable=enabled)
+            method_int = self._host_api.auto_track_method(_CHANNEL)
+            return {
+                "enabled": bool(self._host_api.auto_track_enabled(_CHANNEL)),
+                "method": self._TRACK_METHODS.get(method_int),
+            }
+        except Exception:
+            return {"enabled": False, "method": None}
+
+    async def _set_auto_tracking(self, enabled: bool, method: Optional[str] = None) -> None:
+        try:
+            await self._host_api.set_auto_tracking(_CHANNEL, enable=enabled, method=method)
         except ApiError as e:
             raise CameraDriverError(f"Reolink SetAutoTrack → {e}", code="device_error") from e
 
