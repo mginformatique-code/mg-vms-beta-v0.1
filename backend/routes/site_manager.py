@@ -401,9 +401,15 @@ async def list_cameras_map(
         q["site_id"] = site_id
     if plan_id:
         q["map_position.plan_id"] = plan_id
+    # v3.58 · "brand" corrigé en "manufacturer" (le champ réel sur
+    # db.cameras — voir routers.py, jamais "brand", donc systématiquement
+    # vide côté panneau/rapport PDF) ; "resolution" ajouté (également
+    # absent jusqu'ici, nécessaire au rapport PDF de la Carte). Signalé
+    # par l'utilisateur en comparant avec Camera Center, qui lit déjà les
+    # bons champs.
     proj = {
-        "_id": 0, "id": 1, "name": 1, "ip": 1, "brand": 1, "model": 1,
-        "driver": 1, "site_id": 1, "site_name": 1, "status": 1,
+        "_id": 0, "id": 1, "name": 1, "ip": 1, "manufacturer": 1, "model": 1,
+        "resolution": 1, "driver": 1, "site_id": 1, "site_name": 1, "status": 1,
         "map_position": 1, "enabled_plugins": 1, "detect_enabled": 1,
         "record_enabled": 1, "last_seen_at": 1, "mac": 1, "firmware": 1,
     }

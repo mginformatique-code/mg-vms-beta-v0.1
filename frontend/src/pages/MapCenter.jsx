@@ -285,6 +285,23 @@ function CameraPanel({ camera, onClose, onChange, onOpenInCenter }) {
   const [local, setLocal] = useState(camera?.map_position || {});
   useEffect(() => setLocal(camera?.map_position || {}), [camera]);
 
+  // v3.58 · L'adresse MAC n'est PAS stockée sur le document caméra — Camera
+  // Center l'obtient via un appel dédié par caméra (GET /devices/{id}/
+  // network, interroge le driver en direct, 501 si non supporté) plutôt
+  // que depuis la liste légère utilisée par la Carte (voir CameraCenter.jsx
+  // ::NetworkTab). Même mécanisme réutilisé ici, uniquement pour la caméra
+  // sélectionnée (pas un appel par caméra de la liste entière).
+  const [net, setNet] = useState(null);
+  useEffect(() => {
+    setNet(null);
+    if (!camera?.id) return;
+    let alive = true;
+    api.get(`/devices/${camera.id}/network`)
+      .then((r) => { if (alive) setNet(r.data || null); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [camera?.id]);
+
   if (!camera) return null;
   const set = (k, v) => {
     const next = { ...local, [k]: v };
@@ -337,7 +354,7 @@ function CameraPanel({ camera, onClose, onChange, onOpenInCenter }) {
           <div><span className="text-muted-foreground">Marque : </span>{camera.manufacturer || "—"}</div>
           <div><span className="text-muted-foreground">Modèle : </span>{camera.model || "—"}</div>
           <div><span className="text-muted-foreground">Driver : </span>{camera.driver || "onvif"}</div>
-          <div><span className="text-muted-foreground">MAC : </span><span className="mono">{camera.mac || "—"}</span></div>
+          <div><span className="text-muted-foreground">MAC : </span><span className="mono">{net?.mac || camera.mac || "—"}</span></div>
           <div className="col-span-2"><span className="text-muted-foreground">Firmware : </span>{camera.firmware || "—"}</div>
         </div>
 
