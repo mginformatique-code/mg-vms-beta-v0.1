@@ -43,6 +43,12 @@ export default function MapContextMenu({ x, y, items, onClose }) {
     top: Math.min(y, window.innerHeight - 24),
     zIndex: 10000,
   };
+  // v3.55 · Un sous-menu qui s'ouvre toujours "à droite du parent" déborde
+  // hors écran dès que le menu principal est proche du bord droit (menu
+  // clic-droit ouvert sur la moitié droite de l'écran) — constaté en test
+  // réel (icônes visibles, libellés coupés). On bascule le sous-menu à
+  // GAUCHE du parent dans ce cas plutôt que de le laisser déborder.
+  const flipSub = x > window.innerWidth / 2;
 
   const rowClass = "flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-secondary cursor-pointer whitespace-nowrap";
 
@@ -61,7 +67,7 @@ export default function MapContextMenu({ x, y, items, onClose }) {
                 <ChevronRight size={12} className="text-muted-foreground" />
               </div>
               {isOpen && (
-                <div className="absolute left-full top-0 bg-card border border-border shadow-lg py-1 min-w-[160px]">
+                <div className={`absolute top-0 bg-card border border-border shadow-lg py-1 min-w-[160px] ${flipSub ? "right-full" : "left-full"}`}>
                   {it.options.map((op, j) => (
                     <div key={j} className={rowClass} data-testid={`map-ctx-suboption-${i}-${j}`}
                          onClick={() => { onClose(); op.onClick(); }}>
