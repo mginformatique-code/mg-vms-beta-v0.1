@@ -201,6 +201,17 @@ async def messages():
     return {"messages": (s or {}).get("messages", [])}
 
 
+@mgvms_center_router.get("/license-warning")
+async def license_warning():
+    """v3.56 · Lecture seule, tout profil (même précédent que /status et
+    /messages ci-dessus) — reflète db.settings["license_center_warning"],
+    posé/levé par mgvms_center_ws_loop() selon la dernière vérification
+    de licence reçue via le WebSocket permanent. Avertissement seul,
+    jamais bloquant."""
+    doc = await db.settings.find_one({"key": "license_center_warning"}, {"_id": 0})
+    return {"warning": doc}
+
+
 # ── SSO « Ouvrir MG-VMS » (v3.53) ─────────────────────────────────────
 # Le Center ne peut pas fabriquer de session MG-VMS (JWT_SECRET propre à
 # ce déploiement, jamais connu du Center) — voir POST /sso-token côté

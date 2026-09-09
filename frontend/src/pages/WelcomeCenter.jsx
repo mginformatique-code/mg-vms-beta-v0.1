@@ -257,6 +257,51 @@ function MgvmsCenterMessagesBanner() {
   );
 }
 
+// v3.56 · Connexion WebSocket permanente MG-VMS <-> Center — vérifie en
+// continu que la licence active de CE déploiement est toujours valide
+// auprès de mg-vms.com (relayé par le Center). AVERTISSEMENT SEUL,
+// jamais bloquant (décision explicite) : une licence expirée/invalide ne
+// coupe RIEN ici (caméras, enregistrement, etc. continuent normalement) —
+// seul ce bandeau signale la situation à l'admin. Masquage temporaire
+// (session), pas persistant comme les messages ci-dessus : ce n'est pas
+// une info ponctuelle mais un état qui doit réapparaître à la prochaine
+// visite tant qu'il n'est pas réellement résolu.
+function LicenseCenterWarningBanner() {
+  const [warning, setWarning] = useState(null);
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    const load = () => api.get("/mgvms-center/license-warning").then((r) => setWarning(r.data.warning)).catch(() => {});
+    load();
+    const iv = setInterval(load, 60000);
+    return () => clearInterval(iv);
+  }, []);
+
+  if (!warning || dismissed) return null;
+
+  return (
+    <div className="border p-2.5 text-xs" style={{ borderColor: "#FF333380", background: "#FF33331a" }}
+         data-testid="license-center-warning-banner">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2">
+          <AlertTriangle size={14} style={{ color: "#FF3333" }} className="shrink-0 mt-0.5" />
+          <div>
+            <div className="font-medium" style={{ color: "#FF3333" }}>Licence non valide selon MG-VMS Center</div>
+            <div className="text-muted-foreground mt-0.5">
+              MG-VMS Center signale que la licence active de ce déploiement n'a pas pu être confirmée valide auprès de mg-vms.com.
+              Aucune fonctionnalité n'est bloquée — vérifiez la licence dans Réglages &gt; Licence dès que possible.
+            </div>
+          </div>
+        </div>
+        <button onClick={() => setDismissed(true)} data-testid="license-center-warning-dismiss"
+                className="text-[10px] text-muted-foreground hover:text-foreground uppercase tracking-wider shrink-0">
+          Masquer
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function VersionSection({ version, hasNewVersion, onOpenChangelog }) {
   return (
     <div className="bg-card border border-border p-4" data-testid="welcome-version">
@@ -970,6 +1015,7 @@ export default function WelcomeCenter() {
       </div>
 
       <MgvmsCenterMessagesBanner />
+      <LicenseCenterWarningBanner />
 
       {/* Ligne 1 : Health (2 cols) + Version */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">
