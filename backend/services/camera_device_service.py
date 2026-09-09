@@ -20,6 +20,7 @@ from typing import Optional
 from drivers import (
     CameraDriver, CameraCapabilities, DeviceInfo, DeviceStatus, StreamInfo,
     CameraDriverError, UnsupportedCapabilityError, resolve_driver,
+    list_supported_vendors,
 )
 
 logger = logging.getLogger("services.camera_device")
@@ -31,6 +32,29 @@ def _host_from_rtsp(url: str) -> Optional[str]:
         return None
     m = re.match(r"^rtsps?://(?:[^@/]*@)?([^:/?#]+)", url, re.IGNORECASE)
     return m.group(1) if m else None
+
+
+# v3.59 · "Manufacturer" est une valeur de repli littérale que certaines
+# caméras renvoient sur GetDeviceInformation quand le champ constructeur
+# ONVIF n'est pas correctement rempli côté firmware — constaté en
+# conditions réelles sur une Reolink TrackMix PoE, dont le VRAI fabricant
+# apparaît alors DANS le modèle ("Manufacturer Reolink TrackMix PoE") au
+# lieu du champ manufacturer. Sans ce repli, une telle caméra retombe
+# silencieusement sur le driver ONVIF générique — perdant tout accès aux
+# fonctions propriétaires (suivi PTZ natif, sirène, IR, SD card…) alors
+# que le vrai driver existe et fonctionnerait.
+_PLACEHOLDER_MANUFACTURERS = {"", "manufacturer", "unknown", "generic"}
+
+
+def _resolve_vendor(cam: dict) -> str:
+    vendor = (cam.get("vendor") or cam.get("manufacturer") or "").strip()
+    if vendor.lower() not in _PLACEHOLDER_MANUFACTURERS:
+        return vendor
+    model = (cam.get("model") or "").lower()
+    for known in list_supported_vendors():
+        if known != "onvif" and known in model:
+            return known
+    return vendor or "onvif"
 
 
 class CameraDeviceService:
@@ -66,7 +90,7 @@ class CameraDeviceService:
                 # IR) sont propriétaires et invisibles en ONVIF générique. Le
                 # fabricant réel EST déjà détecté et stocké (`manufacturer`, via
                 # GetDeviceInformation) — on l'utilise en repli avant "onvif".
-                vendor=cam.get("vendor") or cam.get("manufacturer") or "onvif",
+                vendor=_resolve_vendor(cam),
                 host=cam["ip"],
                 username=cam.get("username") or "",
                 # v3.4 · Bug critique : le mot de passe caméra est chiffré Fernet
