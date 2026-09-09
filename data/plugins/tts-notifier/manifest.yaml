@@ -1,0 +1,31 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: tts-notifier
+  displayName: TTS (Synthèse vocale)
+  version: 1.0.0
+  description: Diffuse un message texte sur le haut-parleur d'une caméra via synthèse vocale locale (Piper) et go2rtc.
+  author: MG Informatique
+  license: GPL-3.0-or-later
+  categories:
+    - notifications
+  providerGroup: notifications
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: TtsNotifierPlugin
+  interface: EventConsumer
+  compatibility:
+    mgvms: ">=3.55"
+  capabilities:
+    - event.read
+    - network.outbound
+  resources:
+    cpu: low
+    memory: low
+  dependencies:
+    python:
+      - piper-tts
+  config_schema: config/schema.json
+  bus:
+    order: 200

@@ -169,7 +169,11 @@ async def _run_plugin(config: dict, context: dict) -> dict:
     entry = bus._entries[name]
     if not entry.is_dispatchable():
         return {"ok": False, "error": f"plugin '{name}' non dispatchable ({entry.state})"}
-    await bus._call_one(entry, lambda inst, e=ev: inst.on_event(e))
+    result = await bus._call_one(entry, lambda inst, e=ev: inst.on_event(e))
+    if result is None:
+        return {"ok": False, "error": f"plugin '{name}' : erreur ou timeout (voir logs)", "plugin": name}
+    if not getattr(result, "handled", True):
+        return {"ok": False, "error": getattr(result, "error", None) or f"plugin '{name}' a refusé l'événement", "plugin": name}
     return {"ok": True, "plugin": name}
 
 

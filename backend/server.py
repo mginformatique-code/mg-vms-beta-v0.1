@@ -46,6 +46,7 @@ from routes.site_manager import site_manager_router
 from routes.security import security_router
 from routes.tls import tls_router
 from routes.camera_control import camera_control_router
+from routes.tts_audio import tts_audio_router
 from routes.devices import devices_router
 from routes.vehicles import vehicles_router
 from routes.smart_search import smart_search_router
@@ -132,6 +133,7 @@ app.include_router(smart_zones_router)
 app.include_router(workflows_router)
 app.include_router(timeline_router)
 app.include_router(camera_control_router)
+app.include_router(tts_audio_router)  # v3.59 · service interne WAV pour go2rtc (plugin tts-notifier)
 app.include_router(devices_router)
 app.include_router(pipeline_diag_router)  # v1.0-rc4 · diagnostic pipeline vidéo multi-étages
 # video-engine-v3 · legacy routes SUPPRIMÉES (go2rtc_diag, mjpeg_direct, /api/video/*)

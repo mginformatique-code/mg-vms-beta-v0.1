@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "voice_model": {
+      "type": "string",
+      "title": "Voix (modèle Piper)",
+      "description": "Nom du modèle de voix Piper à utiliser (téléchargé automatiquement au premier usage).",
+      "default": "fr_FR-siwis-medium"
+    }
+  },
+  "required": []
+}
