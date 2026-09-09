@@ -116,6 +116,17 @@ class PTZAutoTrackBody(BaseModel):
     enabled: bool = False
 
 
+class PTZTrackingBody(BaseModel):
+    enabled: bool = False
+    target_classes: list[str] = Field(default_factory=lambda: ["person"])
+    deadzone: float = Field(default=0.08, ge=0.02, le=0.3)
+    max_speed: float = Field(default=0.5, ge=0.1, le=1.0)
+    lost_timeout_s: float = Field(default=2.0, ge=0.5, le=10.0)
+    home_preset_id: Optional[str] = None
+    frame_w: Optional[int] = None
+    frame_h: Optional[int] = None
+
+
 # ── Wrapper — retourne un dict {success/error/message} sur erreur driver ─
 def _driver_error_response(exc: CameraDriverError) -> HTTPException:
     payload = exc.to_dict()
@@ -340,7 +351,9 @@ async def device_audio_stop(camera_id: str,
 async def device_ptz_move(camera_id: str, body: PTZMoveBody,
                            user: dict = Depends(require_permission("manage_cameras"))):
     import ptz_patrol
+    import ptz_tracking
     ptz_patrol.pause(camera_id)
+    ptz_tracking.pause(camera_id)
     try:
         drv = await svc.get_driver(camera_id)
         await drv.ptz_move(body.direction, body.speed)
@@ -364,7 +377,9 @@ async def device_ptz_zoom(camera_id: str, body: PTZZoomBody,
 async def device_ptz_preset(camera_id: str, body: PTZPresetBody,
                              user: dict = Depends(require_permission("manage_cameras"))):
     import ptz_patrol
+    import ptz_tracking
     ptz_patrol.pause(camera_id)
+    ptz_tracking.pause(camera_id)
     try:
         drv = await svc.get_driver(camera_id)
         await drv.ptz_preset(body.id)
@@ -468,6 +483,43 @@ async def device_ptz_set_auto_track(camera_id: str, body: PTZAutoTrackBody,
         return {"enabled": body.enabled}
     except CameraDriverError as e:
         raise _driver_error_response(e)
+
+
+# ── Suivi PTZ logiciel générique — "MG-VMS tracking" (v3.59) ──────
+# Pour le matériel PTZ sans suivi natif (voir /ptz/auto-track ci-dessus
+# pour le suivi natif Reolink) — boucle de correction pan/tilt pilotée
+# par les détections IA déjà calculées (backend/ptz_tracking.py).
+@devices_router.get("/{camera_id}/ptz/tracking")
+async def device_ptz_get_tracking(camera_id: str,
+                                   user: dict = Depends(require_permission("view_live"))):
+    import ptz_tracking
+    from database import db
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "ptz_tracking": 1})
+    if cam is None:
+        raise HTTPException(404, "Caméra introuvable")
+    cfg = cam.get("ptz_tracking") or PTZTrackingBody().model_dump()
+    cfg["running"] = ptz_tracking.is_running(camera_id)
+    return cfg
+
+
+@devices_router.put("/{camera_id}/ptz/tracking")
+async def device_ptz_set_tracking(camera_id: str, body: PTZTrackingBody,
+                                   user: dict = Depends(require_permission("manage_cameras"))):
+    import ptz_patrol
+    import ptz_tracking
+    from database import db
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "id": 1})
+    if cam is None:
+        raise HTTPException(404, "Caméra introuvable")
+    config = body.model_dump()
+    await db.cameras.update_one({"id": camera_id}, {"$set": {"ptz_tracking": config}})
+    if body.enabled:
+        # Exclusion mutuelle : patrouille et suivi ne doivent jamais
+        # piloter le moteur PTZ en même temps — le suivi prend la main.
+        ptz_patrol.set_patrol(camera_id, False)
+    ptz_tracking.set_tracking(camera_id, body.enabled)
+    config["running"] = ptz_tracking.is_running(camera_id)
+    return config
 
 
 # ── Codec du flux principal (v3.10) ───────────────────────────────

@@ -258,6 +258,10 @@ async def on_startup():
         # du conteneur API sans que l'utilisateur ait à rouvrir la page).
         import ptz_patrol
         asyncio.create_task(ptz_patrol.startup_resume_all())
+        # v3.59 · Suivi PTZ logiciel générique ("MG-VMS tracking") — même
+        # raison de survie au redémarrage que la patrouille ci-dessus.
+        import ptz_tracking
+        asyncio.create_task(ptz_tracking.startup_resume_all())
         # v3.49 · Rapport périodique vers MG-VMS Center — no-op tant
         # qu'aucune connexion n'est configurée (Réglages -> MG-VMS Center).
         asyncio.create_task(mgvms_center_report_loop())

@@ -591,6 +591,17 @@ async def run_downstream(cam: dict, frame, result: dict) -> None:
                         if be.get("type") == "plate_recognized"
                     ]
                     _sz_events = await _sz_engine.evaluate(cam["id"], _dets, _tracks, _plates)
+
+                    # v3.59 · Suivi PTZ logiciel ("MG-VMS tracking") — même
+                    # détections déjà calculées ci-dessus, aucun coût
+                    # d'inférence supplémentaire. No-op immédiat si le
+                    # suivi n'est pas actif pour cette caméra.
+                    try:
+                        import ptz_tracking
+                        ptz_tracking.on_frame(cam["id"], _dets, _tracks)
+                    except Exception:
+                        logger.exception("ptz_tracking.on_frame error")
+
                     for zev in _sz_events:
                         await db.events.insert_one({
                             "id": str(uuid.uuid4()),
