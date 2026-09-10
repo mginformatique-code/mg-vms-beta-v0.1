@@ -58,7 +58,6 @@ export default function Cameras() {
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [settingNtp, setSettingNtp] = useState(false);
-  const [testNtp, setTestNtp] = useState(false);
   const [testing, setTesting] = useState(null);
   const [snap, setSnap] = useState(null);
   const [diagState, setDiagState] = useState(null);
@@ -140,7 +139,6 @@ export default function Cameras() {
         preferred_codec: form.preferred_codec || "auto",
         stream_mode: form.stream_mode || "auto",
         profile_token: form.mode === "onvif" ? (form.profile_token || "") : "",
-        test_ntp: form.mode === "onvif" ? testNtp : false,
       });
       setConnCheck(data);
       if (data.profiles && data.profiles.length) {
@@ -204,6 +202,14 @@ export default function Cameras() {
       }));
       const portNote = (data.onvif_port && Number(data.onvif_port) !== (Number(form.onvif_port) || 80))
         ? ` · port ONVIF corrigé → ${data.onvif_port}` : "";
+      // v3.60 · Constaté : détecter l'IP d'une caméra déjà enregistrée ne
+      // disait rien — l'utilisateur pouvait recréer un doublon sans le
+      // savoir. Avertissement explicite si cette IP existe déjà (sauf si
+      // c'est justement la caméra qu'on est en train de modifier).
+      const dup = cams.find((c) => c.ip === form.ip && c.id !== editingId);
+      if (dup) {
+        toast.warning(`Attention : une caméra "${dup.name}" existe déjà avec cette IP (${form.ip}) — vous allez peut-être créer un doublon.`);
+      }
       toast.success(`Caméra détectée : ${data.manufacturer} ${data.model} · ${data.profiles?.length || 0} profil(s)${portNote}`);
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Détection échouée"); }
     finally { setDetecting(false); }
@@ -674,12 +680,6 @@ export default function Cameras() {
                   {checking && <Loader2 size={12} className="animate-spin" />} Tester la connexion
                 </button>
               </div>
-              {form.mode === "onvif" && (
-                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <input type="checkbox" checked={testNtp} onChange={(e) => setTestNtp(e.target.checked)} data-testid="conn-test-ntp-checkbox" />
-                  Tester aussi l'API NTP (vérifie la bonne API selon le constructeur — Reolink natif / ONVIF)
-                </label>
-              )}
               {!connCheck && <p className="text-muted-foreground text-[11px]">{t("cam.test_hint")}</p>}
               {connCheck && (
                 <div className="space-y-1" data-testid="conn-test-result">

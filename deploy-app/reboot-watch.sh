@@ -36,3 +36,17 @@ if [ -f "$NTP_FLAG" ]; then
   systemctl restart chrony
   rm -f "$NTP_FLAG"
 fi
+
+# ── Nettoyage disque système (cache de build Docker) ─────────────────
+# v3.60 · Chaque redéploiement (upgrade.sh) laisse des couches de build
+# inutilisées qui ne se nettoient jamais toutes seules — constaté en
+# conditions réelles : 32 Go de cache accumulé, disque système à 75%.
+# `docker builder prune -f` ne touche à AUCUN volume/donnée applicative
+# (Mongo, enregistrements, config) — uniquement le cache de build.
+DOCKER_CLEANUP_FLAG="${LOGS}/host-docker-cleanup-requested"
+if [ -f "$DOCKER_CLEANUP_FLAG" ]; then
+  REASON=$(cat "$DOCKER_CLEANUP_FLAG")
+  rm -f "$DOCKER_CLEANUP_FLAG"
+  FREED=$(docker builder prune -f 2>&1 | tail -1)
+  logger -t mgvms-reboot-watch "Nettoyage disque système déclenché (${REASON}) — ${FREED}"
+fi

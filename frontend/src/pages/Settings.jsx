@@ -30,6 +30,7 @@ export default function SettingsPage() {
       <Tip text={t("storage.tip")} />
 
       <VMSDiskCard />
+      {user?.role === "admin" && <DockerCleanupCard />}
       {user?.role === "admin" && <DatabaseCard />}
       {user?.role === "admin" && <RetentionCard />}
       {user?.role === "admin" && <VideoPoolsCard />}
@@ -191,6 +192,84 @@ function VMSDiskCard() {
           )}
         </>
       )}
+    </SectionCard>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Nettoyage disque système (cache de build Docker)
+// ═══════════════════════════════════════════════════════════════════
+// v3.60 · Root cause réelle d'un disque système qui grossissait vite
+// sans rapport avec les enregistrements (constaté : 75% de `/`, 32 Go de
+// cache de build Docker jamais purgé, un de plus à chaque redéploiement).
+// Même mécanisme que le redémarrage programmé : le backend dépose une
+// demande, exécutée côté hôte par reboot-watch.sh (aucun accès Docker
+// depuis le conteneur, décision de sécurité déjà actée).
+function DockerCleanupCard() {
+  const [form, setForm] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
+
+  useEffect(() => {
+    api.get("/system/docker-cleanup-settings")
+       .then(({ data }) => setForm(data))
+       .catch(() => setForm({ enabled: false, interval_hours: 24 }));
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const { data } = await api.put("/system/docker-cleanup-settings", form);
+      setForm(data);
+      toast.success("Réglages de nettoyage enregistrés");
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+    finally { setSaving(false); }
+  };
+
+  const cleanNow = async () => {
+    setCleaning(true);
+    try {
+      await api.post("/system/docker-cleanup-now");
+      toast.success("Nettoyage lancé — effectif sous 1 minute");
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+    finally { setCleaning(false); }
+  };
+
+  if (!form) return null;
+
+  return (
+    <SectionCard
+      id="docker-cleanup"
+      title="Nettoyage disque système"
+      subtitle="Purge le cache de build Docker (couches inutilisées accumulées à chaque mise à jour) — n'affecte aucune donnée applicative (caméras, enregistrements, base de données)."
+      icon={Trash2}
+    >
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={form.enabled}
+                 onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
+                 data-testid="docker-cleanup-enabled" />
+          Nettoyage automatique
+        </label>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Tous les</span>
+          <input type="number" min="1" max="720" value={form.interval_hours}
+                 onChange={(e) => setForm({ ...form, interval_hours: Number(e.target.value) })}
+                 disabled={!form.enabled} data-testid="docker-cleanup-interval"
+                 className="w-16 px-2 py-1 bg-background border border-input outline-none mono text-sm focus:border-[#0044FF] disabled:opacity-40" />
+          <span className="text-xs text-muted-foreground">heures</span>
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <button onClick={save} disabled={saving} data-testid="docker-cleanup-save"
+                className="flex items-center gap-2 px-4 py-2 bg-[#0044FF] text-white text-sm">
+          {saving && <Loader2 size={14} className="animate-spin" />}<Save size={14} /> Enregistrer
+        </button>
+        <button onClick={cleanNow} disabled={cleaning} data-testid="docker-cleanup-now"
+                className="flex items-center gap-2 px-4 py-2 border border-[#0044FF] text-[#0044FF] text-sm hover:bg-[#0044FF]/10">
+          {cleaning ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Nettoyer maintenant
+        </button>
+      </div>
     </SectionCard>
   );
 }

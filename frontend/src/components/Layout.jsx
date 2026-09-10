@@ -10,7 +10,7 @@ import WelcomePopup from "@/components/WelcomePopup";
 import CookieConsentBanner from "@/components/CookieConsentBanner";
 import {
   LayoutDashboard, Grid3x3, Cctv, Building2, ScanLine, Car, Bell, Map, Zap,
-  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock, Layers, ChevronDown, ChevronRight, LineChart, Sparkles, ShieldCheck, Lock, Info, LifeBuoy, ScrollText as LegalIcon, Terminal, AlertTriangle,
+  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock, Layers, ChevronDown, ChevronRight, LineChart, Sparkles, ShieldCheck, Lock, Info, LifeBuoy, ScrollText as LegalIcon, Terminal, AlertTriangle, Loader2,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -101,6 +101,73 @@ function MiniBar({ label, value, icon: Icon }) {
         <div style={{ width: `${value}%`, backgroundColor: color }} className="h-full transition-all" />
       </div>
       <span className="text-xs mono w-8">{value}%</span>
+    </div>
+  );
+}
+
+// v3.60 · L'indicateur "STO" n'affichait que le disque système (`/`) —
+// aucune visibilité sur le disque des enregistrements (souvent un disque
+// séparé, ex. /mnt/video-datastore), qui est justement celui qui inquiète
+// le plus l'utilisateur au quotidien. Popover au survol listant TOUS les
+// disques réels détectés (`GET /storage/overview`, déjà utilisé par la
+// page Stockage — aucune nouvelle donnée backend nécessaire), chargé une
+// seule fois au premier survol (pas de polling permanent pour un simple
+// tooltip).
+function StorageMiniBar({ value, navigate }) {
+  const [open, setOpen] = useState(false);
+  const [disks, setDisks] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const color = value > 80 ? "#FF3333" : value > 65 ? "#FFB800" : "#00E676";
+
+  const loadDisks = () => {
+    if (disks || loading) return;
+    setLoading(true);
+    api.get("/storage/overview")
+       .then((r) => setDisks(r.data.partitions || []))
+       .catch(() => setDisks([]))
+       .finally(() => setLoading(false));
+  };
+
+  return (
+    <div className="relative" onMouseEnter={() => { setOpen(true); loadDisks(); }} onMouseLeave={() => setOpen(false)}>
+      <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate("/storage")} data-testid="metric-STO">
+        <HardDrive size={14} strokeWidth={1.5} className="text-muted-foreground" />
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground hidden xl:inline">STO</span>
+        <div className="w-14 h-1.5 bg-secondary overflow-hidden">
+          <div style={{ width: `${value}%`, backgroundColor: color }} className="h-full transition-all" />
+        </div>
+        <span className="text-xs mono w-8">{value}%</span>
+      </div>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 z-50 bg-card border border-border shadow-lg p-2 w-60"
+             data-testid="storage-tooltip">
+          <div className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1.5">Disques</div>
+          {loading && (
+            <div className="text-xs text-muted-foreground flex items-center gap-1.5 py-1">
+              <Loader2 size={12} className="animate-spin" /> Chargement…
+            </div>
+          )}
+          {disks && disks.length === 0 && !loading && (
+            <div className="text-xs text-muted-foreground py-1">Aucun disque détecté</div>
+          )}
+          {disks && disks.map((d) => {
+            const pct = d.used_pct ?? 0;
+            const c = pct > 85 ? "#FF3333" : pct > 70 ? "#FFB800" : "#00E676";
+            return (
+              <div key={d.device} className="flex items-center gap-2 py-1.5 border-t border-border first:border-t-0 first:pt-0">
+                <HardDrive size={12} strokeWidth={1.5} className="text-muted-foreground shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[10px] mono truncate" title={d.device}>{d.mountpoint}</div>
+                  <div className="w-full h-1 bg-secondary overflow-hidden mt-1">
+                    <div style={{ width: `${pct}%`, backgroundColor: c }} className="h-full" />
+                  </div>
+                </div>
+                <span className="text-[10px] mono w-9 text-right shrink-0">{pct}%</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -412,7 +479,7 @@ export default function Layout({ children }) {
             )}
             <MiniBar label="CPU" value={sys.cpu} icon={Cpu} />
             <MiniBar label="RAM" value={sys.ram} icon={MemoryStick} />
-            <MiniBar label="STO" value={sys.storage} icon={HardDrive} />
+            <StorageMiniBar value={sys.storage} navigate={navigate} />
             <GpuMiniBar gpu={sys.gpu} onClick={() => navigate("/gpu")} />
           </div>
           <div className="flex items-center gap-2">

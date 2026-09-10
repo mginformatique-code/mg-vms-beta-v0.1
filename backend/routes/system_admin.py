@@ -354,6 +354,88 @@ async def force_ntp_resync_now(user: dict = Depends(require_role("admin"))):
     return result
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# Nettoyage disque système (cache de build Docker)
+# ═══════════════════════════════════════════════════════════════════════
+# v3.60 · Root cause réelle d'un disque système qui grossissait vite
+# (constaté en conditions réelles : 75% de `/`, dont 32 Go de cache de
+# build Docker jamais purgé — chaque redéploiement en ajoute) : rien ne
+# nettoyait jamais ce cache. Même mécanisme que le redémarrage programmé
+# ci-dessus — le conteneur backend n'a JAMAIS accès à Docker ni à l'hôte
+# (pas de socket Docker monté, décision de sécurité déjà actée) : il
+# dépose un fichier marqueur dans /logs, lu par reboot-watch.sh (timer
+# systemd hôte, toutes les minutes) qui exécute le nettoyage réel.
+_DOCKER_CLEANUP_FLAG_PATH = "/logs/host-docker-cleanup-requested"
+
+
+def _write_docker_cleanup_flag(reason: str) -> None:
+    os.makedirs(os.path.dirname(_DOCKER_CLEANUP_FLAG_PATH), exist_ok=True)
+    with open(_DOCKER_CLEANUP_FLAG_PATH, "w") as f:
+        f.write(f"{datetime.now(timezone.utc).isoformat()} · {reason}\n")
+
+
+class DockerCleanupSettingsIn(BaseModel):
+    enabled: bool
+    interval_hours: int = 24
+
+
+async def _load_docker_cleanup_settings() -> dict:
+    doc = await db.settings.find_one({"key": "docker_cleanup"}, {"_id": 0})
+    val = (doc or {}).get("value") or {}
+    return {
+        "enabled": bool(val.get("enabled", False)),
+        "interval_hours": max(1, min(int(val.get("interval_hours", 24)), 24 * 30)),
+    }
+
+
+@system_admin_router.get("/docker-cleanup-settings")
+async def get_docker_cleanup_settings(user: dict = Depends(require_role("admin"))):
+    return await _load_docker_cleanup_settings()
+
+
+@system_admin_router.put("/docker-cleanup-settings")
+async def put_docker_cleanup_settings(data: DockerCleanupSettingsIn, user: dict = Depends(require_role("admin"))):
+    hours = max(1, min(int(data.interval_hours), 24 * 30))
+    await db.settings.update_one(
+        {"key": "docker_cleanup"},
+        {"$set": {"key": "docker_cleanup", "value": {"enabled": data.enabled, "interval_hours": hours}}},
+        upsert=True,
+    )
+    await log_audit(user, "docker_cleanup_settings_updated", f"enabled={data.enabled} interval={hours}h")
+    return {"enabled": data.enabled, "interval_hours": hours}
+
+
+@system_admin_router.post("/docker-cleanup-now")
+async def docker_cleanup_now(user: dict = Depends(require_role("admin"))):
+    """v3.60 · Bouton "Nettoyer maintenant" (Stockage → Nettoyage disque système) —
+    dépose la demande, exécutée par reboot-watch.sh dans la minute qui suit."""
+    _write_docker_cleanup_flag(f"manuel par {user.get('email', '?')}")
+    await log_audit(user, "docker_cleanup_requested", "manuel")
+    return {"ok": True, "note": "Nettoyage lancé côté hôte, effectif sous 1 minute."}
+
+
+_DOCKER_CLEANUP_CHECK_EVERY_S = 1800  # vérifie l'intervalle configuré toutes les 30 min
+
+
+async def docker_cleanup_loop() -> None:
+    """v3.60 · Dépose périodiquement une demande de nettoyage du cache de
+    build Docker si activé (Stockage → Nettoyage disque système). Même
+    structure que `ntp_resync_loop` ci-dessus."""
+    last_run = 0.0
+    while True:
+        await asyncio.sleep(_DOCKER_CLEANUP_CHECK_EVERY_S)
+        try:
+            cfg = await _load_docker_cleanup_settings()
+            if not cfg["enabled"]:
+                continue
+            if time.monotonic() - last_run < cfg["interval_hours"] * 3600:
+                continue
+            _write_docker_cleanup_flag("automatique (programmé)")
+            last_run = time.monotonic()
+        except Exception:
+            logger.exception("system_admin · erreur boucle docker_cleanup_loop")
+
+
 async def auto_reboot_loop() -> None:
     """Vérifie chaque minute si l'heure programmée du reboot auto est atteinte."""
     last_triggered_date = None
