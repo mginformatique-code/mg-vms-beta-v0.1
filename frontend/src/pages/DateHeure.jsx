@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
-import { Loader2, Save, Clock, Power, Radio, RefreshCw } from "lucide-react";
+import { Loader2, Save, Clock, Power, Radio, RefreshCw, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -172,9 +172,19 @@ function NtpCard({ admin }) {
   const [resyncCustom, setResyncCustom] = useState(false);
   const [savingResync, setSavingResync] = useState(false);
   const [forcingSync, setForcingSync] = useState(false);
+  // v3.60 · Ajout en masse de caméras à la synchro NTP — jusqu'ici,
+  // activer le serveur de temps MG-VMS sur une caméra demandait de quitter
+  // cette page (Appareils → modifier → "Définir comme serveur de temps"),
+  // une caméra à la fois. Menu déroulant à cocher (+ "tout cocher") pour
+  // en ajouter plusieurs d'un coup depuis ici.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [applying, setApplying] = useState(false);
+
+  const load = () => api.get("/cameras").then((r) => setCams(r.data || [])).catch(() => setCams([]));
 
   useEffect(() => {
-    api.get("/cameras").then((r) => setCams(r.data || [])).catch(() => setCams([]));
+    load();
     if (admin) {
       api.get("/system/ntp-upstream").then((r) => setUpstream(r.data.upstream || "")).catch(() => setUpstream(""));
       api.get("/system/ntp-resync-interval").then((r) => {
@@ -223,9 +233,36 @@ function NtpCard({ admin }) {
     finally { setForcingSync(false); }
   };
 
+  const toggleSelected = (id) => {
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
+
+  const applySelected = async () => {
+    if (selectedIds.length === 0) return;
+    setApplying(true);
+    try {
+      const { data } = await api.post("/system/ntp-apply-bulk", {
+        camera_ids: selectedIds, ntp_server: window.location.hostname,
+      });
+      const okCount = data.ok?.length || 0;
+      const errCount = data.errors?.length || 0;
+      if (errCount === 0) {
+        toast.success(`${okCount} caméra(s) ajoutée(s) à la synchro NTP`);
+      } else {
+        toast.error(`${okCount} réussie(s), ${errCount} échec(s) — voir : ${data.errors.map((e) => e.camera).join(", ")}`);
+      }
+      setSelectedIds([]);
+      setPickerOpen(false);
+      load();
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+    finally { setApplying(false); }
+  };
+
   if (cams === null) return null;
   const onvifCams = cams.filter((c) => c.mode === "onvif");
   const managed = cams.filter((c) => c.ntp_managed);
+  const unmanaged = onvifCams.filter((c) => !c.ntp_managed);
+  const allSelected = unmanaged.length > 0 && selectedIds.length === unmanaged.length;
 
   return (
     <SectionCard title="Serveur de temps (NTP)" subtitle="MG-VMS sert l'heure aux caméras du réseau — évite les horloges qui dérivent ou se perdent après un reboot caméra." icon={Radio}>
@@ -267,15 +304,56 @@ function NtpCard({ admin }) {
           ))}
         </div>
       )}
-      {admin && managed.length > 0 && (
-        <button onClick={forceSyncNow} disabled={forcingSync} data-testid="ntp-force-sync"
-                className="flex items-center gap-2 px-4 py-2 border border-[#0044FF] text-[#0044FF] text-sm hover:bg-[#0044FF]/10 mb-3 disabled:opacity-50">
-          {forcingSync ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-          Forcer la synchro maintenant ({managed.length})
-        </button>
-      )}
+      <div className="flex flex-wrap items-start gap-2 mb-3">
+        {admin && managed.length > 0 && (
+          <button onClick={forceSyncNow} disabled={forcingSync} data-testid="ntp-force-sync"
+                  className="flex items-center gap-2 px-4 py-2 border border-[#0044FF] text-[#0044FF] text-sm hover:bg-[#0044FF]/10 disabled:opacity-50">
+            {forcingSync ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+            Forcer la synchro maintenant ({managed.length})
+          </button>
+        )}
+        {admin && unmanaged.length > 0 && (
+          <div className="relative">
+            <button onClick={() => setPickerOpen((v) => !v)} data-testid="ntp-add-cameras-btn"
+                    className="flex items-center gap-2 px-4 py-2 border border-[#00E676] text-[#00E676] text-sm hover:bg-[#00E676]/10">
+              <Plus size={14} /> Ajouter des caméras ({unmanaged.length} non synchro)
+            </button>
+            {pickerOpen && (
+              <div className="absolute top-full left-0 mt-1 z-30 bg-card border border-border shadow-lg w-72" data-testid="ntp-add-cameras-panel">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+                  <label className="flex items-center gap-2 text-xs font-medium cursor-pointer">
+                    <input type="checkbox" checked={allSelected}
+                           onChange={(e) => setSelectedIds(e.target.checked ? unmanaged.map((c) => c.id) : [])}
+                           data-testid="ntp-select-all" />
+                    Tout cocher
+                  </label>
+                  <button onClick={() => setPickerOpen(false)} className="text-muted-foreground hover:text-foreground">
+                    <X size={14} />
+                  </button>
+                </div>
+                <div className="max-h-56 overflow-y-auto">
+                  {unmanaged.map((c) => (
+                    <label key={c.id} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-secondary/50 cursor-pointer">
+                      <input type="checkbox" checked={selectedIds.includes(c.id)} onChange={() => toggleSelected(c.id)} />
+                      <span className="truncate">{c.name}</span>
+                      <span className="text-muted-foreground ml-auto">{c.site_name || "—"}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="px-3 py-2 border-t border-border">
+                  <button onClick={applySelected} disabled={applying || selectedIds.length === 0} data-testid="ntp-apply-selected"
+                          className="w-full flex items-center justify-center gap-2 px-3 py-1.5 bg-[#0044FF] text-white text-xs disabled:opacity-40">
+                    {applying && <Loader2 size={13} className="animate-spin" />}
+                    Appliquer la config NTP ({selectedIds.length})
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
       <p className="text-[11px] text-muted-foreground leading-relaxed mb-4">
-        Pour activer une caméra : Appareils → modifier la caméra (mode ONVIF) → "Définir comme serveur de temps".
+        Pour activer une caméra individuellement : Appareils → modifier la caméra (mode ONVIF) → "Définir comme serveur de temps".
       </p>
 
       {admin && upstream !== null && (

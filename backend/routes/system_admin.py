@@ -354,6 +354,38 @@ async def force_ntp_resync_now(user: dict = Depends(require_role("admin"))):
     return result
 
 
+class NtpApplyBulkIn(BaseModel):
+    camera_ids: list[str]
+    ntp_server: str
+
+
+@system_admin_router.post("/ntp-apply-bulk")
+async def ntp_apply_bulk(data: NtpApplyBulkIn, user: dict = Depends(require_role("admin"))):
+    """v3.60 · Bouton "Ajouter des caméras" (Date et heure → Serveur de temps) —
+    active la gestion NTP MG-VMS sur plusieurs caméras ONVIF non encore
+    synchronisées en une seule action, au lieu de répéter "Appareils →
+    modifier la caméra → Définir comme serveur de temps" une par une.
+    Même logique que `POST /cameras/{id}/ntp` (camera_control.py), juste
+    appliquée à une liste plutôt qu'à une seule caméra."""
+    from routes.camera_control import dispatch_set_ntp, _get_cam_credentials
+    ntp_server = (data.ntp_server or "").strip()
+    if not ntp_server:
+        raise HTTPException(400, "ntp_server requis")
+    ok, errors = [], []
+    for camera_id in data.camera_ids:
+        cam_doc = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "name": 1})
+        name = (cam_doc or {}).get("name", camera_id)
+        try:
+            cam, ip, port, u, pwd = await _get_cam_credentials(camera_id)
+            await dispatch_set_ntp(cam, ip, port, u, pwd, ntp_server)
+            await db.cameras.update_one({"id": camera_id}, {"$set": {"ntp_managed": True, "ntp_server": ntp_server}})
+            ok.append(name)
+        except Exception as e:
+            errors.append({"camera": name, "error": str(e)[:200]})
+    await log_audit(user, "ntp_apply_bulk", f"{len(ok)} caméra(s), {len(errors)} échec(s)")
+    return {"ok": ok, "errors": errors}
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Nettoyage disque système (cache de build Docker)
 # ═══════════════════════════════════════════════════════════════════════
