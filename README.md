@@ -1,4 +1,4 @@
-# MG-VMS — Plateforme d'hypervision vidéo (par MG Informatique)
+# MG-VMS — Video Management System (par MG Informatique)
 
 Plateforme web professionnelle de vidéosurveillance / VMS : multi-sites, gestion caméras, mur vidéo, ANPR, recherche véhicule, alertes, notifications (SMTP/Discord/Telegram), audit, RBAC, 2FA.
 
