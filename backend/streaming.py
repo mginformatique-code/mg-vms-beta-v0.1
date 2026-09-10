@@ -802,6 +802,9 @@ async def reconcile_streams_with_go2rtc() -> dict:
     return result
 
 
+_DEMO_CAMERAS_FLAG = "demo_cameras_seeded_v1"
+
+
 async def _ensure_demo_camera() -> None:
     """Caméras de démonstration : vrais flux H.264 générés localement (pipeline réel).
 
@@ -809,8 +812,17 @@ async def _ensure_demo_camera() -> None:
         - MGVMS_SEED_DEMOS=false → jamais de démos
         - au moins une caméra réelle en base (non-démo) → on ne re-sème pas les démos
           (le client a demandé un setup propre avec sa vraie caméra uniquement)
+        - déjà semées une fois (`_DEMO_CAMERAS_FLAG`) → jamais resemées, même si
+          entre-temps supprimées et qu'aucune caméra réelle n'a encore été
+          ajoutée. v3.60 · même défaut que le bug des comptes démo (seed.py) :
+          sur une installation neuve, supprimer les démos AVANT d'ajouter sa
+          première vraie caméra les faisait réapparaître au redémarrage
+          suivant (`real_count` restait à 0). Une suppression délibérée doit
+          être définitive, comme pour les comptes.
     """
     if (os.environ.get("MGVMS_SEED_DEMOS", "auto") or "").lower() in ("false", "0", "no"):
+        return
+    if await db.meta.find_one({"id": _DEMO_CAMERAS_FLAG}):
         return
     real_count = await db.cameras.count_documents({"id": {"$nin": list(DEMO_IDS)}})
     if real_count > 0:
@@ -833,6 +845,7 @@ async def _ensure_demo_camera() -> None:
             "status": "online", "last_seen": now, "created_at": now,
         })
         logger.info("Caméra de démonstration créée : %s", demo["name"])
+    await db.meta.insert_one({"id": _DEMO_CAMERAS_FLAG, "at": now})
 
 
 # ============ Bibliothèque de fabricants (chargée depuis JSON) ============

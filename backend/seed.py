@@ -12,6 +12,7 @@ from database import db
 from auth import hash_password
 
 PURGE_FLAG = "purged_fake_data_v1"
+DEMO_USERS_FLAG = "demo_users_seeded_v1"
 
 
 async def seed():
@@ -41,18 +42,31 @@ async def seed():
             "active": True, "site_ids": [], "created_at": now,
         })
 
-    demo_users = [
-        ("tech@mg-vms.com", "Tech@2026", "Thomas Technicien", "technician"),
-        ("client@mg-vms.com", "Client@2026", "Claire Cliente", "client"),
-        ("viewer@mg-vms.com", "Viewer@2026", "Victor Lecteur", "readonly"),
-    ]
-    for email, pwd, name, role in demo_users:
-        if not await db.users.find_one({"email": email}):
-            await db.users.insert_one({
-                "id": str(uuid.uuid4()), "email": email, "password_hash": hash_password(pwd),
-                "name": name, "role": role, "twofa_enabled": False, "twofa_secret": None,
-                "active": True, "site_ids": [], "created_at": now,
-            })
+    # v3.60 · BUG DE SÉCURITÉ CORRIGÉ (signalé par l'utilisateur, 10/09) :
+    # même défaut que le bug admin ci-dessus, jamais corrigé pour ces 3
+    # comptes de démonstration — mots de passe par défaut connus (visibles
+    # dans ce fichier). `if not find_one` les recréait à CHAQUE redémarrage
+    # backend tant que le compte n'existait pas, donc un admin qui les
+    # supprimait volontairement (durcissement en production) les voyait
+    # silencieusement revenir avec leur mot de passe par défaut au
+    # redémarrage suivant — rouvrant l'accès qu'il venait de fermer. Comme
+    # pour l'admin, ces comptes ne doivent être semés qu'UNE SEULE FOIS
+    # (même mécanisme que PURGE_FLAG ci-dessous) : une suppression
+    # délibérée est désormais définitive.
+    if not await db.meta.find_one({"id": DEMO_USERS_FLAG}):
+        demo_users = [
+            ("tech@mg-vms.com", "Tech@2026", "Thomas Technicien", "technician"),
+            ("client@mg-vms.com", "Client@2026", "Claire Cliente", "client"),
+            ("viewer@mg-vms.com", "Viewer@2026", "Victor Lecteur", "readonly"),
+        ]
+        for email, pwd, name, role in demo_users:
+            if not await db.users.find_one({"email": email}):
+                await db.users.insert_one({
+                    "id": str(uuid.uuid4()), "email": email, "password_hash": hash_password(pwd),
+                    "name": name, "role": role, "twofa_enabled": False, "twofa_secret": None,
+                    "active": True, "site_ids": [], "created_at": now,
+                })
+        await db.meta.insert_one({"id": DEMO_USERS_FLAG, "at": now})
 
     # ---- Purge unique des données factices (migration vers le tout-réel) ----
     if not await db.meta.find_one({"id": PURGE_FLAG}):

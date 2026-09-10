@@ -7,7 +7,7 @@ import CameraPluginsConfig from "@/pages/CameraPluginsConfig";
 import {
   Plus, Wifi, WifiOff, Camera as CamIcon, Trash2, Activity, Loader2, Radar,
   CheckCircle2, XCircle, AlertTriangle, Pencil, Wand2, ChevronRight,
-  Stethoscope, Clock,
+  Stethoscope, Clock, ChevronUp, ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import HoldToRevealInput from "@/components/ui/hold-to-reveal-input";
@@ -49,11 +49,30 @@ const EMPTY_FORM = {
   wiz_brand: "", wiz_model_idx: 0, wiz_stream: "main", wiz_channel: 1,
 };
 
+// v3.60 · En-tête de colonne cliquable pour trier la liste des caméras.
+function SortTh({ label, colKey, activeKey, activeDir, onSort, className = "" }) {
+  const active = activeKey === colKey;
+  return (
+    <th className={`px-3 py-2 cursor-pointer select-none hover:text-foreground ${className}`}
+        onClick={() => onSort(colKey)} data-testid={`sort-th-${colKey}`}>
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {active && (activeDir === 1 ? <ChevronUp size={11} /> : <ChevronDown size={11} />)}
+      </span>
+    </th>
+  );
+}
+
 export default function Cameras() {
   const { t, can } = useApp();
   const [cams, setCams] = useState([]);
   const [sites, setSites] = useState([]);
   const [filterSite, setFilterSite] = useState("");
+  // v3.60 · Tri de la liste par colonne (demande explicite : clic sur les
+  // en-têtes STATUT/NOM/SITE/IP/MODE/... pour trier) — état "colonne + sens",
+  // toggle sur reclic de la même colonne, comme un tableau classique.
+  const [sortKey, setSortKey] = useState(null);
+  const [sortDir, setSortDir] = useState(1); // 1 = asc, -1 = desc
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -79,6 +98,40 @@ export default function Cameras() {
   useEffect(() => { api.get("/cameras/brands").then((r) => setBrands(r.data.brands || [])).catch(() => {}); }, []);
   useEffect(load, [filterSite]);
   useEffect(() => { const iv = setInterval(load, 15000); return () => clearInterval(iv); }, [filterSite]);
+
+  // v3.60 · Tri de colonnes — un accesseur par colonne (même valeur que
+  // celle réellement affichée dans la cellule, pour que le tri corresponde
+  // à ce que l'utilisateur voit) ; IP triée numériquement par octet, pas
+  // lexicographiquement (sinon "192.168.1.9" > "192.168.1.54").
+  const SORT_ACCESSORS = {
+    status: (c) => (c.status === "online" ? 1 : 0),
+    name: (c) => (c.name || "").toLowerCase(),
+    site: (c) => (c.site_name || "").toLowerCase(),
+    ip: (c) => (c.ip || "0.0.0.0").split(".").map((o) => o.padStart(3, "0")).join("."),
+    mode: (c) => (c.protocol || c.mode || "").toLowerCase(),
+    video_mode: (c) => ((c.stream_mode || "auto").toLowerCase() === "direct_rtsp" ? "direct rtsp" : "go2rtc"),
+    resolution: (c) => {
+      const m = /(\d+)\s*x\s*(\d+)/i.exec(c.resolution || "");
+      return m ? parseInt(m[1], 10) * parseInt(m[2], 10) : 0;
+    },
+    codec: (c) => (c.codec || "").toLowerCase(),
+    ptz: (c) => (c.ptz_enabled ? 1 : 0),
+  };
+  const toggleSort = (key) => {
+    if (sortKey === key) setSortDir((d) => -d);
+    else { setSortKey(key); setSortDir(1); }
+  };
+  const sortedCams = useMemo(() => {
+    if (!sortKey) return cams;
+    const acc = SORT_ACCESSORS[sortKey];
+    return [...cams].sort((a, b) => {
+      const va = acc(a), vb = acc(b);
+      if (va < vb) return -sortDir;
+      if (va > vb) return sortDir;
+      return 0;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cams, sortKey, sortDir]);
 
   const closeDialog = () => { setOpen(false); setEditingId(null); setForm(EMPTY_FORM); setConnCheck(null); setProfiles([]); };
   const openCreate = () => { setEditingId(null); setForm(EMPTY_FORM); setConnCheck(null); setProfiles([]); setOpen(true); };
@@ -365,19 +418,19 @@ export default function Cameras() {
       <div className="border border-border bg-card overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-            <th className="px-3 py-2">{t("common.status")}</th>
-            <th className="px-3 py-2">{t("common.name")}</th>
-            <th className="px-3 py-2">Site</th>
-            <th className="px-3 py-2">Adresse IP</th>
-            <th className="px-3 py-2">Mode</th>
-            <th className="px-3 py-2">{t("cam.video_mode")}</th>
-            <th className="px-3 py-2">{t("cam.resolution")}</th>
-            <th className="px-3 py-2">Codec</th>
-            <th className="px-3 py-2">PTZ</th>
+            <SortTh label={t("common.status")} colKey="status" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
+            <SortTh label={t("common.name")} colKey="name" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
+            <SortTh label="Site" colKey="site" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
+            <SortTh label="Adresse IP" colKey="ip" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
+            <SortTh label="Mode" colKey="mode" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
+            <SortTh label={t("cam.video_mode")} colKey="video_mode" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
+            <SortTh label={t("cam.resolution")} colKey="resolution" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
+            <SortTh label="Codec" colKey="codec" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
+            <SortTh label="PTZ" colKey="ptz" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
             <th className="px-3 py-2 text-right">{t("common.actions")}</th>
           </tr></thead>
           <tbody>
-            {cams.map((c) => (
+            {sortedCams.map((c) => (
               <tr key={c.id} className="border-b border-border hover:bg-secondary/50 cursor-pointer" data-testid="camera-row" onClick={(e) => { if (e.target.closest("button,a,input,select")) return; window.location.href = `/camera-center/${c.id}`; }}>
                 <td className="px-3 py-2"><span className={`inline-flex items-center gap-1.5 text-xs ${c.status === "online" ? "mg-online" : "mg-offline"}`}>
                   {c.status === "online" ? <Wifi size={13} /> : <WifiOff size={13} />}{t(c.status === "online" ? "common.online" : "common.offline")}</span></td>
