@@ -196,7 +196,7 @@ def _derive_sub_url(main_url: str) -> str:
     return ""
 
 
-def pick_preview_stream(cam: dict) -> Optional[dict]:
+def pick_preview_stream(cam: dict, has_ip_sibling: bool = False) -> Optional[dict]:
     """Choisit le sous-flux le plus léger utilisable pour l'APERÇU live.
 
     v3.8 · L'aperçu consommait jusqu'ici le flux PRINCIPAL, ce qui est le
@@ -222,6 +222,33 @@ def pick_preview_stream(cam: dict) -> Optional[dict]:
     Retourne ``None`` si la caméra n'a pas de `streams_detected` (aucune
     découverte ONVIF encore faite) → l'appelant garde son comportement
     actuel, aucune régression.
+
+    v3.61 · `has_ip_sibling` (calculé par l'appelant, coûterait une requête
+    DB ici et cette fonction doit rester pure/synchrone) : True si une AUTRE
+    fiche caméra existe avec la même IP — c'est exactement comme ça qu'une
+    caméra multi-objectifs (Reolink TrackMix, RLC-81MA...) est représentée
+    aujourd'hui (une fiche par objectif). Root cause réelle d'une TrackMix
+    tombée en panne de vue live (plus aucune image, alors que
+    l'enregistrement continuait) : ses 3 profils ONVIF (`/`,
+    `/Preview_01_sub`, `/Preview_01_autotrack`) ne matchent AUCUNE des 3
+    conventions vendeur de `_stream_channel_key()` (pas de préfixe `h264`
+    contrairement à la RLC-81MA) — `detected_keys` était donc vide et le
+    garde-fou v3.9.2 ci-dessous traitait à tort les DEUX fiches comme un
+    appareil mono-objectif, laissant la fiche téléobjectif récupérer
+    `/Preview_01_sub` (le sous-flux du GRAND ANGLE, pas le sien) comme
+    aperçu — mauvais objectif affiché, ET une connexion RTSP redondante
+    vers ce sous-flux ouverte par les DEUX fiches, épuisant la limite de
+    connexions simultanées de la caméra (constaté : seules 2 connexions
+    RTSP tiennent sur cette TrackMix, déjà consommées par l'enregistrement
+    principal des deux objectifs — la 3e, nécessaire à la vue live,
+    timeout systématiquement). `has_ip_sibling=True` bascule la sécurité de
+    canal en mode strict : un candidat n'est accepté QUE si son canal est
+    identifié ET identique à celui du flux principal — jamais par défaut,
+    même quand aucune URL ne matche une convention connue (c'est justement
+    ce cas, `main_key is None`, que l'ancien garde-fou traitait à tort comme
+    "sans ambiguïté"). Sans preuve fiable du canal, on retombe proprement
+    sur le flux principal de CETTE fiche plutôt que de risquer d'emprunter
+    celui d'une fiche sœur.
     """
     main_url = (cam.get("rtsp_url") or "").strip()
     main_key = _stream_channel_key(main_url)
@@ -249,7 +276,21 @@ def pick_preview_stream(cam: dict) -> Optional[dict]:
         # Sécurité canal : on n'accepte QUE des flux du même canal physique
         # que le flux principal (voir _stream_channel_key).
         cand_key = _stream_channel_key(url)
-        if main_key is not None:
+        # v3.61 · Appareil confirmé multi-objectifs (fiche sœur sur la même
+        # IP) : on n'a pas le droit de deviner. `_stream_channel_key()` peut
+        # renvoyer None pour le flux principal ET pour le candidat à la fois
+        # (aucun des deux ne matche une convention vendeur connue — le cas
+        # réel de la TrackMix, dont AUCUNE des 3 URLs `/`, `/Preview_01_sub`,
+        # `/Preview_01_autotrack` ne matche) — dans ce cas, les branches
+        # ci-dessous laissent tout passer sans le vouloir, puisqu'elles ne
+        # se déclenchent que si `cand_key` est reconnu. Ici, on exige une
+        # correspondance POSITIVE et confirmée (les deux canaux identifiés
+        # ET identiques) avant d'accepter quoi que ce soit — jamais un
+        # candidat "par défaut" comme pour une caméra mono-objectif.
+        if has_ip_sibling:
+            if main_key is None or cand_key != main_key:
+                continue
+        elif main_key is not None:
             if cand_key != main_key:
                 continue
         elif cand_key is not None and not single_channel_device:
@@ -280,14 +321,14 @@ def pick_preview_stream(cam: dict) -> Optional[dict]:
     return None
 
 
-def build_preview_rtsp_url(cam: dict) -> str:
+def build_preview_rtsp_url(cam: dict, has_ip_sibling: bool = False) -> str:
     """URL RTSP (identifiants injectés) du flux d'APERÇU.
 
     Retombe sur le flux principal si aucun sous-flux n'est connu — donc
     strictement identique au comportement d'avant tant que la caméra n'a
     pas été découverte (`streams_detected` absent).
     """
-    preview = pick_preview_stream(cam)
+    preview = pick_preview_stream(cam, has_ip_sibling=has_ip_sibling)
     if not preview or not preview.get("url"):
         return _build_rtsp_url(cam)
     # Réutilise l'injection d'identifiants de _build_rtsp_url en lui
@@ -474,7 +515,13 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
     # le seul décodage du main tient déjà à peine 6-8 img/s contre 17 pour
     # le sub. On garde le flux principal pour `name` (recorder + IA, qui en
     # ont besoin en pleine résolution) et on n'allège QUE l'aperçu.
-    preview = pick_preview_stream(cam)
+    # v3.61 · Voir docstring de pick_preview_stream — une AUTRE fiche caméra
+    # avec la même IP signifie appareil multi-objectifs (c'est comme ça
+    # qu'on les représente aujourd'hui), donc le garde-fou "mono-canal par
+    # défaut" ne doit jamais s'appliquer même si aucune URL n'est reconnue.
+    has_ip_sibling = bool(cam.get("ip")) and await db.cameras.count_documents(
+        {"ip": cam["ip"], "id": {"$ne": cam_id}}) > 0
+    preview = pick_preview_stream(cam, has_ip_sibling=has_ip_sibling)
     preview_source_name = name
     # v3.60 · `name` porte désormais potentiellement DEUX sources : le flux
     # vidéo/audio existant (`rtsp_source`, inchangé) + une source `onvif://`
@@ -486,7 +533,7 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
         name: [rtsp_source, onvif_backchannel] if onvif_backchannel else rtsp_source
     }
     if preview and preview.get("url"):
-        preview_url = build_preview_rtsp_url(cam)
+        preview_url = build_preview_rtsp_url(cam, has_ip_sibling=has_ip_sibling)
         if preview_url and preview_url != rtsp_url:
             preview_source_name = f"{name}_preview"
             # v3.19 · Audio caméra → navigateur, sur le sous-flux SEULEMENT

@@ -45,7 +45,7 @@ class VideoCoreManager:
         return _build_rtsp_url(cam)
 
     @staticmethod
-    def _webrtc_rtsp_url_of(cam: dict) -> str:
+    async def _webrtc_rtsp_url_of(cam: dict) -> str:
         """URL RTSP à utiliser pour WHEP navigateur (H264 obligatoire).
 
         Priorité : `webrtc_rtsp_url` (override admin) > sous-flux détecté
@@ -61,14 +61,23 @@ class VideoCoreManager:
         Le sous-flux (896×512 H264 sur la RLC-81MA de test) est à la fois
         18× plus léger et systématiquement en H264 — donc compatible
         navigateur, y compris quand le principal est en HEVC.
+
+        v3.61 · `has_ip_sibling` (voir `streaming.pick_preview_stream`
+        docstring) : passé ici aussi pour que le pont WHEP ne récupère
+        jamais le sous-flux d'une caméra sœur sur une caméra multi-objectifs
+        (Reolink TrackMix...) dont l'URL ne matche aucune convention vendeur
+        connue — même root cause que le bug d'aperçu HD/SD.
         """
         sub = (cam.get("webrtc_rtsp_url") or "").strip()
         if sub.lower().startswith(("rtsp://", "rtsps://")):
             return sub
         try:
+            from database import db
             from streaming import pick_preview_stream, build_preview_rtsp_url
-            if pick_preview_stream(cam):
-                return build_preview_rtsp_url(cam)
+            has_ip_sibling = bool(cam.get("ip")) and await db.cameras.count_documents(
+                {"ip": cam["ip"], "id": {"$ne": cam.get("id")}}) > 0
+            if pick_preview_stream(cam, has_ip_sibling=has_ip_sibling):
+                return build_preview_rtsp_url(cam, has_ip_sibling=has_ip_sibling)
         except Exception:
             pass
         codec = str(cam.get("codec") or "").lower()
@@ -102,7 +111,7 @@ class VideoCoreManager:
     async def ensure_webrtc_source(self, cam: dict) -> RtspSource:
         """Source dédiée WHEP navigateur (H264 obligatoire, sub-stream)."""
         cam_id = cam.get("id") or ""
-        webrtc_url = self._webrtc_rtsp_url_of(cam)
+        webrtc_url = await self._webrtc_rtsp_url_of(cam)
         if not webrtc_url:
             raise ValueError(
                 "Aucune source H264 disponible pour WebRTC — "

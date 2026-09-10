@@ -200,7 +200,7 @@ redis==5.0.1
 # conflit avec cryptography==43.0.1 déjà épinglé ci-dessus (aiortc,
 # google-auth). 2.23.1 ne demande que cryptography>=39.0 — compatible.
 asyncssh==2.23.1
-reolink-aio==0.21.10
+reolink-aio==0.21.15
 referencing==0.37.0
 regex==2024.9.11
 reportlab==4.2.5
