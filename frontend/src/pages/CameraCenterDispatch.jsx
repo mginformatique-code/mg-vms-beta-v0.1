@@ -21,7 +21,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
-import { Wifi, WifiOff, ScanLine, Search, Volume2, Mic, Lightbulb, Move } from "lucide-react";
+import { Wifi, WifiOff, ScanLine, Search, Volume2, Mic, Flashlight, Move, CircleDot, MemoryStick } from "lucide-react";
 
 export default function CameraCenterDispatch() {
   const navigate = useNavigate();
@@ -56,19 +56,22 @@ export default function CameraCenterDispatch() {
         {filtered.map((c) => {
           const pluginCount = (c.enabled_plugins || []).length;
           const anprActive = (c.enabled_plugins || []).includes("fast-alpr");
-          // v3.61 · Icônes de capacités matérielles (HP/micro/lumière/PTZ),
-          // ancrées à DROITE de la carte (sens inverse des badges
-          // plugins/ANPR ci-dessous, à gauche) — demande explicite. Le
-          // haut-parleur/micro/lumière viennent de `capabilities`, un champ
-          // déclaré dans le modèle mais réellement peuplé aujourd'hui
-          // seulement pour certaines caméras (ex. driver ONVIF générique) —
-          // une caméra sans capacités détectées n'affiche simplement aucune
-          // de ces trois icônes, pas une icône "absente" trompeuse. PTZ
-          // vient de `ptz_enabled`, toujours renseigné.
+          // v3.61 · Icônes de capacités matérielles (HP/micro/lumière/IR/
+          // carte SD/PTZ), ancrées à DROITE de la carte (sens inverse des
+          // badges plugins/ANPR ci-dessous, à gauche) — demande explicite.
+          // Toutes (sauf PTZ, qui vient de `ptz_enabled`) viennent de
+          // `capabilities` — fiable depuis le correctif v3.63 du parsing
+          // reolink-aio (voir reolink_driver.py::get_capabilities), qui
+          // renvoyait spotlight/siren/audio à False pour TOUTE caméra
+          // Reolink quel que soit son vrai matériel. Une caméra sans
+          // capacités détectées n'affiche simplement aucune de ces icônes,
+          // pas une icône "absente" trompeuse.
           const caps = c.capabilities || {};
           const hasSpeaker = !!(caps.speaker || caps.audio_output || caps.two_way_audio);
           const hasMic = !!(caps.microphone || caps.audio_input);
           const hasLight = !!(caps.spotlight || caps.white_light);
+          const hasIr = !!caps.ir_control;
+          const hasSdCard = !!caps.sdcard;
           const hasPtz = !!c.ptz_enabled;
           return (
             <button key={c.id} onClick={() => navigate(`/camera-center/${c.id}`)} data-testid="camera-center-card"
@@ -90,11 +93,13 @@ export default function CameraCenterDispatch() {
                     </span>
                   )}
                 </div>
-                {(hasSpeaker || hasMic || hasLight || hasPtz) && (
+                {(hasSpeaker || hasMic || hasLight || hasIr || hasSdCard || hasPtz) && (
                   <div className="flex items-center gap-1 text-muted-foreground shrink-0">
                     {hasSpeaker && <Volume2 size={12} title="Haut-parleur" />}
                     {hasMic && <Mic size={12} title="Microphone" />}
-                    {hasLight && <Lightbulb size={12} title="Lumière" />}
+                    {hasLight && <Flashlight size={12} title="Lumière / projecteur" />}
+                    {hasIr && <CircleDot size={12} className="text-red-500" title="Infrarouge (vision nocturne)" />}
+                    {hasSdCard && <MemoryStick size={12} title="Carte mémoire" />}
                     {hasPtz && <Move size={12} title="PTZ" />}
                   </div>
                 )}

@@ -49,7 +49,7 @@ from drivers import (
     CameraDriverError, UnsupportedCapabilityError, list_supported_vendors,
     IRMode, LightMode,
 )
-from auth import require_permission
+from auth import require_permission, log_audit
 from services.camera_device_service import camera_device_service as svc
 from pipeline_v2.driver_validator import driver_validator
 from pipeline_v2.capability_matrix import build_capability_matrix, build_driver_health
@@ -60,6 +60,10 @@ devices_router = APIRouter(prefix="/api/devices", tags=["devices"])
 
 
 # ── Bodies ──────────────────────────────────────────────────────
+class VendorOverrideBody(BaseModel):
+    vendor: Optional[str] = None
+
+
 class LightBody(BaseModel):
     enabled: bool
     brightness: Optional[int] = Field(default=None, ge=0, le=100)
@@ -268,6 +272,55 @@ async def device_discover(camera_id: str, user: dict = Depends(require_permissio
         return await svc.discover(camera_id)
     except CameraDriverError as e:
         raise _driver_error_response(e)
+
+
+@devices_router.get("/{camera_id}/vendor")
+async def device_vendor_get(camera_id: str, user: dict = Depends(require_permission("view_live"))):
+    """v3.63 · État du choix d'API/driver pour cette caméra.
+
+    ``override`` : vendor forcé manuellement (``cameras.vendor``), ou
+    ``None`` si la caméra est en détection automatique (cas de la quasi-
+    totalité du parc). ``effective`` : le driver réellement utilisé au
+    dernier ``discover()`` (``cameras.driver``) — c'est lui qui pilote
+    vraiment la caméra (Reolink via reolink-aio, Hikvision via ISAPI,
+    Dahua/Axis via leur API propre, ou ONVIF générique en repli).
+    """
+    from database import db
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "vendor": 1, "driver": 1, "manufacturer": 1})
+    if not cam:
+        raise HTTPException(404, "Caméra introuvable")
+    return {
+        "available": list_supported_vendors(),
+        "override": cam.get("vendor") or None,
+        "effective": cam.get("driver") or None,
+        "manufacturer_detected": cam.get("manufacturer") or None,
+    }
+
+
+@devices_router.put("/{camera_id}/vendor")
+async def device_vendor_set(camera_id: str, body: VendorOverrideBody,
+                             user: dict = Depends(require_permission("manage_cameras"))):
+    """v3.63 · Force (ou efface) le driver/API utilisé pour cette caméra.
+
+    Corrige le cas où la détection automatique (``manufacturer``/modèle
+    ONVIF) se trompe d'API pour une caméra donnée — jusqu'ici sans aucun
+    recours côté UI, il fallait modifier la base à la main. ``vendor: null``
+    (ou une chaîne vide) revient à la détection automatique. La caméra est
+    aussitôt redécouverte avec le nouveau driver, et son instance driver en
+    cache est purgée pour ne jamais garder l'ancienne connexion.
+    """
+    from database import db
+    vendor = (body.vendor or "").strip() or None
+    await db.cameras.update_one({"id": camera_id}, {"$set": {"vendor": vendor}} if vendor
+                                 else {"$unset": {"vendor": ""}})
+    await svc.release(camera_id)
+    try:
+        result = await svc.discover(camera_id)
+    except CameraDriverError as e:
+        raise _driver_error_response(e)
+    await log_audit(user, "camera_vendor_override", camera_id,
+                     f"Vendor forcé : {vendor or 'automatique'} (effectif : {result.get('driver')})")
+    return result
 
 
 @devices_router.post("/{camera_id}/light")

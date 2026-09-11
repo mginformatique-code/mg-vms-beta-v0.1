@@ -39,7 +39,6 @@ import {
 
 const TABS = [
   { id: "overview",     label: "Overview",     icon: Camera },
-  { id: "live",         label: "Live",         icon: Video },
   { id: "network",      label: "Network",      icon: Wifi },
   { id: "streams",      label: "Streams",      icon: Video },
   { id: "capabilities", label: "Capabilities", icon: Layers },
@@ -161,7 +160,7 @@ export default function CameraCenter() {
       <Tabs value={tab} onValueChange={setTab} className="space-y-4">
         <TabsList className="flex flex-wrap h-auto justify-start"
                   data-testid="camera-center-tabs">
-          {TABS.filter(({ id }) => id !== "live" || !caps?.ptz).map(({ id, label, icon: Icon }) => (
+          {TABS.map(({ id, label, icon: Icon }) => (
             <TabsTrigger key={id} value={id} data-testid={`cam-tab-${id}`} className="gap-2">
               <Icon className="w-4 h-4" />
               {label}
@@ -170,10 +169,12 @@ export default function CameraCenter() {
         </TabsList>
 
         <TabsContent value="overview"><OverviewTab info={info} caps={caps} cameraId={cameraId} /></TabsContent>
-        {/* v3.45 · Onglet Live masqué pour les caméras PTZ — l'onglet PTZ
-            affiche désormais sa propre vue live (voir PTZTab), le rendre
-            deux fois créerait 2 connexions vidéo concurrentes pour rien. */}
-        {!caps?.ptz && <TabsContent value="live"><LiveTab cameraId={cameraId} /></TabsContent>}
+        {/* v3.63 · Onglet Live retiré pour TOUTES les caméras (plus
+            seulement les PTZ) — l'onglet PTZ affiche désormais sa propre
+            vue live dans tous les cas (voir PTZTab), y compris pour une
+            caméra sans PTZ réel, qui n'affiche alors que la vue live sans
+            les contrôles PTZ. Le rendre deux fois créerait 2 connexions
+            vidéo concurrentes pour rien. */}
         <TabsContent value="network"><NetworkTab info={info} cameraId={cameraId} /></TabsContent>
         <TabsContent value="streams"><StreamsTab cameraId={cameraId} /></TabsContent>
         <TabsContent value="capabilities"><CapabilitiesTab caps={caps} /></TabsContent>
@@ -226,6 +227,33 @@ const EventPanel = ({ title, items, render }) => (
 function OverviewTab({ info, caps, cameraId }) {
   const { t } = useApp();
   const [rt, setRt] = useState({});
+  // v3.63 · Sélecteur d'API/driver — expose et permet de corriger le choix
+  // fait par la détection automatique (`_resolve_vendor()` côté backend),
+  // jusqu'ici invisible et non modifiable depuis l'UI (il fallait éditer la
+  // base à la main pour forcer un vendor). `override` reflète un choix
+  // manuel déjà enregistré (`cameras.vendor`) ; `effective` est le driver
+  // RÉELLEMENT utilisé (`cameras.driver`, posé par le dernier discover()).
+  const [vendorInfo, setVendorInfo] = useState(null);
+  const [vendorChoice, setVendorChoice] = useState("");
+  const [vendorSaving, setVendorSaving] = useState(false);
+
+  const loadVendor = () => {
+    api.get(`/devices/${cameraId}/vendor`).then((r) => {
+      setVendorInfo(r.data);
+      setVendorChoice(r.data.override || "");
+    }).catch(() => {});
+  };
+  useEffect(() => { loadVendor(); }, [cameraId]);
+
+  const saveVendor = () => {
+    setVendorSaving(true);
+    api.put(`/devices/${cameraId}/vendor`, { vendor: vendorChoice || null })
+       .then((r) => toast.success(`API active : ${r.data.driver || "onvif"}`))
+       .then(loadVendor)
+       .catch((e) => toast.error(e.response?.data?.detail?.message || e.response?.data?.detail || "Erreur"))
+       .finally(() => setVendorSaving(false));
+  };
+
   useEffect(() => {
     const load = async () => {
       const [cap, pipe, cam] = await Promise.all([
@@ -281,71 +309,31 @@ function OverviewTab({ info, caps, cameraId }) {
           <div>Temp°</div><div className="font-mono">—</div>
         </div>
       </Card>
+      <Card className="p-4 space-y-2" data-testid="cam-connection-api">
+        <div className="text-sm text-muted-foreground">Connexion / API</div>
+        <div className="grid grid-cols-2 gap-1 text-sm">
+          <div>Fabricant détecté</div><div className="font-mono">{vendorInfo?.manufacturer_detected || info?.manufacturer || "—"}</div>
+          <div>API utilisée</div><div className="font-mono">{vendorInfo?.effective || cam.driver || "onvif"}</div>
+        </div>
+        <div className="pt-1 space-y-1.5">
+          <div className="text-xs text-muted-foreground">Forcer une autre API si la détection automatique se trompe :</div>
+          <div className="flex items-center gap-2">
+            <select className="h-8 text-xs bg-background border border-border px-2 flex-1"
+                    value={vendorChoice} onChange={(e) => setVendorChoice(e.target.value)}
+                    data-testid="cam-vendor-select">
+              <option value="">Automatique</option>
+              {(vendorInfo?.available || []).map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+            <Button size="sm" variant="outline" disabled={vendorSaving || vendorChoice === (vendorInfo?.override || "")}
+                    onClick={saveVendor} data-testid="cam-vendor-save">
+              {vendorSaving ? <Loader2 size={14} className="animate-spin" /> : "Enregistrer"}
+            </Button>
+          </div>
+        </div>
+      </Card>
     </div>
-  );
-}
-
-function LiveTab({ cameraId }) {
-  const { t, aiDetections } = useApp();
-  // video-pipeline-v2 · UN SEUL choix de pipeline par caméra :
-  //   ○ Direct RTSP  ○ MJPEG  ○ MediaMTX
-  // + bandeau statut (Pipeline / État / FPS / latence) via /video-status.
-  const [cam, setCam] = React.useState(null);
-  const [vs, setVs] = React.useState(null);
-  const [saving, setSaving] = React.useState(false);
-  const [reloadKey, setReloadKey] = React.useState(0);
-
-  React.useEffect(() => {
-    let alive = true;
-    api.get(`/cameras/${cameraId}`).then((r) => { if (alive) setCam(r.data); }).catch(() => {});
-    const loadVs = () => api.get(`/cameras/${cameraId}/video-status`)
-      .then((r) => { if (alive) setVs(r.data); }).catch(() => { if (alive) setVs(null); });
-    loadVs();
-    const t = setInterval(loadVs, 10000);
-    return () => { alive = false; clearInterval(t); };
-  }, [cameraId, reloadKey]);
-
-  // video-engine-v3 · UN SEUL moteur vidéo, plus de sélecteur pipeline.
-  const stateColor = vs?.status === "online" ? "text-[#00E676]" : "text-[#FF3333]";
-  return (
-    <Card className="p-3 space-y-2" data-testid="cam-live">
-      <div className="flex items-center justify-between">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("camc.video_engine")}</div>
-        <div className="text-[10px] mono uppercase tracking-wider px-2.5 py-1 border border-[#00E5FF]/60 bg-[#00E5FF]/15 text-[#00E5FF]"
-              data-testid="video-engine-badge">WEBRTC → MJPEG (auto)</div>
-      </div>
-      <div className="flex items-center gap-3 text-[10px] mono border border-border px-2 py-1" data-testid="pipeline-status-band">
-        <span className={stateColor} data-testid="pipeline-status-state">
-          État : <b>{vs ? (vs.status === "online" ? "CONNECTÉ" : (vs.status || "?").toUpperCase()) : "…"}</b>
-        </span>
-        {vs?.fps != null && <span>FPS : <b>{vs.fps}</b></span>}
-        {vs?.width != null && vs?.height != null && <span>{vs.width}×{vs.height}</span>}
-        {vs?.codec && <span className="text-muted-foreground">{String(vs.codec).toUpperCase()}</span>}
-        {vs?.viewers != null && <span>Viewers : <b>{vs.viewers}</b></span>}
-        {vs?.last_error && <span className="text-[#FF3333] truncate max-w-[280px]" title={vs.last_error} data-testid="pipeline-status-error">{vs.last_error}</span>}
-      </div>
-      <div className="relative aspect-video bg-black">
-        {cam && (
-          <>
-            <LivePlayer key={`${cameraId}-${reloadKey}`} camera={cam} hd={true}
-                        className="w-full h-full" dataTestId="center-player" />
-            {/* Tracking anti-vol — uniquement si le plugin retail est actif sur
-                cette caméra (plan Phase 1, léger : réutilise le flux WS
-                ai_detections déjà diffusé, pas de requête supplémentaire). */}
-            {(cam.enabled_plugins || []).includes("retail-suspicious-behavior") && (
-              <RetailTrackingOverlay
-                boxes={aiDetections[cameraId]?.boxes}
-                retail={aiDetections[cameraId]?.retail}
-              />
-            )}
-            {/* v3.6 · Overlay pied de visualisation — lumière/IR/sirène pilotées
-                par les capacités réelles de la caméra (device layer), peu
-                importe le constructeur. Voir CameraControlOverlay.jsx. */}
-            <CameraControlOverlay cam={cam} footer />
-          </>
-        )}
-      </div>
-    </Card>
   );
 }
 
@@ -1220,7 +1208,7 @@ function SdCardTab({ cameraId, caps }) {
 
 // ─── PTZ ───
 function PTZTab({ cameraId, caps }) {
-  const { t } = useApp();
+  const { t, aiDetections } = useApp();
   const [cam, setCam] = useState(null);
   const [presets, setPresets] = useState([]);
   const [presetsLoading, setPresetsLoading] = useState(true);
@@ -1302,7 +1290,10 @@ function PTZTab({ cameraId, caps }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraId, caps?.ptz, caps?.ptz_tracking]);
 
-  if (!caps?.ptz) return <NotSupported what="PTZ" />;
+  // v3.63 · Plus de sortie anticipée ici : la vue live (cam-ptz-live,
+  // ci-dessous) doit toujours s'afficher, PTZ ou non — seuls les contrôles
+  // PTZ (direction, presets, patrouille, suivi) restent conditionnés à
+  // `caps?.ptz` plus bas dans le rendu.
 
   const move = (direction) =>
     api.post(`/devices/${cameraId}/ptz/move`, { direction, speed: 0.5 })
@@ -1414,8 +1405,26 @@ function PTZTab({ cameraId, caps }) {
         <Card className="p-3 space-y-2" data-testid="cam-ptz-live">
           <div className="relative aspect-video bg-black">
             {cam ? (
-              <LivePlayer key={cameraId} camera={cam} hd={false}
-                          className="w-full h-full" dataTestId="ptz-live-player" />
+              <>
+                <LivePlayer key={cameraId} camera={cam} hd={false}
+                            className="w-full h-full" dataTestId="ptz-live-player" />
+                {/* Tracking anti-vol — repris de l'ex-onglet Live (voir plus
+                    bas) : uniquement si le plugin retail est actif. */}
+                {(cam.enabled_plugins || []).includes("retail-suspicious-behavior") && (
+                  <RetailTrackingOverlay
+                    boxes={aiDetections[cameraId]?.boxes}
+                    retail={aiDetections[cameraId]?.retail}
+                  />
+                )}
+                {/* v3.63 · L'onglet Live séparé (LiveTab) est retiré au profit
+                    de cet onglet PTZ, qui doit donc reprendre TOUT ce qu'il
+                    offrait — notamment ce panneau de contrôles rapides
+                    (lumière/IR/sirène/TTS/reboot, pilotés par les capacités
+                    réelles de la caméra), jusqu'ici visible UNIQUEMENT via
+                    l'onglet Live. Sans cet ajout, le retrait de Live aurait
+                    fait disparaître ces boutons de tout le Centre caméras. */}
+                <CameraControlOverlay cam={cam} footer />
+              </>
             ) : (
               <div className="w-full h-full flex items-center justify-center text-muted-foreground">
                 <Loader2 size={20} className="animate-spin" />
@@ -1424,6 +1433,7 @@ function PTZTab({ cameraId, caps }) {
           </div>
         </Card>
 
+        {caps?.ptz && (
         <Card className="p-4 space-y-4" data-testid="cam-ptz">
           <div>
             <div className="text-sm text-muted-foreground mb-2">Directions</div>
@@ -1454,8 +1464,10 @@ function PTZTab({ cameraId, caps }) {
             {t("ptz.preset_add")}
           </Button>
         </Card>
+        )}
       </div>
 
+      {caps?.ptz && (
       <Card className="p-4 space-y-3" data-testid="cam-ptz-presets">
         <div className="text-sm text-muted-foreground">
           {t("ptz.presets_hint")}
@@ -1657,6 +1669,7 @@ function PTZTab({ cameraId, caps }) {
           )}
         </div>
       </Card>
+      )}
     </div>
   );
 }
