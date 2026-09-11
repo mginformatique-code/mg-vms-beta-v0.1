@@ -43,6 +43,7 @@ from pydantic import BaseModel
 
 from auth import require_permission, require_role, log_audit, allowed_sites
 from database import db
+from realtime import broadcast_alert
 
 logger = logging.getLogger("routes.vehicle_anomaly_ai")
 
@@ -373,6 +374,53 @@ async def _ask_qwen_narrate(kind: str, facts: dict) -> dict:
 # ═══════════════════════════════════════════════════════════════════
 # Orchestration — un run complet, persistance dédupliquée par clé stable
 # ═══════════════════════════════════════════════════════════════════
+# v3.71 · Jonction Alertes <-> Anomalies IA — jusqu'ici deux systemes
+# totalement etanches (menu unifie en 2 onglets seulement, voir
+# AiAlertsCenter.jsx, mais db.alerts et db.vehicle_anomaly_reports ne se
+# parlaient jamais) : une anomalie vehicule detectee ici n'apparaissait
+# JAMAIS dans le fil d'Alertes principal (pas de badge, pas de push
+# temps reel, pas de notification) - il fallait penser a aller consulter
+# l'onglet Anomalies manuellement. Chaque nouveau rapport publie
+# desormais AUSSI une entree db.alerts (meme mecanisme que les autres
+# sources d'alertes : ANPR blacklist, reseau, scenarios IA), avec un
+# type dedie "ai_anomaly" et une reference vers le rapport d'origine
+# pour naviguer vers le detail complet.
+_ANOMALY_SEVERITY_TO_ALERT = {"info": "info", "warning": "warning", "high": "critical"}
+
+
+async def _publish_anomaly_alert(report: dict) -> None:
+    cam_id = (report.get("camera_ids") or [None])[0]
+    cam_name = "—"
+    if cam_id:
+        cam = await db.cameras.find_one({"id": cam_id}, {"_id": 0, "name": 1})
+        cam_name = (cam or {}).get("name") or "—"
+    site_name = "—"
+    if report.get("site_id"):
+        site = await db.sites.find_one({"id": report["site_id"]}, {"_id": 0, "name": 1})
+        site_name = (site or {}).get("name") or "—"
+    alert = {
+        "id": str(uuid.uuid4()), "type": "ai_anomaly",
+        "anomaly_kind": report["kind"], "anomaly_report_id": report["id"],
+        "severity": _ANOMALY_SEVERITY_TO_ALERT.get(report["severity"], "info"),
+        "message": report["message"],
+        "camera_id": cam_id or "", "camera_name": cam_name,
+        "site_id": report.get("site_id") or "", "site_name": site_name,
+        "acknowledged": False, "timestamp": report["created_at"],
+    }
+    await db.alerts.insert_one(dict(alert))
+    alert.pop("_id", None)
+    await broadcast_alert(alert)
+    if alert["severity"] == "critical":
+        try:
+            from notifications import send_notification
+            await send_notification(
+                "ANOMALIE IA VÉHICULE",
+                f"{alert['message']}\nCaméra : {cam_name} · Site : {site_name}",
+            )
+        except Exception:
+            logger.exception("anomaly_ai: échec send_notification")
+
+
 async def _run_per_vehicle(site_map: dict) -> int:
     """Réutilise _compute_anomaly (routes/vehicles.py) — même moteur que le
     bouton manuel existant sur la fiche véhicule, appliqué ici en masse
@@ -408,7 +456,7 @@ async def _run_per_vehicle(site_map: dict) -> int:
         except Exception:
             logger.exception("anomaly_ai: échec narration per_vehicle %s", plate)
             continue
-        await db.vehicle_anomaly_reports.insert_one({
+        doc = {
             "id": str(uuid.uuid4()), "kind": "per_vehicle", "dedup_key": key,
             "plates": [plate], "camera_ids": [facts["camera_id"]] if facts["camera_id"] else [],
             "site_id": site_map.get(facts["camera_id"]),
@@ -416,7 +464,9 @@ async def _run_per_vehicle(site_map: dict) -> int:
             "severity": verdict["severity"], "message": verdict["message"],
             "created_at": _iso(datetime.now(timezone.utc)),
             "acknowledged": False,
-        })
+        }
+        await db.vehicle_anomaly_reports.insert_one(doc)
+        await _publish_anomaly_alert(doc)
         created += 1
     return created
 
@@ -435,17 +485,19 @@ async def _run_convoys(rows: list[dict], site_map: dict) -> int:
         except Exception:
             logger.exception("anomaly_ai: échec narration convoy %s", c["plates"])
             continue
-        await db.vehicle_anomaly_reports.update_one(
-            {"dedup_key": key},
-            {"$set": {
-                "id": (existing or {}).get("id") or str(uuid.uuid4()), "kind": "convoy", "dedup_key": key,
-                "plates": c["plates"], "camera_ids": [c["camera_id"]],
-                "site_id": site_map.get(c["camera_id"]),
-                "facts": facts, "severity": verdict["severity"], "message": verdict["message"],
-                "created_at": _iso(datetime.now(timezone.utc)), "acknowledged": False,
-            }},
-            upsert=True,
-        )
+        doc = {
+            "id": (existing or {}).get("id") or str(uuid.uuid4()), "kind": "convoy", "dedup_key": key,
+            "plates": c["plates"], "camera_ids": [c["camera_id"]],
+            "site_id": site_map.get(c["camera_id"]),
+            "facts": facts, "severity": verdict["severity"], "message": verdict["message"],
+            "created_at": _iso(datetime.now(timezone.utc)), "acknowledged": False,
+        }
+        await db.vehicle_anomaly_reports.update_one({"dedup_key": key}, {"$set": doc}, upsert=True)
+        # v3.71 · Un convoi deja signale est mis a jour (compteur d'occurrences
+        # croissant) sans redeclencher une alerte a chaque passage — seule la
+        # toute premiere detection publie dans le fil d'Alertes.
+        if not existing:
+            await _publish_anomaly_alert(doc)
         created += 1
     return created
 
@@ -462,14 +514,16 @@ async def _run_waves(rows: list[dict], site_map: dict) -> int:
         except Exception:
             logger.exception("anomaly_ai: échec narration wave %s", w["camera_id"])
             continue
-        await db.vehicle_anomaly_reports.insert_one({
+        doc = {
             "id": str(uuid.uuid4()), "kind": "wave", "dedup_key": key,
             "plates": w["plates"], "camera_ids": [w["camera_id"]],
             "site_id": site_map.get(w["camera_id"]),
             "facts": w, "severity": verdict["severity"], "message": verdict["message"],
             "created_at": _iso(datetime.now(timezone.utc)),
             "acknowledged": False,
-        })
+        }
+        await db.vehicle_anomaly_reports.insert_one(doc)
+        await _publish_anomaly_alert(doc)
         created += 1
     return created
 
@@ -604,12 +658,14 @@ async def _run_cross_site_impossible(rows: list[dict]) -> int:
         except Exception:
             logger.exception("anomaly_ai: échec narration cross_site_impossible %s", cs["plate"])
             continue
-        await db.vehicle_anomaly_reports.insert_one({
+        doc = {
             "id": str(uuid.uuid4()), "kind": "cross_site_impossible", "dedup_key": key,
             "plates": [cs["plate"]], "camera_ids": cs["camera_ids"], "site_id": cs["site_id_a"],
             "facts": facts, "severity": verdict["severity"], "message": verdict["message"],
             "created_at": _iso(datetime.now(timezone.utc)), "acknowledged": False,
-        })
+        }
+        await db.vehicle_anomaly_reports.insert_one(doc)
+        await _publish_anomaly_alert(doc)
         created += 1
     return created
 
@@ -644,12 +700,14 @@ async def _run_long_parking() -> int:
         except Exception:
             logger.exception("anomaly_ai: échec narration long_parking %s", sess["plate"])
             continue
-        await db.vehicle_anomaly_reports.insert_one({
+        doc = {
             "id": str(uuid.uuid4()), "kind": "long_parking", "dedup_key": key,
             "plates": [sess["plate"]], "camera_ids": [sess["camera_id"]], "site_id": sess.get("site_id"),
             "facts": facts, "severity": verdict["severity"], "message": verdict["message"],
             "created_at": _iso(datetime.now(timezone.utc)), "acknowledged": False,
-        })
+        }
+        await db.vehicle_anomaly_reports.insert_one(doc)
+        await _publish_anomaly_alert(doc)
         created += 1
     return created
 

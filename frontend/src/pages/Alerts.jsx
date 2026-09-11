@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
-import { Bell, Check, CheckCheck, AlertTriangle, Info, ShieldAlert, BrainCircuit, Eye } from "lucide-react";
+import { Bell, Check, CheckCheck, AlertTriangle, Info, ShieldAlert, BrainCircuit, Eye, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import EventViewer from "@/components/EventViewer";
@@ -112,6 +113,7 @@ function AiRulesDialog({ open, onClose }) {
 }
 
 export default function Alerts() {
+  const navigate = useNavigate();
   const { t, can, alertPing } = useApp();
   const [alerts, setAlerts] = useState([]);
   const [total, setTotal] = useState(0);
@@ -197,6 +199,7 @@ export default function Alerts() {
         {alerts.map((a) => {
           const s = SEV[a.severity] || SEV.info; const Icon = s.icon;
           const img = a.thumbnail || a.plate_crop;
+          const isAnomaly = a.type === "ai_anomaly";
           return (
             <div key={a.id} className={`bg-card border-l-2 border border-border flex items-center gap-3 px-4 py-3 fade-up ${a.acknowledged ? "opacity-55" : ""}`} style={{ borderLeftColor: s.color }} data-testid="alert-item">
               <Icon size={18} style={{ color: s.color }} className={a.acknowledged ? "" : "rec-dot"} />
@@ -206,7 +209,19 @@ export default function Alerts() {
                 </button>
               )}
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium">{a.message}</div>
+                <div className="text-sm font-medium flex items-center gap-2">
+                  {a.message}
+                  {/* v3.71 · Jonction Alertes <-> Anomalies IA — une anomalie
+                      vehicule publiee ici renvoie vers son rapport complet
+                      (backend/routes/vehicle_anomaly_ai.py::_publish_anomaly_alert). */}
+                  {isAnomaly && (
+                    <button onClick={() => navigate(`/alerts?tab=anomalies&report=${a.anomaly_report_id}`)}
+                      className="shrink-0 flex items-center gap-1 text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-[#A855F7] text-[#A855F7] hover:bg-[#A855F7]/10"
+                      data-testid="alert-anomaly-link" title="Voir le rapport d'anomalie complet">
+                      <Sparkles size={10} /> IA véhicule
+                    </button>
+                  )}
+                </div>
                 <div className="text-xs text-muted-foreground mono">{a.camera_name} · {a.site_name} · {new Date(a.timestamp).toLocaleString()}</div>
               </div>
               <span className="text-[9px] uppercase tracking-wider px-2 py-0.5 border" style={{ borderColor: s.color, color: s.color }}>{a.severity}</span>

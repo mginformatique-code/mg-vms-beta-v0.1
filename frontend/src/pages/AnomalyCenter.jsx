@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import api from "@/lib/api";
 import { Loader2, Sparkles, Car, Users, TrendingUp, CheckCircle2, RefreshCw, ShieldAlert, Ban, CheckSquare, Square, MapPin, ZoomIn } from "lucide-react";
 import { toast } from "sonner";
@@ -104,6 +105,10 @@ export default function AnomalyCenter() {
   const [selected, setSelected] = useState(() => new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [openPlate, setOpenPlate] = useState(null);
+  // v3.71 · Deep-link depuis une alerte "ai_anomaly" (fil d'Alertes) —
+  // voir _publish_anomaly_alert (backend/routes/vehicle_anomaly_ai.py).
+  const [params] = useSearchParams();
+  const focusReportId = params.get("report");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -123,6 +128,16 @@ export default function AnomalyCenter() {
   useEffect(() => {
     api.get("/settings/llm").then(({ data }) => setAiEnabled(!!data.anomaly_ai_enabled)).catch(() => {});
   }, []);
+  useEffect(() => {
+    if (!focusReportId || items.length === 0) return;
+    const el = document.querySelector(`[data-testid="anomaly-report-${focusReportId}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.style.outline = "2px solid #0044FF";
+    el.style.outlineOffset = "2px";
+    const t = setTimeout(() => { el.style.outline = ""; el.style.outlineOffset = ""; }, 3000);
+    return () => clearTimeout(t);
+  }, [focusReportId, items]);
 
   const pendingIds = items.filter((r) => !r.acknowledged).map((r) => r.id);
   const allSelected = pendingIds.length > 0 && pendingIds.every((id) => selected.has(id));

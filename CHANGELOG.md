@@ -3,6 +3,12 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.71-alerts-anomaly-junction] — 2026-09-11 — Jonction Alertes ↔ Anomalies IA véhicule
+
+### Added
+- **Une anomalie véhicule détectée (convoi, vague, confusion de plaque, trajet impossible, stationnement prolongé) publie désormais aussi une entrée dans le fil d'Alertes principal** — badge, notification temps réel et push (si sévérité "high") comme n'importe quelle autre source d'alerte (ANPR liste noire, réseau, scénarios IA). Jusqu'ici les deux systèmes étaient totalement étanches : la fusion de menu (v3.27) n'était qu'une fusion d'affichage (deux onglets), aucune anomalie ne remontait dans le fil principal — il fallait penser à consulter l'onglet Anomalies séparément.
+- Chaque alerte de ce type porte un badge "IA véhicule" cliquable qui ouvre directement le rapport d'anomalie complet correspondant (surligné et centré dans la liste).
+
 ## [v3.70-map-edit-scale-zoom-position] — 2026-09-11 — Carte interactive : édition équipement, taille d'icône, zoom déplacé
 
 ### Added
