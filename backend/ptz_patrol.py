@@ -62,6 +62,11 @@ async def _loop(camera_id: str) -> None:
 
             presets = patrol["preset_ids"]
             dwell = max(2, int(patrol.get("dwell_seconds", 8)))
+            # v3.64 · Vitesse de transition entre presets, réglable par
+            # caméra (défaut 0.5, comme la vitesse manuelle) — auparavant
+            # aucun réglage n'existait, la patrouille utilisait toujours la
+            # vitesse par défaut de la caméra.
+            speed = patrol.get("speed", 0.5)
             idx %= len(presets)
             preset_id = presets[idx]
             try:
@@ -71,7 +76,7 @@ async def _loop(camera_id: str) -> None:
                 # str(), et ne correspond alors plus à aucun preset réel
                 # sur la caméra — la patrouille "marchait" (aucune erreur)
                 # mais n'allait jamais au bon endroit.
-                await drv.ptz_preset(preset_id)
+                await drv.ptz_preset(preset_id, speed)
             except CameraDriverError as e:
                 logger.warning("ptz_patrol: échec goto preset %s caméra=%s (%s)",
                                preset_id, camera_id, e)

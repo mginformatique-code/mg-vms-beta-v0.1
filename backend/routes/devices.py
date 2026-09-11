@@ -21,7 +21,7 @@ Endpoints v0.4.6 :
   POST /api/devices/{camera_id}/ptz/presets   · {name?}        — créer à la position actuelle (v3.44)
   DELETE /api/devices/{camera_id}/ptz/presets/{preset_id}      — supprimer (v3.44)
   GET  /api/devices/{camera_id}/ptz/patrol                     — config + état patrouille (v3.44)
-  PUT  /api/devices/{camera_id}/ptz/patrol    · {enabled, dwell_seconds, preset_ids} (v3.44)
+  PUT  /api/devices/{camera_id}/ptz/patrol    · {enabled, dwell_seconds, preset_ids, speed} (v3.44, speed v3.64)
   GET  /api/devices/{camera_id}/storage       · supports SD/eMMC détectés
   GET  /api/devices/{camera_id}/recordings    · enregistrements locaux [start, end]
   GET  /api/devices/{camera_id}/recordings/stream?file=…   · proxy vidéo (ffmpeg, MP4)
@@ -104,6 +104,9 @@ class PTZPresetBody(BaseModel):
     # dynamiquement (donc quasi tous, sauf les nombres à 1 chiffre par
     # coïncidence).
     id: str = Field(..., min_length=1, max_length=64)
+    # v3.64 · Optionnel — vitesse du déplacement manuel vers ce preset,
+    # cohérente avec le curseur de vitesse déjà réglable pour le joystick.
+    speed: Optional[float] = Field(default=None, ge=0.1, le=1.0)
 
 
 class PTZPresetCreateBody(BaseModel):
@@ -114,6 +117,10 @@ class PTZPatrolBody(BaseModel):
     enabled: bool = False
     dwell_seconds: int = Field(default=8, ge=2, le=600)
     preset_ids: list[str] = Field(default_factory=list)
+    # v3.64 · Vitesse de transition entre presets pendant la patrouille —
+    # jusqu'ici jamais réglable, la caméra utilisait toujours sa vitesse
+    # PTZ par défaut.
+    speed: float = Field(default=0.5, ge=0.1, le=1.0)
 
 
 class PTZAutoTrackBody(BaseModel):
@@ -438,7 +445,7 @@ async def device_ptz_preset(camera_id: str, body: PTZPresetBody,
     ptz_tracking.pause(camera_id)
     try:
         drv = await svc.get_driver(camera_id)
-        await drv.ptz_preset(body.id)
+        await drv.ptz_preset(body.id, body.speed)
         return {"success": True}
     except CameraDriverError as e:
         raise _driver_error_response(e)
@@ -494,7 +501,7 @@ async def device_ptz_get_patrol(camera_id: str,
     cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "ptz_patrol": 1})
     if cam is None:
         raise HTTPException(404, "Caméra introuvable")
-    patrol = cam.get("ptz_patrol") or {"enabled": False, "dwell_seconds": 8, "preset_ids": []}
+    patrol = cam.get("ptz_patrol") or {"enabled": False, "dwell_seconds": 8, "preset_ids": [], "speed": 0.5}
     patrol["running"] = ptz_patrol.is_running(camera_id)
     return patrol
 

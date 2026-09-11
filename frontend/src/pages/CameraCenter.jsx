@@ -1221,7 +1221,7 @@ function PTZTab({ cameraId, caps }) {
   const [presets, setPresets] = useState([]);
   const [presetsLoading, setPresetsLoading] = useState(true);
   const [addingPreset, setAddingPreset] = useState(false);
-  const [patrol, setPatrol] = useState({ enabled: false, dwell_seconds: 8, preset_ids: [], running: false });
+  const [patrol, setPatrol] = useState({ enabled: false, dwell_seconds: 8, preset_ids: [], speed: 0.5, running: false });
   const [patrolLoading, setPatrolLoading] = useState(true);
   const [patrolSaving, setPatrolSaving] = useState(false);
   // v3.59 · Suivi natif (ex. "Auto Track" Reolink) — bascule directe de
@@ -1261,7 +1261,8 @@ function PTZTab({ cameraId, caps }) {
     api.get(`/devices/${cameraId}/ptz/patrol`)
        .then((r) => setPatrol({
          enabled: !!r.data.enabled, dwell_seconds: r.data.dwell_seconds || 8,
-         preset_ids: r.data.preset_ids || [], running: !!r.data.running,
+         preset_ids: r.data.preset_ids || [], speed: r.data.speed || 0.5,
+         running: !!r.data.running,
        }))
        .catch(() => {})
        .finally(() => setPatrolLoading(false));
@@ -1330,7 +1331,7 @@ function PTZTab({ cameraId, caps }) {
     // v3.47 · id est un token opaque ("000", "004"...) — surtout PAS
     // Number(id), qui perdait les zéros de tête et envoyait un token qui
     // ne correspond à aucun preset réel sur la caméra.
-    api.post(`/devices/${cameraId}/ptz/preset`, { id: String(id) })
+    api.post(`/devices/${cameraId}/ptz/preset`, { id: String(id), speed: ptzSpeed })
        .then(() => toast.success(id))
        .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
 
@@ -1362,6 +1363,7 @@ function PTZTab({ cameraId, caps }) {
     setPatrolSaving(true);
     api.put(`/devices/${cameraId}/ptz/patrol`, {
       enabled: next.enabled, dwell_seconds: next.dwell_seconds, preset_ids: next.preset_ids,
+      speed: next.speed,
     }).then((r) => {
       setPatrol({ ...next, running: !!r.data.running });
     }).catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"))
@@ -1547,6 +1549,15 @@ function PTZTab({ cameraId, caps }) {
                  onChange={(e) => setPatrol((p) => ({ ...p, dwell_seconds: Number(e.target.value) || 8 }))}
                  onBlur={() => savePatrol(patrol)}
                  data-testid="ptz-patrol-dwell" />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Label className="text-xs text-muted-foreground whitespace-nowrap">Vitesse de transition</Label>
+          <input type="range" min={0.1} max={1} step={0.1} value={patrol.speed}
+                 onChange={(e) => setPatrol((p) => ({ ...p, speed: Number(e.target.value) }))}
+                 onMouseUp={() => savePatrol(patrol)} onTouchEnd={() => savePatrol(patrol)}
+                 className="w-32" data-testid="ptz-patrol-speed" />
+          <span className="font-mono text-xs text-muted-foreground">{Math.round(patrol.speed * 100)}%</span>
         </div>
 
         {presets.length === 0 ? (

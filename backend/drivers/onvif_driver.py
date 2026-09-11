@@ -379,13 +379,21 @@ class ONVIFDriver(CameraDriver):
         req.Velocity = {"Zoom": {"x": v}}
         await asyncio.to_thread(self._ptz.ContinuousMove, req)
 
-    async def _ptz_preset(self, preset_id) -> None:
+    async def _ptz_preset(self, preset_id, speed: Optional[float] = None) -> None:
         if self._ptz is None:
             raise UnsupportedCapabilityError("Service PTZ indispo")
         profiles = await asyncio.to_thread(self._media.GetProfiles)
         req = self._ptz.create_type("GotoPreset")
         req.ProfileToken = profiles[0].token
         req.PresetToken = str(preset_id)
+        # v3.64 · `Speed` est un champ optionnel du standard ONVIF GotoPreset
+        # (type PTZSpeed, normalisé -1.0..1.0 par axe) — utilisé par la
+        # patrouille automatique pour régler la vitesse de transition entre
+        # presets. Omis (comportement caméra par défaut, inchangé) si aucune
+        # vitesse n'est fournie, ex. un clic manuel sur un preset.
+        if speed is not None:
+            v = max(0.1, min(1.0, speed))
+            req.Speed = {"PanTilt": {"x": v, "y": v}, "Zoom": {"x": v}}
         await asyncio.to_thread(self._ptz.GotoPreset, req)
 
     # ── Presets PTZ · CRUD (v3.44 · patrouille auto) ────────────────
