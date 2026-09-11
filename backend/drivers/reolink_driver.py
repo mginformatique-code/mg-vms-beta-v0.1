@@ -142,7 +142,20 @@ class ReolinkDriver(ONVIFDriver):
         chn_caps: set = set()
         if self._host_api is not None:
             try:
-                chn_caps = set(self._host_api.capabilities.get(_CHANNEL) or [])
+                raw = self._host_api.capabilities.get(_CHANNEL) or {}
+                # v3.63 · reolink-aio >= 0.21.11 environ a changé la forme de
+                # `host.capabilities[channel]` : ce n'est plus directement
+                # l'ensemble des clés d'ability, mais un dict `{None: {...}}`
+                # qui les enveloppe (confirmé en conditions réelles sur une
+                # RLC-81MA, reolink-aio 0.21.15). L'ancien code faisait
+                # `set(raw)` sur ce dict, ce qui donne l'ensemble de ses CLÉS
+                # (`{None}`) au lieu du contenu réel — spotlight/siren/audio
+                # retombaient donc TOUJOURS à False, peu importe le matériel
+                # réel de la caméra. Root cause de la disparition du bouton
+                # lumière/sirène après le bump reolink-aio 0.21.10 → 0.21.15
+                # (v3.61). On accepte les deux formes pour rester compatible
+                # avec une éventuelle régression future de la librairie.
+                chn_caps = set(raw.get(None) or []) if isinstance(raw, dict) else set(raw or [])
             except Exception:
                 chn_caps = set()
 

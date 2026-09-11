@@ -54,6 +54,7 @@ from routes.llm_settings import llm_settings_router
 from routes.llm_logs import llm_logs_router
 from routes.discovery import discovery_router
 from routes.system_admin import system_admin_router, auto_reboot_loop, ntp_resync_loop, docker_cleanup_loop
+from services.camera_device_service import capabilities_refresh_loop
 from routes.console_ssh import console_router
 from routes.live_layout import live_layout_router
 from routes.vehicle_dedup import vehicle_dedup_router, dedup_batch_loop, dedup_auto_approve_loop
@@ -296,6 +297,7 @@ async def on_startup():
         asyncio.create_task(auto_reboot_loop())
         asyncio.create_task(ntp_resync_loop())
         asyncio.create_task(docker_cleanup_loop())
+        asyncio.create_task(capabilities_refresh_loop())
         asyncio.create_task(dedup_batch_loop())
         asyncio.create_task(dedup_auto_approve_loop())
         asyncio.create_task(identity_merge_ai_batch_loop())

@@ -195,7 +195,17 @@ class HikvisionDriver(ONVIFDriver):
 
     async def get_status(self) -> DeviceStatus:
         st = await super().get_status()
-        if self._http is not None and self._caps and self._caps.sdcard:
+        # v3.63 · Ne plus conditionner ce check à `self._caps.sdcard` : ce
+        # flag n'est qu'un instantané pris au moment de `get_capabilities()`
+        # (souvent au tout premier ajout de la caméra) — si aucune carte
+        # n'était insérée à ce moment-là, `sdcard` restait figé à False pour
+        # toute la durée de vie du process, et une carte insérée ensuite
+        # n'apparaissait jamais dans le Centre caméras tant qu'un nouveau
+        # `discover()` manuel n'était pas déclenché. La requête ISAPI
+        # `ContentMgmt/Storage` est déjà protégée par un `try/except` et un
+        # timeout court — l'appeler à chaque poll de statut est sans risque
+        # et reflète l'état réel de la carte, insérée ou non.
+        if self._http is not None:
             try:
                 r = await self._http.get(f"http://{self.host}/ISAPI/ContentMgmt/Storage", timeout=6.0)
                 if r.status_code == 200:

@@ -179,4 +179,36 @@ class CameraDeviceService:
         return cam
 
 
+_CAPABILITIES_REFRESH_EVERY_S = 24 * 3600
+_CAPABILITIES_REFRESH_PAUSE_S = 2.0
+
+
+async def capabilities_refresh_loop() -> None:
+    """v3.63 · Re-découvre périodiquement les capacités de chaque caméra.
+
+    Root cause corrigée en même temps que cette boucle : ``discover()``
+    n'était appelé QUE manuellement (bouton dédié, jamais utilisé sur la
+    quasi-totalité du parc) — une capacité qui change dans le temps (carte
+    SD insérée/retirée après coup, firmware mis à jour) restait donc figée
+    indéfiniment dans ``cameras.capabilities``. Cette boucle rejoue
+    ``discover()`` sur chaque caméra une fois par jour ; une caméra
+    injoignable au moment du passage échoue silencieusement (log seul) sans
+    bloquer les suivantes ni retenter avant le prochain cycle.
+    """
+    from database import db
+    while True:
+        await asyncio.sleep(_CAPABILITIES_REFRESH_EVERY_S)
+        try:
+            cam_ids = [c["id"] for c in await db.cameras.find({}, {"id": 1}).to_list(1000)]
+        except Exception:
+            logger.exception("camera_device_service · impossible de lister les caméras")
+            continue
+        for cam_id in cam_ids:
+            try:
+                await camera_device_service.discover(cam_id)
+            except Exception as e:
+                logger.debug("capabilities_refresh_loop: %s indisponible (%s)", cam_id, e)
+            await asyncio.sleep(_CAPABILITIES_REFRESH_PAUSE_S)
+
+
 camera_device_service = CameraDeviceService()

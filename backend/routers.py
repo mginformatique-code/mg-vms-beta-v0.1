@@ -364,6 +364,20 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
         await send_pipeline_signal("camera_config_changed", {"camera_id": doc["id"]})
     except Exception:
         pass  # best-effort — l'appel direct ci-dessus a déjà fait le travail
+    # v3.63 · Découverte des capacités matérielles réelles (lumière, sirène,
+    # IR, carte SD, audio…) dès la création — avant ce correctif, seule une
+    # caméra ayant reçu un POST /discover manuel (jamais déclenché
+    # automatiquement) avait un champ `capabilities` peuplé ; toutes les
+    # autres (constaté sur la totalité du parc Reolink) n'avaient AUCUNE
+    # capacité enregistrée, ce qui masquait silencieusement les boutons
+    # lumière/sirène et les icônes de capacités du Centre caméras. Fire-and-
+    # forget (asyncio.create_task) : ne doit jamais retarder ni faire
+    # échouer la réponse de création si la caméra met du temps à répondre.
+    try:
+        from services.camera_device_service import camera_device_service
+        asyncio.create_task(camera_device_service.discover(doc["id"]))
+    except Exception:
+        pass
     doc.pop("_id", None); doc.pop("password", None)
     return doc
 
