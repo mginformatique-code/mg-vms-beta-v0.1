@@ -21,7 +21,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
-import { Wifi, WifiOff, ScanLine, Search } from "lucide-react";
+import { Wifi, WifiOff, ScanLine, Search, Volume2, Mic, Lightbulb, Move } from "lucide-react";
 
 export default function CameraCenterDispatch() {
   const navigate = useNavigate();
@@ -56,6 +56,20 @@ export default function CameraCenterDispatch() {
         {filtered.map((c) => {
           const pluginCount = (c.enabled_plugins || []).length;
           const anprActive = (c.enabled_plugins || []).includes("fast-alpr");
+          // v3.61 · Icônes de capacités matérielles (HP/micro/lumière/PTZ),
+          // ancrées à DROITE de la carte (sens inverse des badges
+          // plugins/ANPR ci-dessous, à gauche) — demande explicite. Le
+          // haut-parleur/micro/lumière viennent de `capabilities`, un champ
+          // déclaré dans le modèle mais réellement peuplé aujourd'hui
+          // seulement pour certaines caméras (ex. driver ONVIF générique) —
+          // une caméra sans capacités détectées n'affiche simplement aucune
+          // de ces trois icônes, pas une icône "absente" trompeuse. PTZ
+          // vient de `ptz_enabled`, toujours renseigné.
+          const caps = c.capabilities || {};
+          const hasSpeaker = !!(caps.speaker || caps.audio_output || caps.two_way_audio);
+          const hasMic = !!(caps.microphone || caps.audio_input);
+          const hasLight = !!(caps.spotlight || caps.white_light);
+          const hasPtz = !!c.ptz_enabled;
           return (
             <button key={c.id} onClick={() => navigate(`/camera-center/${c.id}`)} data-testid="camera-center-card"
                     className="text-left bg-card border border-border p-3 hover:border-[#0044FF] transition-colors">
@@ -67,12 +81,22 @@ export default function CameraCenterDispatch() {
                 </span>
               </div>
               <div className="text-xs text-muted-foreground mb-2 truncate">{c.site_name || "—"}</div>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-[10px] px-1.5 py-0.5 border border-border text-muted-foreground">{pluginCount} plugin{pluginCount > 1 ? "s" : ""} IA</span>
-                {anprActive && (
-                  <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 border border-[#0044FF]/40 text-[#0044FF]">
-                    <ScanLine size={10} /> ANPR
-                  </span>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] px-1.5 py-0.5 border border-border text-muted-foreground">{pluginCount} plugin{pluginCount > 1 ? "s" : ""} IA</span>
+                  {anprActive && (
+                    <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 border border-[#0044FF]/40 text-[#0044FF]">
+                      <ScanLine size={10} /> ANPR
+                    </span>
+                  )}
+                </div>
+                {(hasSpeaker || hasMic || hasLight || hasPtz) && (
+                  <div className="flex items-center gap-1 text-muted-foreground shrink-0">
+                    {hasSpeaker && <Volume2 size={12} title="Haut-parleur" />}
+                    {hasMic && <Mic size={12} title="Microphone" />}
+                    {hasLight && <Lightbulb size={12} title="Lumière" />}
+                    {hasPtz && <Move size={12} title="PTZ" />}
+                  </div>
                 )}
               </div>
             </button>

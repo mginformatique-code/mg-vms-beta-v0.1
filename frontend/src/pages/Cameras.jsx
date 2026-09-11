@@ -133,6 +133,25 @@ export default function Cameras() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cams, sortKey, sortDir]);
 
+  // v3.61 · Détection de doublon dans le formulaire d'ajout/édition — une
+  // MÊME IP + MÊME objectif (profile_token en ONVIF, rtsp_url en RTSP
+  // manuel) qu'une caméra déjà existante est un vrai doublon (bloquant) ;
+  // une même IP avec un objectif DIFFÉRENT est le cas normal d'une caméra
+  // multi-objectifs (TrackMix, RLC-81MA...) — jamais bloquant, juste
+  // informatif. Sans objectif encore identifié (avant auto-détection), on
+  // ne peut pas trancher : informatif seulement, jamais de blocage a priori.
+  const duplicateInfo = useMemo(() => {
+    if (!form.ip) return null;
+    const sameIp = cams.filter((c) => c.ip === form.ip && c.id !== editingId);
+    if (sameIp.length === 0) return null;
+    const identifier = form.mode === "onvif" ? form.profile_token : form.rtsp_url;
+    if (identifier) {
+      const exact = sameIp.find((c) => (form.mode === "onvif" ? c.profile_token : c.rtsp_url) === identifier);
+      if (exact) return { blocking: true, cams: [exact] };
+    }
+    return { blocking: false, cams: sameIp };
+  }, [cams, form.ip, form.mode, form.profile_token, form.rtsp_url, editingId]);
+
   const closeDialog = () => { setOpen(false); setEditingId(null); setForm(EMPTY_FORM); setConnCheck(null); setProfiles([]); };
   const openCreate = () => { setEditingId(null); setForm(EMPTY_FORM); setConnCheck(null); setProfiles([]); setOpen(true); };
   const openEdit = (c) => {
@@ -777,6 +796,26 @@ export default function Cameras() {
             </div>
           </div>
 
+          {duplicateInfo && !editingId && (
+            duplicateInfo.blocking ? (
+              <div className="flex items-start gap-2 px-3 py-2 border border-[#FF3333] bg-[#FF3333]/10 text-[#FF3333] text-sm" data-testid="cam-dup-blocking">
+                <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
+                <span>
+                  Cette caméra existe déjà (même IP et même flux) : <b>{duplicateInfo.cams.map((c) => c.name).join(", ")}</b>.
+                  Impossible de créer un doublon.
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-start gap-2 px-3 py-2 border border-border bg-secondary/40 text-muted-foreground text-sm" data-testid="cam-dup-info">
+                <AlertTriangle size={16} className="flex-shrink-0 mt-0.5 text-[#FFB800]" />
+                <span>
+                  D'autres caméras existent déjà sur cette IP : <b>{duplicateInfo.cams.map((c) => c.name).join(", ")}</b>.
+                  Normal pour une caméra à plusieurs objectifs (grand angle + téléobjectif) — pas un doublon si c'est un objectif différent.
+                </span>
+              </div>
+            )
+          )}
+
           <DialogFooter>
             <button onClick={closeDialog} className="px-4 py-2 border border-border text-sm hover:bg-secondary">Annuler</button>
             {editingId && form.mode === "onvif" && (
@@ -800,14 +839,14 @@ export default function Cameras() {
               const rtspOk = connCheck?.steps?.find((s) => s.name === "rtsp_open")?.status === "ok";
               const canOverride = form.mode === "onvif" && !editingId && connCheck && onvifOk && !rtspOk;
               return canOverride ? (
-                <button onClick={() => submit({ allow_rtsp_override: true })} disabled={saving}
+                <button onClick={() => submit({ allow_rtsp_override: true })} disabled={saving || duplicateInfo?.blocking}
                         data-testid="cam-form-override" title="ONVIF est validé mais le test RTSP a échoué — la caméra sera enregistrée hors ligne, corrigez le RTSP manuellement ensuite."
                         className="px-4 py-2 border border-[#FFB800] text-[#FFB800] hover:bg-[#FFB800]/10 text-sm flex items-center gap-2">
                   {saving && <Loader2 size={15} className="animate-spin" />} Créer malgré le test RTSP
                 </button>
               ) : null;
             })()}
-            <button onClick={() => submit()} disabled={saving} data-testid="cam-form-submit" className="px-4 py-2 bg-[#0044FF] text-white text-sm flex items-center gap-2">{saving && <Loader2 size={15} className="animate-spin" />}{editingId ? "Enregistrer les modifications" : "Créer la caméra"}</button>
+            <button onClick={() => submit()} disabled={saving || duplicateInfo?.blocking} data-testid="cam-form-submit" className="px-4 py-2 bg-[#0044FF] text-white text-sm flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">{saving && <Loader2 size={15} className="animate-spin" />}{editingId ? "Enregistrer les modifications" : "Créer la caméra"}</button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

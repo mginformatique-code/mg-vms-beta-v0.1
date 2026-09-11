@@ -1457,15 +1457,8 @@ function PTZTab({ cameraId, caps }) {
       </div>
 
       <Card className="p-4 space-y-3" data-testid="cam-ptz-presets">
-        <div className="flex items-center justify-between">
-          <div className="text-sm text-muted-foreground">
-            {t("ptz.presets_hint")}
-          </div>
-          <Button variant="outline" size="sm" onClick={addPreset} disabled={addingPreset}
-                  data-testid="ptz-preset-add">
-            {addingPreset ? <Loader2 size={14} className="animate-spin mr-1" /> : <Plus size={14} className="mr-1" />}
-            {t("ptz.preset_add")}
-          </Button>
+        <div className="text-sm text-muted-foreground">
+          {t("ptz.presets_hint")}
         </div>
         {presetsLoading ? (
           <div className="text-sm text-muted-foreground flex items-center gap-2">
