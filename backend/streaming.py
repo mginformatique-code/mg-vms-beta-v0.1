@@ -2373,6 +2373,18 @@ async def cameras_auto_detect(body: AutoDetectInput, user: dict = Depends(requir
             info["live_resolution"] = details.get("resolution")
             info["live_fps"] = details.get("fps")
             info["live_codec"] = details.get("codec")
+    # v3.65 · Tentative de regroupement des profils par objectif physique
+    # via `VideoSourceConfiguration.SourceToken` — ABANDONNÉE après test en
+    # conditions réelles : les 2 vraies caméras multi-objectifs du parc
+    # (RLC-81MA, TrackMix PoE) renvoient le MÊME SourceToken ("000") pour
+    # leurs 3 profils, alors qu'elles ont bien 2 capteurs physiques
+    # distincts — ce champ ONVIF standard ne fait donc pas la distinction
+    # sur ce matériel. `video_source_token` reste extrait sur chaque profil
+    # (donnée factuelle, potentiellement utile ailleurs) mais aucun
+    # regroupement n'en est déduit ici — voir le chantier "auto-détection
+    # multi-objectifs" pour la suite (probablement une heuristique par
+    # motif d'URL/nom de profil, à vérifier vendor par vendor, comme
+    # `_stream_channel_key()` le fait déjà pour un besoin voisin).
     await log_audit(user, "onvif_auto_detect", target=ip)
     # `onvif_port` renvoyé = le port RÉELLEMENT retenu, pour que le formulaire
     # se corrige tout seul si le repli ci-dessus a joué.
@@ -2520,6 +2532,15 @@ def _onvif_probe(ip: str, port: int, username: str, password: str) -> dict:
                 logger.info("onvif_probe %s: profil %s sans RTSP (%s) — profil skippé",
                             ip, profile.token, type(e).__name__)
             enc = getattr(profile, "VideoEncoderConfiguration", None)
+            # v3.65 · `VideoSourceConfiguration.SourceToken` identifie le
+            # capteur physique (l'objectif) dont provient ce profil — un
+            # appareil multi-objectifs (TrackMix, RLC-81MA...) expose
+            # plusieurs SourceToken distincts, chacun avec ses propres
+            # profils main/sub. Jusqu'ici jamais extrait : impossible de
+            # distinguer "2 qualités du même objectif" de "2 objectifs
+            # différents" à partir de la seule liste de profils ONVIF.
+            vsc = getattr(profile, "VideoSourceConfiguration", None)
+            source_token = str(getattr(vsc, "SourceToken", "")) if vsc else None
             result_profiles.append({
                 "token": profile.token,
                 "name": str(profile.Name),
@@ -2527,6 +2548,7 @@ def _onvif_probe(ip: str, port: int, username: str, password: str) -> dict:
                 "codec": str(getattr(enc, "Encoding", "")) if enc else None,
                 "resolution": (f"{enc.Resolution.Width}x{enc.Resolution.Height}"
                                if enc and getattr(enc, "Resolution", None) else None),
+                "video_source_token": source_token or None,
             })
 
     # 3. PTZ : capacité OPTIONNELLE (jamais bloquante)
