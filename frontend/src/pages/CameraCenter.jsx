@@ -1403,7 +1403,7 @@ function PTZTab({ cameraId, caps }) {
     <div className="space-y-4">
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px] gap-4 items-start">
         <Card className="p-3 space-y-2" data-testid="cam-ptz-live">
-          <div className="relative aspect-video bg-black">
+          <div className="relative aspect-video bg-black group">
             {cam ? (
               <>
                 <LivePlayer key={cameraId} camera={cam} hd={false}

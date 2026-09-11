@@ -25,9 +25,12 @@
  *   - TTS (parler, inchangé)            · POST /api/cameras/{id}/audio/tts { text }
  *   - Reboot (inchangé)                 · POST /api/cameras/{id}/reboot (confirm requis)
  *
- * `footer` (bool, def. false) : rendu en barre pleine largeur persistante
- * (usage : CameraCenter LiveTab) au lieu du petit cluster coin bas-gauche
- * qui n'apparaît qu'au survol (usage : mosaïque LiveView, tuiles étroites).
+ * `footer` (bool, def. false) : cluster compact coin bas-DROITE (usage :
+ * CameraCenter, onglet PTZ) au lieu du petit cluster coin bas-gauche
+ * (usage : mosaïque LiveView, tuiles étroites) — les deux variantes
+ * partagent désormais le même comportement discret par défaut / visible au
+ * survol (v3.64 : l'ancienne barre plein-largeur opaque de la variante
+ * `footer` mangeait trop de place sur la vidéo).
  */
 import React, { useState } from "react";
 import { Lightbulb, Moon, Siren, Volume2, RefreshCw, X, Loader2 } from "lucide-react";
@@ -67,7 +70,6 @@ export default function CameraControlOverlay({ cam, footer = false, visible = tr
   const hasLight = !!(caps?.spotlight || caps?.white_light);
   const hasSiren = !!caps?.siren;
   const hasIr = !!caps?.ir_control;
-  const hasAnyDeviceControl = hasLight || hasSiren || hasIr;
 
   const toggleLight = async () => {
     const next = !lightOn;
@@ -154,7 +156,12 @@ export default function CameraControlOverlay({ cam, footer = false, visible = tr
         </ActionBtn>
       )}
       <ActionBtn onClick={() => setTtsOpen(true)} testid="ctrl-tts" title="TTS (parler)">
-        <Volume2 size={14} />
+        {/* v3.64 · Léger décalage optique de l'icône Volume2 par rapport aux
+            autres (Lightbulb/Moon/Siren/RefreshCw) à taille égale — signalé
+            visuellement par l'utilisateur ("bouton du son légèrement décalé
+            vers le haut"). Correction cosmétique via un micro-ajustement
+            vertical, sans toucher aux autres icônes. */}
+        <Volume2 size={14} className="translate-y-px" />
       </ActionBtn>
       <ActionBtn onClick={reboot} testid="ctrl-reboot" title="Redémarrer la caméra" busy={busy === "reboot"}>
         <RefreshCw size={14} />
@@ -163,18 +170,23 @@ export default function CameraControlOverlay({ cam, footer = false, visible = tr
   );
 
   if (footer) {
-    // Barre pleine largeur, persistante — pied de la visualisation
-    // (usage : CameraCenter LiveTab, plus de place qu'une tuile de mosaïque).
+    // v3.64 · Retiré le bandeau plein-largeur opaque (bg-black/75 sur toute
+    // la largeur) — signalé par l'utilisateur comme mangeant trop de place
+    // sur la vue vidéo. Remplacé par un cluster d'icônes compact en bas à
+    // droite, discret par défaut (opacity-40) et pleinement visible au
+    // survol du conteneur vidéo parent (classe `group` requise côté parent
+    // — voir CameraCenter.jsx, carte `cam-ptz-live`). Le texte d'état
+    // "aucune fonction…"/"chargement…" est retiré : sans capacité détectée,
+    // le cluster est simplement absent (rien à afficher), cohérent avec le
+    // principe déjà appliqué aux icônes de Centre caméras (pas de badge
+    // "absent" trompeur). TTS et Reboot restent toujours proposés (aucune
+    // capacité requise), donc le cluster n'est jamais vide.
     return (
-      <div className="absolute bottom-0 inset-x-0 flex items-center justify-between gap-2 px-2 py-1.5 bg-black/75 backdrop-blur-sm"
+      <div className="absolute bottom-2 right-2 flex items-center gap-0.5 opacity-40 hover:opacity-100 group-hover:opacity-100 transition-opacity"
            data-testid={`camera-controls-footer-${camId}`}>
-        <div className="flex items-center gap-3 text-[10px] uppercase tracking-wider text-white/50">
-          {!hasAnyDeviceControl && !caps && "Chargement des capacités…"}
-          {!hasAnyDeviceControl && caps && "Aucune fonction relais/lumière/sirène sur cette caméra"}
-        </div>
-        <div className="flex gap-0.5">{buttons}</div>
+        {buttons}
         {ttsOpen && (
-          <div className="absolute bottom-11 right-2 z-30 bg-black/90 border border-[#00E5FF]/40 p-2 w-64 backdrop-blur-sm"
+          <div className="absolute bottom-9 right-0 z-30 bg-black/90 border border-[#00E5FF]/40 p-2 w-64 backdrop-blur-sm"
                onClick={(e) => e.stopPropagation()} data-testid="tts-panel">
             <TtsPanel ttsText={ttsText} setTtsText={setTtsText} onClose={() => setTtsOpen(false)} onSend={sendTts} busy={busy === "tts"} />
           </div>
