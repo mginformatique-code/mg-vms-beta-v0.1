@@ -1468,6 +1468,7 @@ function PTZTab({ cameraId, caps }) {
       </div>
 
       {caps?.ptz && (
+      <>
       <Card className="p-4 space-y-3" data-testid="cam-ptz-presets">
         <div className="text-sm text-muted-foreground">
           {t("ptz.presets_hint")}
@@ -1669,6 +1670,7 @@ function PTZTab({ cameraId, caps }) {
           )}
         </div>
       </Card>
+      </>
       )}
     </div>
   );
