@@ -20,6 +20,34 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 ### Known limitation
 - Une fraction des messages espacés normalement échoue encore silencieusement (aucune erreur, aucune trace différenciable dans les journaux go2rtc/MG-VMS) — confirmé correspondre à un problème ouvert et non résolu en amont, spécifique à la combinaison go2rtc + back-channel Reolink ([issue GitHub #2007](https://github.com/AlexxIT/go2rtc/issues/2007)). Diagnostiquer plus loin demanderait une capture réseau radio (WiFi) entre go2rtc et la caméra, hors de portée sans accès physique au réseau.
 
+## [v3.61-dual-lens-ntp-bulk-disk-cleanup] — 2026-09-10 — Panne TrackMix (double objectif) corrigée, synchro NTP en masse, nettoyage disque système, sécurité comptes démo
+
+### Fixed
+- **Panne "plus de vue live" sur une caméra PTZ double-objectif (Reolink TrackMix PoE) depuis la veille**, alors que l'enregistrement continuait normalement sur les deux objectifs. Root cause : MG-VMS n'a aucune notion de "device physique multi-objectifs" — chaque objectif est une fiche caméra indépendante, et `streaming.py::pick_preview_stream()` ne reconnaît que 3 conventions d'URL vendeur (Reolink `h264preview_NN_*`, Hikvision `/Streaming/channels/N`, Dahua `?channel=N`) pour éviter qu'une fiche récupère le sous-flux d'un AUTRE objectif du même appareil. Les URLs réelles de la TrackMix (`/Preview_01_sub`, `/Preview_01_autotrack`) ne correspondent à aucune de ces conventions, ce qui faisait basculer par erreur les deux fiches sur le même sous-flux — mauvais objectif affiché en vue live, ET une 3ᵉ connexion RTSP redondante que l'appareil refusait (plafond réel de 2 flux simultanés), d'où la coupure totale. Corrigé en ajoutant un signal fiable déjà présent en base (une autre fiche caméra partage-t-elle la même IP ?) pour désactiver ce raccourci "mono-objectif" dans ce cas précis, sans toucher au comportement déjà correct des modèles couverts par les 3 conventions existantes.
+- **Sécurité — comptes de démonstration recréés après suppression** : `tech@`, `client@`, `viewer@mg-vms.com` (mots de passe connus, visibles dans le code) étaient recréés à chaque redémarrage backend tant qu'ils n'existaient plus en base — même défaut qu'un bug déjà corrigé sur le compte admin, jamais appliqué à ces trois comptes. Corrigé avec le même mécanisme "seed une seule fois" ; comptes supprimés pour de bon. Correctif préventif identique appliqué aux caméras de démonstration go2rtc.
+- **Disque système à 75%** : root cause = 32 Go de cache de build Docker jamais purgé (accumulé au fil des mises à jour). Nettoyé manuellement (75% → 48%).
+- **PTZ (Camera Center) en mouvement continu au lieu de maintien** : un simple clic sur une flèche PTZ lançait un mouvement continu qu'il fallait arrêter manuellement (bouton "■") — comportement standard ONVIF/Reolink pour `ptz/move`. Bascule en "maintenir pour tourner" (appui = démarre, relâchement = stoppe), y compris tactile.
+- **Panneau TTS passant derrière la timeline** en vue live focus (aucun `z-index` explicite sur le panneau).
+
+### Added
+- **Nettoyage automatique/manuel du cache de build Docker** (Paramètres → Stockage) : programmable (intervalle configurable) ou déclenché manuellement, même mécanisme fichier-marqueur + script hôte que le redémarrage programmé (le backend n'a jamais accès direct à Docker).
+- **Détail par disque au survol de l'indicateur "STO"** : jusqu'ici l'indicateur ne surveillait que le disque système, jamais le disque des enregistrements (souvent séparé) — nouveau panneau au survol listant chaque disque réel détecté avec sa propre barre de remplissage.
+- **Bouton "Forcer la synchro NTP"** (toutes les caméras `ntp_managed`) sans attendre le cycle programmé.
+- **Synchro NTP en masse sur une sélection de caméras** (Réglages → Date/Heure) : menu déroulant listant les caméras non synchronisées, case "Tout cocher", application groupée en un clic.
+- **Tri des colonnes de la liste des caméras** (statut/nom/site/IP/mode/mode vidéo/résolution/codec/PTZ), IP triée numériquement par octet.
+- **Avertissement à l'ajout d'une caméra déjà enregistrée** : "Détecter automatiquement la caméra" prévenait jusqu'ici silencieusement en cas d'IP déjà connue — message explicite désormais (nom + IP de la caméra existante).
+- Case "Tester aussi l'API NTP" retirée de la fiche d'ajout de caméra (suppression demandée, sans remplacement).
+- `reolink-aio` mis à jour `0.21.10` → `0.21.15` (support des sous-canaux côté protocole Baichuan) — bump préventif, confirmé non responsable de la panne TrackMix ci-dessus.
+
+## [v3.62-camera-dup-detection-hw-icons] — 2026-09-10 — Détection de doublon caméra à l'ajout, icônes de capacités matérielles, nettoyage UI
+
+### Added
+- **Détection de doublon à l'ajout d'une caméra, avec blocage intelligent** : un vrai doublon (même IP **et** même identifiant de flux — jeton ONVIF ou URL RTSP) bloque désormais réellement l'ajout (bouton désactivé, bandeau explicite dans le formulaire). Une même IP avec un identifiant différent — cas normal d'une caméra à plusieurs objectifs (TrackMix, RLC-81MA...) — reste seulement informative, jamais bloquante.
+- **Icônes de capacités matérielles dans Centre caméras** (haut-parleur/micro/lumière/PTZ), ancrées à droite de chaque carte — même esprit que le badge ANPR déjà existant, à gauche. Limite connue : la plupart des caméras Reolink du parc n'ont pas encore leurs capacités matérielles peuplées en base (champ existant mais rarement renseigné) — seul le badge PTZ est fiable sur tout le parc à ce jour.
+
+### Fixed
+- **Bouton "Ajouter un point ici" en double** dans la carte "Points de surveillance" (Camera Center, onglet PTZ) — faisait doublon avec le contrôle PTZ dédié du même onglet ; retiré précisément à cet endroit (les autres emplacements du bouton, contrôle PTZ et vue live, sont inchangés).
+
 ## [v3.56-websocket-permanent-licence] — 2026-09-09 — Connexion WebSocket permanente MG-VMS ↔ Center (panne quasi instantanée + vérification licence continue)
 
 ### Added
