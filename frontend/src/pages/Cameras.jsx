@@ -87,6 +87,10 @@ export default function Cameras() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [brands, setBrands] = useState([]);
   const [profiles, setProfiles] = useState([]); // profils ONVIF découverts
+  // v3.72 · Auto-détection multi-objectifs (heuristique motif URL/nom,
+  // voir backend/streaming.py::_detect_lens_groups) — purement informatif,
+  // aucune création automatique de fiche.
+  const [lensGroups, setLensGroups] = useState([]);
   const [pools, setPools] = useState([]);
   useEffect(() => { api.get("/storage/overview").then((r) => setPools(r.data.pools || [])).catch(() => {}); }, [open]);
 
@@ -213,6 +217,7 @@ export default function Cameras() {
         profile_token: form.mode === "onvif" ? (form.profile_token || "") : "",
       });
       setConnCheck(data);
+      setLensGroups([]);
       if (data.profiles && data.profiles.length) {
         setProfiles(data.profiles);
         // Sélectionne par défaut le profil de plus haute résolution (typiquement Main),
@@ -246,6 +251,7 @@ export default function Cameras() {
         username: form.username, password: form.password,
       });
       setProfiles(data.profiles || []);
+      setLensGroups(data.lens_groups || []);
       const parseRes = (r) => {
         const m = /(\d+)\s*x\s*(\d+)/i.exec(r || "");
         return m ? (parseInt(m[1], 10) * parseInt(m[2], 10)) : 0;
@@ -550,6 +556,19 @@ export default function Cameras() {
                 {form.manufacturer && (
                   <div className="text-xs mono text-muted-foreground" data-testid="onvif-detected">
                     {form.manufacturer} · {form.model} · FW {form.firmware} {form.ptz_enabled && <span className="ml-1 text-[9px] px-1 bg-[#0044FF] text-white">PTZ</span>}
+                  </div>
+                )}
+                {lensGroups.length > 1 && (
+                  <div className="border border-[#A855F7] bg-[#A855F7]/5 p-2 text-xs space-y-1" data-testid="lens-groups-notice">
+                    <div className="font-medium text-[#A855F7]">Cet appareil semble avoir {lensGroups.length} objectifs distincts</div>
+                    {lensGroups.map((g) => (
+                      <div key={g.label} className="text-[11px] text-muted-foreground">
+                        <span className="font-medium">{g.label}</span> : {g.profiles.map((p) => p.name).join(", ")}
+                      </div>
+                    ))}
+                    <p className="text-[10px] text-muted-foreground pt-1">
+                      Choisissez le profil du 1er objectif ci-dessous pour cette fiche, enregistrez, puis relancez l'ajout avec l'IP de cet appareil pour créer la 2ᵉ fiche avec le profil de l'autre objectif.
+                    </p>
                   </div>
                 )}
                 {profiles.length > 0 && (

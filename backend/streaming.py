@@ -169,6 +169,57 @@ def _stream_channel_key(url: str) -> Optional[str]:
     return None
 
 
+# v3.72 · Auto-detection multi-objectifs (suite du chantier) - regroupe les
+# profils ONVIF decouverts par objectif physique probable, pour PREVENIR
+# l'utilisateur des l'ajout (pas de creation automatique de fiches - deux
+# fiches independantes restent creees manuellement, chacune avec son bon
+# profil). VideoSourceConfiguration.SourceToken (v3.65) est ECARTE : verifie
+# non fiable sur le materiel reel du parc (RLC-81MA, TrackMix PoE - meme
+# token pour tous les profils malgre 2 capteurs distincts). Deux motifs
+# vendor connus, dans l'ordre :
+#   1) Canal numerote dans l'URL (Reolink h264Preview_NN, Hikvision
+#      /Streaming/channels/NN, Dahua ?channel=NN) - reutilise
+#      _stream_channel_key(), deja fiable pour ce motif (RLC-81MA).
+#   2) Motif Reolink TrackMix : un objectif "suivi/telephoto" expose un ou
+#      plusieurs profils nommes/urles avec "autotrack"/"telephoto"/"zoom",
+#      sans canal numerote distinct - le reste des profils (main/sub) forme
+#      le premier objectif (grand angle).
+# Si aucun motif ne matche : un seul groupe (comportement inchange,
+# caméra mono-objectif).
+def _detect_lens_groups(profiles: list[dict]) -> list[dict]:
+    if not profiles:
+        return []
+
+    by_channel: dict[str, list[dict]] = {}
+    unmatched: list[dict] = []
+    for p in profiles:
+        key = _stream_channel_key(p.get("rtsp_url") or "")
+        if key:
+            by_channel.setdefault(key, []).append(p)
+        else:
+            unmatched.append(p)
+    if len(by_channel) > 1:
+        groups = [
+            {"label": f"Objectif {i}", "profiles": plist}
+            for i, (_key, plist) in enumerate(sorted(by_channel.items()), start=1)
+        ]
+        if unmatched:
+            groups.append({"label": "Non classé", "profiles": unmatched})
+        return groups
+
+    autotrack_re = re.compile(r"autotrack|telephoto|zoom", re.IGNORECASE)
+    autotrack = [p for p in profiles
+                 if autotrack_re.search(p.get("name") or "") or autotrack_re.search(p.get("rtsp_url") or "")]
+    rest = [p for p in profiles if p not in autotrack]
+    if autotrack and rest:
+        return [
+            {"label": "Objectif 1 (grand angle)", "profiles": rest},
+            {"label": "Objectif 2 (téléobjectif / suivi)", "profiles": autotrack},
+        ]
+
+    return [{"label": "Objectif unique", "profiles": profiles}]
+
+
 def _derive_sub_url(main_url: str) -> str:
     """Déduit l'URL du sous-flux à partir de celle du flux principal.
 
@@ -2373,18 +2424,19 @@ async def cameras_auto_detect(body: AutoDetectInput, user: dict = Depends(requir
             info["live_resolution"] = details.get("resolution")
             info["live_fps"] = details.get("fps")
             info["live_codec"] = details.get("codec")
-    # v3.65 · Tentative de regroupement des profils par objectif physique
-    # via `VideoSourceConfiguration.SourceToken` — ABANDONNÉE après test en
-    # conditions réelles : les 2 vraies caméras multi-objectifs du parc
-    # (RLC-81MA, TrackMix PoE) renvoient le MÊME SourceToken ("000") pour
-    # leurs 3 profils, alors qu'elles ont bien 2 capteurs physiques
-    # distincts — ce champ ONVIF standard ne fait donc pas la distinction
-    # sur ce matériel. `video_source_token` reste extrait sur chaque profil
-    # (donnée factuelle, potentiellement utile ailleurs) mais aucun
-    # regroupement n'en est déduit ici — voir le chantier "auto-détection
-    # multi-objectifs" pour la suite (probablement une heuristique par
-    # motif d'URL/nom de profil, à vérifier vendor par vendor, comme
-    # `_stream_channel_key()` le fait déjà pour un besoin voisin).
+    # v3.65 · `VideoSourceConfiguration.SourceToken` écarté — ne distingue
+    # pas les objectifs sur le matériel réel du parc (même token pour tous
+    # les profils sur RLC-81MA/TrackMix). `video_source_token` reste extrait
+    # par profil (donnée factuelle) mais aucun regroupement n'en est déduit.
+    # v3.72 · Heuristique par motif d'URL/nom de profil à la place (voir
+    # _detect_lens_groups ci-dessus) — regroupe par objectif probable pour
+    # PRÉVENIR l'utilisateur (pas de création automatique de fiches, la
+    # fiabilité vendor-par-vendor n'est pas encore assez éprouvée pour ça).
+    lens_groups = _detect_lens_groups(info.get("profiles", []))
+    if len(lens_groups) > 1:
+        info["lens_groups"] = lens_groups
+        logger.info("auto-detect %s : %d objectif(s) probable(s) détecté(s) (%s)",
+                    ip, len(lens_groups), ", ".join(g["label"] for g in lens_groups))
     await log_audit(user, "onvif_auto_detect", target=ip)
     # `onvif_port` renvoyé = le port RÉELLEMENT retenu, pour que le formulaire
     # se corrige tout seul si le repli ci-dessus a joué.

@@ -3,6 +3,15 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.72-multi-lens-detection-hint] — 2026-09-11 — Auto-détection multi-objectifs à l'ajout (avertissement)
+
+### Added
+- **Détection automatique du nombre d'objectifs probables** à l'ajout d'une caméra (bouton "Détecter automatiquement") — heuristique par motif d'URL/nom de profil (canal numéroté type Reolink/Hikvision/Dahua, ou motif "autotrack/téléobjectif" côté Reolink TrackMix), après l'échec confirmé du champ ONVIF standard `SourceToken` (v3.65/v3.66, ne distingue pas les objectifs sur le matériel réel). **Vérifié en conditions réelles sur les 2 vraies caméras multi-objectifs du parc** (RLC-81MA, TrackMix PoE) : les 2 objectifs sont correctement identifiés et regroupés dans les deux cas.
+- Un encart apparaît dans le formulaire d'ajout listant les objectifs détectés et leurs profils, pour guider la création de la 2ᵉ fiche avec le bon profil.
+
+### Notes techniques
+- Volontairement **informatif seulement** dans cette passe (pas de création automatique des deux fiches en un clic) — chaque fiche continue de passer par sa propre validation de connectivité (ONVIF + RTSP) avant création, jugé plus sûr qu'une automatisation bypassant ce contrôle. Reste ouvert si demandé : bouton "Créer la 2ᵉ fiche" one-click.
+
 ## [v3.71-alerts-anomaly-junction] — 2026-09-11 — Jonction Alertes ↔ Anomalies IA véhicule
 
 ### Added
