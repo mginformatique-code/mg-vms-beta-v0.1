@@ -172,21 +172,29 @@ export default function CameraControlOverlay({ cam, footer = false, visible = tr
   if (footer) {
     // v3.64 · Retiré le bandeau plein-largeur opaque (bg-black/75 sur toute
     // la largeur) — signalé par l'utilisateur comme mangeant trop de place
-    // sur la vue vidéo. Remplacé par un cluster d'icônes compact en bas à
-    // droite, discret par défaut (opacity-40) et pleinement visible au
-    // survol du conteneur vidéo parent (classe `group` requise côté parent
-    // — voir CameraCenter.jsx, carte `cam-ptz-live`). Le texte d'état
-    // "aucune fonction…"/"chargement…" est retiré : sans capacité détectée,
-    // le cluster est simplement absent (rien à afficher), cohérent avec le
+    // sur la vue vidéo. Remplacé par un cluster d'icônes compact, discret
+    // par défaut (opacity-40) et pleinement visible au survol du conteneur
+    // vidéo parent (classe `group` requise côté parent — voir
+    // CameraCenter.jsx, carte `cam-ptz-live`). Le texte d'état "aucune
+    // fonction…"/"chargement…" est retiré : sans capacité détectée, le
+    // cluster est simplement absent (rien à afficher), cohérent avec le
     // principe déjà appliqué aux icônes de Centre caméras (pas de badge
     // "absent" trompeur). TTS et Reboot restent toujours proposés (aucune
     // capacité requise), donc le cluster n'est jamais vide.
+    // v3.68 · Déplacé de bas-DROITE à bas-GAUCHE : `LivePlayer.jsx` a son
+    // propre bouton muet/son intégré (`${dataTestId}-mute-btn`, mode
+    // webrtc) ancré à `bottom-7 right-2` — les deux se chevauchaient dans
+    // l'onglet PTZ (seul endroit où `footer` est utilisé), signalé à
+    // plusieurs reprises par l'utilisateur avant qu'on identifie qu'il
+    // s'agissait de deux boutons "son" DIFFÉRENTS (muet du lecteur vidéo
+    // vs TTS de ce composant) superposés au même coin. Rien d'autre
+    // n'occupe le bas-gauche de la vue live dans ce contexte.
     return (
-      <div className="absolute bottom-2 right-2 flex items-center gap-0.5 opacity-40 hover:opacity-100 group-hover:opacity-100 transition-opacity"
+      <div className="absolute bottom-2 left-2 flex items-center gap-0.5 opacity-40 hover:opacity-100 group-hover:opacity-100 transition-opacity"
            data-testid={`camera-controls-footer-${camId}`}>
         {buttons}
         {ttsOpen && (
-          <div className="absolute bottom-9 right-0 z-30 bg-black/90 border border-[#00E5FF]/40 p-2 w-64 backdrop-blur-sm"
+          <div className="absolute bottom-9 left-0 z-30 bg-black/90 border border-[#00E5FF]/40 p-2 w-64 backdrop-blur-sm"
                onClick={(e) => e.stopPropagation()} data-testid="tts-panel">
             <TtsPanel ttsText={ttsText} setTtsText={setTtsText} onClose={() => setTtsOpen(false)} onSend={sendTts} busy={busy === "tts"} />
           </div>
