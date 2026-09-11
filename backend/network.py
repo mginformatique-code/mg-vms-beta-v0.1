@@ -44,6 +44,9 @@ class EquipmentPositionInput(BaseModel):
     y: Optional[float] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
+    # v3.70 · Taille d'affichage de l'icône sur la carte (1.0 = normal) —
+    # même champ que cameras.map_position.icon_scale (site_manager.py).
+    icon_scale: Optional[float] = None
 
 
 def _public(doc: dict) -> dict:

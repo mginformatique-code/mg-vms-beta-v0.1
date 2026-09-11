@@ -194,6 +194,10 @@ class MapPositionInput(BaseModel):
     # v0.5.2.c · Phase 3 — photos d'installation embarquées dans map_position
     # (chaque item {type, data_uri, uploaded_at}, taille validée côté frontend).
     photos: Optional[list] = None
+    # v3.70 · Taille d'affichage de l'icône sur la carte (1.0 = normal),
+    # indépendante du zoom du plan — demandé pour distinguer visuellement
+    # des caméras/équipements de facto plus importants sur un même plan.
+    icon_scale: Optional[float] = None
 
 
 # ═══════════════════════════════════════════════════════════════════

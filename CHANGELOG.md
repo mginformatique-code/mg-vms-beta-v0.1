@@ -3,6 +3,18 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.70-map-edit-scale-zoom-position] — 2026-09-11 — Carte interactive : édition équipement, taille d'icône, zoom déplacé
+
+### Added
+- **Panneau d'édition pour un équipement réseau posé sur la carte** (renommer, changer le type, retirer du plan sans le supprimer de l'inventaire, lien direct vers Supervision réseau) — jusqu'ici, sélectionner un équipement ne faisait que le surligner, aucune édition possible depuis la Carte (seules les caméras avaient ce panneau).
+- **Taille d'icône réglable individuellement** pour une caméra ou un équipement (curseur 50-200 %, dans leur panneau respectif) — sur les deux modes de carte (plan image et carte live).
+
+### Fixed
+- **Boutons +/- de zoom (carte live) cachés par la barre d'outils** (Plan/Caméras/Couches) qui occupe le haut-gauche de l'écran — déplacés à droite (topright).
+
+### Notes techniques
+- La rotation d'une caméra à 360° (icône + cône FOV) était déjà pleinement supportée (champ numérique libre, sans limite, dans le panneau caméra) — vérifié en revoyant le chantier, aucune correction nécessaire sur ce point.
+
 ## [v3.69-ptz-patrol-speed-save-button] — 2026-09-11 — Bouton "Enregistrer" explicite pour la vitesse de patrouille
 
 ### Fixed

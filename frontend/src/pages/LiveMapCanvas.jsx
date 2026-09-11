@@ -10,7 +10,7 @@
 // fonctionnelle que le canvas Konva (MapCenter.jsx) : clic-droit sur un
 // élément ou le vide, glisser-déposer, "Attacher une connexion".
 import React, { useEffect, useMemo, useState } from "react";
-import { MapContainer, TileLayer, Marker, Polygon, Polyline, useMap, useMapEvents } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polygon, Polyline, ZoomControl, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
@@ -41,6 +41,9 @@ function cameraDivIcon(cam, { selected, hasAuditIssue, layers }) {
   const showName = layers?.name !== false;
   const showBadges = layers?.badges !== false;
   const showStatus = layers?.status !== false;
+  const iconScale = pos.icon_scale || 1;
+  const baseSize = 32;
+  const scaledSize = Math.round(baseSize * iconScale);
 
   const badgesHtml = showBadges && roles.length
     ? `<div style="display:flex;gap:2px;margin-top:2px;justify-content:center">${roles.map((r) =>
@@ -51,6 +54,7 @@ function cameraDivIcon(cam, { selected, hasAuditIssue, layers }) {
   return L.divIcon({
     className: "mgvms-cam-marker",
     html: `
+      <div style="transform:scale(${iconScale});transform-origin:center top">
       <div style="position:relative;width:32px;height:32px;display:flex;align-items:center;justify-content:center">
         <div style="position:absolute;width:22px;height:22px;border-radius:50%;background:#0d1117;
                     border:2px solid ${covColor};transform:rotate(${rot}deg)">
@@ -62,9 +66,10 @@ function cameraDivIcon(cam, { selected, hasAuditIssue, layers }) {
       </div>
       ${showName ? `<div style="text-align:center;font-size:11px;color:#e6e6e6;text-shadow:0 1px 2px #000;white-space:nowrap;margin-top:1px">${(cam.name || cam.id?.slice(0, 6) || "")}</div>` : ""}
       ${badgesHtml}
+      </div>
     `,
-    iconSize: [32, 32],
-    iconAnchor: [16, 16],
+    iconSize: [scaledSize, scaledSize],
+    iconAnchor: [scaledSize / 2, scaledSize / 2],
   });
 }
 
@@ -72,9 +77,13 @@ function cameraDivIcon(cam, { selected, hasAuditIssue, layers }) {
 // de type, pas d'icône lucide rendue sur la carte — voir MapCenter.jsx).
 function equipmentDivIcon(eq, { selected, showName, showStatus }) {
   const dotColor = STATUS_COLOR[eq.status] || "#71717a";
+  const iconScale = eq.icon_scale || 1;
+  const scaledW = Math.round(32 * iconScale);
+  const scaledH = Math.round(22 * iconScale);
   return L.divIcon({
     className: "mgvms-eq-marker",
     html: `
+      <div style="transform:scale(${iconScale});transform-origin:center top">
       <div style="position:relative;width:32px;height:22px;display:flex;align-items:center;justify-content:center">
         <div style="position:absolute;inset:2px 5px;border-radius:3px;background:#0d1117;border:2px solid #71717a;
                     display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:bold;color:#e6e6e6">
@@ -84,9 +93,10 @@ function equipmentDivIcon(eq, { selected, showName, showStatus }) {
         ${selected ? `<div style="position:absolute;inset:-4px;border-radius:5px;border:2px dashed #00E676"></div>` : ""}
       </div>
       ${showName ? `<div style="text-align:center;font-size:11px;color:#e6e6e6;text-shadow:0 1px 2px #000;white-space:nowrap;margin-top:1px">${eq.name || "—"}</div>` : ""}
+      </div>
     `,
-    iconSize: [32, 22],
-    iconAnchor: [16, 11],
+    iconSize: [scaledW, scaledH],
+    iconAnchor: [scaledW / 2, scaledH / 2],
   });
 }
 
@@ -156,6 +166,7 @@ export default function LiveMapCanvas({
         center={initialCenter}
         zoom={initialZoom}
         className="w-full h-full"
+        zoomControl={false}
         // v3.54 · z-index EXPLICITE (pas juste `position:relative`) —
         // sans lui, .leaflet-container ne crée pas de nouveau contexte
         // d'empilement CSS, et les panneaux internes de Leaflet (tuiles,
@@ -167,6 +178,11 @@ export default function LiveMapCanvas({
         data-testid="live-map-canvas"
       >
         <TileLayer key={tileKind} url={TILE_LAYERS[tileKind].url} attribution={TILE_LAYERS[tileKind].attribution} maxZoom={19} />
+        {/* v3.69 · Repositionné à droite (topright) — la barre d'outils du
+            parent (Plan/Caméras/Couches...) occupe toute la largeur en
+            haut-gauche et cachait partiellement les boutons +/- par
+            défaut de Leaflet (topleft). */}
+        <ZoomControl position="topright" />
         <RecenterOnPlanChange center={initialCenter} zoom={initialZoom} />
         <MapEventsBridge onCenterChange={onCenterChange} onContextMenuEmpty={onContextMenuEmpty} />
 

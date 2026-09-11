@@ -160,6 +160,8 @@ function CameraNode({ cam, selected, layers, auditMode, auditFlags, onDrag, onDr
       x={pos.x || 0}
       y={pos.y || 0}
       rotation={rot}
+      scaleX={pos.icon_scale || 1}
+      scaleY={pos.icon_scale || 1}
       draggable
       onDragMove={(e) => onDrag(cam.id, { x: e.target.x(), y: e.target.y() })}
       onDragEnd={(e) => onDragEnd(cam.id, { x: e.target.x(), y: e.target.y() })}
@@ -241,6 +243,8 @@ function EquipmentNode({ eq, selected, showName, showStatus, onDrag, onDragEnd, 
     <Group
       x={eq.x || 0}
       y={eq.y || 0}
+      scaleX={eq.icon_scale || 1}
+      scaleY={eq.icon_scale || 1}
       draggable
       onDragMove={(e) => onDrag(eq.id, { x: e.target.x(), y: e.target.y() })}
       onDragEnd={(e) => onDragEnd(eq.id, { x: e.target.x(), y: e.target.y() })}
@@ -389,6 +393,11 @@ function CameraPanel({ camera, onClose, onChange, onOpenInCenter }) {
               <input type="number" step="0.5" className="w-full mt-1 px-2 py-1 bg-background border border-border text-sm"
                 value={local.lens_mm ?? DEFAULT_CAM.lens_mm} onChange={(e) => set("lens_mm", num(e.target.value))} />
             </label>
+            <label className="text-xs col-span-2">Taille de l'icône ({Math.round((local.icon_scale || 1) * 100)}%)
+              <input type="range" min={0.5} max={2} step={0.1} className="w-full mt-1"
+                value={local.icon_scale || 1} onChange={(e) => set("icon_scale", num(e.target.value))}
+                data-testid="map-cam-icon-scale" />
+            </label>
             <label className="text-xs col-span-2">Fixation
               <select className="w-full mt-1 px-2 py-1 bg-background border border-border text-sm"
                 value={local.fixture || "wall"} onChange={(e) => set("fixture", e.target.value)}>
@@ -490,6 +499,100 @@ function CameraPanel({ camera, onClose, onChange, onOpenInCenter }) {
         >
           <ExternalLink size={13} /> Voir dans Camera Center
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// v3.70 · Équipement details panel (right side) — équivalent de
+// CameraPanel pour un équipement réseau posé sur la carte (comblait un
+// vrai manque : sélectionner un équipement ne faisait que le surligner,
+// aucun moyen de le renommer/changer son type/ajuster sa taille d'icône
+// depuis la Carte, contrairement aux caméras).
+// ─────────────────────────────────────────────────────────────────────
+function EquipmentPanel({ eq, onClose, onScaleChange, onRename, onRemoveFromPlan, onOpenInNetwork }) {
+  const [name, setName] = useState(eq?.name || "");
+  const [type, setType] = useState(eq?.type || "Générique");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setName(eq?.name || ""); setType(eq?.type || "Générique"); }, [eq?.id]);
+
+  if (!eq) return null;
+  const Icon = TYPE_ICON[eq.type] || BoxIcon;
+  const dirty = name !== (eq.name || "") || type !== (eq.type || "Générique");
+
+  const save = async () => {
+    setSaving(true);
+    try { await onRename(name, type); toast.success("Équipement mis à jour"); }
+    catch (e) { toast.error("Mise à jour refusée"); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="w-80 bg-card border-l border-border flex flex-col overflow-y-auto" data-testid="map-equipment-panel">
+      <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+        <div className="min-w-0 flex items-center gap-2">
+          <Icon size={16} className="text-muted-foreground shrink-0" />
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">Équipement</div>
+            <div className="font-medium truncate">{eq.name || "—"}</div>
+          </div>
+        </div>
+        <button onClick={onClose} className="hover:text-[#FF3333]" data-testid="map-equipment-panel-close">
+          <X size={16} />
+        </button>
+      </div>
+
+      <div className="p-4 space-y-4 text-sm">
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <div><span className="text-muted-foreground">IP : </span><span className="mono">{eq.ip || "—"}</span></div>
+          <div><span className="text-muted-foreground">Statut : </span>
+            <span className="mono" style={{ color: STATUS_COLOR[eq.status] || "#71717a" }}>{eq.status || "—"}</span>
+          </div>
+          <div><span className="text-muted-foreground">Modèle : </span>{eq.model || "—"}</div>
+          <div><span className="text-muted-foreground">Fabricant : </span>{eq.vendor || "—"}</div>
+        </div>
+
+        <div className="pt-3 border-t border-border space-y-2">
+          <label className="text-xs block">Nom
+            <input className="w-full mt-1 px-2 py-1 bg-background border border-border text-sm"
+              value={name} onChange={(e) => setName(e.target.value)}
+              data-testid="map-eq-name" />
+          </label>
+          <label className="text-xs block">Type
+            <select className="w-full mt-1 px-2 py-1 bg-background border border-border text-sm"
+              value={type} onChange={(e) => setType(e.target.value)}
+              data-testid="map-eq-type">
+              {EQUIPMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </label>
+          {dirty && (
+            <button type="button" disabled={saving} onClick={save} data-testid="map-eq-save"
+              className="w-full px-3 py-1.5 text-xs bg-[#0044FF] text-white disabled:opacity-50">
+              {saving ? "Enregistrement…" : "Enregistrer"}
+            </button>
+          )}
+        </div>
+
+        <div className="pt-3 border-t border-border">
+          <label className="text-xs block">Taille de l'icône ({Math.round((eq.icon_scale || 1) * 100)}%)
+            <input type="range" min={0.5} max={2} step={0.1} className="w-full mt-1"
+              value={eq.icon_scale || 1}
+              onChange={(e) => onScaleChange(Number(e.target.value))}
+              data-testid="map-eq-icon-scale" />
+          </label>
+        </div>
+
+        <div className="pt-3 border-t border-border flex flex-col gap-2">
+          <button type="button" onClick={onOpenInNetwork} data-testid="map-eq-open-network"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border hover:bg-secondary">
+            <ExternalLink size={13} /> Ouvrir dans Supervision réseau
+          </button>
+          <button type="button" onClick={onRemoveFromPlan} data-testid="map-eq-remove"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border hover:bg-secondary">
+            <Unlink size={13} /> Retirer du plan (garde l'inventaire)
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1026,6 +1129,21 @@ export default function MapCenter() {
     } catch (e) { toast.error("Renommage refusé"); }
   };
 
+  // v3.70 · Variante utilisee par EquipmentPanel (champs directement dans
+  // le panneau, pas de window.prompt) — meme endpoint que renameEquipment.
+  const updateEquipmentFromPanel = async (eq, name, type) => {
+    await api.put(`/network/equipment/${eq.id}`, {
+      name, type, site_id: eq.site_id, ip: eq.ip || "",
+      model: eq.model || "", vendor: eq.vendor || "", parent_id: eq.parent_id || null,
+    });
+    if (selectedPlan) await loadPlan(selectedPlan.id);
+  };
+
+  const onEquipmentIconScaleChange = (eqId, scale) => {
+    onEqDrag(eqId, { icon_scale: scale });
+    saveEquipmentPos(eqId, { icon_scale: scale });
+  };
+
   const removeEquipmentFromPlan = async (eqId) => {
     try {
       await api.delete(`/network/equipment/${eqId}/position`);
@@ -1085,6 +1203,7 @@ export default function MapCenter() {
   };
 
   const selectedCam = cameras.find((c) => c.id === selectedCamId) || null;
+  const selectedEq = equipment.find((e) => e.id === selectedEqId) || null;
   const camerasOnPlan = cameras;
   // v3.54 · Mesure/export PNG/PDF restent hors périmètre v1 pour une carte
   // live (mesure géo-référencée et export DOM/tuiles = calculs différents
@@ -1631,6 +1750,18 @@ export default function MapCenter() {
           onClose={() => setSelectedCamId(null)}
           onChange={onCameraChange}
           onOpenInCenter={() => navigate(`/cameras?focus=${selectedCam.id}`)}
+        />
+      )}
+
+      {/* v3.70 · Equipment panel */}
+      {selectedEq && (
+        <EquipmentPanel
+          eq={selectedEq}
+          onClose={() => setSelectedEqId(null)}
+          onScaleChange={(scale) => onEquipmentIconScaleChange(selectedEq.id, scale)}
+          onRename={(name, type) => updateEquipmentFromPanel(selectedEq, name, type)}
+          onRemoveFromPlan={async () => { await removeEquipmentFromPlan(selectedEq.id); setSelectedEqId(null); }}
+          onOpenInNetwork={() => navigate(`/network?focus=${selectedEq.id}`)}
         />
       )}
     </div>
