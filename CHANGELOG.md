@@ -3,6 +3,17 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.74-export-wizard-mgvms-player] — 2026-09-12 — Gros chantier Export vidéo : assistant multi-étapes + MG-VMS Player (1ʳᵉ tranche)
+
+### Added
+- **Assistant d'export vidéo en 4 étapes** (Enregistrements → Exporter…) : sélection d'une ou plusieurs caméras → format (ZIP structuré ou MP4 fichier unique) + codec (H.264 par défaut, ou H.265/HEVC réencodé) → système cible (indicatif) → inclusion du lecteur autonome.
+- **Export multi-caméras** — jusqu'ici un export ne portait que sur une seule caméra ; le format ZIP assemble désormais un fichier vidéo par caméra sélectionnée sur la même période.
+- **MG-VMS Player** — lecteur HTML autonome et léger embarqué dans l'export (dossier `PLAYER/index.html`), s'ouvre en double-clic dans n'importe quel navigateur sans installation ni serveur local (métadonnées embarquées directement dans la page, aucun appel réseau requis). Affiche la liste des caméras exportées avec lecture native et infos (site, durée, taille, codec).
+- **Structure d'export autonome** `VIDEO/` + `PLAYER/` (si inclus) + `DATA/export.json` + `README.txt` + `checksums.sha256` (empreintes d'intégrité SHA-256 des fichiers vidéo).
+
+### Notes techniques
+- Reste pour une prochaine tranche : détection automatique des supports USB avec confirmation "Préparer le support MG-VMS" (jamais de formatage silencieux) — hors périmètre de cette 1ʳᵉ tranche, qui porte sur l'assistant et la structure d'export elle-même.
+
 ## [v3.73-blacklist-external-sources] — 2026-09-11 — Gros chantier ANPR : sources de blacklist externes (1ʳᵉ tranche)
 
 ### Added

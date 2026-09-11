@@ -5,6 +5,7 @@ import api from "@/lib/api";
 import { Film, Play, Calendar, Clock, HardDrive, Activity, Cctv, AlertTriangle, Circle, Scissors, Download, FileArchive, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import VirtualGrid from "@/components/VirtualGrid";
+import ExportWizard from "@/components/ExportWizard";
 
 const MODE_COLORS = { continuous: "#0044FF", motion: "#FFB800", ai: "#00E676" };
 const DAY_SEC = 86400;
@@ -64,8 +65,9 @@ export default function Recordings() {
   const [selStart, setSelStart] = useState(8 * 3600);
   const [selEnd, setSelEnd] = useState(10 * 3600);
   const [hasSel, setHasSel] = useState(false);
-  const [format, setFormat] = useState("zip");
-  const [exporting, setExporting] = useState(false);
+  // v3.74 · `format`/`exporting` retires — la logique d'export vit desormais
+  // dans ExportWizard.jsx (assistant multi-etapes).
+  const [wizardOpen, setWizardOpen] = useState(false);
   const [exports, setExports] = useState([]);
   const [viewStart, setViewStart] = useState(0);
   const [viewEnd, setViewEnd] = useState(DAY_SEC);
@@ -167,23 +169,6 @@ export default function Recordings() {
     const d = new Date(`${date}T00:00:00`);
     d.setSeconds(sec);
     return d.toISOString();
-  };
-
-  const doExport = async () => {
-    if (selEnd <= selStart) return toast.error("La fin doit être après le début");
-    setExporting(true);
-    try {
-      const { data: exp } = await api.post("/recordings/export", {
-        camera_id: cameraId, start: isoFromSec(selStart), end: isoFromSec(selEnd), format,
-      });
-      if (exp.format === "zip" && exp.status === "ready") {
-        toast.success(`Export ZIP prêt (${exp.segment_count} segments)`);
-        await downloadExport(exp.id);
-      } else {
-        toast.info(t("rec.mp4_production"));
-      }
-      loadExports();
-    } catch (e) { toast.error("Échec de l'export"); } finally { setExporting(false); }
   };
 
   const downloadExport = async (id) => {
@@ -345,17 +330,9 @@ export default function Recordings() {
                         onChange={(e) => { setSelEnd(hhmmToSec(e.target.value)); setHasSel(true); }}
                         className="bg-card border border-input text-sm px-2 py-1.5 outline-none mono" />
                     </div>
-                    <div>
-                      <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("rec.format")}</label>
-                      <select data-testid="rec-export-format" value={format} onChange={(e) => setFormat(e.target.value)}
-                        className="bg-card border border-input text-sm px-2 py-1.5 outline-none">
-                        <option value="zip">ZIP</option>
-                        <option value="mp4">MP4</option>
-                      </select>
-                    </div>
-                    <button onClick={doExport} disabled={exporting} data-testid="rec-export-btn"
+                    <button onClick={() => setWizardOpen(true)} disabled={selEnd <= selStart} data-testid="rec-export-btn"
                       className="flex items-center gap-2 px-3 py-2 bg-[#0044FF] text-white text-sm hover:bg-[#0033cc] disabled:opacity-60">
-                      {exporting ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} {t(exporting ? "rec.exporting" : "rec.export_btn")}
+                      <Download size={15} /> Exporter…
                     </button>
                     {hasSel && (
                       <button onClick={() => setHasSel(false)} data-testid="rec-clear-sel"
@@ -393,6 +370,16 @@ export default function Recordings() {
                     ))}
                   </div>
                 )}
+                <ExportWizard
+                  open={wizardOpen}
+                  onClose={() => setWizardOpen(false)}
+                  cams={cams}
+                  primaryCameraId={cameraId}
+                  start={isoFromSec(selStart)}
+                  end={isoFromSec(selEnd)}
+                  durationLabel={`${secToHHMM(selStart)} → ${secToHHMM(selEnd)} · ${fmtDur(selEnd - selStart)}`}
+                  onExported={loadExports}
+                />
                 </>)}
               </div>
             </div>

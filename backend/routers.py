@@ -2557,20 +2557,63 @@ async def recordings_media(recording_id: str, request: Request, t: float = 0):
 
 # ============ EXPORT DE SÉQUENCE ============
 class ExportRequest(BaseModel):
-    camera_id: str
+    camera_id: Optional[str] = None        # legacy (compat) — une seule caméra
+    camera_ids: Optional[List[str]] = None  # v3.74 · assistant multi-étapes — plusieurs caméras
     start: str   # ISO datetime
     end: str     # ISO datetime
-    format: str = "zip"   # zip | mp4
+    format: str = "zip"     # zip | mp4 (mp4 = fichier unique, une seule caméra)
+    codec: str = "h264"     # v3.74 · h264 (copie, rapide) | h265 (réencodage HEVC, plus lourd)
+    target_os: str = "any"  # v3.74 · windows | macos | linux | any — texte du README uniquement
+    include_player: bool = False  # v3.74 · embarque un lecteur HTML autonome (dossier PLAYER/)
+
+
+def _export_slug(name: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]+", "_", name or "camera").strip("_") or "camera"
+
+
+async def _assemble_camera_clip(cam: dict, segs: list, codec: str, out_dir: str) -> Optional[dict]:
+    """Concatène les segments d'UNE caméra en un seul MP4 (même logique que
+    l'assemblage FFmpeg déjà existant, réutilisée par caméra pour l'export
+    multi-caméras v3.74). `codec=h265` réencode réellement (libx265,
+    confirmé disponible dans l'image) ; `h264` reste une copie sans
+    réencodage (rapide, comportement historique inchangé)."""
+    files = [s.get("file_path") for s in segs if s.get("file_path") and os.path.exists(s.get("file_path", ""))]
+    if not files:
+        return None
+    slug = _export_slug(cam.get("name"))
+    out_path = os.path.join(out_dir, f"{slug}.mp4")
+    list_path = os.path.join(out_dir, f"{slug}.txt")
+    with open(list_path, "w") as lf:
+        lf.write("\n".join(f"file '{f}'" for f in files))
+    if codec == "h265":
+        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", list_path,
+               "-c:v", "libx265", "-preset", "fast", "-crf", "28", "-c:a", "copy", out_path]
+    else:
+        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", list_path,
+               "-c", "copy", out_path]
+    proc = await asyncio.create_subprocess_exec(*cmd)
+    await proc.wait()
+    os.unlink(list_path)
+    if proc.returncode != 0 or not os.path.exists(out_path):
+        return None
+    duration_sec = int(sum(
+        (datetime.fromisoformat(s["end"]) - datetime.fromisoformat(s["start"])).total_seconds() for s in segs
+    ))
+    return {
+        "filename": f"{slug}.mp4", "size_mb": round(os.path.getsize(out_path) / 1e6, 1),
+        "duration_sec": duration_sec, "segment_count": len(segs),
+    }
 
 
 @api_router.post("/recordings/export")
 async def create_export(data: ExportRequest, user: dict = Depends(require_permission("export_files"))):
-    cam = await db.cameras.find_one({"id": data.camera_id}, {"_id": 0, "password": 0})
-    if not cam:
-        raise HTTPException(404, "Caméra introuvable")
-    allowed = allowed_sites(user)
-    if allowed is not None and cam.get("site_id") not in allowed:
-        raise HTTPException(403, "Accès refusé à cette caméra")
+    cam_ids = data.camera_ids or ([data.camera_id] if data.camera_id else [])
+    if not cam_ids:
+        raise HTTPException(400, "Au moins une caméra requise")
+    fmt = data.format if data.format in ("zip", "mp4") else "zip"
+    codec = data.codec if data.codec in ("h264", "h265") else "h264"
+    if fmt == "mp4" and len(cam_ids) > 1:
+        raise HTTPException(400, "Le format MP4 (fichier unique) ne supporte qu'une seule caméra à la fois — utilisez ZIP pour en exporter plusieurs")
     try:
         start_dt = datetime.fromisoformat(data.start)
         end_dt = datetime.fromisoformat(data.end)
@@ -2578,49 +2621,80 @@ async def create_export(data: ExportRequest, user: dict = Depends(require_permis
         raise HTTPException(400, "Plage horaire invalide")
     if end_dt <= start_dt:
         raise HTTPException(400, "La fin doit être après le début")
-    fmt = data.format if data.format in ("zip", "mp4") else "zip"
-    # Segments chevauchant la plage
-    segs = await db.recordings.find(
-        {"camera_id": data.camera_id, "start": {"$lt": data.end}, "end": {"$gt": data.start}},
-        {"_id": 0}
-    ).sort("start", 1).to_list(500)
+
+    allowed = allowed_sites(user)
+    cams = []
+    for cid in cam_ids:
+        cam = await db.cameras.find_one({"id": cid}, {"_id": 0, "password": 0})
+        if not cam:
+            raise HTTPException(404, f"Caméra introuvable : {cid}")
+        if allowed is not None and cam.get("site_id") not in allowed:
+            raise HTTPException(403, f"Accès refusé à la caméra {cam['name']}")
+        cams.append(cam)
+
     duration_sec = int((end_dt - start_dt).total_seconds())
     now = datetime.now(timezone.utc).isoformat()
-    doc = {
-        "id": str(uuid.uuid4()), "user_id": user["id"],
-        "camera_id": cam["id"], "camera_name": cam["name"], "site_name": cam.get("site_name", ""),
-        "start": data.start, "end": data.end, "format": fmt,
-        "segment_count": len(segs), "duration_sec": duration_sec,
-        "segment_ids": [s["id"] for s in segs],
-        "created_at": now,
-    }
-    if fmt == "zip":
-        doc["status"] = "ready"
-        doc["message"] = "Archive ZIP prête (clips MP4 réels + manifeste)."
-    else:  # mp4 : concaténation réelle FFmpeg (sans réencodage)
-        files = [s.get("file_path") for s in segs if s.get("file_path") and os.path.exists(s.get("file_path", ""))]
-        if not files:
-            raise HTTPException(400, "Aucun segment vidéo sur disque dans cette plage")
+    export_id = str(uuid.uuid4())
+
+    if fmt == "mp4":
+        cam = cams[0]
+        segs = await db.recordings.find(
+            {"camera_id": cam["id"], "start": {"$lt": data.end}, "end": {"$gt": data.start}}, {"_id": 0}
+        ).sort("start", 1).to_list(500)
         export_dir = os.path.join(os.environ.get("RECORDINGS_DIR", "/app/recordings"), "exports")
         os.makedirs(export_dir, exist_ok=True)
-        out_path = os.path.join(export_dir, f"{doc['id']}.mp4")
-        list_path = os.path.join(export_dir, f"{doc['id']}.txt")
-        with open(list_path, "w") as lf:
-            lf.write("\n".join(f"file '{f}'" for f in files))
-        proc = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
-            "-i", list_path, "-c", "copy", out_path)
-        await proc.wait()
-        os.unlink(list_path)
-        if proc.returncode != 0 or not os.path.exists(out_path):
-            raise HTTPException(500, "Échec de l'assemblage FFmpeg")
-        doc["status"] = "ready"
-        doc["file_path"] = out_path
-        doc["size_mb"] = round(os.path.getsize(out_path) / 1e6, 1)
-        doc["message"] = "Clip MP4 assemblé (FFmpeg, copie sans réencodage)."
+        result = await _assemble_camera_clip(cam, segs, codec, export_dir)
+        if not result:
+            raise HTTPException(400, "Aucun segment vidéo sur disque dans cette plage")
+        tmp_path = os.path.join(export_dir, result["filename"])
+        final_path = os.path.join(export_dir, f"{export_id}.mp4")
+        os.replace(tmp_path, final_path)
+        doc = {
+            "id": export_id, "user_id": user["id"], "camera_id": cam["id"], "camera_name": cam["name"],
+            "site_name": cam.get("site_name", ""), "start": data.start, "end": data.end,
+            "format": "mp4", "codec": codec, "segment_count": len(segs), "duration_sec": duration_sec,
+            "created_at": now, "status": "ready", "file_path": final_path,
+            "size_mb": result["size_mb"],
+            "message": f"Clip MP4 assemblé ({codec.upper()}, {'copie sans réencodage' if codec == 'h264' else 'réencodage HEVC'}).",
+        }
+        await db.exports.insert_one(dict(doc))
+        doc.pop("_id", None)
+        await log_audit(user, "recording_export", cam["name"], f"mp4/{codec} · {len(segs)} segments")
+        return doc
+
+    # ZIP structuré (1+ caméras) — VIDEO/PLAYER/DATA/README, voir download_export.
+    export_dir = os.path.join(os.environ.get("RECORDINGS_DIR", "/app/recordings"), "exports", export_id)
+    os.makedirs(export_dir, exist_ok=True)
+    clips = []
+    total_segments = 0
+    for cam in cams:
+        segs = await db.recordings.find(
+            {"camera_id": cam["id"], "start": {"$lt": data.end}, "end": {"$gt": data.start}}, {"_id": 0}
+        ).sort("start", 1).to_list(500)
+        total_segments += len(segs)
+        result = await _assemble_camera_clip(cam, segs, codec, export_dir)
+        if result:
+            clips.append({**result, "camera_id": cam["id"], "camera_name": cam["name"],
+                          "site_name": cam.get("site_name", "")})
+    if not clips:
+        import shutil
+        shutil.rmtree(export_dir, ignore_errors=True)
+        raise HTTPException(400, "Aucun segment vidéo sur disque pour les caméras/plage sélectionnées")
+
+    doc = {
+        "id": export_id, "user_id": user["id"],
+        "camera_ids": [c["id"] for c in cams], "camera_names": [c["name"] for c in cams],
+        "start": data.start, "end": data.end, "format": "zip", "codec": codec,
+        "target_os": data.target_os, "include_player": data.include_player,
+        "segment_count": total_segments, "duration_sec": duration_sec,
+        "clips": clips, "export_dir": export_dir,
+        "created_at": now, "status": "ready",
+        "message": f"Archive prête — {len(clips)} caméra(s), {codec.upper()}"
+                   f"{' + lecteur intégré' if data.include_player else ''}.",
+    }
     await db.exports.insert_one(dict(doc))
     doc.pop("_id", None)
-    await log_audit(user, "recording_export", cam["name"], f"{fmt} · {len(segs)} segments")
+    await log_audit(user, "recording_export", ", ".join(doc["camera_names"]), f"zip/{codec} · {len(clips)} caméra(s)")
     return doc
 
 
@@ -2636,7 +2710,8 @@ async def download_export(export_id: str, user: dict = Depends(require_permissio
         raise HTTPException(404, "Export introuvable")
     if exp["status"] != "ready":
         raise HTTPException(400, "Export non prêt")
-    await log_audit(user, "export_downloaded", exp["camera_name"], exp["id"])
+    cam_label = ", ".join(exp.get("camera_names") or [exp.get("camera_name", "")])
+    await log_audit(user, "export_downloaded", cam_label, exp["id"])
     if exp["format"] == "mp4":
         from fastapi.responses import FileResponse
         path = exp.get("file_path")
@@ -2644,26 +2719,87 @@ async def download_export(export_id: str, user: dict = Depends(require_permissio
             raise HTTPException(404, "Fichier d'export introuvable")
         fname = f"mgvms_export_{exp['camera_name']}_{exp['id'][:8]}.mp4".replace(" ", "_")
         return FileResponse(path, media_type="video/mp4", filename=fname)
-    # ZIP : clips MP4 réels + manifeste
+
+    # v3.74 · ZIP structuré (assistant multi-étapes) — VIDEO/PLAYER/DATA/README,
+    # fichiers déjà assemblés à la création (create_export) dans exp["export_dir"].
     import zipfile
-    segs = await db.recordings.find({"id": {"$in": exp.get("segment_ids", [])}}, {"_id": 0}).sort("start", 1).to_list(500)
-    manifest = {
-        "camera": exp["camera_name"], "site": exp["site_name"],
-        "range": {"start": exp["start"], "end": exp["end"]},
-        "duration_sec": exp["duration_sec"], "segment_count": len(segs),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "segments": [{"start": s["start"], "end": s["end"], "mode": s.get("mode"),
-                      "size_mb": s.get("size_mb"), "file": os.path.basename(s.get("file_path") or "")} for s in segs],
+    import hashlib
+    import json as _json
+    export_dir = exp.get("export_dir")
+    clips = exp.get("clips") or []
+
+    def _label(iso):
+        try:
+            return datetime.fromisoformat(iso).strftime("%d/%m/%Y %H:%M")
+        except Exception:
+            return iso
+
+    def _duration_label(sec):
+        sec = int(sec or 0)
+        return f"{sec // 60}min{sec % 60:02d}s"
+
+    export_json_clips = []
+    checksums = {}
+    for c in clips:
+        filename = c.get("filename")
+        src_path = os.path.join(export_dir or "", filename or "")
+        if filename and os.path.exists(src_path):
+            with open(src_path, "rb") as f:
+                checksums[f"VIDEO/{filename}"] = hashlib.sha256(f.read()).hexdigest()
+        export_json_clips.append({
+            "camera_id": c.get("camera_id"), "camera_name": c.get("camera_name"),
+            "site_name": c.get("site_name", ""), "file": f"../VIDEO/{filename}",
+            "duration_label": _duration_label(c.get("duration_sec")),
+            "duration_sec": c.get("duration_sec", 0), "size_mb": c.get("size_mb", 0),
+            "codec": (exp.get("codec") or "h264").upper(),
+        })
+
+    export_json = {
+        "generator": "MG-VMS", "version": "3.74", "created_at": exp["created_at"],
+        "range": {"start": exp["start"], "end": exp["end"],
+                  "start_label": _label(exp["start"]), "end_label": _label(exp["end"])},
+        "target_os": exp.get("target_os", "any"), "clips": export_json_clips,
     }
+
+    readme_lines = [
+        "MG-VMS — Export vidéo", "=" * 24, "",
+        f"Généré le : {_label(exp['created_at'])}",
+        f"Période : {_label(exp['start'])} → {_label(exp['end'])}",
+        f"Caméra(s) : {cam_label}",
+        f"Codec : {(exp.get('codec') or 'h264').upper()}", "",
+        "Contenu :", "  VIDEO/   — les fichiers vidéo (un par caméra)",
+    ]
+    if exp.get("include_player"):
+        readme_lines += [
+            "  PLAYER/  — lecteur autonome (index.html)", "",
+            "Pour lire les vidéos : ouvrez PLAYER/index.html dans votre navigateur",
+            "(double-clic — aucune installation requise).",
+        ]
+    else:
+        readme_lines += ["", "Ouvrez les fichiers du dossier VIDEO/ avec votre lecteur habituel",
+                          "(VLC, lecteur intégré Windows/macOS/Linux...)."]
+    readme_lines += ["", "DATA/export.json — métadonnées de cet export.",
+                     "checksums.sha256 — empreintes d'intégrité des fichiers vidéo."]
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("manifest.json", __import__("json").dumps(manifest, ensure_ascii=False, indent=2))
-        for i, s in enumerate(segs):
-            path = s.get("file_path")
-            if path and os.path.exists(path):
-                zf.write(path, arcname=f"clips/{i+1:03d}_{os.path.basename(path)}")
+        for c in clips:
+            filename = c.get("filename")
+            src_path = os.path.join(export_dir or "", filename or "")
+            if filename and os.path.exists(src_path):
+                zf.write(src_path, arcname=f"VIDEO/{filename}")
+        zf.writestr("DATA/export.json", _json.dumps(export_json, ensure_ascii=False, indent=2))
+        zf.writestr("README.txt", "\n".join(readme_lines))
+        if checksums:
+            zf.writestr("checksums.sha256", "\n".join(f"{h}  {p}" for p, h in checksums.items()))
+        if exp.get("include_player"):
+            template_path = os.path.join(os.path.dirname(__file__), "assets", "mgvms_player_template.html")
+            with open(template_path, "r", encoding="utf-8") as f:
+                player_html = f.read()
+            player_html = player_html.replace("__MGVMS_EXPORT_DATA__", _json.dumps(export_json, ensure_ascii=False))
+            zf.writestr("PLAYER/index.html", player_html)
     buf.seek(0)
-    fname = f"mgvms_export_{exp['camera_name']}_{exp['id'][:8]}.zip".replace(" ", "_")
+    fname = f"mgvms_export_{exp['id'][:8]}.zip"
     return StreamingResponse(iter([buf.getvalue()]), media_type="application/zip",
                              headers={"Content-Disposition": f"attachment; filename={fname}"})
 
