@@ -48,6 +48,27 @@ Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 ### Fixed
 - **Bouton "Ajouter un point ici" en double** dans la carte "Points de surveillance" (Camera Center, onglet PTZ) — faisait doublon avec le contrôle PTZ dédié du même onglet ; retiré précisément à cet endroit (les autres emplacements du bouton, contrôle PTZ et vue live, sont inchangés).
 
+## [v3.64-camera-ux-driver-selector] — 2026-09-11 — Onglet Live fusionné dans PTZ, icônes IR/carte SD, sélecteur d'API caméra, vitesse PTZ réglable, tri Centre caméras
+
+### Added
+- **Sélecteur d'API/driver par caméra** (Centre caméras → Overview, carte "Connexion / API") : affiche le fabricant détecté et l'API réellement utilisée (Reolink via reolink-aio, Hikvision via ISAPI, Dahua/Axis via leur API propre, ou ONVIF générique en repli), avec un menu déroulant pour forcer manuellement une autre API si la détection automatique se trompe pour une caméra donnée. Le choix est enregistré (`cameras.vendor`) et déclenche aussitôt une redécouverte des capacités avec le nouveau driver. Nouveaux endpoints `GET/PUT /api/devices/{id}/vendor`.
+- **Icônes IR et carte SD** dans les badges de capacités matérielles du Centre caméras (en plus de haut-parleur/micro/lumière/PTZ déjà présents), fiables depuis le correctif de parsing Reolink ci-dessous.
+- **Vitesse de déplacement PTZ réglable** (curseur 10-100 %, onglet PTZ) — le backend acceptait déjà ce paramètre (`POST .../ptz/move {speed}`) mais le frontend envoyait toujours 0.5 en dur, sans réglage possible. Préférence mémorisée par caméra.
+- **Tri de la grille du Centre caméras** (nom / site / statut / plugins IA actifs) — jusqu'ici seule la liste "Appareils" (tableau) était triable.
+
+### Fixed
+- **Onglet "Live" en trop dans le Centre caméras** : coexistait avec l'onglet PTZ qui affiche pourtant déjà sa propre vue live. L'onglet PTZ affiche désormais la vue live pour TOUTE caméra (PTZ ou non — seuls les contrôles de direction/presets/patrouille restent réservés aux caméras PTZ), et reprend aussi le panneau de contrôles rapides (lumière/IR/sirène/TTS/reboot) qui n'existait jusqu'ici que dans l'onglet Live retiré.
+- **Boutons de contrôle caméra (lumière/IR/sirène/TTS/reboot) trop envahissants** : l'ancien bandeau opaque pleine largeur au pied de la vue live masquait une bonne partie de l'image. Remplacé par un petit cluster d'icônes en bas à droite, discret par défaut et pleinement visible au survol de la vidéo — même comportement que la vue live en mosaïque. Correction au passage d'un léger décalage vertical de l'icône TTS par rapport aux autres.
+
+## [v3.63-fix-capacites-reolink-hikvision] — 2026-09-11 — Bug capacités Reolink (lumière/sirène/audio à tort désactivés), carte SD Hikvision figée, découverte auto des capacités
+
+### Fixed
+- **Root cause d'une régression introduite par le bump `reolink-aio` 0.21.10 → 0.21.15 (v3.61)** : la structure de `host.capabilities[canal]` a changé de forme dans cette version de la librairie (elle enveloppe désormais l'ensemble réel des capacités dans un dict `{None: {...}}` au lieu de l'exposer directement) — le code de lecture faisait `set(dict)`, ce qui renvoie l'ensemble des CLÉS (`{None}`) au lieu du contenu réel. Résultat : `spotlight`/`siren`/`audio_input`/`audio_output` retombaient TOUJOURS à `False` pour absolument toute caméra Reolink, peu importe son vrai matériel — c'est la cause directe de la disparition des boutons lumière/sirène signalée par un utilisateur. Corrigé en dépliant correctement la nouvelle structure ; revérifié sur l'ensemble du parc Reolink (15 caméras) après correctif — les valeurs varient maintenant correctement par modèle (ex. RLC-820A sans lumière/sirène contre TrackMix PoE ou RLC-81MA qui en ont réellement).
+- **Statut de la carte microSD figé pour les caméras Hikvision** : la vérification de présence de carte ne se déclenchait qu'une seule fois (au premier ajout de la caméra) et restait bloquée sur cette valeur pour toute la durée de vie du process — une carte insérée après coup n'apparaissait jamais dans le Centre caméras sans une redécouverte manuelle. Le contrôle se fait désormais à chaque vérification de statut.
+
+### Added
+- **Découverte automatique des capacités à la création d'une caméra** : jusqu'ici, seul un appel manuel à `POST /devices/{id}/discover` (jamais déclenché en pratique sur la quasi-totalité du parc) peuplait les capacités matérielles réelles — une caméra nouvellement ajoutée n'avait donc aucune capacité connue tant que cette action n'était pas lancée à la main.
+- **Rafraîchissement périodique des capacités** (une fois par jour, toutes caméras) — pour que l'insertion/le retrait d'une carte SD ou une mise à jour de firmware finissent par se refléter sans action manuelle.
 ## [v3.56-websocket-permanent-licence] — 2026-09-09 — Connexion WebSocket permanente MG-VMS ↔ Center (panne quasi instantanée + vérification licence continue)
 
 ### Added
