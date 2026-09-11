@@ -65,6 +65,7 @@ from routes.parking_sessions import parking_sessions_router, parking_sessions_lo
 from routes.mgvms_center import mgvms_center_router, mgvms_center_report_loop, mgvms_center_ws_loop  # v3.49/3.56 · Connexion MG-VMS Center
 from routes.anpr_tuning import anpr_tuning_router, anpr_tuning_loop
 from routes.vehicle_anomaly_ai import vehicle_anomaly_ai_router, anomaly_ai_batch_loop
+from routes.blacklist_sources import blacklist_sources_router, blacklist_sync_loop
 from routes.vehicle_color_ai import vehicle_color_ai_router, color_ai_batch_loop
 from routes.vehicle_make_ai import vehicle_make_ai_router, make_ai_batch_loop
 from wsdl_path import validate_wsdl_dir
@@ -143,6 +144,7 @@ app.include_router(camera_api_router)   # camera-api-v2.2 · HTTP/HTTPS layer (R
 from routes.live_v3 import live_v3_router
 app.include_router(live_v3_router)   # video-engine-v3 · RTSP-native + aiortc WHEP
 app.include_router(vehicle_anomaly_ai_router)  # v3.44 · doit précéder vehicles_router : /api/vehicles/anomaly-ai collisionne sinon avec /api/vehicles/{plate}
+app.include_router(blacklist_sources_router)  # v3.73 · sources de blacklist externes (REST/CSV/webhook)
 app.include_router(vehicles_router)
 app.include_router(smart_search_router)
 app.include_router(llm_settings_router)
@@ -304,6 +306,7 @@ async def on_startup():
         asyncio.create_task(identity_merge_ai_auto_approve_loop())
         asyncio.create_task(parking_sessions_loop())
         asyncio.create_task(anomaly_ai_batch_loop())
+        asyncio.create_task(blacklist_sync_loop())
         asyncio.create_task(color_ai_batch_loop())
         asyncio.create_task(make_ai_batch_loop())
         asyncio.create_task(anpr_tuning_loop())

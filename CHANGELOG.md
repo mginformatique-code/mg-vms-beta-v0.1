@@ -3,6 +3,17 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.73-blacklist-external-sources] — 2026-09-11 — Gros chantier ANPR : sources de blacklist externes (1ʳᵉ tranche)
+
+### Added
+- **Nouvelle page Administration → Sources blacklist (externes)** : connexion générique à une ou plusieurs sources externes de plaques blacklistées — API REST (JSON), fichier CSV distant, ou webhook poussé par le tiers — avec authentification aucune/clé API/Bearer/basique.
+- **Synchronisation automatique programmable** (5 min à 1×/jour, ou manuelle via "Synchroniser maintenant"), état de synchro visible (dernière heure, nombre de plaques, succès/échec), résilience par source (l'échec d'une source n'affecte jamais les autres).
+- Chaque plaque synchronisée alimente la MÊME liste noire globale déjà utilisée par le moteur de comparaison existant (`db.watchlist`) — aucune nouvelle logique de comparaison : la détection d'une plaque blacklistée déclenche déjà alerte + notification, peu importe si elle a été ajoutée manuellement, importée en CSV, ou synchronisée automatiquement.
+- Une plaque retirée de la source externe lors d'une synchronisation ultérieure est automatiquement retirée de la liste noire (jamais une entrée ajoutée manuellement ou par une autre source).
+
+### Notes techniques
+- L'enrichissement contextuel par Qwen (prévu au cahier des charges de ce chantier) est reporté à une prochaine tranche — cette livraison pose le socle (connecteur générique + synchronisation + comparaison), sur lequel l'enrichissement viendra se greffer ensuite.
+
 ## [v3.72-multi-lens-detection-hint] — 2026-09-11 — Auto-détection multi-objectifs à l'ajout (avertissement)
 
 ### Added

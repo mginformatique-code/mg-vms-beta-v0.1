@@ -10,7 +10,7 @@ import WelcomePopup from "@/components/WelcomePopup";
 import CookieConsentBanner from "@/components/CookieConsentBanner";
 import {
   LayoutDashboard, Grid3x3, Cctv, Building2, ScanLine, Car, Bell, Map, Zap,
-  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock, Layers, ChevronDown, ChevronRight, LineChart, Sparkles, ShieldCheck, Lock, Info, LifeBuoy, ScrollText as LegalIcon, Terminal, AlertTriangle, Loader2,
+  ScrollText, Users, Settings, LogOut, Moon, Sun, Languages, Cpu, HardDrive, MemoryStick, BellRing, Puzzle, Film, Network, FileText, Server, Radio, Brain, Activity, ScanFace, Thermometer, Radar, Plane, DoorOpen, MapPin, Clock, Layers, ChevronDown, ChevronRight, LineChart, Sparkles, ShieldCheck, Lock, Info, LifeBuoy, ScrollText as LegalIcon, Terminal, AlertTriangle, Loader2, Ban,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -66,6 +66,9 @@ const NAV = [
     ]},
     { to: "/plugins", icon: Puzzle, key: "nav.plugins", role: "admin" },
     { to: "/llm-settings", icon: Brain, key: "nav.llm", role: "admin" },
+    // v3.73 · Sources de blacklist externes (chantier ANPR) — synchro
+    // automatique vers la watchlist déjà utilisée par le moteur d'alerte.
+    { to: "/blacklist-sources", icon: Ban, key: "nav.blacklist_sources", role: "admin" },
   ]},
   { group: "nav.logs_reports", items: [
     { to: "/reports", icon: FileText, key: "nav.reports", role: "technician" },
