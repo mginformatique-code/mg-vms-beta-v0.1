@@ -23,10 +23,22 @@ import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
 import { Wifi, WifiOff, ScanLine, Search, Volume2, Mic, Flashlight, Move, CircleDot, MemoryStick } from "lucide-react";
 
+// v3.64 · "Trier par" — même besoin que le tri déjà construit sur la liste
+// Appareils, mais la vue ici est une grille de cartes, pas un tableau (pas
+// de colonnes à cliquer) : un simple sélecteur de champ + un tri croissant
+// implicite couvre le besoin sans réinventer un système de tri par colonne.
+const SORT_OPTIONS = [
+  { id: "name", label: "Nom" },
+  { id: "site_name", label: "Site" },
+  { id: "status", label: "Statut" },
+  { id: "plugins", label: "Plugins IA" },
+];
+
 export default function CameraCenterDispatch() {
   const navigate = useNavigate();
   const [cams, setCams] = useState(null);
   const [q, setQ] = useState("");
+  const [sortBy, setSortBy] = useState("name");
 
   useEffect(() => {
     api.get("/cameras").then((r) => setCams(r.data || [])).catch(() => setCams([]));
@@ -38,6 +50,16 @@ export default function CameraCenterDispatch() {
     ? cams.filter((c) => (c.name || "").toLowerCase().includes(q.toLowerCase()) || (c.site_name || "").toLowerCase().includes(q.toLowerCase()))
     : cams;
 
+  const sortValue = (c) => {
+    if (sortBy === "plugins") return (c.enabled_plugins || []).length;
+    if (sortBy === "status") return c.status === "online" ? 0 : 1;
+    return (c[sortBy] || "").toString().toLowerCase();
+  };
+  const sorted = [...filtered].sort((a, b) => {
+    const va = sortValue(a), vb = sortValue(b);
+    return va < vb ? -1 : va > vb ? 1 : 0;
+  });
+
   return (
     <div className="p-6" data-testid="camera-center-overview">
       <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
@@ -45,15 +67,23 @@ export default function CameraCenterDispatch() {
           <h1 className="text-2xl font-bold tracking-tight">Centre caméras</h1>
           <p className="text-sm text-muted-foreground mt-1">Vue technique rapide — cliquez une caméra pour ouvrir son panneau complet.</p>
         </div>
-        <div className="relative">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filtrer…" data-testid="camera-center-filter"
-                 className="pl-8 pr-3 py-1.5 bg-background border border-input outline-none text-sm w-48 focus:border-[#0044FF]" />
+        <div className="flex items-center gap-2">
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} data-testid="camera-center-sort"
+                  className="h-9 px-2 bg-background border border-input outline-none text-sm focus:border-[#0044FF]">
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.id} value={o.id}>Trier par : {o.label}</option>
+            ))}
+          </select>
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filtrer…" data-testid="camera-center-filter"
+                   className="pl-8 pr-3 py-1.5 bg-background border border-input outline-none text-sm w-48 focus:border-[#0044FF]" />
+          </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-        {filtered.map((c) => {
+        {sorted.map((c) => {
           const pluginCount = (c.enabled_plugins || []).length;
           const anprActive = (c.enabled_plugins || []).includes("fast-alpr");
           // v3.61 · Icônes de capacités matérielles (HP/micro/lumière/IR/
@@ -107,7 +137,7 @@ export default function CameraCenterDispatch() {
             </button>
           );
         })}
-        {filtered.length === 0 && (
+        {sorted.length === 0 && (
           <div className="col-span-full text-center text-muted-foreground py-12 text-sm">Aucune caméra</div>
         )}
       </div>

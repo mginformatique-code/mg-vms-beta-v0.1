@@ -1210,6 +1210,14 @@ function SdCardTab({ cameraId, caps }) {
 function PTZTab({ cameraId, caps }) {
   const { t, aiDetections } = useApp();
   const [cam, setCam] = useState(null);
+  // v3.64 · Vitesse de déplacement manuel (0.1-1.0), réglable — persistée
+  // en localStorage par caméra pour ne pas avoir à la re-régler à chaque
+  // ouverture (préférence d'usage, pas une donnée serveur).
+  const [ptzSpeed, setPtzSpeed] = useState(() => {
+    const saved = Number(localStorage.getItem(`ptz_speed_${cameraId}`));
+    return saved >= 0.1 && saved <= 1 ? saved : 0.5;
+  });
+  useEffect(() => { localStorage.setItem(`ptz_speed_${cameraId}`, String(ptzSpeed)); }, [cameraId, ptzSpeed]);
   const [presets, setPresets] = useState([]);
   const [presetsLoading, setPresetsLoading] = useState(true);
   const [addingPreset, setAddingPreset] = useState(false);
@@ -1295,8 +1303,11 @@ function PTZTab({ cameraId, caps }) {
   // PTZ (direction, presets, patrouille, suivi) restent conditionnés à
   // `caps?.ptz` plus bas dans le rendu.
 
+  // v3.64 · Vitesse réglable — le backend acceptait déjà `speed` (0.0-1.0)
+  // sur `POST .../ptz/move` (voir `PTZMoveBody`), mais le frontend envoyait
+  // toujours 0.5 en dur, sans aucun réglage possible depuis l'interface.
   const move = (direction) =>
-    api.post(`/devices/${cameraId}/ptz/move`, { direction, speed: 0.5 })
+    api.post(`/devices/${cameraId}/ptz/move`, { direction, speed: ptzSpeed })
        .then(() => {})
        .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
   // v3.60 · `ptz/move` déclenche un mouvement CONTINU côté caméra (comme la
@@ -1448,6 +1459,15 @@ function PTZTab({ cameraId, caps }) {
               <Button variant="outline" {...holdMove("down")} data-testid="ptz-down">↓</Button>
               <Button variant="outline" {...holdMove("downright")}>↘</Button>
             </div>
+          </div>
+          <div>
+            <div className="text-sm text-muted-foreground mb-2 flex items-center justify-between">
+              <span>Vitesse</span>
+              <span className="font-mono text-xs">{Math.round(ptzSpeed * 100)}%</span>
+            </div>
+            <input type="range" min={0.1} max={1} step={0.1} value={ptzSpeed}
+                   onChange={(e) => setPtzSpeed(Number(e.target.value))}
+                   className="w-48" data-testid="ptz-speed" />
           </div>
           {caps.zoom && (
             <div>
