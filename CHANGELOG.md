@@ -3,6 +3,11 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.69-ptz-patrol-speed-save-button] — 2026-09-11 — Bouton "Enregistrer" explicite pour la vitesse de patrouille
+
+### Fixed
+- **Curseur de vitesse de transition (patrouille PTZ) sans confirmation d'envoi** : la sauvegarde reposait uniquement sur les événements de relâchement souris/tactile du curseur, sans jamais confirmer visuellement que la nouvelle valeur avait bien été reçue par le serveur — un réglage pouvait sembler pris en compte sans l'être vraiment. Ajout d'un bouton "Enregistrer" explicite à côté du curseur, avec confirmation visible uniquement après réponse positive du serveur (pas avant), et prise en charge du réglage au clavier (flèches) qui ne déclenchait auparavant aucune sauvegarde.
+
 ## [v3.68-ptz-overlay-mute-collision] — 2026-09-11 — Correctif position du cluster de contrôle caméra (onglet PTZ)
 
 ### Fixed

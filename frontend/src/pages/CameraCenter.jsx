@@ -1359,13 +1359,17 @@ function PTZTab({ cameraId, caps }) {
        .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
   };
 
-  const savePatrol = (next) => {
+  const savePatrol = (next, { confirm = false } = {}) => {
     setPatrolSaving(true);
     api.put(`/devices/${cameraId}/ptz/patrol`, {
       enabled: next.enabled, dwell_seconds: next.dwell_seconds, preset_ids: next.preset_ids,
       speed: next.speed,
     }).then((r) => {
       setPatrol({ ...next, running: !!r.data.running });
+      // v3.69 · Confirmation explicite uniquement sur clic "Enregistrer" —
+      // le slider sauvegarde déjà silencieusement sur relâchement, pour ne
+      // pas spammer un toast à chaque glissement.
+      if (confirm) toast.success("Vitesse de patrouille enregistrée (envoyée au serveur)");
     }).catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"))
       .finally(() => setPatrolSaving(false));
   };
@@ -1556,8 +1560,21 @@ function PTZTab({ cameraId, caps }) {
           <input type="range" min={0.1} max={1} step={0.1} value={patrol.speed}
                  onChange={(e) => setPatrol((p) => ({ ...p, speed: Number(e.target.value) }))}
                  onMouseUp={() => savePatrol(patrol)} onTouchEnd={() => savePatrol(patrol)}
+                 onKeyUp={() => savePatrol(patrol)}
                  className="w-32" data-testid="ptz-patrol-speed" />
           <span className="font-mono text-xs text-muted-foreground">{Math.round(patrol.speed * 100)}%</span>
+          {/* v3.69 · Bouton explicite en filet de secours : le slider sauvegarde
+              déjà sur relâchement souris/tactile/clavier, mais certains
+              gestes (glisser-relâcher rapide, pilotage clavier partiel) ne
+              déclenchent pas toujours ces événements de façon fiable selon
+              le navigateur — ce bouton garantit l'envoi, avec confirmation
+              visible (au lieu de dépendre silencieusement d'un événement). */}
+          <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs"
+                  disabled={patrolSaving}
+                  onClick={() => savePatrol(patrol, { confirm: true })}
+                  data-testid="ptz-patrol-speed-save">
+            {t("common.save") || "Enregistrer"}
+          </Button>
         </div>
 
         {presets.length === 0 ? (
