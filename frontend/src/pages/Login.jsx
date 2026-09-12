@@ -42,8 +42,8 @@ export default function Login() {
     setLoading(true); setError("");
     try {
       const res = await login(email, password, need2fa ? totp : undefined);
-      if (res.requires_2fa) { setNeed2fa(true); toast.info("Code 2FA requis"); }
-      else { toast.success("Connexion réussie"); navigate("/"); }
+      if (res.requires_2fa) { setNeed2fa(true); toast.info(t("login.toast_2fa_required")); }
+      else { toast.success(t("login.toast_success")); navigate("/"); }
     } catch (err) {
       setError(formatApiErrorDetail(err.response?.data?.detail) || err.message);
     } finally { setLoading(false); }
@@ -77,9 +77,9 @@ export default function Login() {
           </div>
           <div>
             <h1 className="font-head font-black text-4xl xl:text-5xl tracking-tight leading-tight mb-4">
-              Centre de<br />commandement<br /><span className="text-[#0044FF]">vidéosurveillance</span>
+              {t("login.hero_line1")}<br />{t("login.hero_line2")}<br /><span className="text-[#0044FF]">{t("login.hero_line3")}</span>
             </h1>
-            <p className="text-muted-foreground text-sm max-w-md">{t("app.tagline")} — gérez des centaines de caméras, ANPR, alertes intelligentes et multi-sites depuis une plateforme unique.</p>
+            <p className="text-muted-foreground text-sm max-w-md">{t("app.tagline")} — {t("login.hero_tagline_suffix")}</p>
           </div>
           <div className="flex gap-6 text-xs text-muted-foreground mono" data-testid="login-status-badges">
             <span data-testid="badge-online">
@@ -135,12 +135,11 @@ export default function Login() {
               <div className="mb-4 p-3 border border-[#FFB800] bg-[#FFB800]/10 text-[#FFB800] text-xs flex items-start gap-2" data-testid="inactivity-banner">
                 <Clock size={14} className="mt-0.5 shrink-0" />
                 <div>
-                  <div className="font-semibold mb-0.5">Session expirée pour inactivité</div>
-                  Vous avez été déconnecté en raison de l&apos;inactivité (politique de timeout).
-                  Reconnectez-vous pour reprendre votre session.
+                  <div className="font-semibold mb-0.5">{t("login.inactivity_title")}</div>
+                  {t("login.inactivity_message")}
                 </div>
                 <button type="button" onClick={() => setSearchParams({}, { replace: true })}
-                        className="ml-auto text-[#FFB800]/70 hover:text-[#FFB800]" aria-label="Fermer">✕</button>
+                        className="ml-auto text-[#FFB800]/70 hover:text-[#FFB800]" aria-label={t("common.close")}>✕</button>
               </div>
             )}
 

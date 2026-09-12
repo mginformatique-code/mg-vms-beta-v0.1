@@ -52,6 +52,10 @@ const TABS = [
   { id: "sdcard",       label: "Carte SD",     icon: HardDrive },
   { id: "ptz",          label: "PTZ",          icon: Move3d },
 ];
+// v0.5.1 · Libellés d'onglets encore en français — le tableau TABS est au
+// niveau module (pas d'accès à `t()`), on ne mappe donc que les 3 id
+// concernés vers une clé de traduction, appliquée au rendu (voir plus bas).
+const TAB_LABEL_KEYS = { osd: "camc.tab_osd", datetime: "camc.tab_datetime", sdcard: "camc.tab_sdcard" };
 
 // v0.5.0.b · Bandeau santé global (GPU/CPU/RAM/VRAM/Mongo/go2rtc/Capture/Pipeline)
 export default function CameraCenter() {
@@ -85,7 +89,7 @@ export default function CameraCenter() {
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="sm" onClick={() => navigate("/camera-center")}
                     data-testid="back-to-cameras">
-              <ArrowLeft className="w-4 h-4 mr-1" />Liste
+              <ArrowLeft className="w-4 h-4 mr-1" />{t("camc.back_to_list")}
             </Button>
             <Button variant="outline" size="icon" disabled={!prevId}
                     onClick={() => go(prevId)} data-testid="cam-prev">
@@ -109,12 +113,12 @@ export default function CameraCenter() {
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={refresh} data-testid="cam-refresh">
-              <RefreshCw className="w-4 h-4 mr-2" />Rafraîchir
+              <RefreshCw className="w-4 h-4 mr-2" />{t("camc.refresh")}
             </Button>
-            <Button onClick={() => discover().then(() => toast.success("Capacités détectées"))
-                                       .catch((e) => toast.error(e.response?.data?.detail?.message || "Échec probe"))}
+            <Button onClick={() => discover().then(() => toast.success(t("camc.caps_detected")))
+                                       .catch((e) => toast.error(e.response?.data?.detail?.message || t("camc.probe_failed")))}
                     data-testid="cam-discover">
-              <ScanLine className="w-4 h-4 mr-2" />Détecter capacités
+              <ScanLine className="w-4 h-4 mr-2" />{t("camc.detect_caps")}
             </Button>
           </div>
         </div>
@@ -134,22 +138,22 @@ export default function CameraCenter() {
               </div>
               {error.code && (
                 <div className="text-[10px] mt-1 uppercase tracking-wider text-muted-foreground/70 mono">
-                  code : {error.code}{error.status ? ` · HTTP ${error.status}` : ""}
+                  {t("camc.error_code_label")} {error.code}{error.status ? ` · HTTP ${error.status}` : ""}
                 </div>
               )}
               {error.status === 404 && (
                 <div className="text-xs mt-1">
-                  Astuce : cliquez sur <b>{t("camc.detect_caps")}</b> pour lancer la probe initiale.
+                  {t("camc.hint_click_prefix")} <b>{t("camc.detect_caps")}</b> {t("camc.hint_click_suffix")}
                 </div>
               )}
               {error.code === "authentication_failed" && (
                 <div className="text-xs mt-1 text-[#FFAA00]">
-                  Éditez la caméra pour corriger l'identifiant/mot de passe ONVIF. Aucune nouvelle tentative n'est déclenchée automatiquement.
+                  {t("camc.auth_failed_hint")}
                 </div>
               )}
               {error.code === "device_locked" && (
                 <div className="text-xs mt-1 text-[#FF6666]">
-                  Attendez le déverrouillage par la caméra (souvent 5-15 min) — aucune tentative automatique n'est effectuée pendant cette période.
+                  {t("camc.device_locked_hint")}
                 </div>
               )}
             </div>
@@ -163,7 +167,7 @@ export default function CameraCenter() {
           {TABS.map(({ id, label, icon: Icon }) => (
             <TabsTrigger key={id} value={id} data-testid={`cam-tab-${id}`} className="gap-2">
               <Icon className="w-4 h-4" />
-              {label}
+              {TAB_LABEL_KEYS[id] ? t(TAB_LABEL_KEYS[id]) : label}
             </TabsTrigger>
           ))}
         </TabsList>
@@ -202,26 +206,32 @@ const CapField = ({ ok, label }) => (
   </div>
 );
 
-const NotSupported = ({ what }) => (
-  <Card className="p-6 text-sm text-muted-foreground" data-testid="cap-not-supported">
-    Cette caméra ne supporte pas cette fonction <b>{what}</b>. Onglet masqué
-    apres un <i>discover</i> est effectué (fail-safe côté capabilities).
-  </Card>
-);
+const NotSupported = ({ what }) => {
+  const { t } = useApp();
+  return (
+    <Card className="p-6 text-sm text-muted-foreground" data-testid="cap-not-supported">
+      {t("camc.not_supported_prefix")} <b>{what}</b>. {t("camc.not_supported_mid")}{" "}
+      <i>discover</i> {t("camc.not_supported_suffix")}
+    </Card>
+  );
+};
 
 const fmtMs = (v) => (v == null ? "—" : `${v} ms`);
 
-const EventPanel = ({ title, items, render }) => (
+const EventPanel = ({ title, items, render }) => {
+  const { t } = useApp();
+  return (
   <Card className="p-3 space-y-2">
     <div className="text-xs uppercase tracking-wider text-muted-foreground">{title}</div>
     <div className="space-y-1 max-h-64 overflow-auto">
-      {items.length === 0 && <div className="text-xs text-muted-foreground py-3 text-center">Aucun</div>}
+      {items.length === 0 && <div className="text-xs text-muted-foreground py-3 text-center">{t("common.none")}</div>}
       {items.map((it, i) => (
         <div key={i} className="text-xs border-b border-border/40 pb-1">{render(it)}</div>
       ))}
     </div>
   </Card>
-);
+  );
+};
 
 // ─── Overview ─── v0.5.0.b · tableau de bord complet
 function OverviewTab({ info, caps, cameraId }) {
@@ -248,9 +258,9 @@ function OverviewTab({ info, caps, cameraId }) {
   const saveVendor = () => {
     setVendorSaving(true);
     api.put(`/devices/${cameraId}/vendor`, { vendor: vendorChoice || null })
-       .then((r) => toast.success(`API active : ${r.data.driver || "onvif"}`))
+       .then((r) => toast.success(`${t("camc.api_active_prefix")} ${r.data.driver || "onvif"}`))
        .then(loadVendor)
-       .catch((e) => toast.error(e.response?.data?.detail?.message || e.response?.data?.detail || "Erreur"))
+       .catch((e) => toast.error(e.response?.data?.detail?.message || e.response?.data?.detail || t("camc.error_generic")))
        .finally(() => setVendorSaving(false));
   };
 
@@ -277,10 +287,10 @@ function OverviewTab({ info, caps, cameraId }) {
       <Card className="p-4 space-y-1">
         <div className="text-sm text-muted-foreground">{t("camc.identity")}</div>
         <div className="grid grid-cols-2 gap-1 text-sm">
-          <div>Nom</div><div className="font-mono truncate">{cam.name || "—"}</div>
-          <div>{t("camc.state")}</div><div>{w.alive ? <Badge>en ligne</Badge> : <Badge variant="destructive">hors ligne</Badge>}</div>
+          <div>{t("common.name")}</div><div className="font-mono truncate">{cam.name || "—"}</div>
+          <div>{t("camc.state")}</div><div>{w.alive ? <Badge>{t("common.online")}</Badge> : <Badge variant="destructive">{t("common.offline")}</Badge>}</div>
           <div>Driver</div><div className="font-mono">{cam.driver || "onvif"}</div>
-          <div>Fabricant</div><div className="font-mono">{info?.manufacturer || "—"}</div>
+          <div>{t("camc.manufacturer")}</div><div className="font-mono">{info?.manufacturer || "—"}</div>
           <div>{t("camc.model")}</div><div className="font-mono">{info?.model || "—"}</div>
           <div>Firmware</div><div className="font-mono">{info?.firmware || "—"}</div>
         </div>
@@ -288,47 +298,47 @@ function OverviewTab({ info, caps, cameraId }) {
       <Card className="p-4 space-y-1">
         <div className="text-sm text-muted-foreground">{t("camc.video_capture")}</div>
         <div className="grid grid-cols-2 gap-1 text-sm">
-          <div>RTSP</div><div className="font-mono truncate text-xs">{cam.rtsp_url ? "configuré" : "—"}</div>
+          <div>RTSP</div><div className="font-mono truncate text-xs">{cam.rtsp_url ? t("camc.configured") : "—"}</div>
           <div>Codec</div><div className="font-mono">{w.codec || "—"}</div>
           <div>{t("cam.resolution")}</div><div className="font-mono">{w.resolution || "—"}</div>
-          <div>FPS capture</div><div className="font-mono">{w.fps_capture_1min ?? "—"}</div>
+          <div>{t("camc.fps_capture")}</div><div className="font-mono">{w.fps_capture_1min ?? "—"}</div>
           <div>Frames dropped</div><div className="font-mono">{w.frames_dropped ?? 0}</div>
           <div>Warmup</div><div className="font-mono">{fmtMs(w.warmup_ms)}</div>
         </div>
       </Card>
       <Card className="p-4 space-y-1">
-        <div className="text-sm text-muted-foreground">IA · ANPR · Stockage</div>
+        <div className="text-sm text-muted-foreground">{t("camc.ai_anpr_storage")}</div>
         <div className="grid grid-cols-2 gap-1 text-sm">
-          <div>IA active</div>
+          <div>{t("camc.ai_active")}</div>
           <div>{aiActive ? <Badge>ON</Badge> : <Badge variant="secondary">OFF</Badge>}</div>
           <div>ANPR</div>
           <div>{(cam.enabled_plugins || []).includes("fast-alpr") ? <Badge>ON</Badge> : <Badge variant="secondary">OFF</Badge>}</div>
-          <div>Plugins actifs</div><div className="font-mono">{(cam.enabled_plugins || []).length}</div>
-          <div>Enregistrement</div><div>{cam.record_enabled ? "actif" : "inactif"}</div>
-          <div>Batterie</div><div className="font-mono">—</div>
-          <div>Temp°</div><div className="font-mono">—</div>
+          <div>{t("camc.active_plugins")}</div><div className="font-mono">{(cam.enabled_plugins || []).length}</div>
+          <div>{t("camc.recording")}</div><div>{cam.record_enabled ? t("common.active") : t("camc.inactive")}</div>
+          <div>{t("camc.battery")}</div><div className="font-mono">—</div>
+          <div>{t("camc.temperature")}</div><div className="font-mono">—</div>
         </div>
       </Card>
       <Card className="p-4 space-y-2" data-testid="cam-connection-api">
-        <div className="text-sm text-muted-foreground">Connexion / API</div>
+        <div className="text-sm text-muted-foreground">{t("camc.connection_api")}</div>
         <div className="grid grid-cols-2 gap-1 text-sm">
-          <div>Fabricant détecté</div><div className="font-mono">{vendorInfo?.manufacturer_detected || info?.manufacturer || "—"}</div>
-          <div>API utilisée</div><div className="font-mono">{vendorInfo?.effective || cam.driver || "onvif"}</div>
+          <div>{t("camc.manufacturer_detected")}</div><div className="font-mono">{vendorInfo?.manufacturer_detected || info?.manufacturer || "—"}</div>
+          <div>{t("camc.api_used")}</div><div className="font-mono">{vendorInfo?.effective || cam.driver || "onvif"}</div>
         </div>
         <div className="pt-1 space-y-1.5">
-          <div className="text-xs text-muted-foreground">Forcer une autre API si la détection automatique se trompe :</div>
+          <div className="text-xs text-muted-foreground">{t("camc.force_api_hint")}</div>
           <div className="flex items-center gap-2">
             <select className="h-8 text-xs bg-background border border-border px-2 flex-1"
                     value={vendorChoice} onChange={(e) => setVendorChoice(e.target.value)}
                     data-testid="cam-vendor-select">
-              <option value="">Automatique</option>
+              <option value="">{t("camc.automatic")}</option>
               {(vendorInfo?.available || []).map((v) => (
                 <option key={v} value={v}>{v}</option>
               ))}
             </select>
             <Button size="sm" variant="outline" disabled={vendorSaving || vendorChoice === (vendorInfo?.override || "")}
                     onClick={saveVendor} data-testid="cam-vendor-save">
-              {vendorSaving ? <Loader2 size={14} className="animate-spin" /> : "Enregistrer"}
+              {vendorSaving ? <Loader2 size={14} className="animate-spin" /> : t("common.save")}
             </Button>
           </div>
         </div>
@@ -338,6 +348,7 @@ function OverviewTab({ info, caps, cameraId }) {
 }
 
 function NetworkTab({ info, cameraId }) {
+  const { t } = useApp();
   // v3.7 · Détails réseau constructeur (ports, protocoles, UID, WiFi) —
   // /api/devices/{id}/network. 501 si le driver ne l'implémente pas :
   // on garde alors uniquement les infos de base ci-dessous.
@@ -351,7 +362,7 @@ function NetworkTab({ info, cameraId }) {
     return () => { alive = false; };
   }, [cameraId]);
 
-  const yesNo = (v) => (v == null ? "—" : v ? "activé" : "désactivé");
+  const yesNo = (v) => (v == null ? "—" : v ? t("camc.enabled_word") : t("camc.disabled_word"));
   const color = (v) => (v == null ? "" : v ? "text-[#00E676]" : "text-muted-foreground");
 
   return (
@@ -365,7 +376,7 @@ function NetworkTab({ info, cameraId }) {
           <>
             <div>WiFi</div>
             <div className="font-mono">
-              {net.wifi ? `connecté${net.wifi_signal != null ? ` (${net.wifi_signal}%)` : ""}` : "filaire (Ethernet)"}
+              {net.wifi ? `${t("camc.connected")}${net.wifi_signal != null ? ` (${net.wifi_signal}%)` : ""}` : t("camc.wired_ethernet")}
             </div>
           </>
         )}
@@ -387,7 +398,7 @@ function NetworkTab({ info, cameraId }) {
 
       {net?.protocols && Object.keys(net.protocols).length > 0 && (
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">Protocoles</div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">{t("camc.protocols_label")}</div>
           <div className="flex flex-wrap gap-2 text-xs">
             {Object.entries(net.protocols).map(([name, enabled]) => (
               <div key={name} className="border border-border px-2 py-1">
@@ -401,7 +412,7 @@ function NetworkTab({ info, cameraId }) {
 
       {unsupported && (
         <div className="text-xs text-muted-foreground">
-          Le driver de cette caméra ne remonte pas de paramètres réseau détaillés.
+          {t("camc.network_unsupported")}
         </div>
       )}
     </Card>
@@ -419,7 +430,7 @@ function StreamsTab({ cameraId }) {
     <Card className="p-4" data-testid="cam-streams">
       <table className="w-full text-sm">
         <thead className="text-left text-muted-foreground">
-          <tr><th>Nom</th><th>{t("cam.resolution")}</th><th>FPS</th><th>Codec</th><th>URL</th></tr>
+          <tr><th>{t("common.name")}</th><th>{t("cam.resolution")}</th><th>FPS</th><th>Codec</th><th>URL</th></tr>
         </thead>
         <tbody>
           {streams.map((s, i) => (
@@ -433,7 +444,7 @@ function StreamsTab({ cameraId }) {
           ))}
           {streams.length === 0 && (
             <tr><td colSpan={5} className="py-6 text-center text-muted-foreground">
-              Aucun stream déclaré. Cliquer sur <b>{t("camc.detect_caps")}</b>.
+              {t("camc.no_streams_prefix")} <b>{t("camc.detect_caps")}</b>.
             </td></tr>
           )}
         </tbody>
@@ -459,25 +470,25 @@ function CapabilitiesTab({ caps }) {
       { key: "focus", label: "Focus" },
     ]},
     { title: "AUDIO", fields: [
-      { key: "audio_input", label: "Micro" },
+      { key: "audio_input", label: t("camc.microphone") },
       { key: "audio_output", label: "Speaker" },
       { key: "two_way_audio", label: "Talk-back" },
     ]},
-    { title: "LUMIÈRE", fields: [
+    { title: t("camc.cap_group_light"), fields: [
       { key: "spotlight", label: "Spotlight" },
       { key: "white_light", label: "White light" },
       { key: "ir_control", label: "IR" },
       { key: "ir_cut_filter", label: "IR cut filter" },
     ]},
-    { title: "ALARME", fields: [
-      { key: "siren", label: "Sirène" },
-      { key: "alarm_output", label: "Relais alarme" },
+    { title: t("camc.cap_group_alarm"), fields: [
+      { key: "siren", label: t("camc.siren") },
+      { key: "alarm_output", label: t("camc.alarm_relay") },
     ]},
-    { title: "CAPTEURS", fields: [
+    { title: t("camc.cap_group_sensors"), fields: [
       { key: "pir_sensor", label: "PIR" },
-      { key: "battery", label: "Batterie" },
+      { key: "battery", label: t("camc.battery") },
     ]},
-    { title: "IA EMBARQUÉE", fields: [{ key: "onboard_ai", label: "Détection embarquée" }]},
+    { title: t("camc.cap_group_onboard_ai"), fields: [{ key: "onboard_ai", label: t("camc.onboard_detection") }]},
   ];
   return (
     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="cam-capabilities">
@@ -550,8 +561,8 @@ function AITab({ caps, cameraId }) {
     try {
       await api.post("/diagnostics/anpr-quality/reset", null, { params: { camera_id: cameraId } });
       loadAnprQuality();
-      toast.success("Suspension ANPR réinitialisée — reprise immédiate");
-    } catch (e) { toast.error("Échec de la réinitialisation"); }
+      toast.success(t("camc.anpr_suspension_reset"));
+    } catch (e) { toast.error(t("camc.reset_failed")); }
     finally { setResettingAnprQuality(false); }
   };
   const [savingAnprDedicated, setSavingAnprDedicated] = useState(false);
@@ -561,8 +572,8 @@ function AITab({ caps, cameraId }) {
       await api.put(`/cameras/${cameraId}/anpr-dedicated`, { enabled });
       setAi((prev) => ({ ...prev, cam: { ...prev.cam, anpr_dedicated: enabled } }));
       loadAnprQuality();
-      toast.success(enabled ? "Caméra marquée ANPR dédiée — suspension auto désactivée" : "Suspension auto ANPR réactivée");
-    } catch (e) { toast.error("Échec de l'enregistrement"); }
+      toast.success(enabled ? t("camc.anpr_dedicated_on") : t("camc.anpr_dedicated_off"));
+    } catch (e) { toast.error(t("camc.save_failed")); }
     finally { setSavingAnprDedicated(false); }
   };
   const runTuningNow = async () => {
@@ -571,8 +582,8 @@ function AITab({ caps, cameraId }) {
       await api.post(`/cameras/${cameraId}/anpr-tuning/run`);
       const r = await api.get(`/cameras/${cameraId}/anpr-tuning/history`);
       setTuning(r.data);
-      toast.success("Seuil ANPR réévalué");
-    } catch (e) { toast.error(e.response?.data?.detail?.message || "Échec — pas assez de lectures récentes ?"); }
+      toast.success(t("camc.anpr_threshold_reevaluated"));
+    } catch (e) { toast.error(e.response?.data?.detail?.message || t("camc.reevaluate_failed")); }
     finally { setTuningRunning(false); }
   };
   const plugins = ai.cam?.enabled_plugins || [];
@@ -586,8 +597,8 @@ function AITab({ caps, cameraId }) {
         ...prev,
         cam: { ...prev.cam, pipeline_config: { ...prev.cam.pipeline_config, ai: { ...(prev.cam.pipeline_config?.ai || {}), speed_calibration: undefined } } },
       }));
-      toast.success("Calibration vitesse supprimée");
-    } catch (e) { toast.error("Échec de la suppression"); }
+      toast.success(t("camc.speed_cal_deleted"));
+    } catch (e) { toast.error(t("camc.delete_failed")); }
     finally { setClearingSpeedCal(false); }
   };
   return (
@@ -598,21 +609,21 @@ function AITab({ caps, cameraId }) {
           discute justement ici. Rendu plus visible, demande explicite. */}
       <div data-testid="cam-ai-global-settings">
         <div className="text-xs uppercase tracking-wider text-[#FFB800] mb-1">
-          Réglage global — s'applique à TOUTES les caméras et TOUTES les classes (pas seulement celle-ci)
+          {t("camc.global_setting_notice")}
         </div>
         <AiDetectionSettings />
       </div>
     <div className="grid gap-3 md:grid-cols-2" data-testid="cam-ai">
       <Card className="p-4 space-y-2">
-        <div className="text-xs uppercase tracking-wider text-muted-foreground">Pipeline actif</div>
+        <div className="text-xs uppercase tracking-wider text-muted-foreground">{t("camc.active_pipeline")}</div>
         <div className="grid grid-cols-2 gap-1 text-sm">
           <div>{t("camc.detection")}</div><div className="font-mono">YOLO11</div>
           <div>Tracking</div><div className="font-mono">{ai.cam?.tracker_algo || "ByteTrack"}</div>
           <div>ANPR</div>
           <div>{plugins.includes("fast-alpr") ? <Badge>FastALPR</Badge> : <Badge variant="secondary">OFF</Badge>}</div>
           <div>{t("camc.onboard_ai")}</div>
-          <div>{caps?.onboard_ai ? <Badge variant="secondary">dispo</Badge> : "—"}</div>
-          <div>Plugins actifs</div><div className="font-mono">{plugins.length}</div>
+          <div>{caps?.onboard_ai ? <Badge variant="secondary">{t("camc.available")}</Badge> : "—"}</div>
+          <div>{t("camc.active_plugins")}</div><div className="font-mono">{plugins.length}</div>
         </div>
       </Card>
       <Card className="p-4 space-y-2">
@@ -629,28 +640,26 @@ function AITab({ caps, cameraId }) {
       <Card className="p-4 space-y-2 md:col-span-2" data-testid="cam-speed-calibration">
         <div className="flex items-center justify-between">
           <div className="text-xs uppercase tracking-wider text-muted-foreground">
-            Vitesse calibrée (homographie)
+            {t("camc.speed_cal_title")}
           </div>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={() => setShowSpeedCal(true)} data-testid="speed-cal-open">
-              {speedCal?.enabled ? "Recalibrer" : "Calibrer"}
+              {speedCal?.enabled ? t("camc.recalibrate") : t("camc.calibrate")}
             </Button>
             {speedCal?.enabled && (
               <Button size="sm" variant="outline" onClick={clearSpeedCal} disabled={clearingSpeedCal} data-testid="speed-cal-clear">
-                {clearingSpeedCal ? "…" : "Supprimer"}
+                {clearingSpeedCal ? "…" : t("common.delete")}
               </Button>
             )}
           </div>
         </div>
         {speedCal?.enabled ? (
           <div className="text-sm">
-            Zone calibrée : {speedCal.width_m}m × {speedCal.length_m}m — chaque véhicule suivi affiche sa vitesse
-            réelle (km/h) sur le mur vidéo, à l'arrêt comme en mouvement.
+            {t("camc.speed_cal_zone_prefix")} {speedCal.width_m}m × {speedCal.length_m}m {t("camc.speed_cal_zone_suffix")}
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">
-            Non calibrée — tracez un rectangle de dimensions réelles connues au sol pour afficher la vitesse (km/h)
-            de chaque véhicule suivi par cette caméra.
+            {t("camc.speed_cal_not_calibrated")}
           </p>
         )}
       </Card>
@@ -672,20 +681,19 @@ function AITab({ caps, cameraId }) {
         <Card className="p-4 space-y-2 md:col-span-2" data-testid="cam-anpr-tuning">
           <div className="flex items-center justify-between">
             <div className="text-xs uppercase tracking-wider text-muted-foreground">
-              Seuil de confiance ANPR (auto-réglé par IA)
+              {t("camc.anpr_threshold_title")}
             </div>
             <Button size="sm" variant="outline" onClick={runTuningNow} disabled={tuningRunning} data-testid="anpr-tuning-run">
-              {tuningRunning ? "Analyse…" : "Réévaluer maintenant"}
+              {tuningRunning ? t("camc.analyzing") : t("camc.reevaluate_now")}
             </Button>
           </div>
           <div className="text-2xl font-mono">{Math.round(tuning.current_min_confidence * 100)}%</div>
           <p className="text-xs text-muted-foreground">
-            Les lectures de plaque sous ce seuil sont ignorées (pas stockées). Réévalué automatiquement une fois par semaine
-            à partir des 14 derniers jours de lectures de cette caméra.
+            {t("camc.anpr_threshold_desc")}
           </p>
           {tuning.history?.length > 0 && (
             <div className="text-xs text-muted-foreground border-t border-border pt-2 mt-1">
-              Dernier ajustement : {Math.round(tuning.history[0].previous * 100)}% → {Math.round(tuning.history[0].new * 100)}%
+              {t("camc.last_adjustment")} {Math.round(tuning.history[0].previous * 100)}% → {Math.round(tuning.history[0].new * 100)}%
               — {tuning.history[0].reason}
             </div>
           )}
@@ -698,43 +706,41 @@ function AITab({ caps, cameraId }) {
           <Card className="p-4 space-y-2 md:col-span-2" data-testid="cam-anpr-quality">
             <div className="flex items-center justify-between">
               <div className="text-xs uppercase tracking-wider text-muted-foreground">
-                Qualité ANPR — auto-suspension ("pas de plaque &gt; fausse plaque")
+                {t("camc.anpr_quality_title")}
               </div>
               {state.suspended && !state.is_specialized && (
                 <Button size="sm" variant="outline" onClick={resetAnprQuality} disabled={resettingAnprQuality} data-testid="anpr-quality-reset">
-                  {resettingAnprQuality ? "…" : "Forcer la reprise"}
+                  {resettingAnprQuality ? "…" : t("camc.force_resume")}
                 </Button>
               )}
             </div>
             <label className="flex items-center gap-2 text-xs cursor-pointer" data-testid="anpr-dedicated-toggle">
               <input type="checkbox" checked={!!ai.cam?.anpr_dedicated} disabled={savingAnprDedicated}
                      onChange={(e) => setAnprDedicated(e.target.checked)} />
-              Caméra ANPR dédiée (IR/WDR nocturne) — forcer l'ANPR en tout temps, désactiver l'auto-suspension
+              {t("camc.anpr_dedicated_label")}
             </label>
             {state.is_specialized ? (
               <div className="flex items-center gap-2">
-                <Badge variant="secondary">Toujours actif</Badge>
-                <span className="text-sm">{state.specialized_model} — caméra ANPR dédiée, l'auto-suspension ne s'applique pas.</span>
+                <Badge variant="secondary">{t("camc.always_active")}</Badge>
+                <span className="text-sm">{state.specialized_model} {t("camc.dedicated_anpr_suffix")}</span>
               </div>
             ) : state.suspended ? (
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
-                  <Badge variant="destructive">ANPR suspendu</Badge>
-                  <span className="text-sm">score qualité {Math.round((state.last_score || 0) * 100)}%</span>
+                  <Badge variant="destructive">{t("camc.anpr_suspended")}</Badge>
+                  <span className="text-sm">{t("camc.quality_score")} {Math.round((state.last_score || 0) * 100)}%</span>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {state.last_reason || "Conditions insuffisantes (luminosité/netteté/contraste)."}
+                  {state.last_reason || t("camc.insufficient_conditions")}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Comportement normal sur une caméra standard hors des heures de jour — pour un fonctionnement 24/7,
-                  il faut un modèle ANPR dédié (Dahua ITC413/ITC237/ITC215, Hikvision DeepInView…), conçu pour gérer
-                  le bas éclairage lui-même. {state.total_suspensions > 1 && `${state.total_suspensions} suspensions au total.`}
+                  {t("camc.anpr_dedicated_needed_hint")} {state.total_suspensions > 1 && `${state.total_suspensions} ${t("camc.total_suspensions_suffix")}`}
                 </p>
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <Badge variant="secondary">Actif</Badge>
-                <span className="text-sm">score qualité {Math.round((state.last_score || 0) * 100)}%</span>
+                <Badge variant="secondary">{t("common.active")}</Badge>
+                <span className="text-sm">{t("camc.quality_score")} {Math.round((state.last_score || 0) * 100)}%</span>
               </div>
             )}
           </Card>
@@ -783,7 +789,7 @@ function EventsTab({ cameraId }) {
                // (`a.message`, déjà composé côté backend avec le libellé du
                // scénario/la plaque concernée) existe mais n'était jamais lu.
                <div>
-                 <div className="font-medium">{a.message || a.title || "Alerte"}</div>
+                 <div className="font-medium">{a.message || a.title || t("camc.alert_fallback")}</div>
                  <div className="text-muted-foreground text-[10px] flex items-center gap-1.5">
                    {a.scenario && <span className="uppercase tracking-wide">IA · {a.scenario}</span>}
                    {!a.scenario && a.type && a.type !== "ai_scenario" && <span className="uppercase tracking-wide">{a.type}</span>}
@@ -801,14 +807,14 @@ function EventsTab({ cameraId }) {
 function AudioTab({ cameraId, caps }) {
   const { t } = useApp();
   if (!caps?.audio_input && !caps?.audio_output) return <NotSupported what="Audio" />;
-  const start = () => api.post(`/devices/${cameraId}/audio/start`).then(() => toast.success("Audio démarré"))
-                          .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
-  const stop = () => api.post(`/devices/${cameraId}/audio/stop`).then(() => toast.success("Audio arrêté"))
-                         .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
+  const start = () => api.post(`/devices/${cameraId}/audio/start`).then(() => toast.success(t("camc.audio_started")))
+                          .catch((e) => toast.error(e.response?.data?.detail?.message || t("camc.error_generic")));
+  const stop = () => api.post(`/devices/${cameraId}/audio/stop`).then(() => toast.success(t("camc.audio_stopped")))
+                         .catch((e) => toast.error(e.response?.data?.detail?.message || t("camc.error_generic")));
   return (
     <Card className="p-4 space-y-2" data-testid="cam-audio">
       <div className="text-sm text-muted-foreground">
-        {caps.two_way_audio ? "Talk-back disponible" : "Audio one-way"}
+        {caps.two_way_audio ? t("camc.talkback_available") : "Audio one-way"}
       </div>
       <div className="flex gap-2">
         {caps.audio_output && (
@@ -827,11 +833,11 @@ function LightingTab({ cameraId, caps }) {
   const { t } = useApp();
   const supported = caps?.spotlight || caps?.white_light;
   const [brightness, setBrightness] = useState(80);
-  if (!supported) return <NotSupported what="Lumière (spotlight / white light)" />;
+  if (!supported) return <NotSupported what={t("camc.what_light")} />;
   const toggle = (enabled) =>
     api.post(`/devices/${cameraId}/light`, { enabled, brightness, mode: "on" })
-       .then(() => toast.success(enabled ? "Lumière ON" : "Lumière OFF"))
-       .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
+       .then(() => toast.success(enabled ? t("camc.light_on") : t("camc.light_off")))
+       .catch((e) => toast.error(e.response?.data?.detail?.message || t("camc.error_generic")));
   return (
     <Card className="p-4 space-y-3" data-testid="cam-lighting">
       <Label>Brightness ({brightness}%)</Label>
@@ -839,7 +845,7 @@ function LightingTab({ cameraId, caps }) {
              onChange={(e) => setBrightness(Number(e.target.value))}
              data-testid="light-brightness" />
       <div className="flex gap-2">
-        <Button onClick={() => toggle(true)} data-testid="light-on">Allumer</Button>
+        <Button onClick={() => toggle(true)} data-testid="light-on">{t("camc.turn_on")}</Button>
         <Button variant="outline" onClick={() => toggle(false)} data-testid="light-off">{t("camc.turn_off")}</Button>
       </div>
     </Card>
@@ -853,6 +859,7 @@ function LightingTab({ cameraId, caps }) {
 // haut de l'image" (l'incrustation caméra chevauchait nos propres infos).
 const OSD_POSITIONS = ["Upper Left", "Upper Right", "Top Center", "Bottom Center", "Lower Left", "Lower Right"];
 function OsdTab({ cameraId, caps }) {
+  const { t } = useApp();
   const [osd, setOsd] = useState(null);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
@@ -860,9 +867,9 @@ function OsdTab({ cameraId, caps }) {
     api.get(`/devices/${cameraId}/osd`).then((r) => setOsd(r.data)).catch(() => setOsd(false));
   }, [cameraId, caps?.osd]);
 
-  if (!caps?.osd) return <NotSupported what="Incrustation (OSD)" />;
-  if (osd === null) return <Card className="p-4 text-sm text-muted-foreground">Chargement…</Card>;
-  if (osd === false) return <Card className="p-4 text-sm text-muted-foreground">Lecture impossible sur cette caméra.</Card>;
+  if (!caps?.osd) return <NotSupported what={t("camc.what_osd")} />;
+  if (osd === null) return <Card className="p-4 text-sm text-muted-foreground">{t("common.loading")}</Card>;
+  if (osd === false) return <Card className="p-4 text-sm text-muted-foreground">{t("camc.read_impossible")}</Card>;
 
   const save = (patch) => {
     const next = { ...osd, ...patch };
@@ -871,8 +878,8 @@ function OsdTab({ cameraId, caps }) {
     api.post(`/devices/${cameraId}/osd`, {
       name_pos: next.name_enabled ? next.name_pos : "Off",
       date_pos: next.date_enabled ? next.date_pos : "Off",
-    }).then(() => toast.success("Incrustation mise à jour"))
-      .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"))
+    }).then(() => toast.success(t("camc.osd_updated")))
+      .catch((e) => toast.error(e.response?.data?.detail?.message || t("camc.error_generic")))
       .finally(() => setSaving(false));
   };
 
@@ -892,11 +899,11 @@ function OsdTab({ cameraId, caps }) {
   return (
     <Card className="p-4 space-y-4" data-testid="cam-osd">
       <p className="text-xs text-muted-foreground">
-        Position (ou désactivation) de la date/heure et du nom que la caméra grave elle-même dans l'image.
+        {t("camc.osd_desc")}
       </p>
-      <Row label="Nom caméra" enabled={osd.name_enabled} pos={osd.name_pos}
+      <Row label={t("camc.camera_name_label")} enabled={osd.name_enabled} pos={osd.name_pos}
            onEnabled={(v) => save({ name_enabled: v })} onPos={(v) => save({ name_pos: v })} />
-      <Row label="Date / heure" enabled={osd.date_enabled} pos={osd.date_pos}
+      <Row label={t("camc.date_time_label")} enabled={osd.date_enabled} pos={osd.date_pos}
            onEnabled={(v) => save({ date_enabled: v })} onPos={(v) => save({ date_pos: v })} />
     </Card>
   );
@@ -909,6 +916,7 @@ function OsdTab({ cameraId, caps }) {
 // obligatoire à l'ajout suffit là-bas) — ici c'est la vue persistante,
 // consultable et actionnable à tout moment sans rouvrir le formulaire.
 function DateTimeTab({ cameraId }) {
+  const { t } = useApp();
   const [state, setState] = useState(null); // null=chargement, false=erreur, objet=données
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -922,7 +930,7 @@ function DateTimeTab({ cameraId }) {
        .catch((e) => {
          setState(false);
          const d = e.response?.data?.detail;
-         setError((typeof d === "string" ? d : d?.message) || "Lecture impossible sur cette caméra.");
+         setError((typeof d === "string" ? d : d?.message) || t("camc.read_impossible"));
        })
        .finally(() => setRefreshing(false));
   };
@@ -931,20 +939,20 @@ function DateTimeTab({ cameraId }) {
   const setNtp = () => {
     setSettingNtp(true);
     api.post(`/cameras/${cameraId}/ntp`, { ntp_server: window.location.hostname })
-       .then(() => { toast.success("Serveur de temps défini — MG-VMS resynchronisera cette caméra automatiquement toutes les 24h"); load(); })
-       .catch((e) => toast.error(e.response?.data?.detail?.message || e.response?.data?.detail || "Échec"))
+       .then(() => { toast.success(t("camc.ntp_set_success")); load(); })
+       .catch((e) => toast.error(e.response?.data?.detail?.message || e.response?.data?.detail || t("camc.failed_generic")))
        .finally(() => setSettingNtp(false));
   };
 
   const syncNow = () => {
     setSyncingNow(true);
     api.post(`/cameras/${cameraId}/datetime/sync-now`)
-       .then(() => { toast.success("Horloge caméra mise à l'heure du serveur"); load(); })
-       .catch((e) => toast.error(e.response?.data?.detail?.message || e.response?.data?.detail || "Échec"))
+       .then(() => { toast.success(t("camc.clock_synced")); load(); })
+       .catch((e) => toast.error(e.response?.data?.detail?.message || e.response?.data?.detail || t("camc.failed_generic")))
        .finally(() => setSyncingNow(false));
   };
 
-  if (state === null) return <Card className="p-4 text-sm text-muted-foreground" data-testid="cam-datetime">Chargement…</Card>;
+  if (state === null) return <Card className="p-4 text-sm text-muted-foreground" data-testid="cam-datetime">{t("common.loading")}</Card>;
 
   const drift = state ? Math.abs(state.drift_seconds ?? 0) : null;
   const driftOk = drift !== null && drift < 60;
@@ -952,7 +960,7 @@ function DateTimeTab({ cameraId }) {
   return (
     <Card className="p-4 space-y-4" data-testid="cam-datetime">
       <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">Horloge de la caméra, lue à la demande (ONVIF).</p>
+        <p className="text-xs text-muted-foreground">{t("camc.clock_desc")}</p>
         <Button size="sm" variant="outline" onClick={load} disabled={refreshing} data-testid="cam-datetime-refresh">
           {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
         </Button>
@@ -964,42 +972,41 @@ function DateTimeTab({ cameraId }) {
         <>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Heure caméra</div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("camc.camera_time")}</div>
               <div className="mono">{new Date(state.camera_time).toLocaleString("fr-FR")}</div>
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Heure serveur MG-VMS</div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("camc.server_time")}</div>
               <div className="mono">{new Date(state.server_time).toLocaleString("fr-FR")}</div>
             </div>
           </div>
           <div className={`text-sm ${driftOk ? "text-[#00E676]" : "text-[#FFB800]"}`}>
-            Écart : {state.drift_seconds > 0 ? "+" : ""}{state.drift_seconds}s
-            {driftOk ? " — horloge synchronisée" : " — dérive notable"}
+            {t("camc.drift_label")} {state.drift_seconds > 0 ? "+" : ""}{state.drift_seconds}s
+            {driftOk ? ` ${t("camc.clock_synced_suffix")}` : ` ${t("camc.drift_notable_suffix")}`}
           </div>
           <Button size="sm" variant="outline" onClick={syncNow} disabled={syncingNow} data-testid="cam-datetime-sync-now"
                   className="flex items-center gap-2">
             {syncingNow ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-            Synchroniser maintenant (à l'heure du serveur, ponctuel)
+            {t("camc.sync_now_btn")}
           </Button>
         </>
       )}
 
       <div className="border-t border-border pt-4">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Serveur de temps (NTP)</div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">{t("camc.ntp_server_title")}</div>
         {state && state.ntp_managed ? (
           <p className="text-sm text-[#00E676]">
-            Gérée par MG-VMS ({state.ntp_server}) — resynchronisation automatique toutes les 24h.
+            {t("camc.ntp_managed_prefix")} ({state.ntp_server}) {t("camc.ntp_managed_suffix")}
           </p>
         ) : (
           <>
             <p className="text-[11px] text-muted-foreground mb-2">
-              Cette caméra n'est pas configurée pour se synchroniser sur MG-VMS — dérive possible avec le temps
-              ou après un redémarrage caméra.
+              {t("camc.ntp_not_configured")}
             </p>
             <Button onClick={setNtp} disabled={settingNtp} data-testid="cam-datetime-set-ntp"
                     className="flex items-center gap-2">
               {settingNtp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Clock className="w-4 h-4" />}
-              Configurer avec le serveur NTP local (MG-VMS) — fortement conseillé
+              {t("camc.configure_ntp_btn")}
             </Button>
           </>
         )}
@@ -1012,15 +1019,15 @@ function DateTimeTab({ cameraId }) {
 function AlarmTab({ cameraId, caps }) {
   const { t } = useApp();
   const [duration, setDuration] = useState(10);
-  if (!caps?.siren) return <NotSupported what="Sirène" />;
+  if (!caps?.siren) return <NotSupported what={t("camc.siren")} />;
   const trigger = () =>
     api.post(`/devices/${cameraId}/siren`, { enabled: true, duration })
-       .then(() => toast.success(`Sirène déclenchée (${duration}s)`))
-       .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
+       .then(() => toast.success(`${t("camc.siren_triggered_prefix")} (${duration}s)`))
+       .catch((e) => toast.error(e.response?.data?.detail?.message || t("camc.error_generic")));
   const stop = () =>
     api.post(`/devices/${cameraId}/siren`, { enabled: false })
-       .then(() => toast.success("Sirène arrêtée"))
-       .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
+       .then(() => toast.success(t("camc.siren_stopped")))
+       .catch((e) => toast.error(e.response?.data?.detail?.message || t("camc.error_generic")));
   return (
     <Card className="p-4 space-y-3" data-testid="cam-alarm">
       <Label>{t("camc.duration_s")}</Label>
@@ -1065,7 +1072,7 @@ function SdCardTab({ cameraId, caps }) {
     return () => { alive = false; };
   }, [cameraId, caps?.sdcard]);
 
-  if (!caps?.sdcard) return <NotSupported what="Carte SD / stockage local" />;
+  if (!caps?.sdcard) return <NotSupported what={t("camc.what_sdcard")} />;
 
   const search = async () => {
     setLoading(true); setRecordings(null); setPlaying(null);
@@ -1078,9 +1085,9 @@ function SdCardTab({ cameraId, caps }) {
         },
       });
       setRecordings(data.recordings || []);
-      if (!(data.recordings || []).length) toast.info("Aucun enregistrement sur cette période");
+      if (!(data.recordings || []).length) toast.info(t("camc.no_recordings_period"));
     } catch (e) {
-      toast.error(e.response?.data?.detail?.message || "Recherche impossible");
+      toast.error(e.response?.data?.detail?.message || t("camc.search_impossible"));
     } finally { setLoading(false); }
   };
 
@@ -1098,7 +1105,7 @@ function SdCardTab({ cameraId, caps }) {
     document.body.appendChild(a);
     a.click();
     a.remove();
-    toast.success("Téléchargement lancé");
+    toast.success(t("camc.download_started"));
   };
 
   return (
@@ -1110,14 +1117,14 @@ function SdCardTab({ cameraId, caps }) {
               <div className="flex items-center justify-between gap-3">
                 <span className="text-muted-foreground">{s.type || "SD"} #{s.index}</span>
                 <span className={s.available ? "text-[#00E676]" : "text-[#FF3333]"}>
-                  {s.available ? "OK" : "absente/erreur"}
+                  {s.available ? "OK" : t("camc.absent_or_error")}
                 </span>
               </div>
               {s.available && s.total_bytes > 0 && (
                 <>
                   <div className="mt-1 font-mono text-[11px]">
                     {fmtGb(s.total_bytes - s.free_bytes)} / {fmtGb(s.total_bytes)}
-                    <span className="text-muted-foreground ml-1.5">({s.used_percent}% utilisé)</span>
+                    <span className="text-muted-foreground ml-1.5">({s.used_percent}% {t("camc.used_suffix")})</span>
                   </div>
                   <div className="mt-1 h-1.5 bg-secondary overflow-hidden">
                     <div className="h-full bg-[#0044FF]"
@@ -1135,7 +1142,7 @@ function SdCardTab({ cameraId, caps }) {
 
       <div className="flex flex-wrap items-end gap-2">
         <div>
-          <Label>Depuis</Label>
+          <Label>{t("camc.since_label")}</Label>
           <Input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} data-testid="sdcard-start" />
         </div>
         <div>
@@ -1158,12 +1165,11 @@ function SdCardTab({ cameraId, caps }) {
           </div>
         </div>
         <Button onClick={search} disabled={loading} data-testid="sdcard-search">
-          {loading ? "Recherche…" : "Rechercher"}
+          {loading ? t("camc.searching") : t("common.search")}
         </Button>
       </div>
       <div className="text-[11px] text-muted-foreground">
-        HD = flux principal (qualité maximale) · SD = sous-flux (fichiers plus légers,
-        lecture et téléchargement plus rapides).
+        {t("camc.hd_sd_explainer")}
       </div>
 
       {playing && (
@@ -1190,7 +1196,7 @@ function SdCardTab({ cameraId, caps }) {
                 {r.size_bytes != null && <span>{(r.size_bytes / 1024 / 1024).toFixed(1)} Mo</span>}
                 <Button size="sm" variant="outline" data-testid="sdcard-play-btn"
                         onClick={(e) => { e.stopPropagation(); setPlaying(r.file_name); }}>
-                  Lire
+                  {t("camc.play_btn")}
                 </Button>
                 <Button size="sm" variant="outline" data-testid="sdcard-download-btn"
                         title={t("camc.download_local")}
@@ -1310,7 +1316,7 @@ function PTZTab({ cameraId, caps }) {
   const move = (direction) =>
     api.post(`/devices/${cameraId}/ptz/move`, { direction, speed: ptzSpeed })
        .then(() => {})
-       .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
+       .catch((e) => toast.error(e.response?.data?.detail?.message || t("camc.error_generic")));
   // v3.60 · `ptz/move` déclenche un mouvement CONTINU côté caméra (comme la
   // quasi-totalité des PTZ ONVIF/Reolink) — un simple onClick l'envoyait
   // sans jamais l'arrêter, obligeant à cliquer "■" à chaque fois. Bascule
@@ -1326,14 +1332,14 @@ function PTZTab({ cameraId, caps }) {
   const zoom = (value) =>
     api.post(`/devices/${cameraId}/ptz/zoom`, { value })
        .then(() => {})
-       .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
+       .catch((e) => toast.error(e.response?.data?.detail?.message || t("camc.error_generic")));
   const gotoPreset = (id) =>
     // v3.47 · id est un token opaque ("000", "004"...) — surtout PAS
     // Number(id), qui perdait les zéros de tête et envoyait un token qui
     // ne correspond à aucun preset réel sur la caméra.
     api.post(`/devices/${cameraId}/ptz/preset`, { id: String(id), speed: ptzSpeed })
        .then(() => toast.success(id))
-       .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
+       .catch((e) => toast.error(e.response?.data?.detail?.message || t("camc.error_generic")));
 
   const addPreset = () => {
     const name = window.prompt(t("ptz.preset_name_prompt"), "");
@@ -1344,7 +1350,7 @@ function PTZTab({ cameraId, caps }) {
          toast.success(`${t("ptz.preset_added")} ${r.data.name}`);
          loadPresets();
        })
-       .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"))
+       .catch((e) => toast.error(e.response?.data?.detail?.message || t("camc.error_generic")))
        .finally(() => setAddingPreset(false));
   };
 
@@ -1356,7 +1362,7 @@ function PTZTab({ cameraId, caps }) {
          loadPresets();
          setPatrol((p) => ({ ...p, preset_ids: p.preset_ids.filter((id) => id !== preset.id) }));
        })
-       .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"));
+       .catch((e) => toast.error(e.response?.data?.detail?.message || t("camc.error_generic")));
   };
 
   const savePatrol = (next, { confirm = false } = {}) => {
@@ -1369,8 +1375,8 @@ function PTZTab({ cameraId, caps }) {
       // v3.69 · Confirmation explicite uniquement sur clic "Enregistrer" —
       // le slider sauvegarde déjà silencieusement sur relâchement, pour ne
       // pas spammer un toast à chaque glissement.
-      if (confirm) toast.success("Vitesse de patrouille enregistrée (envoyée au serveur)");
-    }).catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"))
+      if (confirm) toast.success(t("camc.patrol_speed_saved"));
+    }).catch((e) => toast.error(e.response?.data?.detail?.message || t("camc.error_generic")))
       .finally(() => setPatrolSaving(false));
   };
 
@@ -1378,7 +1384,7 @@ function PTZTab({ cameraId, caps }) {
     setAutoTrackSaving(true);
     api.put(`/devices/${cameraId}/ptz/auto-track`, { enabled, method: method ?? autoTrack.method })
        .then((r) => setAutoTrack({ enabled: !!r.data.enabled, method: r.data.method || null }))
-       .catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"))
+       .catch((e) => toast.error(e.response?.data?.detail?.message || t("camc.error_generic")))
        .finally(() => setAutoTrackSaving(false));
   };
 
@@ -1394,7 +1400,7 @@ function PTZTab({ cameraId, caps }) {
       // (exclusion mutuelle) — on recharge son état pour que le toggle
       // patrouille reflète bien qu'elle est désormais arrêtée.
       if (next.enabled) loadPatrol();
-    }).catch((e) => toast.error(e.response?.data?.detail?.message || "Erreur"))
+    }).catch((e) => toast.error(e.response?.data?.detail?.message || t("camc.error_generic")))
       .finally(() => setTrackingSaving(false));
   };
 
@@ -1453,7 +1459,7 @@ function PTZTab({ cameraId, caps }) {
         {caps?.ptz && (
         <Card className="p-4 space-y-4" data-testid="cam-ptz">
           <div>
-            <div className="text-sm text-muted-foreground mb-2">Directions</div>
+            <div className="text-sm text-muted-foreground mb-2">{t("camc.directions")}</div>
             <div className="grid grid-cols-3 gap-1 w-48">
               <Button variant="outline" {...holdMove("upleft")}>↖</Button>
               <Button variant="outline" {...holdMove("up")} data-testid="ptz-up">↑</Button>
@@ -1468,7 +1474,7 @@ function PTZTab({ cameraId, caps }) {
           </div>
           <div>
             <div className="text-sm text-muted-foreground mb-2 flex items-center justify-between">
-              <span>Vitesse</span>
+              <span>{t("camc.speed_label")}</span>
               <span className="font-mono text-xs">{Math.round(ptzSpeed * 100)}%</span>
             </div>
             <input type="range" min={0.1} max={1} step={0.1} value={ptzSpeed}
@@ -1501,7 +1507,7 @@ function PTZTab({ cameraId, caps }) {
         </div>
         {presetsLoading ? (
           <div className="text-sm text-muted-foreground flex items-center gap-2">
-            <Loader2 size={14} className="animate-spin" /> Chargement…
+            <Loader2 size={14} className="animate-spin" /> {t("common.loading")}
           </div>
         ) : presets.length === 0 ? (
           <div className="text-sm text-muted-foreground">{t("ptz.no_presets")}</div>
@@ -1556,7 +1562,7 @@ function PTZTab({ cameraId, caps }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <Label className="text-xs text-muted-foreground whitespace-nowrap">Vitesse de transition</Label>
+          <Label className="text-xs text-muted-foreground whitespace-nowrap">{t("camc.transition_speed")}</Label>
           <input type="range" min={0.1} max={1} step={0.1} value={patrol.speed}
                  onChange={(e) => setPatrol((p) => ({ ...p, speed: Number(e.target.value) }))}
                  onMouseUp={() => savePatrol(patrol)} onTouchEnd={() => savePatrol(patrol)}
@@ -1605,11 +1611,11 @@ function PTZTab({ cameraId, caps }) {
                       <span className="mono text-muted-foreground w-4">{idx + 1}.</span>
                       <span className="flex-1">{presetName(id)}</span>
                       <button onClick={() => movePatrolStep(idx, -1)} disabled={idx === 0}
-                              className="disabled:opacity-30 hover:text-[#0044FF]" title="Monter">
+                              className="disabled:opacity-30 hover:text-[#0044FF]" title={t("camc.move_up")}>
                         <ArrowUp size={12} />
                       </button>
                       <button onClick={() => movePatrolStep(idx, 1)} disabled={idx === patrol.preset_ids.length - 1}
-                              className="disabled:opacity-30 hover:text-[#0044FF]" title="Descendre">
+                              className="disabled:opacity-30 hover:text-[#0044FF]" title={t("camc.move_down")}>
                         <ArrowDown size={12} />
                       </button>
                     </div>

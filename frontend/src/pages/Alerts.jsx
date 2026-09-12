@@ -18,7 +18,7 @@ function AiRulesDialog({ open, onClose }) {
   const [rules, setRules] = useState(null);
   const [arming, setArming] = useState(null);
   const [saving, setSaving] = useState(false);
-  const DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+  const DAYS = [t("alr.day_mon"), t("alr.day_tue"), t("alr.day_wed"), t("alr.day_thu"), t("alr.day_fri"), t("alr.day_sat"), t("alr.day_sun")];
 
   useEffect(() => {
     if (open) {
@@ -32,10 +32,10 @@ function AiRulesDialog({ open, onClose }) {
     try {
       await api.put("/ai/alert-rules", rules);
       await api.put("/ai/arming", arming);
-      toast.success("Règles IA et armement enregistrés");
+      toast.success(t("alr.save_success"));
       onClose();
     }
-    catch (e) { toast.error("Erreur d'enregistrement"); } finally { setSaving(false); }
+    catch (e) { toast.error(t("alr.save_error")); } finally { setSaving(false); }
   };
 
   const toggleDay = (d) => {
@@ -47,20 +47,20 @@ function AiRulesDialog({ open, onClose }) {
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="rounded-none border-border max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader><DialogTitle className="font-head flex items-center gap-2"><BrainCircuit size={18} /> {t("alr.ai_rules")}</DialogTitle></DialogHeader>
-        {!rules || !arming ? <div className="text-sm text-muted-foreground py-6">Chargement...</div> : (
+        {!rules || !arming ? <div className="text-sm text-muted-foreground py-6">{t("common.loading")}</div> : (
           <div className="space-y-2">
             <div className="border border-border p-3 space-y-2" data-testid="arming-section">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">{t("alr.arming")}</span>
                 <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 border ${arming.armed_now ? "border-[#00E676] text-[#00E676]" : "border-[#FF3333] text-[#FF3333]"}`} data-testid="armed-status">
-                  {arming.armed_now ? "Armé" : "Désarmé"}
+                  {arming.armed_now ? t("alr.status_armed") : t("alr.status_disarmed")}
                 </span>
               </div>
               <select value={arming.mode} data-testid="arming-mode-select"
                 onChange={(e) => setArming({ ...arming, mode: e.target.value })}
                 className="w-full px-2 py-1.5 bg-card border border-input text-sm">
                 <option value="always">{t("alr.always_armed")}</option>
-                <option value="schedule">Selon planning</option>
+                <option value="schedule">{t("alr.schedule_mode")}</option>
                 <option value="off">{t("alr.disarmed")}</option>
               </select>
               {arming.mode === "schedule" && (
@@ -72,13 +72,13 @@ function AiRulesDialog({ open, onClose }) {
                     ))}
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">De</span>
+                    <span className="text-xs text-muted-foreground">{t("alr.hours_from")}</span>
                     <input type="number" min="0" max="23" value={arming.start_h} data-testid="arming-start"
                       onChange={(e) => setArming({ ...arming, start_h: +e.target.value })} className="w-16 px-2 py-1 bg-card border border-input text-sm" />
                     <span className="text-xs text-muted-foreground">{t("alr.hours_to")}</span>
                     <input type="number" min="0" max="24" value={arming.end_h} data-testid="arming-end"
                       onChange={(e) => setArming({ ...arming, end_h: +e.target.value })} className="w-16 px-2 py-1 bg-card border border-input text-sm" />
-                    <span className="text-xs text-muted-foreground">h (UTC)</span>
+                    <span className="text-xs text-muted-foreground">{t("alr.hours_unit_utc")}</span>
                   </div>
                 </>
               )}
@@ -94,17 +94,17 @@ function AiRulesDialog({ open, onClose }) {
               </div>
             ))}
             <div className="flex items-center gap-3 pt-1">
-              <label className="text-xs text-muted-foreground">Plage nocturne :</label>
+              <label className="text-xs text-muted-foreground">{t("alr.night_range_label")}</label>
               <input type="number" min="0" max="23" value={rules.intrusion_nocturne?.night_start ?? 22}
                 onChange={(e) => setRules({ ...rules, intrusion_nocturne: { ...rules.intrusion_nocturne, night_start: +e.target.value }, vol_vehicule: { ...rules.vol_vehicule, night_start: +e.target.value } })}
                 className="w-16 px-2 py-1 bg-card border border-input text-sm" data-testid="ai-rule-night-start" />
-              <span className="text-xs text-muted-foreground">h →</span>
+              <span className="text-xs text-muted-foreground">{t("alr.hours_arrow_suffix")}</span>
               <input type="number" min="0" max="23" value={rules.intrusion_nocturne?.night_end ?? 6}
                 onChange={(e) => setRules({ ...rules, intrusion_nocturne: { ...rules.intrusion_nocturne, night_end: +e.target.value }, vol_vehicule: { ...rules.vol_vehicule, night_end: +e.target.value } })}
                 className="w-16 px-2 py-1 bg-card border border-input text-sm" data-testid="ai-rule-night-end" />
-              <span className="text-xs text-muted-foreground">h (UTC)</span>
+              <span className="text-xs text-muted-foreground">{t("alr.hours_unit_utc")}</span>
             </div>
-            <button onClick={save} disabled={saving} data-testid="ai-rules-save-btn" className="w-full mt-2 px-4 py-2 bg-[#0044FF] text-white text-sm">{saving ? "..." : "Enregistrer"}</button>
+            <button onClick={save} disabled={saving} data-testid="ai-rules-save-btn" className="w-full mt-2 px-4 py-2 bg-[#0044FF] text-white text-sm">{saving ? "..." : t("alr.save_btn")}</button>
           </div>
         )}
       </DialogContent>
@@ -133,7 +133,7 @@ export default function Alerts() {
     id: a.id, thumbnail: a.thumbnail || a.vehicle_crop || a.plate_crop,
     plate_crop: a.plate_crop, vehicle_crop: a.vehicle_crop,
     camera_id: a.camera_id, camera_name: a.camera_name, site_name: a.site_name,
-    timestamp: a.timestamp, plugin: a.plugin || (a.scenario ? `IA · ${a.scenario}` : "Alerte"),
+    timestamp: a.timestamp, plugin: a.plugin || (a.scenario ? `${t("alerts.ai_scenario_prefix")} ${a.scenario}` : t("alerts.no_plugin_fallback")),
     type: a.type || a.scenario || "alert", label: a.message,
     plate: a.plate, list_status: a.list_status,
   }));
@@ -167,7 +167,7 @@ export default function Alerts() {
   useEffect(load, [filter]);
   useEffect(() => { if (alertPing) load(); }, [alertPing]);
 
-  const ack = async (id) => { try { await api.post(`/alerts/${id}/ack`); toast.success(t("alerts.acked")); load(); } catch (e) { toast.error("Erreur"); } };
+  const ack = async (id) => { try { await api.post(`/alerts/${id}/ack`); toast.success(t("alerts.acked")); load(); } catch (e) { toast.error(t("alerts.generic_error")); } };
   const [ackingAll, setAckingAll] = useState(false);
   const ackAll = async () => {
     setAckingAll(true);
@@ -176,7 +176,7 @@ export default function Alerts() {
       const n = r.data.acknowledged || 0;
       toast.success(n > 0 ? `${n} ${t("alerts.ack_all_done")}` : t("alerts.ack_all_none"));
       load();
-    } catch (e) { toast.error("Erreur"); } finally { setAckingAll(false); }
+    } catch (e) { toast.error(t("alerts.generic_error")); } finally { setAckingAll(false); }
   };
 
   return (
@@ -204,7 +204,7 @@ export default function Alerts() {
             <div key={a.id} className={`bg-card border-l-2 border border-border flex items-center gap-3 px-4 py-3 fade-up ${a.acknowledged ? "opacity-55" : ""}`} style={{ borderLeftColor: s.color }} data-testid="alert-item">
               <Icon size={18} style={{ color: s.color }} className={a.acknowledged ? "" : "rec-dot"} />
               {img && (
-                <button onClick={() => setViewerId(a.id)} className="w-20 h-12 shrink-0 border border-border overflow-hidden hover:ring-2 hover:ring-[#0044FF] transition" data-testid="alert-thumb-btn" title="Voir en HD">
+                <button onClick={() => setViewerId(a.id)} className="w-20 h-12 shrink-0 border border-border overflow-hidden hover:ring-2 hover:ring-[#0044FF] transition" data-testid="alert-thumb-btn" title={t("alerts.view_hd_title")}>
                   <img src={img} alt="" className="w-full h-full object-cover bg-black" data-testid="alert-thumbnail" />
                 </button>
               )}
@@ -217,15 +217,15 @@ export default function Alerts() {
                   {isAnomaly && (
                     <button onClick={() => navigate(`/alerts?tab=anomalies&report=${a.anomaly_report_id}`)}
                       className="shrink-0 flex items-center gap-1 text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-[#A855F7] text-[#A855F7] hover:bg-[#A855F7]/10"
-                      data-testid="alert-anomaly-link" title="Voir le rapport d'anomalie complet">
-                      <Sparkles size={10} /> IA véhicule
+                      data-testid="alert-anomaly-link" title={t("alerts.anomaly_report_title")}>
+                      <Sparkles size={10} /> {t("alerts.vehicle_ai_badge")}
                     </button>
                   )}
                 </div>
                 <div className="text-xs text-muted-foreground mono">{a.camera_name} · {a.site_name} · {new Date(a.timestamp).toLocaleString()}</div>
               </div>
               <span className="text-[9px] uppercase tracking-wider px-2 py-0.5 border" style={{ borderColor: s.color, color: s.color }}>{a.severity}</span>
-              <button onClick={() => setViewerId(a.id)} className="flex items-center gap-1 px-2 py-1.5 text-xs border border-border hover:bg-secondary" data-testid="alert-view-btn" title="Ouvrir la visionneuse"><Eye size={13} /></button>
+              <button onClick={() => setViewerId(a.id)} className="flex items-center gap-1 px-2 py-1.5 text-xs border border-border hover:bg-secondary" data-testid="alert-view-btn" title={t("alerts.open_viewer_title")}><Eye size={13} /></button>
               {!a.acknowledged && can("client") && (
                 <button onClick={() => ack(a.id)} data-testid="alert-ack-btn" className="flex items-center gap-1 px-3 py-1.5 text-xs border border-border hover:bg-secondary"><Check size={13} /> {t("alerts.ack")}</button>
               )}
@@ -239,7 +239,7 @@ export default function Alerts() {
         <div className="flex justify-center pt-3">
           <button onClick={loadMore} disabled={loadingMore} data-testid="alerts-load-more"
                   className="px-4 py-2 text-xs uppercase tracking-wider border border-border hover:bg-secondary disabled:opacity-40">
-            {loadingMore ? "Chargement…" : `Charger plus (${alerts.length} / ${total})`}
+            {loadingMore ? t("common.loading") : `${t("alerts.load_more")} (${alerts.length} / ${total})`}
           </button>
         </div>
       )}

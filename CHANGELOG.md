@@ -3,6 +3,11 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.79-i18n-wave2] — 2026-09-12 — Traduction : deuxième vague (pages partiellement traduites)
+
+### Added
+- **780 nouvelles clés de traduction** (FR + EN) sur 20 pages qui avaient déjà une traduction partielle mais avec beaucoup de texte encore en dur — notamment la page d'accueil (signalée par l'utilisateur comme non traduite à 100%), Cameras.jsx, CameraCenter.jsx et Vehicles.jsx (les plus grosses pages de l'app). Le fichier de traduction passe de 1893 à 2673 clés (FR/EN parfaitement alignées, vérifié).
+
 ## [v3.77-i18n-newline-fix] — 2026-09-12 — Correctif build (v3.76)
 
 ### Fixed

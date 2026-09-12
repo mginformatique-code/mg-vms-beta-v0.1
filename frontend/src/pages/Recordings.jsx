@@ -179,7 +179,7 @@ export default function Recordings() {
       a.href = url; a.download = `mgvms_export_${id.slice(0, 8)}.zip`;
       document.body.appendChild(a); a.click(); a.remove();
       window.URL.revokeObjectURL(url);
-    } catch (e) { toast.error("Téléchargement indisponible (MP4 = production)"); }
+    } catch (e) { toast.error(t("rec.download_unavailable")); }
   };
 
   const selPct = { left: `${secToX(selStart)}%`, width: `${((selEnd - selStart) / viewSpan) * 100}%` };
@@ -261,11 +261,11 @@ export default function Recordings() {
               {/* Timeline 24h — molette pour zoomer, glisser pour sélectionner un export */}
               <div className="border border-border bg-card p-3" data-testid="rec-timeline">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] text-muted-foreground">Molette : zoomer/dézoomer · glisser-déposer : sélectionner un export</span>
+                  <span className="text-[10px] text-muted-foreground">{t("rec.timeline_hint")}</span>
                   {zoomed && (
                     <button onClick={resetZoom} data-testid="rec-zoom-reset"
                       className="text-[10px] px-1.5 py-0.5 border border-border hover:bg-secondary text-muted-foreground">
-                      Réinitialiser le zoom ({fmtDur(Math.round(viewSpan))})
+                      {t("rec.reset_zoom")} ({fmtDur(Math.round(viewSpan))})
                     </button>
                   )}
                 </div>
@@ -332,7 +332,7 @@ export default function Recordings() {
                     </div>
                     <button onClick={() => setWizardOpen(true)} disabled={selEnd <= selStart} data-testid="rec-export-btn"
                       className="flex items-center gap-2 px-3 py-2 bg-[#0044FF] text-white text-sm hover:bg-[#0033cc] disabled:opacity-60">
-                      <Download size={15} /> Exporter…
+                      <Download size={15} /> {t("rec.export_ellipsis")}
                     </button>
                     {hasSel && (
                       <button onClick={() => setHasSel(false)} data-testid="rec-clear-sel"

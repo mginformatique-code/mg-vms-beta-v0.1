@@ -77,22 +77,26 @@ function StatBox({ label, value, color, small }) {
 }
 
 function UsageBar({ pct, threshold }) {
+  const { t } = useApp();
   const color = pct > 85 ? "#FF3333" : pct > 70 ? "#FFB800" : "#00E676";
   return (
     <div className="h-2 bg-secondary mb-3 relative overflow-hidden">
       <div className="h-full transition-all" style={{ width: `${Math.min(100, pct || 0)}%`, backgroundColor: color }} />
-      {threshold && <div className="absolute top-0 h-full w-px bg-white/40" style={{ left: `${threshold}%` }} title={`Seuil ${threshold}%`} />}
+      {threshold && <div className="absolute top-0 h-full w-px bg-white/40" style={{ left: `${threshold}%` }} title={`${t("storage.threshold_label")} ${threshold}%`} />}
     </div>
   );
 }
 
-function DedicatedBadge({ ok, labelOk = "Dédié", labelWarn = "Partagé" }) {
+function DedicatedBadge({ ok, labelOk, labelWarn }) {
+  const { t } = useApp();
+  const okLabel = labelOk || t("storage.dedicated_badge");
+  const warnLabel = labelWarn || t("storage.shared_badge");
   return (
     <span
       className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 border ${ok ? "text-[#00E676] border-[#00E676]/60 bg-[#00E676]/10" : "text-[#FFB800] border-[#FFB800]/60 bg-[#FFB800]/10"}`}
       data-testid={ok ? "badge-dedicated" : "badge-shared"}
     >
-      {ok ? labelOk : labelWarn}
+      {ok ? okLabel : warnLabel}
     </span>
   );
 }
@@ -118,19 +122,20 @@ function partitionFor(partitions, targetPath) {
   return best;
 }
 
-const DISK_TYPE_LABEL = { nvme: "NVMe", ssd: "SSD", hdd: "HDD", unknown: "Inconnu" };
+const DISK_TYPE_LABEL = { nvme: "NVMe", ssd: "SSD", hdd: "HDD" };
 const DISK_TYPE_COLOR = { nvme: "#0044FF", ssd: "#00E676", hdd: "#FFB800", unknown: "#8892a0" };
 
 function DiskTypeBadge({ type }) {
-  const t = type || "unknown";
-  const color = DISK_TYPE_COLOR[t] || DISK_TYPE_COLOR.unknown;
+  const { t } = useApp();
+  const dt = type || "unknown";
+  const color = DISK_TYPE_COLOR[dt] || DISK_TYPE_COLOR.unknown;
   return (
     <span
       className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 border font-bold"
       style={{ color, borderColor: `${color}99`, backgroundColor: `${color}1A` }}
-      data-testid={`disk-type-${t}`}
+      data-testid={`disk-type-${dt}`}
     >
-      {DISK_TYPE_LABEL[t] || t}
+      {DISK_TYPE_LABEL[dt] || t("storage.disk_type_unknown")}
     </span>
   );
 }
@@ -172,21 +177,20 @@ function VMSDiskCard() {
         <>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
             <StatBox label={t("storage.vms_mount")} value={vmsPart.mountpoint} small />
-            <StatBox label="Type" value={<DiskTypeBadge type={vmsPart.type} />} small />
+            <StatBox label={t("storage.type_label")} value={<DiskTypeBadge type={vmsPart.type} />} small />
             <StatBox label={t("storage.vms_total")} value={`${vmsPart.total_gb} Go`} />
             <StatBox label={t("storage.vms_used")} value={`${vmsPart.used_gb} Go`} color={usedPct > 85 ? "#FF3333" : usedPct > 70 ? "#FFB800" : undefined} />
             <StatBox label={t("storage.vms_free")} value={`${vmsPart.free_gb} Go`} color={usedPct > 85 ? "#FF3333" : undefined} />
           </div>
           <UsageBar pct={usedPct} />
           <div className="mono text-[10px] text-muted-foreground" data-testid="vms-device">
-            {vmsPart.device} ({vmsPart.fstype}) · {usedPct}% utilisé
+            {vmsPart.device} ({vmsPart.fstype}) · {usedPct}% {t("storage.used_suffix")}
           </div>
           {!isDedicated && (
             <div className="mt-3 text-[11px] text-[#FFB800] flex items-start gap-1.5">
               <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
               <span>
-                L&apos;application et les enregistrements vidéo partagent la même partition. Pour un déploiement production,
-                montez un disque dédié aux enregistrements (voir la section <b>{t("set.video_recordings")}</b> ci-dessous).
+                {t("storage.disk_shared_warning_pre")}<b>{t("set.video_recordings")}</b>{t("storage.disk_shared_warning_post")}
               </span>
             </div>
           )}
@@ -206,6 +210,7 @@ function VMSDiskCard() {
 // demande, exécutée côté hôte par reboot-watch.sh (aucun accès Docker
 // depuis le conteneur, décision de sécurité déjà actée).
 function DockerCleanupCard() {
+  const { t } = useApp();
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [cleaning, setCleaning] = useState(false);
@@ -221,8 +226,8 @@ function DockerCleanupCard() {
     try {
       const { data } = await api.put("/system/docker-cleanup-settings", form);
       setForm(data);
-      toast.success("Réglages de nettoyage enregistrés");
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+      toast.success(t("storage.docker_cleanup_saved"));
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("storage.generic_fail")); }
     finally { setSaving(false); }
   };
 
@@ -230,8 +235,8 @@ function DockerCleanupCard() {
     setCleaning(true);
     try {
       await api.post("/system/docker-cleanup-now");
-      toast.success("Nettoyage lancé — effectif sous 1 minute");
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+      toast.success(t("storage.docker_cleanup_started"));
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("storage.generic_fail")); }
     finally { setCleaning(false); }
   };
 
@@ -240,8 +245,8 @@ function DockerCleanupCard() {
   return (
     <SectionCard
       id="docker-cleanup"
-      title="Nettoyage disque système"
-      subtitle="Purge le cache de build Docker (couches inutilisées accumulées à chaque mise à jour) — n'affecte aucune donnée applicative (caméras, enregistrements, base de données)."
+      title={t("storage.docker_cleanup_title")}
+      subtitle={t("storage.docker_cleanup_desc")}
       icon={Trash2}
     >
       <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
@@ -249,25 +254,25 @@ function DockerCleanupCard() {
           <input type="checkbox" checked={form.enabled}
                  onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
                  data-testid="docker-cleanup-enabled" />
-          Nettoyage automatique
+          {t("storage.docker_cleanup_auto_label")}
         </label>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Tous les</span>
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("storage.every_label")}</span>
           <input type="number" min="1" max="720" value={form.interval_hours}
                  onChange={(e) => setForm({ ...form, interval_hours: Number(e.target.value) })}
                  disabled={!form.enabled} data-testid="docker-cleanup-interval"
                  className="w-16 px-2 py-1 bg-background border border-input outline-none mono text-sm focus:border-[#0044FF] disabled:opacity-40" />
-          <span className="text-xs text-muted-foreground">heures</span>
+          <span className="text-xs text-muted-foreground">{t("storage.hours_label")}</span>
         </div>
       </div>
       <div className="flex gap-2">
         <button onClick={save} disabled={saving} data-testid="docker-cleanup-save"
                 className="flex items-center gap-2 px-4 py-2 bg-[#0044FF] text-white text-sm">
-          {saving && <Loader2 size={14} className="animate-spin" />}<Save size={14} /> Enregistrer
+          {saving && <Loader2 size={14} className="animate-spin" />}<Save size={14} /> {t("storage.save_btn")}
         </button>
         <button onClick={cleanNow} disabled={cleaning} data-testid="docker-cleanup-now"
                 className="flex items-center gap-2 px-4 py-2 border border-[#0044FF] text-[#0044FF] text-sm hover:bg-[#0044FF]/10">
-          {cleaning ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Nettoyer maintenant
+          {cleaning ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} {t("storage.docker_cleanup_now_btn")}
         </button>
       </div>
     </SectionCard>
@@ -288,12 +293,12 @@ function DatabaseCard() {
 
   const load = async () => {
     try { const { data } = await api.get("/settings/database"); setState(data); }
-    catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Erreur chargement"); }
+    catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("storage.load_error")); }
   };
   useEffect(() => { load(); }, []);
 
   const test = async () => {
-    if (!form.mongo_url || !form.db_name) { toast.error("URI et nom de base requis"); return; }
+    if (!form.mongo_url || !form.db_name) { toast.error(t("storage.db_uri_required")); return; }
     setTesting(true); setTestResult(null);
     try {
       const { data } = await api.post("/settings/database/test", form);
@@ -304,23 +309,23 @@ function DatabaseCard() {
   };
 
   const save = async () => {
-    if (!testResult?.ok) { toast.error("Testez d'abord la connexion avec succès avant d'enregistrer"); return; }
-    if (!window.confirm("Confirmer l'enregistrement ?\n\nLe fichier /app/backend/.env sera modifié.\nLe backend devra être redémarré pour appliquer la nouvelle URI.")) return;
+    if (!testResult?.ok) { toast.error(t("storage.db_test_first")); return; }
+    if (!window.confirm(t("storage.db_save_confirm"))) return;
     setSaving(true);
     try {
       await api.put("/settings/database", form);
-      toast.success("Config sauvegardée — redémarrage requis");
+      toast.success(t("storage.db_saved"));
       load();
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || e.message); }
     finally { setSaving(false); }
   };
 
   const restart = async () => {
-    if (!window.confirm("Redémarrer le backend ?\n\nVous serez déconnecté quelques secondes. Reconnectez-vous ensuite.")) return;
+    if (!window.confirm(t("storage.db_restart_confirm"))) return;
     setRestarting(true);
     try {
       await api.post("/settings/database/restart-backend", { confirm: true });
-      toast.info("Redémarrage en cours…");
+      toast.info(t("storage.db_restarting"));
       setTimeout(() => window.location.reload(), 6000);
     } catch (e) {
       toast.error(formatApiErrorDetail(e.response?.data?.detail) || e.message);
@@ -339,34 +344,30 @@ function DatabaseCard() {
       title={t("storage.db")}
       subtitle={t("storage.db_desc")}
       icon={Database}
-      badge={c && <DedicatedBadge ok={isDedicated} labelOk="Serveur dédié" labelWarn="Serveur local" />}
+      badge={c && <DedicatedBadge ok={isDedicated} labelOk={t("storage.db_dedicated_label")} labelWarn={t("storage.db_shared_label")} />}
     >
       <div className="border border-[#0044FF]/40 bg-[#0044FF]/5 p-3 mb-4 flex items-start gap-2" data-testid="db-nvme-warning">
         <AlertTriangle size={14} className="text-[#0044FF] flex-shrink-0 mt-0.5" />
         <div className="text-[11px] text-muted-foreground leading-relaxed">
-          <b className="text-foreground">{t("set.mongo_writes")}</b> (un événement/plaque = plusieurs
-          écritures). Un disque <b className="text-[#0044FF]">{t("set.nvme_pref")}</b> dédié à la base change directement la
-          latence de toute l&apos;API — un HDD la ralentit fortement. Emplacement disque local :
-          variable <code className="mono">MONGO_DATA_PATH</code> dans <code className="mono">deploy-app/.env</code>, appliquée
-          via <code className="mono">./install.sh</code> (le conteneur MongoDB étant séparé, ce n&apos;est pas modifiable ici en un clic).
-          {" "}<b className="text-[#FF3333]">⚠ Changer ce chemin sur une install existante ne déplace PAS les données</b> :
-          copiez d&apos;abord le contenu de l&apos;ancien dossier vers le nouveau, sinon MongoDB redémarre avec une base vide.
+          <b className="text-foreground">{t("set.mongo_writes")}</b>{t("storage.mongo_tip_a")}<b className="text-[#0044FF]">{t("set.nvme_pref")}</b>{t("storage.mongo_tip_b")}
+          <code className="mono">MONGO_DATA_PATH</code>{t("storage.mongo_tip_c")}<code className="mono">deploy-app/.env</code>{t("storage.mongo_tip_d")}<code className="mono">./install.sh</code>{t("storage.mongo_tip_e")}
+          {" "}<b className="text-[#FF3333]">{t("storage.mongo_path_change_warning")}</b>{t("storage.mongo_tip_f")}
         </div>
       </div>
       {c && (
         <div className="border border-border p-3 mb-4 bg-background">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Connexion active</div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">{t("storage.db_active_connection")}</div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
             <div>
               <div className="text-[10px] text-muted-foreground">{t("set.uri_masked")}</div>
               <div className="mono text-xs break-all" data-testid="db-current-uri">{c.mongo_url_redacted || "—"}</div>
             </div>
             <div>
-              <div className="text-[10px] text-muted-foreground">Nom de base</div>
+              <div className="text-[10px] text-muted-foreground">{t("storage.db_name_label")}</div>
               <div className="mono text-xs" data-testid="db-current-name">{c.db_name || "—"}</div>
             </div>
             <div>
-              <div className="text-[10px] text-muted-foreground">Statut</div>
+              <div className="text-[10px] text-muted-foreground">{t("storage.status_label")}</div>
               <div className="flex items-center gap-1.5 text-xs">
                 {c.status === "ok"
                   ? <><CheckCircle2 size={12} className="mg-online" /> <span className="mg-online mono">OK</span></>
@@ -375,24 +376,24 @@ function DatabaseCard() {
               </div>
             </div>
             <div>
-              <div className="text-[10px] text-muted-foreground">Collections</div>
+              <div className="text-[10px] text-muted-foreground">{t("storage.collections_label")}</div>
               <div className="mono text-xs">{c.collections ?? "—"}</div>
             </div>
           </div>
         </div>
       )}
 
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Nouvelle configuration</div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">{t("storage.db_new_config")}</div>
       <div className="grid grid-cols-1 gap-2 mb-3">
         <div>
-          <label className="text-xs text-muted-foreground block mb-1">URI MongoDB</label>
+          <label className="text-xs text-muted-foreground block mb-1">{t("storage.db_uri_label")}</label>
           <input type="text" placeholder="mongodb://user:password@serveur-mongo:27017 · mongodb+srv://..." value={form.mongo_url}
                  onChange={(e) => { setForm({ ...form, mongo_url: e.target.value }); setTestResult(null); }}
                  data-testid="db-new-uri"
                  className="w-full px-3 py-2 bg-background border border-input outline-none mono text-xs focus:border-[#0044FF]" />
         </div>
         <div>
-          <label className="text-xs text-muted-foreground block mb-1">Nom de base</label>
+          <label className="text-xs text-muted-foreground block mb-1">{t("storage.db_name_label")}</label>
           <input type="text" placeholder="mg_vms_prod" value={form.db_name}
                  onChange={(e) => { setForm({ ...form, db_name: e.target.value }); setTestResult(null); }}
                  data-testid="db-new-name"
@@ -408,7 +409,7 @@ function DatabaseCard() {
           {testResult.ok ? (
             <div>
               <div className="flex items-center gap-1.5 mg-online mb-1"><CheckCircle2 size={12} /> {t("set.conn_ok")}</div>
-              <div className="text-muted-foreground">Ping : <b>{testResult.ping_ms}ms</b> · Collections : <b>{testResult.collections}</b>{t("set.cameras_count")}<b>{testResult.cameras_count}</b></div>
+              <div className="text-muted-foreground">{t("storage.ping_prefix")}<b>{testResult.ping_ms}ms</b>{t("storage.collections_sep")}<b>{testResult.collections}</b>{t("set.cameras_count")}<b>{testResult.cameras_count}</b></div>
             </div>
           ) : (
             <div className="flex items-center gap-1.5 mg-error"><XCircle size={12} /> {testResult.error}</div>
@@ -420,25 +421,24 @@ function DatabaseCard() {
         <button onClick={test} disabled={testing || !form.mongo_url || !form.db_name}
                 data-testid="db-test-btn"
                 className="flex items-center gap-2 px-4 py-2 border border-[#0044FF] text-[#0044FF] text-sm hover:bg-[#0044FF]/10 disabled:opacity-40">
-          {testing ? <Loader2 size={13} className="animate-spin" /> : <PlayCircle size={13} />} Tester la connexion
+          {testing ? <Loader2 size={13} className="animate-spin" /> : <PlayCircle size={13} />} {t("storage.test_connection_btn")}
         </button>
         <button onClick={save} disabled={saving || !testResult?.ok}
                 data-testid="db-save-btn"
                 className="flex items-center gap-2 px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40">
-          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Enregistrer
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} {t("storage.save_btn")}
         </button>
         <button onClick={restart} disabled={restarting}
                 data-testid="db-restart-btn"
                 className="flex items-center gap-2 px-4 py-2 border border-[#FF3333] text-[#FF3333] text-sm hover:bg-[#FF3333]/10 disabled:opacity-40">
-          {restarting ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Redémarrer backend
+          {restarting ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} {t("storage.restart_backend_btn")}
         </button>
       </div>
 
       <div className="text-[11px] text-muted-foreground border-t border-border pt-3 flex items-start gap-1.5">
         <AlertTriangle size={12} className="mg-warning flex-shrink-0 mt-0.5" />
         <span>
-          Pour une installation production, hébergez la base sur un <b>{t("set.dedicated_disk")}</b> (SSD recommandé).
-          Testez toujours la connexion avant d&apos;enregistrer. Backup automatique dans <code className="mono">/app/backend/.env.bak</code>.
+          {t("storage.db_prod_tip_pre")}<b>{t("set.dedicated_disk")}</b>{t("storage.db_prod_tip_mid")}<code className="mono">/app/backend/.env.bak</code>.
         </span>
       </div>
     </SectionCard>
@@ -471,19 +471,19 @@ function RetentionCard() {
         min_free_gb: Number(form.min_free_gb),
         max_disk_pct: Number(form.max_disk_pct),
       });
-      setState(data); toast.success("Rétention mise à jour"); load();
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+      setState(data); toast.success(t("storage.retention_updated")); load();
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("storage.generic_fail")); }
     finally { setSaving(false); }
   };
 
   const purgeNow = async () => {
-    if (!window.confirm("Lancer la purge maintenant ? Les enregistrements dépassant les seuils seront supprimés.")) return;
+    if (!window.confirm(t("storage.purge_confirm"))) return;
     setPurging(true);
     try {
       const { data } = await api.post("/settings/retention/run");
-      toast.success(`Purge : ${data.deleted_by_age} par âge + ${data.deleted_by_quota} par quota, ${data.freed_gb} Go libérés`);
+      toast.success(`${t("storage.purge_result_prefix")}${data.deleted_by_age}${t("storage.purge_result_by_age")}${data.deleted_by_quota}${t("storage.purge_result_by_quota")}${data.freed_gb}${t("storage.purge_result_freed")}`);
       load();
-    } catch (e) { toast.error("Purge échouée"); }
+    } catch (e) { toast.error(t("storage.purge_failed")); }
     finally { setPurging(false); }
   };
 
@@ -491,45 +491,45 @@ function RetentionCard() {
   const usedColor = usedPct > form.max_disk_pct ? "#FF3333" : usedPct > form.max_disk_pct - 10 ? "#FFB800" : "#00E676";
 
   return (
-    <SectionCard id="video-retention" title={t("set.retention_title")} subtitle="Politique automatique de conservation et purge." icon={Film}>
+    <SectionCard id="video-retention" title={t("set.retention_title")} subtitle={t("storage.retention_subtitle")} icon={Film}>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
-        <StatBox label="Disque total" value={`${state.disk.total_gb} Go`} />
-        <StatBox label="Utilisé" value={`${state.disk.used_gb} Go`} color={usedColor} />
-        <StatBox label="Libre" value={`${state.disk.free_gb} Go`} color={state.disk.free_gb < form.min_free_gb ? "#FF3333" : undefined} />
-        <StatBox label="Occupation" value={`${usedPct}%`} color={usedColor} />
+        <StatBox label={t("storage.disk_total_label")} value={`${state.disk.total_gb} Go`} />
+        <StatBox label={t("storage.used_label")} value={`${state.disk.used_gb} Go`} color={usedColor} />
+        <StatBox label={t("storage.free_label")} value={`${state.disk.free_gb} Go`} color={state.disk.free_gb < form.min_free_gb ? "#FF3333" : undefined} />
+        <StatBox label={t("storage.occupancy_label")} value={`${usedPct}%`} color={usedColor} />
       </div>
       <UsageBar pct={usedPct} threshold={form.max_disk_pct} />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
-        <StatBox label="Enregistrements" value={state.recordings.count} small />
-        <StatBox label="Volume total" value={`${state.recordings.size_gb} Go`} small />
-        <StatBox label="Plus ancien" value={state.recordings.oldest ? new Date(state.recordings.oldest).toLocaleDateString("fr-FR") : "—"} small />
+        <StatBox label={t("storage.recordings_label")} value={state.recordings.count} small />
+        <StatBox label={t("storage.total_volume_label")} value={`${state.recordings.size_gb} Go`} small />
+        <StatBox label={t("storage.oldest_label")} value={state.recordings.oldest ? new Date(state.recordings.oldest).toLocaleDateString("fr-FR") : "—"} small />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
         <div>
-          <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Conservation (jours)</label>
+          <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("storage.retention_days_label")}</label>
           <input type="number" min="1" max="365" value={form.retention_days} onChange={(e) => setForm({ ...form, retention_days: e.target.value })} data-testid="retention-days" className="w-full px-3 py-2 bg-background border border-input outline-none mono focus:border-[#0044FF]" />
         </div>
         <div>
-          <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Espace libre min. (Go)</label>
+          <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("storage.min_free_label")}</label>
           <input type="number" min="0.5" step="0.5" value={form.min_free_gb} onChange={(e) => setForm({ ...form, min_free_gb: e.target.value })} data-testid="retention-free" className="w-full px-3 py-2 bg-background border border-input outline-none mono focus:border-[#0044FF]" />
         </div>
         <div>
-          <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Occupation max. (%)</label>
+          <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("storage.max_pct_label")}</label>
           <input type="number" min="10" max="99" value={form.max_disk_pct} onChange={(e) => setForm({ ...form, max_disk_pct: e.target.value })} data-testid="retention-pct" className="w-full px-3 py-2 bg-background border border-input outline-none mono focus:border-[#0044FF]" />
         </div>
       </div>
       <p className="text-[11px] text-muted-foreground mb-3 leading-relaxed">
-        Les vidéos plus anciennes que <b>{form.retention_days} jours</b> sont supprimées automatiquement. Si l&apos;espace libre passe sous <b>{form.min_free_gb} Go</b> <i>ou</i> si l&apos;occupation dépasse <b>{form.max_disk_pct}%</b>, les <b>plus anciens segments</b> sont supprimés en priorité.
+        {t("storage.retention_desc_pre")}<b>{form.retention_days}{t("storage.retention_desc_days_suffix")}</b>{t("storage.retention_desc_mid1")}<b>{form.min_free_gb} Go</b> <i>{t("storage.retention_desc_or")}</i>{t("storage.retention_desc_mid2")}<b>{form.max_disk_pct}%</b>{t("storage.retention_desc_mid3")}<b>{t("storage.retention_desc_oldest_segments")}</b>{t("storage.retention_desc_post")}
       </p>
 
       <div className="flex gap-2">
         <button onClick={save} disabled={saving} data-testid="retention-save" className="flex items-center gap-2 px-4 py-2 bg-[#0044FF] text-white text-sm">
-          {saving && <Loader2 size={14} className="animate-spin" />}<Save size={14} /> Enregistrer les seuils
+          {saving && <Loader2 size={14} className="animate-spin" />}<Save size={14} /> {t("storage.save_thresholds_btn")}
         </button>
         <button onClick={purgeNow} disabled={purging} data-testid="retention-purge" className="flex items-center gap-2 px-4 py-2 border border-[#FF3333] text-[#FF3333] text-sm hover:bg-[#FF3333]/10">
-          {purging ? <Loader2 size={14} className="animate-spin" /> : <PlayCircle size={14} />} Purger maintenant
+          {purging ? <Loader2 size={14} className="animate-spin" /> : <PlayCircle size={14} />} {t("storage.purge_now_btn")}
         </button>
       </div>
     </SectionCard>
@@ -552,25 +552,25 @@ function VideoPoolsCard() {
   useEffect(() => { load(); const iv = setInterval(load, 60000); return () => clearInterval(iv); }, []);
 
   const addPool = async () => {
-    if (!newPool.path.trim()) return toast.error("Chemin requis");
+    if (!newPool.path.trim()) return toast.error(t("storage.path_required"));
     setSaving(true);
     try {
       await api.post("/storage/pools", {
         ...newPool, max_size_gb: Number(newPool.max_size_gb) || 0, priority: Number(newPool.priority) || 0,
       });
-      toast.success("Pool ajouté"); setNewPool({ name: "", path: "", enabled: true, max_size_gb: 0, priority: 0 }); load();
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+      toast.success(t("storage.pool_added")); setNewPool({ name: "", path: "", enabled: true, max_size_gb: 0, priority: 0 }); load();
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("storage.generic_fail")); }
     finally { setSaving(false); }
   };
 
   const updatePool = async (pool, patch) => {
-    try { await api.put(`/storage/pools/${pool.id}`, { ...pool, ...patch }); load(); toast.success("Pool mis à jour"); }
+    try { await api.put(`/storage/pools/${pool.id}`, { ...pool, ...patch }); load(); toast.success(t("storage.pool_updated")); }
     catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
 
   const delPool = async (id) => {
-    if (!window.confirm("Supprimer ce pool ? (les fichiers ne sont pas effacés)")) return;
-    try { await api.delete(`/storage/pools/${id}`); load(); toast.success("Pool supprimé"); }
+    if (!window.confirm(t("storage.pool_delete_confirm"))) return;
+    try { await api.delete(`/storage/pools/${id}`); load(); toast.success(t("storage.pool_deleted")); }
     catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
 
@@ -584,20 +584,19 @@ function VideoPoolsCard() {
       icon={HardDrive}
     >
       <div className="text-[11px] mono text-muted-foreground mb-3">
-        Dossier principal : <span className="text-foreground">{state.primary_recordings_dir}</span>
+        {t("storage.main_folder_label")} <span className="text-foreground">{state.primary_recordings_dir}</span>
       </div>
 
       <div className="border border-[#00E676]/40 bg-[#00E676]/5 p-3 mb-4 flex items-start gap-2" data-testid="video-hdd-tip">
         <Info size={14} className="text-[#00E676] flex-shrink-0 mt-0.5" />
         <div className="text-[11px] text-muted-foreground leading-relaxed">
-          Les enregistrements sont surtout de <b className="text-foreground">{t("set.seq_volumes")}</b> — un
-          <b className="text-[#FFB800]"> HDD</b> convient très bien et coûte bien moins cher au Go qu&apos;un NVMe/SSD, qu&apos;il
-          vaut mieux réserver à la base de données (voir plus haut).
+          {t("storage.hdd_tip_pre")}<b className="text-foreground">{t("set.seq_volumes")}</b>{t("storage.hdd_tip_mid")}
+          <b className="text-[#FFB800]"> HDD</b>{t("storage.hdd_tip_post")}
         </div>
       </div>
 
       {/* Disques détectés — choix rapide */}
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Disques détectés ({state.partitions.length})</div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">{t("storage.detected_disks_label")} ({state.partitions.length})</div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4">
         {state.partitions.map((p, i) => {
           const isRecordingsDisk = state.recordings_disk?.device === p.device;
@@ -613,8 +612,8 @@ function VideoPoolsCard() {
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="mono text-[#0044FF]">{p.mountpoint}</span>
                   <DiskTypeBadge type={p.type} />
-                  {isRecordingsDisk && <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-border text-muted-foreground">Enregistrements</span>}
-                  {isAppDisk && <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-border text-muted-foreground">Application</span>}
+                  {isRecordingsDisk && <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-border text-muted-foreground">{t("storage.recordings_label")}</span>}
+                  {isAppDisk && <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-border text-muted-foreground">{t("storage.app_badge")}</span>}
                 </div>
                 {alreadyUsed ? (
                   <span className="text-[10px] text-muted-foreground shrink-0">{t("set.already_used")}</span>
@@ -622,11 +621,11 @@ function VideoPoolsCard() {
                   <button onClick={() => setNewPool({ ...newPool, path: p.mountpoint, name: newPool.name || p.mountpoint })}
                           className="text-[10px] px-2 py-0.5 border border-[#0044FF] text-[#0044FF] hover:bg-[#0044FF]/10 shrink-0"
                           data-testid={`use-partition-${i}`}>
-                    Utiliser pour vidéo
+                    {t("storage.use_for_video_btn")}
                   </button>
                 )}
               </div>
-              <div className="mono text-[10px] text-muted-foreground">{p.device} ({p.fstype}) · {p.total_gb} Go · libre {p.free_gb} Go ({100 - Math.round(p.used_pct)}%)</div>
+              <div className="mono text-[10px] text-muted-foreground">{p.device} ({p.fstype}) · {p.total_gb} Go · {t("storage.free_prefix")} {p.free_gb} Go ({100 - Math.round(p.used_pct)}%)</div>
               <div className="h-1 bg-secondary mt-1"><div className="h-full" style={{ width: `${p.used_pct}%`, backgroundColor: p.used_pct > 85 ? "#FF3333" : p.used_pct > 70 ? "#FFB800" : "#00E676" }} /></div>
             </div>
           );
@@ -634,7 +633,7 @@ function VideoPoolsCard() {
       </div>
 
       {/* Pools déclarés */}
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Pools déclarés ({state.pools.length})</div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">{t("storage.declared_pools_label")} ({state.pools.length})</div>
       {state.pools.length === 0 && <p className="text-xs text-muted-foreground mb-3">{t("set.no_pool")}</p>}
       <div className="space-y-2 mb-3">
         {state.pools.map((pool) => (
@@ -647,16 +646,16 @@ function VideoPoolsCard() {
                 {!pool.enabled && <span className="text-[10px] text-[#FFB800]">{t("set.disabled")}</span>}
               </div>
               <div className="flex gap-1">
-                <button onClick={() => updatePool(pool, { enabled: !pool.enabled })} className="text-[10px] px-2 py-0.5 border border-border hover:bg-secondary" data-testid={`pool-toggle-${pool.id}`}>{pool.enabled ? "Désactiver" : "Activer"}</button>
+                <button onClick={() => updatePool(pool, { enabled: !pool.enabled })} className="text-[10px] px-2 py-0.5 border border-border hover:bg-secondary" data-testid={`pool-toggle-${pool.id}`}>{pool.enabled ? t("storage.disable_btn") : t("storage.enable_btn")}</button>
                 <button onClick={() => delPool(pool.id)} className="text-[10px] px-2 py-0.5 border border-[#FF3333] text-[#FF3333] hover:bg-[#FF3333]/10" data-testid={`pool-del-${pool.id}`}><Trash2 size={10} /></button>
               </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
-              <div><div className="text-muted-foreground uppercase">Disque total</div><div className="mono">{pool.usage?.total_gb} Go</div></div>
-              <div><div className="text-muted-foreground uppercase">Libre</div><div className="mono">{pool.usage?.free_gb} Go</div></div>
-              <div><div className="text-muted-foreground uppercase">Enregistrements</div><div className="mono">{pool.recordings_count} · {pool.recordings_size_gb} Go</div></div>
+              <div><div className="text-muted-foreground uppercase">{t("storage.disk_total_label")}</div><div className="mono">{pool.usage?.total_gb} Go</div></div>
+              <div><div className="text-muted-foreground uppercase">{t("storage.free_label")}</div><div className="mono">{pool.usage?.free_gb} Go</div></div>
+              <div><div className="text-muted-foreground uppercase">{t("storage.recordings_label")}</div><div className="mono">{pool.recordings_count} · {pool.recordings_size_gb} Go</div></div>
               <div>
-                <div className="text-muted-foreground uppercase">Quota (Go)</div>
+                <div className="text-muted-foreground uppercase">{t("storage.quota_gb_label")}</div>
                 <input type="number" min="0" defaultValue={pool.max_size_gb}
                        onBlur={(e) => updatePool(pool, { max_size_gb: Number(e.target.value) })}
                        className="w-full px-1.5 py-0.5 bg-background border border-input outline-none mono text-[10px]"
@@ -669,13 +668,13 @@ function VideoPoolsCard() {
 
       {/* Ajout manuel */}
       <div className="border border-dashed border-border p-3">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Ajouter un pool manuellement</div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">{t("storage.add_pool_manual_label")}</div>
         <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
-          <input placeholder="Nom" value={newPool.name} onChange={(e) => setNewPool({ ...newPool, name: e.target.value })} className="px-2 py-1.5 bg-background border border-input outline-none text-xs" data-testid="pool-new-name" />
+          <input placeholder={t("storage.name_placeholder")} value={newPool.name} onChange={(e) => setNewPool({ ...newPool, name: e.target.value })} className="px-2 py-1.5 bg-background border border-input outline-none text-xs" data-testid="pool-new-name" />
           <input placeholder="/mnt/nas/videos" value={newPool.path} onChange={(e) => setNewPool({ ...newPool, path: e.target.value })} className="px-2 py-1.5 bg-background border border-input outline-none text-xs mono md:col-span-2" data-testid="pool-new-path" />
-          <input type="number" min="0" placeholder="Quota Go (0=illim)" value={newPool.max_size_gb} onChange={(e) => setNewPool({ ...newPool, max_size_gb: e.target.value })} className="px-2 py-1.5 bg-background border border-input outline-none text-xs mono" />
+          <input type="number" min="0" placeholder={t("storage.quota_placeholder")} value={newPool.max_size_gb} onChange={(e) => setNewPool({ ...newPool, max_size_gb: e.target.value })} className="px-2 py-1.5 bg-background border border-input outline-none text-xs mono" />
           <button onClick={addPool} disabled={saving} className="flex items-center justify-center gap-1 px-3 py-1.5 bg-[#0044FF] text-white text-xs" data-testid="pool-add">
-            {saving && <Loader2 size={11} className="animate-spin" />}<Save size={11} /> Ajouter
+            {saving && <Loader2 size={11} className="animate-spin" />}<Save size={11} /> {t("storage.add_btn")}
           </button>
         </div>
       </div>

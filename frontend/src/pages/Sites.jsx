@@ -22,15 +22,15 @@ export default function Sites() {
   const openEdit = (s) => { setEditing(s); setForm({ name: s.name, type: s.type, address: s.address, lat: s.lat, lng: s.lng }); setOpen(true); };
 
   const submit = async () => {
-    if (!form.name) return toast.error("Nom requis");
+    if (!form.name) return toast.error(t("sites.name_required"));
     setSaving(true);
     try {
       if (editing) await api.put(`/sites/${editing.id}`, { ...form, lat: parseFloat(form.lat), lng: parseFloat(form.lng) });
       else await api.post("/sites", { ...form, lat: parseFloat(form.lat), lng: parseFloat(form.lng) });
-      toast.success(editing ? "Site modifié" : "Site ajouté"); setOpen(false); load();
+      toast.success(editing ? t("sites.updated") : t("sites.added")); setOpen(false); load();
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); } finally { setSaving(false); }
   };
-  const del = async (s) => { if (!window.confirm(`Supprimer ${s.name} et ses caméras ?`)) return; await api.delete(`/sites/${s.id}`); toast.success("Supprimé"); load(); };
+  const del = async (s) => { if (!window.confirm(`${t("sites.confirm_delete_prefix")}${s.name}${t("sites.confirm_delete_suffix")}`)) return; await api.delete(`/sites/${s.id}`); toast.success(t("sites.deleted")); load(); };
 
   return (
     <div className="p-4">
@@ -67,8 +67,8 @@ export default function Sites() {
             <F label={t("common.type")}><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="inp2">{TYPES.map((x) => <option key={x}>{x}</option>)}</select></F>
             <F label={t("common.address")}><input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="inp2" /></F>
             <div className="grid grid-cols-2 gap-3">
-              <F label="Latitude"><input value={form.lat} onChange={(e) => setForm({ ...form, lat: e.target.value })} className="inp2 mono" /></F>
-              <F label="Longitude"><input value={form.lng} onChange={(e) => setForm({ ...form, lng: e.target.value })} className="inp2 mono" /></F>
+              <F label={t("common.latitude")}><input value={form.lat} onChange={(e) => setForm({ ...form, lat: e.target.value })} className="inp2 mono" /></F>
+              <F label={t("common.longitude")}><input value={form.lng} onChange={(e) => setForm({ ...form, lng: e.target.value })} className="inp2 mono" /></F>
             </div>
           </div>
           <DialogFooter>

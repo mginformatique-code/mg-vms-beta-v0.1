@@ -63,9 +63,9 @@ export default function SessionsCenter() {
     setBusy(true);
     try {
       const r = await api.post("/security/sessions/revoke-others");
-      toast.success(`${r.data.revoked_count} session(s) révoquée(s)`);
+      toast.success(`${r.data.revoked_count} ${t("security.revoked_count_suffix")}`);
       await load();
-    } catch (e) { toast.error("Échec"); }
+    } catch (e) { toast.error(t("security.action_failed")); }
     finally { setBusy(false); }
   };
   const setHours = async (h) => {
@@ -73,12 +73,12 @@ export default function SessionsCenter() {
       await api.put("/security/timeout", { session_hours: Number(h) });
       await load();
       toast.success(t("security.timeout_saved") || "Timeout mis à jour");
-    } catch (e) { toast.error("Échec"); }
+    } catch (e) { toast.error(t("security.action_failed")); }
   };
 
   const fmt = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
   const uaShort = (ua) => {
-    if (!ua) return "Inconnu";
+    if (!ua) return t("security.unknown_client");
     if (ua.includes("Chrome")) return "Chrome";
     if (ua.includes("Firefox")) return "Firefox";
     if (ua.includes("Safari")) return "Safari";
@@ -96,30 +96,30 @@ export default function SessionsCenter() {
         <div className="flex items-center gap-3">
           <LogOut size={26} className="text-[#0044FF]" />
           <div>
-            <h1 className="font-head font-bold text-2xl tracking-tight">Sessions actives</h1>
-            <p className="text-xs text-muted-foreground">Suivi et révocation des connexions à votre compte</p>
+            <h1 className="font-head font-bold text-2xl tracking-tight">{t("security.sessions_title")}</h1>
+            <p className="text-xs text-muted-foreground">{t("security.sessions_subtitle")}</p>
           </div>
         </div>
         <button onClick={load} disabled={loading}
           className="px-3 py-2 border border-border text-sm flex items-center gap-2 hover:bg-secondary"
           data-testid="sessions-refresh-btn">
-          <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Actualiser
+          <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> {t("security.refresh")}
         </button>
       </div>
 
       {/* KPI grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-        <KpiTile icon={Users} label="Sessions actives" value={data.items.length} color="#0044FF" />
-        <KpiTile icon={Wifi} label="IP uniques" value={uniqueIps} color="#00E676" />
-        <KpiTile icon={Clock} label="Timeout actuel" value={timeoutCfg.session_hours < 1 ? `${timeoutCfg.session_hours * 60}min` : `${timeoutCfg.session_hours}h`} color="#FFB800" />
-        <KpiTile icon={Monitor} label="Session courante" value={currentSession ? uaShort(currentSession.user_agent) : "—"} color="#FF7043" />
+        <KpiTile icon={Users} label={t("security.sessions_title")} value={data.items.length} color="#0044FF" />
+        <KpiTile icon={Wifi} label={t("security.kpi_unique_ips")} value={uniqueIps} color="#00E676" />
+        <KpiTile icon={Clock} label={t("security.kpi_current_timeout")} value={timeoutCfg.session_hours < 1 ? `${timeoutCfg.session_hours * 60}min` : `${timeoutCfg.session_hours}h`} color="#FFB800" />
+        <KpiTile icon={Monitor} label={t("security.kpi_current_session")} value={currentSession ? uaShort(currentSession.user_agent) : "—"} color="#FF7043" />
       </div>
 
       {/* Timeout admin */}
       {isAdmin && (
         <div className="border border-border bg-card p-5 mb-4" data-testid="sessions-timeout-panel">
           <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground mb-3 flex items-center gap-2">
-            <Clock size={14} /> Durée de session avant déconnexion automatique
+            <Clock size={14} /> {t("security.timeout_panel_label")}
           </div>
           <div className="flex flex-wrap gap-2">
             {timeoutCfg.options.map((h) => (
@@ -135,7 +135,7 @@ export default function SessionsCenter() {
             ))}
           </div>
           <p className="text-[10px] text-muted-foreground mt-2 flex items-center gap-1">
-            <Info size={11} /> Prend effet à la prochaine connexion. Vaut pour tous les utilisateurs de l&apos;instance.
+            <Info size={11} /> {t("security.timeout_hint")} {t("security.timeout_scope_hint")}
           </p>
         </div>
       )}
@@ -143,13 +143,13 @@ export default function SessionsCenter() {
       {/* Actions bar */}
       <div className="flex items-center justify-between mb-2 px-1">
         <div className="text-xs text-muted-foreground">
-          {data.items.length} session(s) trouvée(s)
+          {data.items.length} {t("security.sessions_found_suffix")}
         </div>
         {data.items.length > 1 && (
           <button onClick={revokeOthers} disabled={busy}
             className="text-xs text-[#FF3333] hover:underline flex items-center gap-1"
             data-testid="sessions-revoke-others">
-            <LogOut size={12} /> Déconnecter toutes les autres
+            <LogOut size={12} /> {t("security.revoke_others_btn")}
           </button>
         )}
       </div>
@@ -157,17 +157,17 @@ export default function SessionsCenter() {
       {/* Sessions table */}
       <div className="border border-border bg-card" data-testid="sessions-list">
         <div className="hidden md:grid grid-cols-[1.5fr_1fr_1.4fr_1.4fr_120px] gap-3 px-4 py-2 bg-muted text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border">
-          <div>Navigateur / Client</div><div>Adresse IP</div><div>Dernière activité</div><div>Expiration</div><div className="text-right">Action</div>
+          <div>{t("security.col_browser")}</div><div>{t("security.col_ip")}</div><div>{t("security.col_last_activity")}</div><div>{t("security.col_expiration")}</div><div className="text-right">{t("security.col_action")}</div>
         </div>
         {loading && (
           <div className="p-6 text-center text-sm text-muted-foreground flex items-center justify-center gap-2">
-            <Loader2 size={14} className="animate-spin" /> Chargement...
+            <Loader2 size={14} className="animate-spin" /> {t("common.loading")}
           </div>
         )}
         {!loading && data.items.length === 0 && (
           <div className="p-6 text-center text-sm text-muted-foreground">
             <AlertCircle size={20} className="mx-auto mb-2 opacity-60" />
-            Aucune session active trouvée.
+            {t("security.no_sessions_found")}
           </div>
         )}
         {data.items.map((s) => (
@@ -178,7 +178,7 @@ export default function SessionsCenter() {
               <span className="font-medium">{uaShort(s.user_agent)}</span>
               {s.current && (
                 <span className="text-[9px] mono uppercase tracking-wider px-1.5 py-0.5 bg-[#00E676]/20 text-[#00E676] border border-[#00E676]/50">
-                  actuelle
+                  {t("security.current_session")}
                 </span>
               )}
             </div>
@@ -189,14 +189,14 @@ export default function SessionsCenter() {
               <Clock size={11} /> {fmt(s.last_seen_at)}
             </div>
             <div className="text-xs mono text-muted-foreground">
-              Expire : {fmt(s.expires_at)}
+              {t("security.expires")} : {fmt(s.expires_at)}
             </div>
             <div className="text-right">
               {!s.current && (
                 <button onClick={() => revoke(s.jti)} disabled={busy}
                   className="text-xs text-[#FF3333] hover:underline"
                   data-testid={`session-revoke-${s.jti}`}>
-                  Déconnecter
+                  {t("security.revoke")}
                 </button>
               )}
             </div>
@@ -208,9 +208,7 @@ export default function SessionsCenter() {
       <div className="mt-4 border border-border p-3 bg-card flex items-start gap-2">
         <Shield size={14} className="text-[#0044FF] mt-0.5" />
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Une session peut être révoquée à distance à tout moment. La révocation
-          est immédiate : la prochaine requête effectuée par ce token sera
-          rejetée avec un 401.
+          {t("security.revoke_info")}
         </p>
       </div>
     </div>

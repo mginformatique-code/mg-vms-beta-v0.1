@@ -45,8 +45,8 @@ export default function Reports() {
       a.href = url; a.download = `mgvms_${type}.${format}`;
       document.body.appendChild(a); a.click(); a.remove();
       window.URL.revokeObjectURL(url);
-      toast.success(`Rapport ${format.toUpperCase()} généré`);
-    } catch (e) { toast.error("Échec de la génération"); } finally { setBusy(false); }
+      toast.success(`${t("rep.generated_prefix")}${format.toUpperCase()}${t("rep.generated_suffix")}`);
+    } catch (e) { toast.error(t("rep.generate_failed")); } finally { setBusy(false); }
   };
 
   return (

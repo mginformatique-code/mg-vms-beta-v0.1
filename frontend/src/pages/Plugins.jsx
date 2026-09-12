@@ -15,11 +15,11 @@ const ICONS = {
 };
 const CAT_COLOR = { Vision: "#0044FF", Capteurs: "#FFB800", "Métier": "#00E676", "Intégration": "#A855F7" };
 
-const STATUS_META = {
-  ok:             { color: "#00E676", label: "OK",             Ic: CheckCircle2 },
-  error:          { color: "#FF3333", label: "Erreur",         Ic: XCircle },
-  not_configured: { color: "#FFB800", label: "Non configuré",  Ic: AlertTriangle },
-  disabled:       { color: "#666",    label: "Désactivé",      Ic: PowerOff },
+const STATUS_META_KEYS = {
+  ok:             { color: "#00E676", labelKey: "plugins.status_ok",             Ic: CheckCircle2 },
+  error:          { color: "#FF3333", labelKey: "plugins.status_error",          Ic: XCircle },
+  not_configured: { color: "#FFB800", labelKey: "plugins.status_not_configured", Ic: AlertTriangle },
+  disabled:       { color: "#666",    labelKey: "plugins.disabled",              Ic: PowerOff },
 };
 
 export default function Plugins() {
@@ -36,7 +36,7 @@ export default function Plugins() {
   useEffect(() => { load(); const iv = setInterval(load, 20000); return () => clearInterval(iv); }, []);
 
   const toggle = async (p, enabled) => {
-    try { await api.put(`/plugins/${p.id}`, { enabled }); toast.success(`${p.name} ${enabled ? "activé" : "désactivé"}`); load(); }
+    try { await api.put(`/plugins/${p.id}`, { enabled }); toast.success(`${p.name} ${enabled ? t("plugins.enabled") : t("plugins.disabled")}`); load(); }
     catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
 
@@ -46,7 +46,7 @@ export default function Plugins() {
         <h1 className="font-head font-bold text-2xl tracking-tight flex items-center gap-2"><Puzzle size={22} /> {t("plugins.title")}</h1>
         <button onClick={load} data-testid="plugins-refresh"
                 className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-border hover:bg-secondary">
-          <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} /> Rafraîchir
+          <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} /> {t("plugins.refresh")}
         </button>
       </div>
       <p className="text-sm text-muted-foreground mb-4">{t("plugins.subtitle")}</p>
@@ -54,7 +54,8 @@ export default function Plugins() {
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         {plugins.map((p) => {
           const Icon = ICONS[p.id] || Puzzle;
-          const meta = STATUS_META[p.status] || STATUS_META.not_configured;
+          const metaKeys = STATUS_META_KEYS[p.status] || STATUS_META_KEYS.not_configured;
+          const meta = { ...metaKeys, label: t(metaKeys.labelKey) };
           const StatusIc = meta.Ic;
           const h = p.health || {};
           return (
@@ -70,11 +71,11 @@ export default function Plugins() {
                       <span className="font-head font-semibold">{p.name}</span>
                       <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border" style={{ borderColor: CAT_COLOR[p.category], color: CAT_COLOR[p.category] }}>{p.category}</span>
                     </div>
-                    <div className="text-[10px] mono text-muted-foreground">v{p.version}{p.core ? " · cœur" : ""}</div>
+                    <div className="text-[10px] mono text-muted-foreground">v{p.version}{p.core ? ` · ${t("plugins.core")}` : ""}</div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {p.core ? <Lock size={13} className="text-muted-foreground" title="Plugin cœur (non désactivable)" /> : null}
+                  {p.core ? <Lock size={13} className="text-muted-foreground" title={t("plugins.core_tooltip")} /> : null}
                   <Switch checked={p.enabled} onCheckedChange={(v) => toggle(p, v)} disabled={!isAdmin || p.core} data-testid={`plugin-toggle-${p.id}`} />
                 </div>
               </div>
@@ -108,15 +109,15 @@ export default function Plugins() {
               {p.enabled && (h.events_total > 0 || h.last_event_at) && (
                 <div className="mt-2 pt-2 border-t border-border grid grid-cols-3 gap-1 text-center">
                   <div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Total</div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("plugins.metric_total")}</div>
                     <div className="mono text-sm font-bold">{h.events_total}</div>
                   </div>
                   <div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">24 h</div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("plugins.metric_24h")}</div>
                     <div className="mono text-sm font-bold">{h.events_24h || 0}</div>
                   </div>
                   <div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center justify-center gap-0.5"><Clock size={9} /> Dernier</div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center justify-center gap-0.5"><Clock size={9} /> {t("plugins.metric_last")}</div>
                     <div className="mono text-[10px]">{h.last_event_at ? new Date(h.last_event_at).toLocaleTimeString("fr-FR") : "—"}</div>
                   </div>
                 </div>

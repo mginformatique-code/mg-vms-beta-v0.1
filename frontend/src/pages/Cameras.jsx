@@ -202,8 +202,8 @@ export default function Cameras() {
   };
 
   const runConnectivity = async () => {
-    if (!form.ip) { toast.error("Adresse IP obligatoire"); return null; }
-    if (form.mode === "rtsp" && !form.rtsp_url) { toast.error("Mode RTSP : renseignez l'URL RTSP"); return null; }
+    if (!form.ip) { toast.error(t("cam.err_ip_required")); return null; }
+    if (form.mode === "rtsp" && !form.rtsp_url) { toast.error(t("cam.err_rtsp_url_mode")); return null; }
     setChecking(true); setConnCheck(null);
     try {
       const { data } = await api.post("/cameras/test-connectivity", {
@@ -238,12 +238,12 @@ export default function Cameras() {
         }
       }
       return data;
-    } catch (e) { toast.error("Test de connectivité échoué"); return null; }
+    } catch (e) { toast.error(t("cam.err_connectivity_failed")); return null; }
     finally { setChecking(false); }
   };
 
   const autoDetect = async () => {
-    if (!form.ip) { toast.error("Renseignez l'IP pour la détection automatique"); return; }
+    if (!form.ip) { toast.error(t("cam.err_autodetect_ip")); return; }
     setDetecting(true);
     try {
       const { data } = await api.post("/cameras/auto-detect", {
@@ -279,22 +279,22 @@ export default function Cameras() {
         name: f.name || `${data.model || "Caméra"} (${data.ip})`,
       }));
       const portNote = (data.onvif_port && Number(data.onvif_port) !== (Number(form.onvif_port) || 80))
-        ? ` · port ONVIF corrigé → ${data.onvif_port}` : "";
+        ? ` ${t("cam.port_corrected_prefix")} ${data.onvif_port}` : "";
       // v3.60 · Constaté : détecter l'IP d'une caméra déjà enregistrée ne
       // disait rien — l'utilisateur pouvait recréer un doublon sans le
       // savoir. Avertissement explicite si cette IP existe déjà (sauf si
       // c'est justement la caméra qu'on est en train de modifier).
       const dup = cams.find((c) => c.ip === form.ip && c.id !== editingId);
       if (dup) {
-        toast.warning(`Attention : une caméra "${dup.name}" existe déjà avec cette IP (${form.ip}) — vous allez peut-être créer un doublon.`);
+        toast.warning(`${t("cam.warn_dup_ip_prefix")} "${dup.name}" ${t("cam.warn_dup_ip_mid")} (${form.ip}) — ${t("cam.warn_dup_ip_tail")}`);
       }
-      toast.success(`Caméra détectée : ${data.manufacturer} ${data.model} · ${data.profiles?.length || 0} profil(s)${portNote}`);
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Détection échouée"); }
+      toast.success(`${t("cam.success_detected_prefix")} ${data.manufacturer} ${data.model} · ${data.profiles?.length || 0} ${t("cam.profiles_count_suffix")}${portNote}`);
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("cam.err_detect_failed")); }
     finally { setDetecting(false); }
   };
 
   const applyWizard = async () => {
-    if (!form.wiz_brand || !form.ip) { toast.error("Fabricant + IP requis"); return; }
+    if (!form.wiz_brand || !form.ip) { toast.error(t("cam.err_brand_ip_required")); return; }
     try {
       const { data } = await api.post("/cameras/generate-rtsp-url", {
         brand: form.wiz_brand, model_idx: form.wiz_model_idx || 0,
@@ -304,14 +304,14 @@ export default function Cameras() {
         username: form.username, password: form.password,
       });
       setForm((f) => ({ ...f, rtsp_url: data.rtsp_url }));
-      toast.success("URL RTSP générée");
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Génération impossible"); }
+      toast.success(t("cam.success_rtsp_generated"));
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("cam.err_rtsp_gen_failed")); }
   };
 
   const submit = async ({ allow_rtsp_override = false, force_stream_mode = null } = {}) => {
-    if (!form.name || !form.site_id) return toast.error("Nom et site requis");
-    if (!form.ip) return toast.error("Adresse IP requise");
-    if (form.mode === "rtsp" && !form.rtsp_url) return toast.error("URL RTSP requise (mode RTSP)");
+    if (!form.name || !form.site_id) return toast.error(t("cam.err_name_site_required"));
+    if (!form.ip) return toast.error(t("cam.err_ip_required_submit"));
+    if (form.mode === "rtsp" && !form.rtsp_url) return toast.error(t("cam.err_rtsp_required_mode"));
 
     setSaving(true);
     try {
@@ -321,16 +321,16 @@ export default function Cameras() {
       if (!allow_rtsp_override) {
         if (!check || !check.success || !check.rtsp_url_validated) {
           if (form.mode === "onvif" && onvifOk && !rtspOk) {
-            toast.warning("Test RTSP échoué. ONVIF fonctionne — utilisez « Créer malgré le test RTSP » pour continuer.");
+            toast.warning(t("cam.warn_rtsp_failed_onvif_ok"));
             setSaving(false); return;
           }
-          toast.error(check?.message || "URL RTSP non validée — impossible de créer la caméra");
+          toast.error(check?.message || t("cam.err_rtsp_not_validated"));
           setSaving(false); return;
         }
       } else if (!onvifOk && !rtspOk) {
         // v1.0-rc4 · L'override est autorisé si AU MOINS ONVIF OU RTSP marche.
         // Cas "ONVIF OK + RTSP OK + Go2RTC KO" doit pouvoir passer même en mode rtsp.
-        toast.error("Impossible de forcer : ni ONVIF ni RTSP n'ont répondu correctement");
+        toast.error(t("cam.err_override_impossible"));
         setSaving(false); return;
       }
       const { wiz_brand, wiz_model_idx, wiz_stream, wiz_channel, record_mode, storage_pool_id, storage_max_size_gb, ...payload } = form;
@@ -342,11 +342,11 @@ export default function Cameras() {
       let camId = editingId;
       if (editingId) {
         await api.put(`/cameras/${editingId}`, payload);
-        toast.success("Caméra mise à jour");
+        toast.success(t("cam.success_updated"));
       } else {
         const { data: created } = await api.post("/cameras", payload);
         camId = created.id;
-        toast.success("Caméra ajoutée (flux vérifié)");
+        toast.success(t("cam.success_created"));
       }
       // Sauvegarde l'assignation stockage / mode enregistrement
       try {
@@ -367,10 +367,9 @@ export default function Cameras() {
       const isGo2rtcFailure = /go2rtc/i.test(detailMsg) && !allow_rtsp_override;
       if (isGo2rtcFailure && !editingId) {
         const proceed = window.confirm(
-          "Go2RTC ne parvient pas à exploiter ce flux.\n\n" +
-          "La caméra peut néanmoins être créée avec le pipeline RTSP → MG-VMS " +
-          "direct (indépendant de Go2RTC, l'IA lira le flux directement).\n\n" +
-          "Créer malgré l'erreur Go2RTC ?"
+          `${t("cam.confirm_go2rtc_l1")}\n\n` +
+          `${t("cam.confirm_go2rtc_l2")}\n\n` +
+          t("cam.confirm_go2rtc_q")
         );
         if (proceed) {
           // Force direct_rtsp + allow_rtsp_override, sans dépendre du re-render setForm
@@ -382,7 +381,7 @@ export default function Cameras() {
           return;
         }
       }
-      toast.error(formatApiErrorDetail(detail) || "Échec de la sauvegarde");
+      toast.error(formatApiErrorDetail(detail) || t("cam.err_save_failed"));
     }
     finally { setSaving(false); }
   };
@@ -392,22 +391,22 @@ export default function Cameras() {
     try { const { data } = await api.post(`/cameras/${c.id}/test`);
       const extra = data.resolution ? ` (${data.resolution}${data.fps ? ` @ ${data.fps}fps` : ""}${data.codec ? ` ${data.codec}` : ""})` : "";
       data.success ? toast.success(`${c.name}: ${data.message}${extra}`) : toast.error(`${c.name}: ${data.message}`);
-      load(); } catch (e) { toast.error("Échec du test"); } finally { setTesting(null); }
+      load(); } catch (e) { toast.error(t("cam.err_test_failed")); } finally { setTesting(null); }
   };
   const snapshot = async (c) => {
     try { const { data } = await api.post(`/cameras/${c.id}/snapshot`);
       const token = localStorage.getItem("mg_token");
       const url = `${process.env.REACT_APP_BACKEND_URL}/api${data.snapshot_url}?token=${encodeURIComponent(token || "")}&t=${Date.now()}`;
-      setSnap({ ...data, snapshot_url: url, name: c.name }); } catch (e) { toast.error("Échec — flux injoignable"); }
+      setSnap({ ...data, snapshot_url: url, name: c.name }); } catch (e) { toast.error(t("cam.err_snapshot_unreachable")); }
   };
-  const del = async (c) => { if (!window.confirm(`Supprimer ${c.name} ?`)) return; await api.delete(`/cameras/${c.id}`); toast.success("Supprimée"); load(); };
+  const del = async (c) => { if (!window.confirm(`${t("cam.confirm_delete_prefix")} ${c.name} ?`)) return; await api.delete(`/cameras/${c.id}`); toast.success(t("cam.success_deleted")); load(); };
 
   const openDiagnostic = async (c) => {
     setDiagState({ loading: true, cam: c });
     try {
       const { data } = await api.get(`/cameras/${c.id}/diagnostic`);
       setDiagState({ loading: false, cam: c, ...data });
-    } catch (e) { toast.error("Diagnostic indisponible"); setDiagState(null); }
+    } catch (e) { toast.error(t("cam.err_diagnostic_unavailable")); setDiagState(null); }
   };
 
   // v1.0-rc4 · Diagnostic pipeline vidéo multi-étages (RTSP → Go2RTC → WebRTC)
@@ -418,7 +417,7 @@ export default function Cameras() {
       const { data } = await api.get(`/cameras/${c.id}/pipeline-diagnostic`);
       setPipelineDiag({ loading: false, cam: c, ...data });
     } catch (e) {
-      toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Diagnostic pipeline indisponible");
+      toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("cam.err_pipeline_diag_unavailable"));
       setPipelineDiag(null);
     }
   };
@@ -435,7 +434,7 @@ export default function Cameras() {
             <option value="">{t("common.all")} — {t("nav.sites")}</option>
             {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
-          {can("technician") && <button onClick={() => setDiscOpen(true)} data-testid="onvif-discover-btn" className="flex items-center gap-2 px-3 py-2 border border-border text-sm hover:bg-secondary"><Radar size={16} /> Scan ONVIF</button>}
+          {can("technician") && <button onClick={() => setDiscOpen(true)} data-testid="onvif-discover-btn" className="flex items-center gap-2 px-3 py-2 border border-border text-sm hover:bg-secondary"><Radar size={16} /> {t("cam.scan_onvif_btn")}</button>}
           {can("technician") && <button onClick={openCreate} data-testid="add-camera-btn" className="flex items-center gap-2 px-3 py-2 bg-[#0044FF] text-white text-sm hover:bg-[#0033cc]"><Plus size={16} /> {t("cam.add")}</button>}
         </div>
       </div>
@@ -445,13 +444,13 @@ export default function Cameras() {
           <thead><tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted-foreground">
             <SortTh label={t("common.status")} colKey="status" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
             <SortTh label={t("common.name")} colKey="name" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
-            <SortTh label="Site" colKey="site" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
-            <SortTh label="Adresse IP" colKey="ip" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
-            <SortTh label="Mode" colKey="mode" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
+            <SortTh label={t("common.site")} colKey="site" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
+            <SortTh label={t("cam.ip")} colKey="ip" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
+            <SortTh label={t("cam.mode_label")} colKey="mode" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
             <SortTh label={t("cam.video_mode")} colKey="video_mode" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
             <SortTh label={t("cam.resolution")} colKey="resolution" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
-            <SortTh label="Codec" colKey="codec" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
-            <SortTh label="PTZ" colKey="ptz" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
+            <SortTh label={t("cam.codec")} colKey="codec" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
+            <SortTh label={t("cam.ptz")} colKey="ptz" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />
             <th className="px-3 py-2 text-right">{t("common.actions")}</th>
           </tr></thead>
           <tbody>
@@ -491,13 +490,13 @@ export default function Cameras() {
                 <td className="px-3 py-2"><CodecSwitch camera={c} onChanged={() => load()} /></td>
                 <td className="px-3 py-2 text-center">{c.ptz_enabled ? <CheckCircle2 size={14} className="text-[#00E676] inline" /> : "—"}</td>
                 <td className="px-3 py-2"><div className="flex items-center justify-end gap-1">
-                  <button onClick={() => test(c)} disabled={testing === c.id} data-testid="test-camera-btn" title="Tester la connexion" className="p-1.5 hover:bg-secondary">
+                  <button onClick={() => test(c)} disabled={testing === c.id} data-testid="test-camera-btn" title={t("cam.title_test_connection")} className="p-1.5 hover:bg-secondary">
                     {testing === c.id ? <Loader2 size={15} className="animate-spin" /> : <Activity size={15} />}
                   </button>
-                  <button onClick={() => openDiagnostic(c)} data-testid="diagnostic-camera-btn" title="Diagnostic" className="p-1.5 hover:bg-secondary text-[#00E676]"><Radar size={15} /></button>
-                  <button onClick={() => snapshot(c)} data-testid="snapshot-camera-btn" title="Snapshot" className="p-1.5 hover:bg-secondary"><CamIcon size={15} /></button>
-                  {can("technician") && <button onClick={() => openEdit(c)} data-testid="edit-camera-btn" title="Modifier" className="p-1.5 hover:bg-secondary"><Pencil size={15} /></button>}
-                  {can("technician") && <button onClick={() => del(c)} data-testid="delete-camera-btn" title="Supprimer" className="p-1.5 hover:bg-secondary text-[#FF3333]"><Trash2 size={15} /></button>}
+                  <button onClick={() => openDiagnostic(c)} data-testid="diagnostic-camera-btn" title={t("cam.title_diagnostic")} className="p-1.5 hover:bg-secondary text-[#00E676]"><Radar size={15} /></button>
+                  <button onClick={() => snapshot(c)} data-testid="snapshot-camera-btn" title={t("cam.title_snapshot")} className="p-1.5 hover:bg-secondary"><CamIcon size={15} /></button>
+                  {can("technician") && <button onClick={() => openEdit(c)} data-testid="edit-camera-btn" title={t("common.edit")} className="p-1.5 hover:bg-secondary"><Pencil size={15} /></button>}
+                  {can("technician") && <button onClick={() => del(c)} data-testid="delete-camera-btn" title={t("common.delete")} className="p-1.5 hover:bg-secondary text-[#FF3333]"><Trash2 size={15} /></button>}
                 </div></td>
               </tr>
             ))}
@@ -507,13 +506,13 @@ export default function Cameras() {
 
       <Dialog open={open} onOpenChange={(o) => { if (!o) closeDialog(); }}>
         <DialogContent className="rounded-none border-border max-w-3xl max-h-[92vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="font-head">{editingId ? "Modifier la caméra" : "Ajouter une caméra"}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-head">{editingId ? t("cam.dialog_title_edit") : t("cam.dialog_title_add")}</DialogTitle></DialogHeader>
 
           {/* Mode toggle */}
           <div className="flex items-center gap-2 mb-2" data-testid="cam-mode-toggle">
             {[
-              { v: "onvif", label: "Mode ONVIF (recommandé)" },
-              { v: "rtsp", label: "Mode RTSP manuel" },
+              { v: "onvif", label: t("cam.mode_onvif_label") },
+              { v: "rtsp", label: t("cam.mode_rtsp_label") },
             ].map((m) => (
               <button key={m.v} type="button" onClick={() => { setForm({ ...form, mode: m.v, protocol: m.v.toUpperCase() }); setConnCheck(null); }}
                 data-testid={`cam-mode-${m.v}`}
@@ -522,26 +521,26 @@ export default function Cameras() {
               </button>
             ))}
             <span className="text-[11px] text-muted-foreground ml-auto">
-              {form.mode === "onvif" ? "L'URL RTSP est découverte automatiquement." : "URL RTSP saisie manuellement ou générée."}
+              {form.mode === "onvif" ? t("cam.mode_onvif_hint") : t("cam.mode_rtsp_hint")}
             </span>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Nom"><input data-testid="cam-form-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="inp" /></Field>
-            <Field label="Site">
+            <Field label={t("common.name")}><input data-testid="cam-form-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="inp" /></Field>
+            <Field label={t("common.site")}>
               <select data-testid="cam-form-site" value={form.site_id} onChange={(e) => setForm({ ...form, site_id: e.target.value })} className="inp">
                 <option value="">—</option>{sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </Field>
-            <Field label="Adresse IP"><input data-testid="cam-form-ip" value={form.ip} onChange={(e) => setForm({ ...form, ip: e.target.value })} className="inp" placeholder="192.168.1.10" /></Field>
-            <Field label={form.mode === "onvif" ? "Port ONVIF" : "Port RTSP"}>
+            <Field label={t("cam.ip")}><input data-testid="cam-form-ip" value={form.ip} onChange={(e) => setForm({ ...form, ip: e.target.value })} className="inp" placeholder="192.168.1.10" /></Field>
+            <Field label={form.mode === "onvif" ? t("cam.field_port_onvif") : t("cam.field_port_rtsp")}>
               <input data-testid="cam-form-port" type="number" min="1" max="65535"
                 value={form.mode === "onvif" ? form.onvif_port : form.rtsp_port}
                 onChange={(e) => setForm({ ...form, [form.mode === "onvif" ? "onvif_port" : "rtsp_port"]: e.target.value })}
                 className="inp mono" />
             </Field>
-            <Field label={form.mode === "onvif" ? "Identifiant ONVIF" : "Identifiant (optionnel)"}><input data-testid="cam-form-username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} className="inp" autoComplete="off" /></Field>
-            <Field label={form.mode === "onvif" ? "Mot de passe ONVIF" : "Mot de passe (optionnel)"}><HoldToRevealInput data-testid="cam-form-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="inp" autoComplete="new-password" placeholder={editingId ? "(inchangé si vide)" : ""} /></Field>
+            <Field label={form.mode === "onvif" ? t("cam.field_user_onvif") : t("cam.field_user_rtsp")}><input data-testid="cam-form-username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} className="inp" autoComplete="off" /></Field>
+            <Field label={form.mode === "onvif" ? t("cam.field_pass_onvif") : t("cam.field_pass_rtsp")}><HoldToRevealInput data-testid="cam-form-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="inp" autoComplete="new-password" placeholder={editingId ? t("cam.pass_unchanged_ph") : ""} /></Field>
 
             {/* --- Bloc ONVIF : auto-détect + profils --- */}
             {form.mode === "onvif" && (
@@ -550,7 +549,7 @@ export default function Cameras() {
                   <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("cam.autodetect")}</span>
                   <button type="button" onClick={autoDetect} disabled={detecting} data-testid="auto-detect-btn"
                     className="px-3 py-1.5 bg-[#00E676]/20 text-[#00E676] border border-[#00E676] hover:bg-[#00E676]/30 text-xs flex items-center gap-1">
-                    {detecting ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />} Détecter automatiquement la caméra
+                    {detecting ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />} {t("cam.autodetect_btn")}
                   </button>
                 </div>
                 {form.manufacturer && (
@@ -560,14 +559,14 @@ export default function Cameras() {
                 )}
                 {lensGroups.length > 1 && (
                   <div className="border border-[#A855F7] bg-[#A855F7]/5 p-2 text-xs space-y-1" data-testid="lens-groups-notice">
-                    <div className="font-medium text-[#A855F7]">Cet appareil semble avoir {lensGroups.length} objectifs distincts</div>
+                    <div className="font-medium text-[#A855F7]">{t("cam.lens_groups_title_prefix")} {lensGroups.length} {t("cam.lens_groups_title_suffix")}</div>
                     {lensGroups.map((g) => (
                       <div key={g.label} className="text-[11px] text-muted-foreground">
                         <span className="font-medium">{g.label}</span> : {g.profiles.map((p) => p.name).join(", ")}
                       </div>
                     ))}
                     <p className="text-[10px] text-muted-foreground pt-1">
-                      Choisissez le profil du 1er objectif ci-dessous pour cette fiche, enregistrez, puis relancez l'ajout avec l'IP de cet appareil pour créer la 2ᵉ fiche avec le profil de l'autre objectif.
+                      {t("cam.lens_groups_hint")}
                     </p>
                   </div>
                 )}
@@ -592,14 +591,14 @@ export default function Cameras() {
                                 {badge && <span className={`text-[9px] px-1.5 py-0.5 font-bold ${isMain ? "bg-[#0044FF] text-white" : "bg-muted text-muted-foreground"}`}>{badge}</span>}
                                 <span className="text-muted-foreground mono">{p.resolution || ""} {p.codec || ""}</span>
                               </div>
-                              <div className="text-[10px] text-muted-foreground truncate mono">{p.rtsp_url || "(pas d'URI RTSP)"}</div>
+                              <div className="text-[10px] text-muted-foreground truncate mono">{p.rtsp_url || t("cam.no_rtsp_uri")}</div>
                             </div>
                           </label>
                         );
                       })}
                     </div>
                     <p className="text-[10px] text-muted-foreground mt-1">
-                      Aucune substitution de flux — l&apos;URL exacte du profil coché est persistée et utilisée par go2rtc. Cliquez sur « Tester la connexion » après avoir changé de profil pour re-valider.
+                      {t("cam.profile_no_substitution")}
                     </p>
                   </div>
                 )}
@@ -610,7 +609,7 @@ export default function Cameras() {
             {form.mode === "rtsp" && (
               <div className="col-span-2 border border-border p-3 space-y-2" data-testid="rtsp-wizard">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Assistant RTSP</span>
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("cam.wizard_title")}</span>
                   <span className="text-[10px] text-muted-foreground">{t("cam.wizard_hint")}</span>
                 </div>
                 <div className="grid grid-cols-4 gap-2">
@@ -622,21 +621,21 @@ export default function Cameras() {
                     {currentBrand?.models?.map((m, i) => <option key={i} value={i}>{m.name}</option>)}
                   </select>
                   <select value={form.wiz_stream} onChange={(e) => setForm({ ...form, wiz_stream: e.target.value })} className="inp text-xs" disabled={!currentModel} data-testid="wiz-stream">
-                    {currentModel?.streams?.map((s) => <option key={s} value={s}>{streamLabel(s)}</option>)}
+                    {currentModel?.streams?.map((s) => <option key={s} value={s}>{streamLabel(s, t)}</option>)}
                   </select>
                   <div className="flex items-center gap-1">
-                    <input type="number" min="1" max="64" placeholder="Canal"
+                    <input type="number" min="1" max="64" placeholder={t("cam.wizard_channel_ph")}
                       value={form.wiz_channel} onChange={(e) => setForm({ ...form, wiz_channel: e.target.value })}
                       className="inp text-xs mono" style={{ width: 60 }} title={t("cam.channel_title")} data-testid="wiz-channel" />
                     <button type="button" onClick={applyWizard} disabled={!form.wiz_brand} data-testid="wiz-generate-btn"
                       className="px-3 py-2 bg-[#0044FF] text-white text-xs flex items-center gap-1 hover:bg-[#0033cc] disabled:opacity-50">
-                      <ChevronRight size={12} /> Générer
+                      <ChevronRight size={12} /> {t("cam.wizard_generate_btn")}
                     </button>
                   </div>
                 </div>
                 {currentModel?.help && <p className="text-[10px] text-muted-foreground border-l-2 border-[#FFB800] pl-2 mt-1">{currentModel.help}</p>}
                 <div>
-                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">URL RTSP (modifiable)</label>
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("cam.wizard_url_label")}</label>
                   <input data-testid="cam-form-rtsp-url" value={form.rtsp_url}
                     onChange={(e) => setForm({ ...form, rtsp_url: e.target.value })}
                     className="inp mono text-xs mt-1" placeholder="rtsp://..." />
@@ -646,18 +645,18 @@ export default function Cameras() {
 
             {/* Options avancées enregistrement / IA */}
             <div className="col-span-2 flex items-center gap-5 flex-wrap">
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.ptz_enabled} onChange={(e) => setForm({ ...form, ptz_enabled: e.target.checked })} /> PTZ</label>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.ptz_enabled} onChange={(e) => setForm({ ...form, ptz_enabled: e.target.checked })} /> {t("cam.ptz")}</label>
               <label className="flex items-center gap-2 text-sm" data-testid="record-toggle"><input type="checkbox" checked={form.record_enabled} onChange={(e) => setForm({ ...form, record_enabled: e.target.checked })} /> {t("cam.record_enabled")}</label>
               <label className="flex items-center gap-2 text-sm" data-testid="detect-toggle">
                 <input type="checkbox" checked={form.detect_enabled} onChange={(e) => setForm({ ...form, detect_enabled: e.target.checked })} />
-                Analyse IA activée
+                {t("cam.ai_enabled_label")}
                 <span className="text-[10px] text-muted-foreground">{t("cam.ai_killswitch")}</span>
               </label>
               <label className="flex items-center gap-2 text-sm" data-testid="anpr-dedicated-toggle">
                 <input type="checkbox" checked={form.anpr_dedicated}
                        onChange={(e) => setForm({ ...form, anpr_dedicated: e.target.checked })} />
-                Caméra ANPR dédiée
-                <span className="text-[10px] text-muted-foreground">force l'ANPR en tout temps (nuit incluse)</span>
+                {t("cam.anpr_dedicated_label")}
+                <span className="text-[10px] text-muted-foreground">{t("cam.anpr_dedicated_hint")}</span>
               </label>
             </div>
 
@@ -683,12 +682,12 @@ export default function Cameras() {
                 donner l'illusion d'un choix. Les valeurs par défaut (tcp/auto)
                 restent envoyées au backend, rien ne change côté API. */}
             <div className="col-span-2 grid grid-cols-1 gap-3 border border-border p-3 bg-secondary/30">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Analyse IA</div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("cam.ai_analysis_title")}</div>
               <div>
                 {/* v3.1.1 · Résolution envoyée à YOLO/ANPR uniquement — l'enregistrement
                     est toujours natif (recorder.py fait `-c copy`, jamais concerné). */}
                 <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                  Résolution IA / ANPR
+                  {t("cam.ai_resolution_label")}
                 </label>
                 <select
                   value={form.ai_resolution}
@@ -701,12 +700,7 @@ export default function Cameras() {
                   <option value="native">{t("cam.ai_res_native")}</option>
                 </select>
                 <p className="text-[10px] text-muted-foreground mt-0.5">
-                  Le scan continu (détection véhicule) tourne toujours en résolution légère, quel que
-                  soit ce réglage — pas d&apos;impact sur la fluidité du live. Au-dessus de 720p, une image
-                  haute résolution est récupérée UNIQUEMENT au moment où un véhicule est détecté, pour
-                  générer des crops (véhicule/plaque) nets. N&apos;affecte pas l&apos;enregistrement (toujours
-                  natif). &laquo; Native &raquo; nécessite que la résolution ait déjà été détectée
-                  ci-dessus (bouton Tester la connexion).
+                  {t("cam.ai_resolution_hint")}
                 </p>
               </div>
               {/* v3.9.1 · Sélecteur « Mode vidéo » retiré : « Direct RTSP »
@@ -723,39 +717,39 @@ export default function Cameras() {
             {/* Config enregistrement avancée : mode + canal ONVIF + disque cible */}
             {form.record_enabled && (
               <div className="col-span-2 border border-border p-3 space-y-3 bg-secondary/30" data-testid="record-cfg">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Configuration d&apos;enregistrement</div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("cam.record_config_title")}</div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Mode</label>
+                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("cam.mode_label")}</label>
                     <select value={form.record_mode} onChange={(e) => setForm({ ...form, record_mode: e.target.value })} className="inp" data-testid="record-mode">
-                      <option value="continuous">Continu (24/7)</option>
-                      <option value="motion">Sur mouvement</option>
+                      <option value="continuous">{t("cam.rec_continuous")}</option>
+                      <option value="motion">{t("cam.rec_motion")}</option>
                       <option value="ai">{t("cam.rec_ai_event")}</option>
                       <option value="off">{t("cam.rec_off")}</option>
                     </select>
                     <p className="text-[10px] text-muted-foreground mt-0.5">{t("cam.rec_mode_hint")}</p>
                   </div>
                   <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Canal ONVIF (profil)</label>
+                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("cam.record_channel_label")}</label>
                     <select value={form.profile_token} onChange={(e) => setForm({ ...form, profile_token: e.target.value })} className="inp" disabled={profiles.length === 0} data-testid="record-profile">
                       <option value="">{t("cam.default_main")}</option>
                       {profiles.map((p) => (
                         <option key={p.token} value={p.token}>{p.name} {p.resolution ? `· ${p.resolution}` : ""}</option>
                       ))}
                     </select>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">{profiles.length === 0 ? "Lancez le test ONVIF pour lister les canaux." : `${profiles.length} profil(s) découverts`}</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">{profiles.length === 0 ? t("cam.no_profiles_hint") : `${profiles.length} ${t("cam.profiles_found_suffix")}`}</p>
                   </div>
                   <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Disque cible</label>
+                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("cam.storage_target_label")}</label>
                     <select value={form.storage_pool_id} onChange={(e) => setForm({ ...form, storage_pool_id: e.target.value })} className="inp" data-testid="record-pool">
-                      <option value="">— Défaut ({pools.length} pool(s) déclaré(s)) —</option>
+                      <option value="">{t("cam.storage_default_prefix")}{pools.length} {t("cam.storage_default_suffix")}</option>
                       {pools.filter((p) => p.enabled).map((p) => (
-                        <option key={p.id} value={p.id}>{p.name} — {p.usage?.free_gb ?? "?"} Go libres</option>
+                        <option key={p.id} value={p.id}>{p.name} — {p.usage?.free_gb ?? "?"} {t("cam.storage_free_suffix")}</option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Quota max. (Go)</label>
+                    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("cam.quota_label")}</label>
                     <input type="number" min="0" value={form.storage_max_size_gb} onChange={(e) => setForm({ ...form, storage_max_size_gb: e.target.value })} className="inp mono" placeholder={t("cam.quota_ph")} data-testid="record-quota" />
                   </div>
                 </div>
@@ -765,10 +759,10 @@ export default function Cameras() {
             {/* Test de connexion multi-étapes */}
             <div className="col-span-2 border border-border p-3 space-y-2" data-testid="conn-test-block">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Test de connexion ({form.mode.toUpperCase()}) — obligatoire</span>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("cam.conn_test_title_prefix")}{form.mode.toUpperCase()}{t("cam.conn_test_title_suffix")}</span>
                 <button type="button" onClick={runConnectivity} disabled={checking} data-testid="conn-test-btn"
                   className="px-3 py-1.5 border border-border hover:bg-secondary text-xs flex items-center gap-1">
-                  {checking && <Loader2 size={12} className="animate-spin" />} Tester la connexion
+                  {checking && <Loader2 size={12} className="animate-spin" />} {t("cam.title_test_connection")}
                 </button>
               </div>
               {!connCheck && <p className="text-muted-foreground text-[11px]">{t("cam.test_hint")}</p>}
@@ -780,7 +774,7 @@ export default function Cameras() {
                   {connCheck.debug_attempts && connCheck.debug_attempts.length > 0 && (
                     <details className="mt-2 border border-border bg-background/40 p-2" open={!connCheck.rtsp_url_validated} data-testid="rtsp-debug-panel">
                       <summary className="text-[10px] uppercase tracking-wider text-muted-foreground cursor-pointer">
-                        Debug RTSP — {connCheck.debug_attempts.length} tentative(s)
+                        {t("cam.debug_rtsp_prefix")} {connCheck.debug_attempts.length} {t("cam.debug_attempts_suffix")}
                         {connCheck.rtsp_url_validated && (
                           <span className="ml-2 text-[#00E676]">{t("cam.url_validated")}</span>
                         )}
@@ -797,7 +791,7 @@ export default function Cameras() {
                       </ol>
                       {connCheck.validated_url && (
                         <div className="mt-2 text-[10px] mono text-[#00E676] border-t border-border pt-1.5" data-testid="validated-url">
-                          <span className="text-muted-foreground">URL retenue : </span>{connCheck.validated_url}
+                          <span className="text-muted-foreground">{t("cam.retained_url_label")}</span>{connCheck.validated_url}
                           {connCheck.validated_transport && <span className="text-muted-foreground"> · {connCheck.validated_transport.toUpperCase()}</span>}
                         </div>
                       )}
@@ -820,37 +814,37 @@ export default function Cameras() {
               <div className="flex items-start gap-2 px-3 py-2 border border-[#FF3333] bg-[#FF3333]/10 text-[#FF3333] text-sm" data-testid="cam-dup-blocking">
                 <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
                 <span>
-                  Cette caméra existe déjà (même IP et même flux) : <b>{duplicateInfo.cams.map((c) => c.name).join(", ")}</b>.
-                  Impossible de créer un doublon.
+                  {t("cam.dup_blocking_prefix")} <b>{duplicateInfo.cams.map((c) => c.name).join(", ")}</b>.
+                  {t("cam.dup_blocking_suffix")}
                 </span>
               </div>
             ) : (
               <div className="flex items-start gap-2 px-3 py-2 border border-border bg-secondary/40 text-muted-foreground text-sm" data-testid="cam-dup-info">
                 <AlertTriangle size={16} className="flex-shrink-0 mt-0.5 text-[#FFB800]" />
                 <span>
-                  D'autres caméras existent déjà sur cette IP : <b>{duplicateInfo.cams.map((c) => c.name).join(", ")}</b>.
-                  Normal pour une caméra à plusieurs objectifs (grand angle + téléobjectif) — pas un doublon si c'est un objectif différent.
+                  {t("cam.dup_info_prefix")} <b>{duplicateInfo.cams.map((c) => c.name).join(", ")}</b>.
+                  {t("cam.dup_info_suffix")}
                 </span>
               </div>
             )
           )}
 
           <DialogFooter>
-            <button onClick={closeDialog} className="px-4 py-2 border border-border text-sm hover:bg-secondary">Annuler</button>
+            <button onClick={closeDialog} className="px-4 py-2 border border-border text-sm hover:bg-secondary">{t("common.cancel")}</button>
             {editingId && form.mode === "onvif" && (
               <button
                 onClick={async () => {
                   setSettingNtp(true);
                   try {
                     await api.post(`/cameras/${editingId}/ntp`, { ntp_server: window.location.hostname });
-                    toast.success("Serveur de temps défini — MG-VMS resynchronisera cette caméra automatiquement toutes les 24h");
-                  } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+                    toast.success(t("cam.ntp_success"));
+                  } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("cam.err_generic_failed")); }
                   finally { setSettingNtp(false); }
                 }}
                 disabled={settingNtp} data-testid="cam-form-set-ntp"
-                title="Définit MG-VMS comme source d'heure (NTP) de cette caméra"
+                title={t("cam.ntp_button_title")}
                 className="px-4 py-2 border border-border text-sm hover:bg-secondary flex items-center gap-2">
-                {settingNtp ? <Loader2 size={15} className="animate-spin" /> : <Clock size={15} />} Définir comme serveur de temps
+                {settingNtp ? <Loader2 size={15} className="animate-spin" /> : <Clock size={15} />} {t("cam.ntp_button_label")}
               </button>
             )}
             {(() => {
@@ -859,13 +853,13 @@ export default function Cameras() {
               const canOverride = form.mode === "onvif" && !editingId && connCheck && onvifOk && !rtspOk;
               return canOverride ? (
                 <button onClick={() => submit({ allow_rtsp_override: true })} disabled={saving || duplicateInfo?.blocking}
-                        data-testid="cam-form-override" title="ONVIF est validé mais le test RTSP a échoué — la caméra sera enregistrée hors ligne, corrigez le RTSP manuellement ensuite."
+                        data-testid="cam-form-override" title={t("cam.override_btn_title")}
                         className="px-4 py-2 border border-[#FFB800] text-[#FFB800] hover:bg-[#FFB800]/10 text-sm flex items-center gap-2">
-                  {saving && <Loader2 size={15} className="animate-spin" />} Créer malgré le test RTSP
+                  {saving && <Loader2 size={15} className="animate-spin" />} {t("cam.override_btn_label")}
                 </button>
               ) : null;
             })()}
-            <button onClick={() => submit()} disabled={saving || duplicateInfo?.blocking} data-testid="cam-form-submit" className="px-4 py-2 bg-[#0044FF] text-white text-sm flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">{saving && <Loader2 size={15} className="animate-spin" />}{editingId ? "Enregistrer les modifications" : "Créer la caméra"}</button>
+            <button onClick={() => submit()} disabled={saving || duplicateInfo?.blocking} data-testid="cam-form-submit" className="px-4 py-2 bg-[#0044FF] text-white text-sm flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">{saving && <Loader2 size={15} className="animate-spin" />}{editingId ? t("cam.save_edit_label") : t("cam.save_create_label")}</button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -873,7 +867,7 @@ export default function Cameras() {
       {snap && (
         <Dialog open={!!snap} onOpenChange={(o) => !o && setSnap(null)}>
           <DialogContent className="rounded-none border-border max-w-2xl p-0">
-            <DialogHeader className="px-3 py-2 border-b border-border"><DialogTitle className="text-sm mono">{snap.name} — snapshot</DialogTitle></DialogHeader>
+            <DialogHeader className="px-3 py-2 border-b border-border"><DialogTitle className="text-sm mono">{snap.name} — {t("cam.snapshot_suffix")}</DialogTitle></DialogHeader>
             <img src={snap.snapshot_url} alt="snapshot" className="w-full" data-testid="snapshot-image" />
           </DialogContent>
         </Dialog>
@@ -916,7 +910,7 @@ function PipelineDiagnosticDialog({ state, onClose, onRefresh }) {
       <DialogContent className="rounded-none border-border max-w-3xl" data-testid="pipeline-diag-dialog">
         <DialogHeader>
           <DialogTitle className="font-head flex items-center gap-2">
-            <Stethoscope size={18} /> Diagnostic pipeline vidéo — {cam?.name}
+            <Stethoscope size={18} /> {t("cam.pipeline_diag_title_prefix")} {cam?.name}
           </DialogTitle>
         </DialogHeader>
         {loading ? (
@@ -925,15 +919,15 @@ function PipelineDiagnosticDialog({ state, onClose, onRefresh }) {
           <div className="space-y-3">
             <div className="grid grid-cols-3 gap-2 text-xs">
               <div className="border border-border p-2">
-                <div className="text-[10px] uppercase text-muted-foreground">Verdict global</div>
+                <div className="text-[10px] uppercase text-muted-foreground">{t("cam.verdict_global_label")}</div>
                 <div className={`text-lg font-bold ${verdictColor}`} data-testid="pipeline-diag-verdict">{verdict}</div>
               </div>
               <div className="border border-border p-2">
-                <div className="text-[10px] uppercase text-muted-foreground">Stream Mode</div>
+                <div className="text-[10px] uppercase text-muted-foreground">{t("cam.stream_mode_label")}</div>
                 <div className="mono text-sm">{stream_mode}</div>
               </div>
               <div className="border border-border p-2">
-                <div className="text-[10px] uppercase text-muted-foreground">Nom stream Go2RTC</div>
+                <div className="text-[10px] uppercase text-muted-foreground">{t("cam.stream_name_label")}</div>
                 <div className="mono text-xs truncate" title={stream_name}>{stream_name}</div>
               </div>
             </div>
@@ -965,9 +959,9 @@ function PipelineDiagnosticDialog({ state, onClose, onRefresh }) {
         )}
         <DialogFooter>
           <button onClick={doRefresh} disabled={refreshing || loading} className="text-xs px-3 py-1.5 border border-border hover:bg-secondary flex items-center gap-1" data-testid="pipeline-diag-refresh">
-            {refreshing ? <Loader2 size={12} className="animate-spin" /> : <Activity size={12} />} Relancer
+            {refreshing ? <Loader2 size={12} className="animate-spin" /> : <Activity size={12} />} {t("cam.btn_relaunch")}
           </button>
-          <button onClick={onClose} className="text-xs px-3 py-1.5 border border-border hover:bg-secondary" data-testid="pipeline-diag-close">Fermer</button>
+          <button onClick={onClose} className="text-xs px-3 py-1.5 border border-border hover:bg-secondary" data-testid="pipeline-diag-close">{t("common.close")}</button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -983,31 +977,31 @@ function DiagnosticDialog({ state, onClose, onRefresh }) {
     setRefreshing(true);
     try {
       await api.post(`/cameras/${cam.id}/refresh-stream`);
-      toast.success("Flux ré-enregistré dans go2rtc — variantes HD/SD recréées");
+      toast.success(t("cam.toast_stream_reregistered"));
       onRefresh?.();
     } catch (e) {
-      toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec du ré-enregistrement du flux");
+      toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("cam.err_reregister_failed"));
     } finally { setRefreshing(false); }
   };
   return (
     <Dialog open={true} onOpenChange={onClose}>
       <DialogContent className="max-w-3xl" data-testid="diagnostic-dialog">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Radar size={16} className="text-[#00E676]" /> Diagnostic — {cam?.name}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2"><Radar size={16} className="text-[#00E676]" /> {t("cam.title_diagnostic")} — {cam?.name}</DialogTitle>
         </DialogHeader>
         {loading ? <div className="py-8 text-center text-muted-foreground"><Loader2 size={20} className="animate-spin inline mr-2" /> {t("cam.loading")}</div> : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
             <section className="border border-border p-3">
               <div className="font-head font-semibold mb-2">{t("cam.video_stream")}</div>
               <div className="space-y-1.5">
-                <div className="flex items-center gap-2">{ok(flux?.camera_online)} <span className="text-xs">Caméra {camera?.status?.toUpperCase()}</span></div>
+                <div className="flex items-center gap-2">{ok(flux?.camera_online)} <span className="text-xs">{t("common.camera")} {camera?.status?.toUpperCase()}</span></div>
                 <div className="flex items-center gap-2">{ok(flux?.go2rtc_registered)} <span className="text-xs">{t("cam.g2r_source")}</span></div>
                 <div className="flex items-center gap-2">{ok(flux?.go2rtc_hd_registered)} <span className="text-xs">{t("cam.g2r_variant")}<b>HD</b>{t("cam.native_res")}</span></div>
                 <div className="flex items-center gap-2">{ok(flux?.go2rtc_sd_registered)} <span className="text-xs">{t("cam.g2r_variant")}<b>SD</b> (640 px)</span></div>
-                <div className="text-xs text-muted-foreground mono">Fabricant : <b className="text-foreground">{camera?.manufacturer || "—"}</b> · Modèle : <b className="text-foreground">{camera?.model || "—"}</b></div>
-                <div className="text-xs text-muted-foreground mono">Profil : <b className="text-foreground">{camera?.profile_name || camera?.profile_token || "—"}</b></div>
-                <div className="text-xs text-muted-foreground mono">Transport : <b>{(flux?.rtsp_transport_used || "tcp").toUpperCase()}</b> · Codec : <b>{(camera?.codec || "auto").toUpperCase()}</b></div>
-                <div className="text-xs text-muted-foreground mono">Résolution source : {camera?.resolution || "—"}{camera?.fps ? ` @ ${camera.fps} FPS` : ""}</div>
+                <div className="text-xs text-muted-foreground mono">{t("cam.manufacturer_colon")}<b className="text-foreground">{camera?.manufacturer || "—"}</b> · {t("cam.model_colon")}<b className="text-foreground">{camera?.model || "—"}</b></div>
+                <div className="text-xs text-muted-foreground mono">{t("cam.profile_colon")}<b className="text-foreground">{camera?.profile_name || camera?.profile_token || "—"}</b></div>
+                <div className="text-xs text-muted-foreground mono">{t("cam.transport_colon")}<b>{(flux?.rtsp_transport_used || "tcp").toUpperCase()}</b>{t("cam.codec_mid_label")}<b>{(camera?.codec || "auto").toUpperCase()}</b></div>
+                <div className="text-xs text-muted-foreground mono">{t("cam.res_source_label")}{camera?.resolution || "—"}{camera?.fps ? ` @ ${camera.fps} FPS` : ""}</div>
                 {(() => {
                   const [w, h] = (camera?.resolution || "").split(/x/i).map((n) => parseInt(n, 10) || 0);
                   if (w > 0 && h > 0 && (w < 1280 || h < 720)) {
@@ -1019,10 +1013,10 @@ function DiagnosticDialog({ state, onClose, onRefresh }) {
                   }
                   return null;
                 })()}
-                {camera?.rtsp_url_masked && <div className="text-[10px] text-muted-foreground mono truncate" title={camera.rtsp_url_masked}>URL RTSP : {camera.rtsp_url_masked}</div>}
+                {camera?.rtsp_url_masked && <div className="text-[10px] text-muted-foreground mono truncate" title={camera.rtsp_url_masked}>{t("cam.rtsp_url_label")}{camera.rtsp_url_masked}</div>}
                 {(!flux?.go2rtc_hd_registered || !flux?.go2rtc_sd_registered) && (
                   <div className="text-[11px] text-[#FFB800] mt-1">
-                    ⚠ Variantes HD/SD manquantes dans go2rtc. Cliquez sur « Ré-enregistrer le flux » ci-dessous.
+                    ⚠ {t("cam.hd_sd_missing_warning")}
                   </div>
                 )}
               </div>
@@ -1031,30 +1025,30 @@ function DiagnosticDialog({ state, onClose, onRefresh }) {
                         className="text-xs px-2.5 py-1.5 border border-[#0044FF] text-[#0044FF] hover:bg-[#0044FF] hover:text-white flex items-center gap-1"
                         data-testid="stream-force-register">
                   {refreshing ? <Loader2 size={12} className="animate-spin" /> : <Radar size={12} />}
-                  Ré-enregistrer le flux (HD + SD)
+                  {t("cam.reregister_btn")}
                 </button>
               </div>
             </section>
             <section className="border border-border p-3">
-              <div className="font-head font-semibold mb-2">Intelligence artificielle</div>
+              <div className="font-head font-semibold mb-2">{t("cam.ai_section_title")}</div>
               <div className="space-y-1.5">
-                <div className="flex items-center gap-2">{ok(ai?.detect_enabled)} <span className="text-xs">Détection IA {ai?.detect_enabled ? "active" : "désactivée"}</span></div>
-                <div className="text-xs text-muted-foreground mono">Dernière analyse : {ai?.last_analysis_at ? new Date(ai.last_analysis_at).toLocaleTimeString() : "—"}</div>
+                <div className="flex items-center gap-2">{ok(ai?.detect_enabled)} <span className="text-xs">{t("cam.ai_detection_label")} {ai?.detect_enabled ? t("common.active") : t("cam.state_disabled")}</span></div>
+                <div className="text-xs text-muted-foreground mono">{t("cam.ai_last_analysis_label")}{ai?.last_analysis_at ? new Date(ai.last_analysis_at).toLocaleTimeString() : "—"}</div>
                 <div className="text-xs text-muted-foreground mono">YOLO : {ai?.last_yolo_ms ? `${ai.last_yolo_ms} ms` : "—"} · ALPR : {ai?.last_alpr_ms ? `${ai.last_alpr_ms} ms` : "—"}</div>
-                <div className="text-xs text-muted-foreground mono">Mouvement : {ai?.motion_pct != null ? `${ai.motion_pct.toFixed(1)} %` : "—"}</div>
+                <div className="text-xs text-muted-foreground mono">{t("cam.motion_label")}{ai?.motion_pct != null ? `${ai.motion_pct.toFixed(1)} %` : "—"}</div>
                 <div className="text-xs text-muted-foreground mono">{t("cam.last_frame_det")}<b className="text-foreground">{ai?.last_detections_count || 0}</b></div>
               </div>
             </section>
             <section className="border border-border p-3 md:col-span-2">
               <div className="font-head font-semibold mb-2">{t("cam.activity_24h")}</div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center">
-                <StatBoxD label="Événements" value={stats_24h?.events || 0} />
-                <StatBoxD label="Plaques lues" value={stats_24h?.plates || 0} />
-                <StatBoxD label="Dernier événement" value={last_event ? new Date(last_event.timestamp).toLocaleTimeString() : "—"} small />
-                <StatBoxD label="Dernière plaque" value={last_plate?.plate || "—"} small />
+                <StatBoxD label={t("cam.stat_events")} value={stats_24h?.events || 0} />
+                <StatBoxD label={t("cam.stat_plates")} value={stats_24h?.plates || 0} />
+                <StatBoxD label={t("cam.stat_last_event")} value={last_event ? new Date(last_event.timestamp).toLocaleTimeString() : "—"} small />
+                <StatBoxD label={t("cam.stat_last_plate")} value={last_plate?.plate || "—"} small />
               </div>
               <div className="mt-3 flex items-center gap-2 justify-end">
-                <button onClick={onRefresh} className="text-xs px-2.5 py-1.5 border border-border hover:bg-secondary flex items-center gap-1" data-testid="diagnostic-refresh"><Loader2 size={12} /> Actualiser</button>
+                <button onClick={onRefresh} className="text-xs px-2.5 py-1.5 border border-border hover:bg-secondary flex items-center gap-1" data-testid="diagnostic-refresh"><Loader2 size={12} /> {t("cam.btn_refresh")}</button>
               </div>
             </section>
           </div>
@@ -1095,12 +1089,12 @@ function StepRow({ step }) {
   );
 }
 
-function streamLabel(key) {
+function streamLabel(key, t) {
   const m = {
-    main: "Flux principal (Main)", sub: "Flux secondaire (Sub)", third: "3ᵉ flux",
+    main: t("cam.stream_main"), sub: t("cam.stream_sub"), third: t("cam.stream_third"),
     main_h264: "Main — H.264", sub_h264: "Sub — H.264",
     main_h265: "Main — H.265", sub_h265: "Sub — H.265",
-    custom: "URL personnalisée",
+    custom: t("cam.stream_custom"),
   };
   return m[key] || key;
 }
@@ -1141,7 +1135,7 @@ function OnvifDiscovery({ open, onClose, onPick }) {
         });
         setSelected(pre);
       } catch (e) {
-        setError("Impossible de récupérer les interfaces réseau");
+        setError(t("cam.err_interfaces_fetch"));
       }
     })();
     return () => { cleanupStream(); };
@@ -1168,7 +1162,7 @@ function OnvifDiscovery({ open, onClose, onPick }) {
     const nets = [];
     interfaces.forEach((i) => { if (selected[i.name] && i.cidr) nets.push(i.cidr); });
     customCidrs.forEach((c) => { const v = c.trim(); if (v) nets.push(v); });
-    if (nets.length === 0) { toast.error("Sélectionnez au moins un réseau"); return; }
+    if (nets.length === 0) { toast.error(t("cam.err_select_network")); return; }
 
     resetAll();
     setPhase("scanning");
@@ -1182,7 +1176,7 @@ function OnvifDiscovery({ open, onClose, onPick }) {
       setTaskId(data.task_id);
       openStream(data.task_id);
     } catch (e) {
-      setError("Échec démarrage : " + (e?.response?.data?.detail || e.message));
+      setError(t("cam.err_start_scan_prefix") + (e?.response?.data?.detail || e.message));
       setPhase("config");
     }
   };
@@ -1234,8 +1228,8 @@ function OnvifDiscovery({ open, onClose, onPick }) {
   // ─────────────── Export logs ───────────────
   const logText = () => logs.map((l) => `[${l.time}] ${l.line}`).join("\n");
   const copyLog = async () => {
-    try { await navigator.clipboard.writeText(logText()); toast.success("Journal copié"); }
-    catch (_) { toast.error("Échec de la copie"); }
+    try { await navigator.clipboard.writeText(logText()); toast.success(t("cam.toast_log_copied")); }
+    catch (_) { toast.error(t("cam.toast_copy_failed")); }
   };
   const clearLog = () => setLogs([]);
   const downloadLog = (ext) => {
@@ -1256,7 +1250,7 @@ function OnvifDiscovery({ open, onClose, onPick }) {
       <DialogContent className="rounded-none border-border max-w-4xl" data-testid="onvif-discover-dialog">
         <DialogHeader>
           <DialogTitle className="font-head flex items-center gap-2">
-            <Radar size={18} /> Assistant de découverte réseau
+            <Radar size={18} /> {t("cam.discovery_dialog_title")}
           </DialogTitle>
         </DialogHeader>
 
@@ -1267,14 +1261,14 @@ function OnvifDiscovery({ open, onClose, onPick }) {
               <p className="text-xs text-muted-foreground">{t("disc.select_hint")}</p>
               <label className="flex items-center gap-2 text-xs cursor-pointer" data-testid="show-virtual-toggle">
                 <input type="checkbox" checked={showVirtual} onChange={(e) => setShowVirtual(e.target.checked)} />
-                Afficher les interfaces virtuelles
+                {t("cam.show_virtual_ifaces")}
               </label>
             </div>
 
             {/* Interfaces */}
             <div className="border border-border">
               <div className="grid grid-cols-[24px_1fr_140px_140px_100px_70px] gap-2 px-3 py-2 bg-muted text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border">
-                <div></div><div>Interface</div><div>Adresse / CIDR</div><div>Passerelle</div><div>Vitesse</div><div>{t("disc.state")}</div>
+                <div></div><div>{t("cam.col_interface")}</div><div>{t("cam.col_address_cidr")}</div><div>{t("cam.col_gateway")}</div><div>{t("cam.col_speed")}</div><div>{t("disc.state")}</div>
               </div>
               {visibleIfaces.length === 0 && <div className="p-3 text-sm text-muted-foreground">{t("disc.no_iface")}</div>}
               {visibleIfaces.map((i) => (
@@ -1296,7 +1290,7 @@ function OnvifDiscovery({ open, onClose, onPick }) {
             <div className="border border-border p-3 space-y-2">
               <div className="flex items-center justify-between">
                 <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">{t("disc.custom_nets")}</div>
-                <button onClick={addCidr} className="text-[11px] px-2 py-1 border border-border hover:bg-secondary" data-testid="add-custom-cidr">+ Ajouter</button>
+                <button onClick={addCidr} className="text-[11px] px-2 py-1 border border-border hover:bg-secondary" data-testid="add-custom-cidr">+ {t("common.add")}</button>
               </div>
               {customCidrs.map((c, i) => (
                 <div key={i} className="flex items-center gap-2">
@@ -1319,7 +1313,7 @@ function OnvifDiscovery({ open, onClose, onPick }) {
               <div className="border border-border p-2"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">{t("disc.tested")}</div><div className="font-mono text-sm">{progress.tested} / {progress.total || "?"}</div></div>
               <div className="border border-border p-2"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">{t("disc.cameras")}</div><div className="font-mono text-sm text-[#00CC66]">{devices.length}</div></div>
               <div className="border border-border p-2"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">{t("disc.elapsed")}</div><div className="font-mono text-sm">{progress.elapsed_sec}s</div></div>
-              <div className="border border-border p-2"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Restant</div><div className="font-mono text-sm">{phase === "done" ? "—" : `${progress.eta_sec}s`}</div></div>
+              <div className="border border-border p-2"><div className="text-[10px] uppercase tracking-widest text-muted-foreground">{t("cam.col_remaining")}</div><div className="font-mono text-sm">{phase === "done" ? "—" : `${progress.eta_sec}s`}</div></div>
             </div>
             <div className="h-2 bg-muted relative overflow-hidden border border-border">
               <div className="h-full bg-[#0044FF] transition-all" style={{ width: `${Math.min(progress.percent, 100)}%` }} data-testid="scan-progress-bar" />
@@ -1335,12 +1329,12 @@ function OnvifDiscovery({ open, onClose, onPick }) {
 
             {/* Console actions */}
             <div className="flex items-center gap-2 flex-wrap text-xs">
-              <button onClick={copyLog} className="px-2 py-1 border border-border hover:bg-secondary" data-testid="log-copy">Copier</button>
-              <button onClick={clearLog} className="px-2 py-1 border border-border hover:bg-secondary" data-testid="log-clear">Vider</button>
-              <button onClick={() => downloadLog("txt")} className="px-2 py-1 border border-border hover:bg-secondary" data-testid="log-save-txt">Sauver .txt</button>
-              <button onClick={() => downloadLog("log")} className="px-2 py-1 border border-border hover:bg-secondary" data-testid="log-save-log">Sauver .log</button>
+              <button onClick={copyLog} className="px-2 py-1 border border-border hover:bg-secondary" data-testid="log-copy">{t("cam.btn_copy")}</button>
+              <button onClick={clearLog} className="px-2 py-1 border border-border hover:bg-secondary" data-testid="log-clear">{t("cam.btn_clear")}</button>
+              <button onClick={() => downloadLog("txt")} className="px-2 py-1 border border-border hover:bg-secondary" data-testid="log-save-txt">{t("cam.btn_save_txt")}</button>
+              <button onClick={() => downloadLog("log")} className="px-2 py-1 border border-border hover:bg-secondary" data-testid="log-save-log">{t("cam.btn_save_log")}</button>
               <div className="flex-1" />
-              {phase === "scanning" && <button onClick={cancelScan} className="px-3 py-1 border border-[#FF4C4C]/40 text-[#FF4C4C] hover:bg-[#FF4C4C]/10" data-testid="cancel-scan-btn">Annuler le scan</button>}
+              {phase === "scanning" && <button onClick={cancelScan} className="px-3 py-1 border border-[#FF4C4C]/40 text-[#FF4C4C] hover:bg-[#FF4C4C]/10" data-testid="cancel-scan-btn">{t("cam.btn_cancel_scan")}</button>}
             </div>
 
             {/* Summary */}
@@ -1352,8 +1346,8 @@ function OnvifDiscovery({ open, onClose, onPick }) {
                 <div>{t("disc.cams_found")}<span className="font-mono text-[#00CC66]">{summary.cameras_found}</span> (ONVIF : {summary.onvif_count})</div>
                 {Object.entries(summary.by_manufacturer || {}).map(([k, v]) => (<div key={k} className="pl-3 text-muted-foreground">• {k} : {v}</div>))}
                 <div>{t("disc.non_cams")}<span className="font-mono">{summary.other_devices_found}</span></div>
-                <div>Erreurs : <span className="font-mono">{summary.errors}</span></div>
-                <div>{t("disc.duration")}<span className="font-mono">{summary.elapsed_sec}s</span> · Statut : <span className="font-mono">{summary.status}</span></div>
+                <div>{t("cam.errors_label")}<span className="font-mono">{summary.errors}</span></div>
+                <div>{t("disc.duration")}<span className="font-mono">{summary.elapsed_sec}s</span> · {t("cam.status_label")}<span className="font-mono">{summary.status}</span></div>
               </div>
             )}
 
@@ -1371,7 +1365,7 @@ function OnvifDiscovery({ open, onClose, onPick }) {
                       {d.auth_required && <span className="text-[9px] px-1 border border-[#FFB800]/40 text-[#FFB800]">auth</span>}
                       {d.already_added && <span className="text-[9px] px-1 border border-border text-muted-foreground">{t("disc.already_added")}</span>}
                     </div>
-                    <button onClick={() => onPick({ ip: d.ip, port: d.onvif_port || 80 })} className="px-3 py-1 bg-[#0044FF] text-white text-xs" data-testid={`pick-device-${d.ip}`}>Utiliser cette IP</button>
+                    <button onClick={() => onPick({ ip: d.ip, port: d.onvif_port || 80 })} className="px-3 py-1 bg-[#0044FF] text-white text-xs" data-testid={`pick-device-${d.ip}`}>{t("cam.btn_use_ip")}</button>
                   </div>
                 ))}
               </div>
@@ -1394,19 +1388,19 @@ function OnvifDiscovery({ open, onClose, onPick }) {
         <DialogFooter className="pt-3">
           {phase === "config" && (
             <>
-              <button onClick={onClose} className="px-3 py-2 border border-border text-sm hover:bg-secondary">Fermer</button>
+              <button onClick={onClose} className="px-3 py-2 border border-border text-sm hover:bg-secondary">{t("common.close")}</button>
               <button onClick={startScan} className="px-4 py-2 bg-[#0044FF] text-white text-sm flex items-center gap-2" data-testid="onvif-scan-btn">
-                <Radar size={15} /> Lancer la découverte
+                <Radar size={15} /> {t("cam.btn_launch_discovery")}
               </button>
             </>
           )}
           {phase === "scanning" && (
-            <button onClick={onClose} className="px-3 py-2 border border-border text-sm hover:bg-secondary">Masquer</button>
+            <button onClick={onClose} className="px-3 py-2 border border-border text-sm hover:bg-secondary">{t("cam.btn_hide")}</button>
           )}
           {phase === "done" && (
             <>
-              <button onClick={() => { resetAll(); }} className="px-3 py-2 border border-border text-sm hover:bg-secondary" data-testid="rescan-btn">Nouveau scan</button>
-              <button onClick={onClose} className="px-3 py-2 bg-[#0044FF] text-white text-sm">Fermer</button>
+              <button onClick={() => { resetAll(); }} className="px-3 py-2 border border-border text-sm hover:bg-secondary" data-testid="rescan-btn">{t("cam.btn_new_scan")}</button>
+              <button onClick={onClose} className="px-3 py-2 bg-[#0044FF] text-white text-sm">{t("common.close")}</button>
             </>
           )}
         </DialogFooter>

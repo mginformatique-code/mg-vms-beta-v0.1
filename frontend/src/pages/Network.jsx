@@ -17,10 +17,10 @@ const NODE_W = 156, NODE_H = 58, H_GAP = 36, V_GAP = 92;
 function statusLabel(t, s) {
   return s === "online" ? t("common.online") : s === "warning" ? t("net.warning") : t("common.offline");
 }
-function fmtUptime(sec) {
+function fmtUptime(t, sec) {
   if (!sec) return "—";
   const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600);
-  return d > 0 ? `${d}j ${h}h` : `${h}h`;
+  return d > 0 ? `${d}${t("net.day_abbr")} ${h}${t("net.hour_abbr")}` : `${h}${t("net.hour_abbr")}`;
 }
 
 function Stat({ label, value, color }) {
@@ -127,9 +127,9 @@ export default function Network() {
     try {
       const params = filterSite ? { site_id: filterSite } : {};
       const { data } = await api.post("/network/poll", null, { params });
-      toast.success(`${data.polled} équipements sondés · ${data.alerts_raised} alerte(s)`);
+      toast.success(`${data.polled} ${t("net.polled_equipment_suffix")} · ${data.alerts_raised} ${t("net.alerts_suffix")}`);
       load();
-    } catch (e) { toast.error("Échec du sondage"); } finally { setPolling(false); }
+    } catch (e) { toast.error(t("net.poll_failed")); } finally { setPolling(false); }
   };
 
   const ping = async (eq) => {
@@ -139,22 +139,22 @@ export default function Network() {
       setSheet(data.equipment);
       data.result === "ok" ? toast.success(`${eq.name}: ${data.equipment.latency_ms} ms`) : toast.error(`${eq.name}: timeout`);
       load();
-    } catch (e) { toast.error("Échec du ping"); } finally { setPinging(false); }
+    } catch (e) { toast.error(t("net.ping_failed")); } finally { setPinging(false); }
   };
 
   const submit = async () => {
-    if (!form.name || !form.site_id) return toast.error("Nom et site requis");
+    if (!form.name || !form.site_id) return toast.error(t("net.name_site_required"));
     setSaving(true);
     try {
       await api.post("/network/equipment", { ...form, parent_id: form.parent_id || null });
-      toast.success("Équipement ajouté"); setOpen(false); load();
+      toast.success(t("net.added")); setOpen(false); load();
       setForm({ name: "", type: "Switch", site_id: "", ip: "", model: "", vendor: "", parent_id: "" });
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); } finally { setSaving(false); }
   };
 
   const del = async (eq) => {
-    if (!window.confirm(`Supprimer ${eq.name} ?`)) return;
-    await api.delete(`/network/equipment/${eq.id}`); toast.success("Supprimé"); setSheet(null); load();
+    if (!window.confirm(`${t("common.delete")} ${eq.name} ?`)) return;
+    await api.delete(`/network/equipment/${eq.id}`); toast.success(t("net.deleted")); setSheet(null); load();
   };
 
   const nodes = topo.nodes;
@@ -263,7 +263,7 @@ export default function Network() {
               <Row label={t("net.model")}>{sheet.model || "—"}</Row>
               <Row label={t("common.site")}>{sheet.site_name}</Row>
               <Row label={t("net.latency")}><span className="mono text-xs">{sheet.latency_ms != null ? `${sheet.latency_ms} ms` : "—"}</span></Row>
-              <Row label={t("net.uptime")}>{fmtUptime(sheet.uptime_sec)}</Row>
+              <Row label={t("net.uptime")}>{fmtUptime(t, sheet.uptime_sec)}</Row>
               {sheet.type === "UPS" && (
                 <>
                   <Row label={t("net.battery")}>{sheet.battery_pct != null ? `${sheet.battery_pct}%` : "—"}</Row>

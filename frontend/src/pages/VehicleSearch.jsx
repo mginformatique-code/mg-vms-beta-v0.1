@@ -47,6 +47,7 @@ function PluginBadge({ name }) {
 }
 
 function DetailModal({ item, onClose }) {
+  const { t } = useApp();
   if (!item) return null;
   const readings = item.anpr_readings || [];
   const plugins = item.plugins_used || [];
@@ -76,7 +77,7 @@ function DetailModal({ item, onClose }) {
           {/* Frame plein cadre */}
           <div>
             <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2">
-              Scène complète
+              {t("veh.full_scene")}
             </div>
             <div className="bg-black border border-border h-96 flex items-center justify-center overflow-hidden">
               {item.frame_thumb ? (
@@ -87,7 +88,7 @@ function DetailModal({ item, onClose }) {
                   data-testid="veh-detail-frame"
                 />
               ) : (
-                <span className="text-muted-foreground text-xs">Frame indisponible</span>
+                <span className="text-muted-foreground text-xs">{t("veh.frame_unavailable")}</span>
               )}
             </div>
           </div>
@@ -96,7 +97,7 @@ function DetailModal({ item, onClose }) {
           <div className="space-y-3">
             <div>
               <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2 flex items-center gap-1">
-                <Car size={12} /> Véhicule (YOLO)
+                <Car size={12} /> {t("veh.vehicle_yolo")}
               </div>
               <div className="bg-black border border-border h-40 flex items-center justify-center overflow-hidden">
                 {item.vehicle_crop ? (
@@ -107,13 +108,13 @@ function DetailModal({ item, onClose }) {
                     data-testid="veh-detail-vehicle-crop"
                   />
                 ) : (
-                  <span className="text-muted-foreground text-xs">Crop véhicule indisponible</span>
+                  <span className="text-muted-foreground text-xs">{t("veh.vehicle_crop_unavailable")}</span>
                 )}
               </div>
             </div>
             <div>
               <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2 flex items-center gap-1">
-                <ScanLine size={12} /> Crop OCR (plaque)
+                <ScanLine size={12} /> {t("veh.crop_ocr_label")}
               </div>
               <div className="bg-black border border-border h-24 flex items-center justify-center overflow-hidden">
                 {item.plate_crop ? (
@@ -124,7 +125,7 @@ function DetailModal({ item, onClose }) {
                     data-testid="veh-detail-plate-crop"
                   />
                 ) : (
-                  <span className="text-muted-foreground text-xs">Crop OCR indisponible</span>
+                  <span className="text-muted-foreground text-xs">{t("veh.crop_ocr_unavailable")}</span>
                 )}
               </div>
             </div>
@@ -136,7 +137,7 @@ function DetailModal({ item, onClose }) {
           {plugins.length > 0 && (
             <div>
               <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2 flex items-center gap-1">
-                <Layers size={12} /> Plugins utilisés ({plugins.length})
+                <Layers size={12} /> {t("veh.plugins_used_label")} ({plugins.length})
               </div>
               <div className="flex flex-wrap gap-1" data-testid="veh-detail-plugins">
                 {plugins.map((p) => <PluginBadge key={p} name={p} />)}
@@ -146,14 +147,14 @@ function DetailModal({ item, onClose }) {
           {readings.length > 0 && (
             <div>
               <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2 flex items-center gap-1">
-                <ScanLine size={12} /> Lectures multi-moteurs ({readings.length})
+                <ScanLine size={12} /> {t("veh.multi_engine_readings_label")} ({readings.length})
               </div>
               <table className="w-full text-sm" data-testid="veh-detail-readings">
                 <thead className="text-left text-muted-foreground text-xs">
                   <tr>
-                    <th className="py-1">Moteur</th>
-                    <th className="py-1">Plaque lue</th>
-                    <th className="py-1 text-right">Confiance</th>
+                    <th className="py-1">{t("veh.col_engine")}</th>
+                    <th className="py-1">{t("veh.col_plate_read")}</th>
+                    <th className="py-1 text-right">{t("veh.col_confidence")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -171,10 +172,10 @@ function DetailModal({ item, onClose }) {
         </div>
 
         <div className="p-4 border-t border-border grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-          <div><span className="text-muted-foreground">Site : </span>{item.site_name}</div>
-          <div><span className="text-muted-foreground">Type : </span>{item.vehicle_type || "—"}</div>
-          <div><span className="text-muted-foreground">Couleur : </span>{item.vehicle_color || "—"}</div>
-          <div><span className="text-muted-foreground">Date : </span>{new Date(item.timestamp).toLocaleString()}</div>
+          <div><span className="text-muted-foreground">{t("common.site")} : </span>{item.site_name}</div>
+          <div><span className="text-muted-foreground">{t("common.type")} : </span>{item.vehicle_type || "—"}</div>
+          <div><span className="text-muted-foreground">{t("veh.color")} : </span>{item.vehicle_color || "—"}</div>
+          <div><span className="text-muted-foreground">{t("common.date")} : </span>{new Date(item.timestamp).toLocaleString()}</div>
         </div>
       </div>
     </div>

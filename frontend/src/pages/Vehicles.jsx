@@ -78,19 +78,17 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
     const plates = items.filter((it) => selectedPlates.has(it.plate));
     const totalReads = plates.reduce((sum, it) => sum + (it.passages_count || 0), 0);
     if (!window.confirm(
-      `Supprimer définitivement ${plates.length} fiche${plates.length > 1 ? "s" : ""} `
-      + `(${totalReads} lecture${totalReads > 1 ? "s" : ""} ANPR + miniatures) ? `
-      + `Cette action est IRRÉVERSIBLE.`
+      t("veh.delete_confirm_tpl").replace("{n}", plates.length).replace("{reads}", totalReads)
     )) return;
     setDeleting(true);
     try {
       const allPlates = plates.flatMap((it) => [it.plate, ...(it.plate_variants || [])]);
       const { data } = await api.post("/vehicles/bulk-delete", { plates: allPlates, confirm: true });
-      toast.success(`${data.reads_deleted} lecture(s) supprimée(s) définitivement`);
+      toast.success(t("veh.reads_deleted_toast_tpl").replace("{n}", data.reads_deleted));
       cancelDelete();
       load(q);
       loadIdentities();
-    } catch (e) { toast.error(e.response?.data?.detail?.message || "Échec de la suppression"); }
+    } catch (e) { toast.error(e.response?.data?.detail?.message || t("veh.delete_failed")); }
     finally { setDeleting(false); }
   };
   // v3.19 · Créer une fiche véhicule manuellement — ex. véhicule signalé
@@ -111,7 +109,7 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
   });
   const submitCreate = async () => {
     const plate = createForm.plate.trim().toUpperCase().replace(/\s|-/g, "");
-    if (!plate) { toast.error("La plaque est requise"); return; }
+    if (!plate) { toast.error(t("veh.plate_required")); return; }
     setCreating(true);
     try {
       await api.post("/vehicles/identities", {
@@ -125,13 +123,13 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
       if (createForm.blacklist) {
         await api.post("/watchlist", { plate, list_type: "black", reason: createForm.reason.trim() });
       }
-      toast.success(`Fiche créée pour ${plate}`);
+      toast.success(t("veh.record_created_toast_tpl").replace("{plate}", plate));
       setCreateOpen(false);
       resetCreateForm();
       load(q);
       loadIdentities();
     } catch (e) {
-      toast.error(e.response?.data?.detail?.message || "Création de la fiche impossible");
+      toast.error(e.response?.data?.detail?.message || t("veh.record_create_failed"));
     } finally {
       setCreating(false);
     }
@@ -147,11 +145,11 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
         .filter((it) => selectedPlates.has(it.plate))
         .flatMap((it) => [it.plate, ...(it.plate_variants || [])]);
       await api.post("/vehicles/identities", { plates, name: plates[0] });
-      toast.success(`${selectedPlates.size} fiches fusionnées`);
+      toast.success(t("veh.records_merged_toast_tpl").replace("{n}", selectedPlates.size));
       cancelMerge();
       load(q);
     } catch (e) {
-      toast.error("Fusion impossible");
+      toast.error(t("veh.merge_impossible"));
     } finally {
       setMerging(false);
     }
@@ -208,7 +206,7 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
     setDedupRunning(true);
     try {
       await api.post("/vehicles/dedup/run");
-      toast.success("Recherche de doublons lancée en arrière-plan — les suggestions apparaîtront ici automatiquement (peut prendre plusieurs minutes)");
+      toast.success(t("veh.dedup_launched_toast"));
       let tries = 0;
       const poll = setInterval(() => {
         tries += 1;
@@ -220,7 +218,7 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
       // si le switch dédoublonnage est désactivé dans Administration → LLM)
       // — on l'affiche tel quel au lieu d'un message générique qui laissait
       // l'utilisateur chercher pourquoi ça ne marche pas.
-      toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec du lancement de la recherche de doublons");
+      toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("veh.dedup_launch_failed"));
     }
     finally { setDedupRunning(false); }
   };
@@ -229,8 +227,8 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
     try {
       await api.post(`/vehicles/dedup/suggestions/${id}/${accept ? "accept" : "reject"}`);
       setDedupSuggestions((prev) => prev.filter((s) => s.id !== id));
-      if (accept) { toast.success("Fiches fusionnées"); load(q); }
-    } catch { toast.error("Échec"); }
+      if (accept) { toast.success(t("veh.records_merged_toast")); load(q); }
+    } catch { toast.error(t("veh.generic_failed")); }
   };
 
   // v3.41 · L'ancien détecteur heuristique de candidats (/vehicles/identities/detect
@@ -262,9 +260,9 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
         setHistory(next);
       } catch { /* ignore */ }
       const total = (data.vehicles_count || 0) + (data.persons_count || 0);
-      toast.success(`${total} résultat${total > 1 ? "s" : ""} trouvé${total > 1 ? "s" : ""}`);
+      toast.success(t("veh.results_found_tpl").replace("{n}", total));
     } catch (e) {
-      toast.error(e.response?.data?.detail?.message || "Recherche IA impossible");
+      toast.error(e.response?.data?.detail?.message || t("veh.ai_search_failed"));
     } finally { setSmartLoading(false); }
   }, [smart]);
 
@@ -299,7 +297,7 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
       setItems(data.items || []);
       setTotal(data.total || 0);
     } catch (e) {
-      toast.error("Impossible de charger les véhicules");
+      toast.error(t("veh.load_vehicles_failed"));
     } finally {
       setLoading(false);
     }
@@ -314,7 +312,7 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
       setItems((prev) => [...prev, ...(data.items || [])]);
       setTotal(data.total || 0);
     } catch (e) {
-      toast.error("Impossible de charger la suite");
+      toast.error(t("veh.load_more_failed"));
     } finally {
       setLoadingMore(false);
     }
@@ -344,10 +342,10 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
         {!embedded && (
           <div>
             <h1 className="font-head font-bold text-2xl tracking-tight flex items-center gap-2">
-              <Car size={26} /> Véhicules
+              <Car size={26} /> {t("veh.page_title")}
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Historique par véhicule — cliquez sur une carte pour ouvrir la fiche complète.
+              {t("veh.page_subtitle")}
             </p>
           </div>
         )}
@@ -359,7 +357,7 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
               onChange={(e) => setSmart(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && runSmartSearch()}
               data-testid="smart-search-input"
-              placeholder="Recherche IA : « voitures rouges hier », « plaque L3863 », « camions ce matin »…"
+              placeholder={t("veh.search_ph")}
               className="w-full pl-9 pr-24 py-2 bg-card border border-input outline-none text-sm focus:border-[#0044FF]"
             />
             {smart && (
@@ -375,7 +373,7 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
               className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground border border-border px-1.5 py-0.5"
               title={t("veh.adv_filters")}
             >
-              Filtres
+              {t("veh.filters_btn")}
             </button>
           </div>
           <button
@@ -385,7 +383,7 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
             className="flex items-center gap-1 px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40"
           >
             {smartLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={13} />}
-            Recherche IA
+            {t("veh.ai_search_btn")}
           </button>
         </div>
       </div>
@@ -393,30 +391,30 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
       {advOpen && (
         <div className="border border-border bg-card p-3 mb-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs" data-testid="advanced-search">
           <div>
-            <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Couleur</label>
+            <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">{t("veh.filter_color_label")}</label>
             <input value={adv.colors} onChange={(e) => setAdv({ ...adv, colors: e.target.value })} placeholder="rouge, noir…" className="w-full px-2 py-1.5 bg-background border border-input outline-none" data-testid="adv-colors" />
           </div>
           <div>
-            <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Marque</label>
+            <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">{t("veh.filter_make_label")}</label>
             <input value={adv.makes} onChange={(e) => setAdv({ ...adv, makes: e.target.value })} placeholder="Toyota, Peugeot…" className="w-full px-2 py-1.5 bg-background border border-input outline-none" />
           </div>
           <div>
-            <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Type</label>
+            <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">{t("veh.filter_type_label")}</label>
             <input value={adv.types} onChange={(e) => setAdv({ ...adv, types: e.target.value })} placeholder="voiture, camion…" className="w-full px-2 py-1.5 bg-background border border-input outline-none" />
           </div>
           <div>
-            <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Du</label>
+            <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">{t("veh.date_from_label")}</label>
             <input type="date" value={adv.date_from} onChange={(e) => setAdv({ ...adv, date_from: e.target.value })} className="w-full px-2 py-1.5 bg-background border border-input outline-none mono" />
           </div>
           <div>
-            <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Au</label>
+            <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">{t("veh.date_to_label")}</label>
             <input type="date" value={adv.date_to} onChange={(e) => setAdv({ ...adv, date_to: e.target.value })} className="w-full px-2 py-1.5 bg-background border border-input outline-none mono" />
           </div>
           <div className="col-span-2 md:col-span-5 flex justify-end">
             <button onClick={runAdvancedSearch}
                     data-testid="adv-apply"
                     className="text-[10px] uppercase tracking-wider px-3 py-1.5 border border-[#0044FF] text-[#0044FF] hover:bg-[#0044FF]/10">
-              Appliquer les filtres
+              {t("veh.apply_filters_btn")}
             </button>
           </div>
         </div>
@@ -425,17 +423,17 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
       <div className="text-xs text-muted-foreground mono mb-3 flex items-center justify-between" data-testid="vehicles-count">
         <span>
           {smartResult
-            ? `${(smartResult.vehicles_count || 0)} véhicule(s) + ${(smartResult.persons_count || 0)} personne(s) pour « ${smartResult.query} »`
-            : `${items.length} véhicule${items.length > 1 ? "s" : ""} affiché${items.length > 1 ? "s" : ""} sur ${total}`}
+            ? t("veh.results_smart_tpl").replace("{v}", smartResult.vehicles_count || 0).replace("{p}", smartResult.persons_count || 0).replace("{q}", smartResult.query)
+            : t("veh.results_count_tpl").replace("{n}", items.length).replace("{total}", total)}
         </span>
         <div className="flex items-center gap-3">
           <div className="flex border border-border" data-testid="vehicles-view-toggle">
-            <button onClick={() => setViewMode("tiles")} title="Affichage tuiles"
+            <button onClick={() => setViewMode("tiles")} title={t("veh.tiles_view_title")}
                     className={`p-1.5 ${viewMode === "tiles" ? "bg-[#0044FF] text-white" : "text-muted-foreground hover:text-foreground"}`}
                     data-testid="vehicles-view-tiles">
               <LayoutGrid size={13} />
             </button>
-            <button onClick={() => setViewMode("list")} title="Affichage liste"
+            <button onClick={() => setViewMode("list")} title={t("veh.list_view_title")}
                     className={`p-1.5 border-l border-border ${viewMode === "list" ? "bg-[#0044FF] text-white" : "text-muted-foreground hover:text-foreground"}`}
                     data-testid="vehicles-view-list">
               <List size={13} />
@@ -444,25 +442,25 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
           {smartResult && (
             <button onClick={clearSmart} data-testid="smart-clear-inline"
                     className="text-[10px] uppercase tracking-wider text-[#0044FF] hover:underline">
-              Réinitialiser la recherche
+              {t("veh.reset_search_btn")}
             </button>
           )}
           {!smartResult && !mergeMode && !deleteMode && (
             <button onClick={() => setMergeMode(true)} data-testid="merge-mode-toggle"
                     className="text-[10px] uppercase tracking-wider text-muted-foreground hover:text-[#0044FF] flex items-center gap-1">
-              <GitMerge size={12} /> Fusionner des fiches
+              <GitMerge size={12} /> {t("veh.merge_records_btn")}
             </button>
           )}
           {!smartResult && !mergeMode && !deleteMode && (
             <button onClick={() => setDeleteMode(true)} data-testid="delete-mode-toggle"
                     className="text-[10px] uppercase tracking-wider text-muted-foreground hover:text-[#FF3333] flex items-center gap-1">
-              <XIcon size={12} /> Supprimer des fiches
+              <XIcon size={12} /> {t("veh.delete_records_btn")}
             </button>
           )}
           {!smartResult && !mergeMode && !deleteMode && (
             <button onClick={() => setCreateOpen(true)} data-testid="create-fiche-btn"
                     className="text-[10px] uppercase tracking-wider text-muted-foreground hover:text-[#0044FF] flex items-center gap-1">
-              <Plus size={12} /> Créer une fiche
+              <Plus size={12} /> {t("veh.create_record_btn")}
             </button>
           )}
         </div>
@@ -475,17 +473,17 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
       {mergeMode && (
         <div className="border border-[#0044FF] bg-[#0044FF]/5 p-3 mb-3 flex items-center justify-between flex-wrap gap-2" data-testid="merge-toolbar">
           <span className="text-xs">
-            Sélectionnez au moins 2 fiches représentant le même véhicule (ex. une voiture garée lue différemment à chaque scan), puis fusionnez.
-            <span className="ml-2 font-medium">{selectedPlates.size} sélectionnée{selectedPlates.size > 1 ? "s" : ""}</span>
+            {t("veh.merge_instructions")}
+            <span className="ml-2 font-medium">{selectedPlates.size} {t(selectedPlates.size > 1 ? "veh.selected_many" : "veh.selected_one")}</span>
           </span>
           <div className="flex items-center gap-2">
             <button onClick={cancelMerge} className="px-3 py-1.5 text-xs border border-border hover:bg-secondary">
-              Annuler
+              {t("veh.cancel_btn")}
             </button>
             <button onClick={confirmMerge} disabled={selectedPlates.size < 2 || merging} data-testid="merge-confirm-btn"
                     className="px-3 py-1.5 text-xs bg-[#0044FF] text-white flex items-center gap-2 disabled:opacity-40">
               {merging ? <Loader2 size={13} className="animate-spin" /> : <GitMerge size={13} />}
-              Fusionner ({selectedPlates.size})
+              {t("veh.merge_btn_tpl").replace("{n}", selectedPlates.size)}
             </button>
           </div>
         </div>
@@ -499,17 +497,17 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
       {deleteMode && (
         <div className="border border-[#FF3333] bg-[#FF3333]/5 p-3 mb-3 flex items-center justify-between flex-wrap gap-2" data-testid="delete-toolbar">
           <span className="text-xs">
-            Sélectionnez les fiches à supprimer définitivement (lectures ANPR + miniatures — irréversible).
-            <span className="ml-2 font-medium">{selectedPlates.size} sélectionnée{selectedPlates.size > 1 ? "s" : ""}</span>
+            {t("veh.delete_instructions")}
+            <span className="ml-2 font-medium">{selectedPlates.size} {t(selectedPlates.size > 1 ? "veh.selected_many" : "veh.selected_one")}</span>
           </span>
           <div className="flex items-center gap-2">
             <button onClick={cancelDelete} className="px-3 py-1.5 text-xs border border-border hover:bg-secondary">
-              Annuler
+              {t("veh.cancel_btn")}
             </button>
             <button onClick={confirmDelete} disabled={selectedPlates.size < 1 || deleting} data-testid="delete-confirm-btn"
                     className="px-3 py-1.5 text-xs bg-[#FF3333] text-white flex items-center gap-2 disabled:opacity-40">
               {deleting ? <Loader2 size={13} className="animate-spin" /> : <XIcon size={13} />}
-              Supprimer ({selectedPlates.size})
+              {t("veh.delete_btn_tpl").replace("{n}", selectedPlates.size)}
             </button>
           </div>
         </div>
@@ -518,11 +516,11 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
       <Dialog open={createOpen} onOpenChange={(o) => { setCreateOpen(o); if (!o) resetCreateForm(); }}>
         <DialogContent className="rounded-none border-border max-w-md" data-testid="create-fiche-dialog">
           <DialogHeader>
-            <DialogTitle className="font-head flex items-center gap-2"><Plus size={18} /> Créer une fiche véhicule</DialogTitle>
+            <DialogTitle className="font-head flex items-center gap-2"><Plus size={18} /> {t("veh.create_dialog_title")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div>
-              <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Plaque *</label>
+              <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">{t("veh.plate_label")}</label>
               <input
                 value={createForm.plate}
                 onChange={(e) => setCreateForm({ ...createForm, plate: e.target.value })}
@@ -532,33 +530,33 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
               />
             </div>
             <div>
-              <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Nom / repère (optionnel)</label>
+              <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">{t("veh.name_label")}</label>
               <input
                 value={createForm.name}
                 onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-                placeholder="ex. Fourgon bleu Kangoo"
+                placeholder={t("veh.name_ph")}
                 className="w-full px-2 py-1.5 bg-background border border-input outline-none"
               />
             </div>
             <div className="grid grid-cols-3 gap-2">
               <div>
-                <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Marque</label>
+                <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">{t("veh.filter_make_label")}</label>
                 <input value={createForm.vehicle_make} onChange={(e) => setCreateForm({ ...createForm, vehicle_make: e.target.value })}
                        className="w-full px-2 py-1.5 bg-background border border-input outline-none" />
               </div>
               <div>
-                <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Couleur</label>
+                <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">{t("veh.filter_color_label")}</label>
                 <input value={createForm.vehicle_color} onChange={(e) => setCreateForm({ ...createForm, vehicle_color: e.target.value })}
                        className="w-full px-2 py-1.5 bg-background border border-input outline-none" />
               </div>
               <div>
-                <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Type</label>
+                <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">{t("veh.filter_type_label")}</label>
                 <input value={createForm.vehicle_type} onChange={(e) => setCreateForm({ ...createForm, vehicle_type: e.target.value })}
                        className="w-full px-2 py-1.5 bg-background border border-input outline-none" />
               </div>
             </div>
             <div>
-              <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Notes</label>
+              <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">{t("veh.notes_label")}</label>
               <textarea
                 value={createForm.notes}
                 onChange={(e) => setCreateForm({ ...createForm, notes: e.target.value })}
@@ -571,25 +569,25 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
                      onChange={(e) => setCreateForm({ ...createForm, blacklist: e.target.checked })}
                      data-testid="create-fiche-blacklist" />
               <ShieldAlert size={14} className="text-red-500" />
-              Mettre en liste noire (véhicule signalé volé) — alerte + notification à la prochaine lecture
+              {t("veh.blacklist_checkbox_label")}
             </label>
             {createForm.blacklist && (
               <div>
-                <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Motif</label>
+                <label className="block text-[9px] uppercase tracking-wider text-muted-foreground mb-1">{t("veh.reason_label")}</label>
                 <input value={createForm.reason} onChange={(e) => setCreateForm({ ...createForm, reason: e.target.value })}
-                       placeholder="ex. Vol signalé le 28/08/2026"
+                       placeholder={t("veh.reason_ph")}
                        className="w-full px-2 py-1.5 bg-background border border-input outline-none" />
               </div>
             )}
           </div>
           <DialogFooter>
             <button onClick={() => setCreateOpen(false)} className="px-3 py-1.5 text-xs border border-border hover:bg-secondary">
-              Annuler
+              {t("veh.cancel_btn")}
             </button>
             <button onClick={submitCreate} disabled={creating || !createForm.plate.trim()} data-testid="create-fiche-submit"
                     className="px-3 py-1.5 text-xs bg-[#0044FF] text-white flex items-center gap-2 disabled:opacity-40">
               {creating ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
-              Créer la fiche
+              {t("veh.create_record_submit")}
             </button>
           </DialogFooter>
         </DialogContent>
@@ -604,7 +602,7 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
               onClick={() => runSmartSearch(h.query)}
               data-testid={`history-${i}`}
               className="flex items-center gap-1 px-2 py-0.5 border border-border hover:border-[#0044FF] hover:text-[#0044FF] transition-colors"
-              title={`${h.vehicles || 0} véhicules · ${h.persons || 0} personnes`}
+              title={t("veh.history_tooltip_tpl").replace("{v}", h.vehicles || 0).replace("{p}", h.persons || 0)}
             >
               <Sparkles size={10} className="text-[#0044FF]" />
               <span className="truncate max-w-[240px]">{h.query}</span>
@@ -615,14 +613,14 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
             data-testid="history-clear"
             className="text-[9px] uppercase tracking-wider text-muted-foreground hover:text-foreground ml-auto"
           >
-            Vider
+            {t("veh.clear_btn")}
           </button>
         </div>
       )}
 
       {smartResult?.filters && (
         <div className="border border-[#0044FF]/40 bg-[#0044FF]/5 p-2 mb-3 text-[11px] mono flex flex-wrap gap-2 items-center" data-testid="smart-filters">
-          <span className="text-[#0044FF] font-medium">Filtres IA :</span>
+          <span className="text-[#0044FF] font-medium">{t("veh.ai_filters_label")}</span>
           {Object.entries(smartResult.filters).filter(([_, v]) => v && (Array.isArray(v) ? v.length : true)).map(([k, v]) => (
             <span key={k} className="px-1.5 py-0.5 border border-[#0044FF]/40 text-[#0044FF]">
               {k}: {Array.isArray(v) ? v.join(",") : String(v)}
@@ -707,7 +705,7 @@ export function VehiclesSection({ embedded = false, initialQuery = "" }) {
           <button onClick={loadMore} disabled={loadingMore} data-testid="vehicles-load-more"
                   className="flex items-center gap-2 px-4 py-2 border border-border text-xs uppercase tracking-wider text-muted-foreground hover:text-foreground hover:border-[#0044FF]/60 disabled:opacity-50">
             {loadingMore ? <Loader2 size={13} className="animate-spin" /> : null}
-            {loadingMore ? "Chargement…" : `Charger plus (${items.length} / ${total})`}
+            {loadingMore ? t("veh.loading") : t("veh.load_more_tpl").replace("{n}", items.length).replace("{total}", total)}
           </button>
         </div>
       )}
@@ -784,7 +782,7 @@ function VehicleCard({ v, onOpen, selectable = false, selected = false }) {
             <img
               key={id}
               src={thumbUrl(id, "vehicle")}
-              alt={`Passage ${idx + 1}`}
+              alt={`${t("veh.passage_alt")} ${idx + 1}`}
               loading="lazy"
               className={`absolute inset-0 w-full h-full object-cover border border-border ${isTop ? "shadow-lg" : ""} transition-transform group-hover:scale-[1.02]`}
               style={style}
@@ -818,9 +816,9 @@ function VehicleCard({ v, onOpen, selectable = false, selected = false }) {
 
       {/* Meta */}
       <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-        <div className="flex items-center gap-1"><Activity size={11} /> {v.passages_count} passages</div>
-        <div className="flex items-center gap-1"><CameraIcon size={11} /> {v.cameras_count} caméra{v.cameras_count > 1 ? "s" : ""}</div>
-        <div className="flex items-center gap-1 col-span-2"><Clock size={11} /> Dernier : {fmtRelative(v.last_seen)}</div>
+        <div className="flex items-center gap-1"><Activity size={11} /> {v.passages_count} {t("veh.passages_label")}</div>
+        <div className="flex items-center gap-1"><CameraIcon size={11} /> {v.cameras_count} {t("veh.camera_singular")}{v.cameras_count > 1 ? "s" : ""}</div>
+        <div className="flex items-center gap-1 col-span-2"><Clock size={11} /> {t("veh.last_label")}{fmtRelative(v.last_seen, t)}</div>
       </div>
     </button>
   );
@@ -838,7 +836,7 @@ export function VehicleDrawer({ plate, onClose, onWatchChanged }) {
     if (!plate) return;
     api.get(`/vehicles/${encodeURIComponent(plate)}`)
       .then(({ data }) => setDetail(data))
-      .catch(() => toast.error("Impossible de charger la fiche véhicule"));
+      .catch(() => toast.error(t("veh.load_record_error")));
   }, [plate]);
   useEffect(() => {
     if (!plate) { setDetail(null); return; }
@@ -868,7 +866,7 @@ export function VehicleDrawer({ plate, onClose, onWatchChanged }) {
         {detail && (
           <Tabs defaultValue="overview" className="p-4">
             <TabsList className="grid grid-cols-3 rounded-none bg-secondary/40 border border-border h-auto p-0">
-              <TabsTrigger value="overview"  className="rounded-none text-xs py-2" data-testid="tab-overview">Vue</TabsTrigger>
+              <TabsTrigger value="overview"  className="rounded-none text-xs py-2" data-testid="tab-overview">{t("veh.tab_overview")}</TabsTrigger>
               <TabsTrigger value="timeline"  className="rounded-none text-xs py-2" data-testid="tab-timeline">Timeline</TabsTrigger>
               <TabsTrigger value="heatmap"   className="rounded-none text-xs py-2" data-testid="tab-heatmap">Heatmap</TabsTrigger>
             </TabsList>
@@ -921,10 +919,10 @@ function TabOverview({ d, onWatchChanged, onReload }) {
       if (listType) {
         await api.post("/watchlist", { plate: d.plate, list_type: listType, reason: "" });
       }
-      toast.success(listType ? `Plaque ajoutée à la liste ${listType === "black" ? "noire" : "blanche"}` : "Plaque retirée");
+      toast.success(listType ? t("veh.plate_added_to_list_tpl").replace("{list}", listType === "black" ? t("veh.list_black") : t("veh.list_white")) : t("veh.plate_removed"));
       onWatchChanged && onWatchChanged(listType || "none");
     } catch (e) {
-      toast.error("Échec de la mise à jour de la liste");
+      toast.error(t("veh.list_update_failed"));
     } finally { setWlSaving(false); }
   };
 
@@ -933,11 +931,11 @@ function TabOverview({ d, onWatchChanged, onReload }) {
     try {
       const { data } = await api.post(`/vehicles/${encodeURIComponent(d.plate)}/notify-anomaly`);
       const channels = Object.entries(data.sent || {}).filter(([_, v]) => v === "sent").map(([k]) => k);
-      if (channels.length) toast.success(`Notification envoyée sur : ${channels.join(", ")}`);
-      else toast.info("Aucun canal de notification actif — configurez SMTP/Discord/Telegram dans les Notifications.");
+      if (channels.length) toast.success(t("veh.notif_sent_tpl").replace("{channels}", channels.join(", ")));
+      else toast.info(t("veh.notif_no_channel"));
     } catch (e) {
       const detail = e.response?.data?.detail;
-      toast.error(detail?.message || "Notification impossible");
+      toast.error(detail?.message || t("veh.notif_failed"));
     } finally { setNotifSending(false); }
   };
 
@@ -964,7 +962,7 @@ function TabOverview({ d, onWatchChanged, onReload }) {
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5 font-medium" style={{ color: anomaly.severity === "high" ? "#FF3333" : "#FFB800" }}>
-              <AlertTriangle size={13} /> Anomalie détectée
+              <AlertTriangle size={13} /> {t("veh.anomaly_detected")}
               <span className="text-[10px] uppercase tracking-wider mono ml-1">
                 [{anomaly.severity}]
               </span>
@@ -976,7 +974,7 @@ function TabOverview({ d, onWatchChanged, onReload }) {
               style={{ borderColor: anomaly.severity === "high" ? "#FF3333" : "#FFB800" }}
             >
               {notifSending ? <Loader2 size={11} className="animate-spin" /> : <Bell size={11} />}
-              Créer une alerte
+              {t("veh.create_alert_btn")}
             </button>
           </div>
           <div className="text-muted-foreground">{anomaly.message}</div>
@@ -1001,7 +999,7 @@ function TabOverview({ d, onWatchChanged, onReload }) {
                   borderColor: current === "black" ? "#FF3333" : current === "white" ? "#00E676" : "#333",
                   border: "1px solid",
                 }}>
-            {current === "black" ? "LISTE NOIRE" : current === "white" ? "LISTE BLANCHE" : "AUCUNE"}
+            {current === "black" ? t("veh.status_blacklist") : current === "white" ? t("veh.status_whitelist") : t("veh.status_none")}
           </span>
         </div>
         <div className="grid grid-cols-3 gap-2">
@@ -1027,7 +1025,7 @@ function TabOverview({ d, onWatchChanged, onReload }) {
             data-testid="watch-remove-btn"
             className="flex items-center justify-center gap-1 px-2 py-2 border border-border text-xs hover:bg-secondary disabled:opacity-40"
           >
-            {wlSaving ? <Loader2 size={11} className="animate-spin" /> : <XIcon size={12} />} Retirer
+            {wlSaving ? <Loader2 size={11} className="animate-spin" /> : <XIcon size={12} />} {t("veh.remove_btn")}
           </button>
         </div>
       </div>
@@ -1039,11 +1037,11 @@ function TabOverview({ d, onWatchChanged, onReload }) {
              style={{ borderColor: "#00E676", background: "rgba(0,230,118,0.06)" }}
              data-testid="parking-block">
           <div className="flex items-center gap-1.5 font-medium" style={{ color: "#00E676" }}>
-            <MapPin size={13} /> En stationnement
+            <MapPin size={13} /> {t("veh.parked_label")}
             <span className="ml-auto mono">{fmtDuration(parking.duration_seconds)}</span>
           </div>
           <div className="text-muted-foreground">
-            {parking.camera_name}{parking.site_name ? ` · ${parking.site_name}` : ""} — depuis {fmtDateTime(parking.since)}
+            {parking.camera_name}{parking.site_name ? ` · ${parking.site_name}` : ""} — {t("veh.since_label")} {fmtDateTime(parking.since)}
           </div>
         </div>
       )}
@@ -1063,7 +1061,7 @@ function TabOverview({ d, onWatchChanged, onReload }) {
         return (
           <div className="border border-border p-3 space-y-2" data-testid="parking-sessions-block">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              Historique stationnement ({parkingSessions.length} passage{parkingSessions.length > 1 ? "s" : ""} sur {days.length} jour{days.length > 1 ? "s" : ""})
+              {t("veh.parking_history_tpl").replace("{n}", parkingSessions.length).replace("{d}", days.length)}
             </div>
             <div className="space-y-1 max-h-64 overflow-y-auto">
               {days.map(([day, sessions]) => {
@@ -1073,7 +1071,7 @@ function TabOverview({ d, onWatchChanged, onReload }) {
                     <div className="flex items-center justify-between text-[11px] py-1 px-1.5 hover:bg-secondary/60 cursor-default">
                       <span className="mono font-medium">{fmtDay(day)}</span>
                       <span className="text-muted-foreground">
-                        {sessions.length} passage{sessions.length > 1 ? "s" : ""} · {fmtDuration(totalSec)} cumulé
+                        {sessions.length} {t("veh.passage_singular")}{sessions.length > 1 ? "s" : ""} · {fmtDuration(totalSec)} {t("veh.cumulated_label")}
                       </span>
                     </div>
                     <div className="hidden group-hover:block absolute z-20 right-0 top-full bg-black/90 border border-[#0044FF]/40 p-2 w-80 space-y-1.5"
@@ -1081,18 +1079,18 @@ function TabOverview({ d, onWatchChanged, onReload }) {
                       {sessions.map((s) => (
                         <div key={s.id} className="flex items-center gap-2 text-[10px] text-white">
                           {s.arrival_plate_reading_id ? (
-                            <img src={passageThumbUrl(s.arrival_plate_reading_id, "vehicle")} alt="arrivée" loading="lazy"
+                            <img src={passageThumbUrl(s.arrival_plate_reading_id, "vehicle")} alt={t("veh.arrival_alt")} loading="lazy"
                                  className="w-9 h-7 object-cover border border-border shrink-0" />
                           ) : <div className="w-9 h-7 bg-secondary border border-border shrink-0" />}
                           <div className="flex-1 min-w-0">
-                            <div className="mono">{fmtTime(s.arrived_at)} → {s.departed_at ? fmtTime(s.departed_at) : "en cours"}</div>
+                            <div className="mono">{fmtTime(s.arrived_at)} → {s.departed_at ? fmtTime(s.departed_at) : t("veh.ongoing_label")}</div>
                             <div className="text-white/60 truncate">
                               {s.camera_name} — {fmtDuration(s.duration_seconds)}
                               {(s.vehicle_make || s.vehicle_color) && ` · ${[s.vehicle_make, s.vehicle_color].filter(Boolean).join(" ")}`}
                             </div>
                           </div>
                           {s.departure_plate_reading_id ? (
-                            <img src={passageThumbUrl(s.departure_plate_reading_id, "vehicle")} alt="départ" loading="lazy"
+                            <img src={passageThumbUrl(s.departure_plate_reading_id, "vehicle")} alt={t("veh.departure_alt")} loading="lazy"
                                  className="w-9 h-7 object-cover border border-border shrink-0" />
                           ) : <div className="w-9 h-7 bg-secondary border border-border shrink-0" />}
                         </div>
@@ -1108,21 +1106,21 @@ function TabOverview({ d, onWatchChanged, onReload }) {
       )}
 
       <div className="grid grid-cols-2 gap-2 text-sm">
-        <Stat label="Passages" value={d.passages_count} />
-        <Stat label="Caméras" value={d.cameras_count} />
-        <Stat label="Première apparition" value={fmtDateTime(d.first_seen)} />
-        <Stat label="Dernier passage" value={fmtDateTime(d.last_seen)} />
-        <Stat label="Confiance moyenne" value={d.avg_confidence != null ? `${(d.avg_confidence * 100).toFixed(0)}%` : "—"} />
-        <Stat label="Durée moy. présence" value={d.avg_visit_duration_min != null ? `${d.avg_visit_duration_min} min` : "—"} />
-        <Stat label="Marque" value={d.vehicle_make || "—"} />
-        <Stat label="Modèle" value={d.vehicle_model || "—"} />
-        <Stat label="Couleur" value={d.vehicle_color || "—"} />
-        <Stat label="Type" value={d.vehicle_type || "—"} />
+        <Stat label={t("veh.passages_label")} value={d.passages_count} />
+        <Stat label={t("veh.cameras")} value={d.cameras_count} />
+        <Stat label={t("veh.stat_first_seen")} value={fmtDateTime(d.first_seen)} />
+        <Stat label={t("veh.stat_last_passage")} value={fmtDateTime(d.last_seen)} />
+        <Stat label={t("veh.stat_avg_confidence")} value={d.avg_confidence != null ? `${(d.avg_confidence * 100).toFixed(0)}%` : "—"} />
+        <Stat label={t("veh.stat_avg_duration")} value={d.avg_visit_duration_min != null ? `${d.avg_visit_duration_min} min` : "—"} />
+        <Stat label={t("veh.filter_make_label")} value={d.vehicle_make || "—"} />
+        <Stat label={t("veh.model_label")} value={d.vehicle_model || "—"} />
+        <Stat label={t("veh.filter_color_label")} value={d.vehicle_color || "—"} />
+        <Stat label={t("veh.filter_type_label")} value={d.vehicle_type || "—"} />
       </div>
       {habits && (habits.typical_arrival || habits.nocturnal_note || habits.typical_days?.length > 0) && (
         <div className="border border-border p-3 space-y-1.5 text-xs" data-testid="habits-block">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-            <Info size={11} /> Habitudes observées
+            <Info size={11} /> {t("veh.habits_observed")}
           </div>
           {habits.typical_arrival && <div>{t("veh.usual_arrival")}<b className="mono">{habits.typical_arrival}</b></div>}
           {habits.typical_departure && <div>{t("veh.usual_departure")}<b className="mono">{habits.typical_departure}</b></div>}
@@ -1149,7 +1147,7 @@ function PersonsSection({ persons, description }) {
         <Users size={16} className="text-[#0044FF]" />
         <h2 className="font-head text-lg tracking-tight">{t("veh.people_detected")}<span className="mono text-sm text-muted-foreground">({persons.length})</span></h2>
         {description && (
-          <span className="text-xs text-muted-foreground italic">— « {description} » (tri visuel manuel)</span>
+          <span className="text-xs text-muted-foreground italic">— « {description} » {t("veh.manual_sort_note")}</span>
         )}
       </div>
       <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
@@ -1187,6 +1185,7 @@ function PersonsSection({ persons, description }) {
 // Consensus multi-plugins & Validation manuelle de la plaque (v0.7 preview)
 // ═══════════════════════════════════════════════════════════════════
 function PlateConsensusBlock({ plate, onValidated }) {
+  const { t } = useApp();
   const [data, setData] = useState(null);
   const [saving, setSaving] = useState(false);
   // v3.19 · Bypass manuel — quand aucune variante suggérée n'est la bonne
@@ -1220,12 +1219,12 @@ function PlateConsensusBlock({ plate, onValidated }) {
       await api.post(`/vehicles/${encodeURIComponent(plate)}/validate`, {
         canonical_plate: chosenCanonical,
         variants: variantPlates,
-        reason: "Validation manuelle depuis le drawer véhicule",
+        reason: t("veh.validation_reason_manual"),
       });
-      toast.success(`Plaque « ${chosenCanonical} » validée · ${variantPlates.length} variante(s) liée(s)`);
+      toast.success(t("veh.plate_validated_toast_tpl").replace("{plate}", chosenCanonical).replace("{n}", variantPlates.length));
       load();
       onValidated && onValidated();  // v3.19 · rafraîchit le titre de la fiche (voir vehicle_detail)
-    } catch { toast.error("Validation impossible"); }
+    } catch { toast.error(t("veh.validation_failed")); }
     finally { setSaving(false); }
   };
 
@@ -1241,10 +1240,10 @@ function PlateConsensusBlock({ plate, onValidated }) {
     setSaving(true);
     try {
       await api.delete(`/vehicles/${encodeURIComponent(plate)}/validate`);
-      toast.success("Validation retirée");
+      toast.success(t("veh.validation_removed_toast"));
       load();
       onValidated && onValidated();
-    } catch { toast.error("Retrait impossible"); }
+    } catch { toast.error(t("veh.removal_failed")); }
     finally { setSaving(false); }
   };
 
@@ -1252,54 +1251,54 @@ function PlateConsensusBlock({ plate, onValidated }) {
     <div className="border border-border p-3 space-y-2" data-testid="consensus-block">
       <div className="flex items-center justify-between">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-          <GitMerge size={11} /> Consensus multi-plugins
+          <GitMerge size={11} /> {t("veh.consensus_title")}
         </div>
         {isValidated && (
           <span className="text-[9px] mono uppercase px-1.5 py-0.5 border border-[#00E676] text-[#00E676] flex items-center gap-1">
-            <CheckCircle2 size={10} /> Validée
+            <CheckCircle2 size={10} /> {t("veh.validated_badge")}
           </span>
         )}
       </div>
 
       {isValidated ? (
         <div className="text-xs space-y-1">
-          <div>Plaque canonique : <b className="mono">{canonical}</b></div>
+          <div>{t("veh.canonical_plate_label")}<b className="mono">{canonical}</b></div>
           {val.variants?.length > 0 && (
             <div className="text-muted-foreground">
-              Variantes liées : {val.variants.map((v) => <span key={v} className="mono mr-1">{v}</span>)}
+              {t("veh.linked_variants_label")}{val.variants.map((v) => <span key={v} className="mono mr-1">{v}</span>)}
             </div>
           )}
           <div className="text-[10px] text-muted-foreground">
-            Par {val.validated_by} · {fmtDateTime(val.validated_at)}
+            {t("veh.validated_by_tpl").replace("{by}", val.validated_by).replace("{date}", fmtDateTime(val.validated_at))}
           </div>
           <button onClick={unvalidate} disabled={saving}
                   data-testid="unvalidate-btn"
                   className="mt-1 text-[10px] uppercase tracking-wider px-2 py-1 border border-border hover:bg-secondary/60">
-            {saving ? <Loader2 size={11} className="animate-spin" /> : "Retirer la validation"}
+            {saving ? <Loader2 size={11} className="animate-spin" /> : t("veh.remove_validation_btn")}
           </button>
         </div>
       ) : manualOpen ? (
         <div className="flex items-center gap-1.5 border-t border-border pt-2" data-testid="manual-plate-form">
           <input value={manualPlate} onChange={(e) => setManualPlate(e.target.value)}
                  onKeyDown={(e) => e.key === "Enter" && validateManual()}
-                 placeholder="Plaque correcte…" autoFocus data-testid="manual-plate-input"
+                 placeholder={t("veh.plate_ph")} autoFocus data-testid="manual-plate-input"
                  className="flex-1 px-2 py-1 bg-background border border-input outline-none mono uppercase text-xs" />
           <button onClick={validateManual} disabled={saving || !manualPlate.trim()} data-testid="manual-plate-submit"
                   className="text-[9px] uppercase tracking-wider px-2 py-1 border border-[#00E676] text-[#00E676] hover:bg-[#00E676]/10 disabled:opacity-40">
-            Valider
+            {t("veh.validate_btn")}
           </button>
           <button onClick={() => { setManualOpen(false); setManualPlate(""); }}
                   className="text-[9px] uppercase tracking-wider px-2 py-1 border border-border hover:bg-secondary/60">
-            Annuler
+            {t("veh.cancel_btn")}
           </button>
         </div>
       ) : (
         <>
           <div className="text-xs space-y-1">
-            <div>Suggestion : <b className="mono text-[#00E676]">{canonical}</b> (score {data.canonical_score})</div>
+            <div>{t("veh.suggestion_label_tpl").replace("{score}", data.canonical_score).split("{plate}")[0]}<b className="mono text-[#00E676]">{canonical}</b>{t("veh.suggestion_label_tpl").replace("{score}", data.canonical_score).split("{plate}")[1]}</div>
             {hasVariants && (
               <div className="text-muted-foreground text-[11px]">
-                {variants.length} variante{variants.length > 1 ? "s" : ""} OCR détectée{variants.length > 1 ? "s" : ""} — probablement le même véhicule
+                {t("veh.variants_detected_tpl").replace("{n}", variants.length)}
               </div>
             )}
           </div>
@@ -1315,7 +1314,7 @@ function PlateConsensusBlock({ plate, onValidated }) {
                   </div>
                   <span className="mono w-10 text-right">{c.score}</span>
                   <span className="mono text-muted-foreground w-14 text-right">
-                    {c.reads} lect. · {c.engines.length} moteur{c.engines.length > 1 ? "s" : ""}
+                    {t("veh.reads_engines_tpl").replace("{reads}", c.reads).replace("{engines}", c.engines.length)}
                   </span>
                   <button
                     onClick={() => validate(c.plate)}
@@ -1323,7 +1322,7 @@ function PlateConsensusBlock({ plate, onValidated }) {
                     data-testid={`validate-${c.plate}`}
                     className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border border-[#00E676] text-[#00E676] hover:bg-[#00E676]/10 disabled:opacity-40"
                   >
-                    Valider
+                    {t("veh.validate_btn")}
                   </button>
                 </div>
               ))}
@@ -1338,13 +1337,13 @@ function PlateConsensusBlock({ plate, onValidated }) {
               className="w-full flex items-center justify-center gap-1 px-2 py-2 border border-[#00E676] text-[#00E676] text-xs hover:bg-[#00E676]/10"
             >
               {saving ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={12} />}
-              Valider cette plaque
+              {t("veh.validate_this_plate_btn")}
             </button>
           )}
 
           <button onClick={() => setManualOpen(true)} data-testid="manual-plate-open"
                   className="w-full text-[10px] uppercase tracking-wider text-muted-foreground hover:text-[#0044FF] pt-1">
-            Aucune suggestion correcte ? Saisir la plaque manuellement
+            {t("veh.manual_entry_prompt")}
           </button>
         </>
       )}
@@ -1356,16 +1355,17 @@ function PlateConsensusBlock({ plate, onValidated }) {
 // Bandeau d'anomalies récentes (en tête de la grille)
 // ═══════════════════════════════════════════════════════════════════
 function AnomaliesBanner({ items, onOpen, onDismiss }) {
+  const { t } = useApp();
   return (
     <div className="border border-[#FFB800]/60 bg-[#FFB800]/5 p-3 mb-4" data-testid="anomalies-banner">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-1.5 text-[#FFB800] text-xs uppercase tracking-wider font-medium">
-          <AlertTriangle size={14} /> Anomalies récentes ({items.length})
+          <AlertTriangle size={14} /> {t("veh.recent_anomalies_tpl").replace("{n}", items.length)}
         </div>
         <button onClick={onDismiss}
                 data-testid="anomalies-dismiss"
                 className="text-[10px] text-muted-foreground hover:text-foreground uppercase tracking-wider">
-          Masquer
+          {t("veh.hide_btn")}
         </button>
       </div>
       <div className="flex flex-wrap gap-2">
@@ -1409,6 +1409,7 @@ function AnomaliesBanner({ items, onOpen, onDismiss }) {
 // abouti). Renommé en conséquence : ce n'est plus seulement des
 // suggestions, mais aussi les fusions déjà confirmées.
 function DedupButton({ items, identities, admin, running, available, onRunNow, onAccept, onReject, onOpenPlate, onMerged }) {
+  const { t } = useApp();
   const [open, setOpen] = useState(false);
   const [mergeMode, setMergeMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -1433,10 +1434,10 @@ function DedupButton({ items, identities, admin, running, available, onRunNow, o
     setIdentityMergeAiRunning(true);
     try {
       await api.post("/vehicles/identities/merge-ai/run");
-      toast.success("Recherche de fusions d'identités lancée en arrière-plan.");
+      toast.success(t("veh.identity_merge_launched_toast"));
       setTimeout(loadIdentitySuggestions, 15000);
     } catch (e) {
-      toast.error(e.response?.data?.detail?.message || "Échec du lancement");
+      toast.error(e.response?.data?.detail?.message || t("veh.launch_failed"));
     } finally { setIdentityMergeAiRunning(false); }
   };
 
@@ -1444,10 +1445,10 @@ function DedupButton({ items, identities, admin, running, available, onRunNow, o
     try {
       await api.post(`/vehicles/identities/merge-ai/suggestions/${s.id}/accept`);
       setIdentitySuggestions((prev) => prev.filter((x) => x.id !== s.id));
-      toast.success("Identités fusionnées");
+      toast.success(t("veh.identities_merged_toast"));
       onMerged && onMerged();
     } catch (e) {
-      toast.error(e.response?.data?.detail?.message || "Échec de la fusion");
+      toast.error(e.response?.data?.detail?.message || t("veh.merge_failed"));
     }
   };
 
@@ -1456,7 +1457,7 @@ function DedupButton({ items, identities, admin, running, available, onRunNow, o
       await api.post(`/vehicles/identities/merge-ai/suggestions/${s.id}/reject`);
       setIdentitySuggestions((prev) => prev.filter((x) => x.id !== s.id));
     } catch (e) {
-      toast.error("Échec du rejet");
+      toast.error(t("veh.reject_failed"));
     }
   };
 
@@ -1473,47 +1474,47 @@ function DedupButton({ items, identities, admin, running, available, onRunNow, o
     setMerging(true);
     try {
       await api.post("/vehicles/identities/merge", { identity_ids: Array.from(selectedIds) });
-      toast.success(`${selectedIds.size} identités fusionnées`);
+      toast.success(t("veh.identities_merged_count_tpl").replace("{n}", selectedIds.size));
       setSelectedIds(new Set());
       setMergeMode(false);
       onMerged && onMerged();
     } catch (e) {
-      toast.error(e.response?.data?.detail?.message || "Échec de la fusion");
+      toast.error(e.response?.data?.detail?.message || t("veh.merge_failed"));
     } finally { setMerging(false); }
   };
   return (
     <>
       <button onClick={() => setOpen(true)} data-testid="dedup-open-modal"
               className="flex items-center gap-1.5 border border-[#0044FF]/40 bg-[#0044FF]/5 text-[#0044FF] px-3 py-1.5 text-xs uppercase tracking-wider mb-4 hover:bg-[#0044FF]/10">
-        <Sparkles size={14} /> Fusion & identités véhicule (IA) {items.length > 0 && `(${items.length})`}
+        <Sparkles size={14} /> {t("veh.dedup_main_label")} {items.length > 0 && `(${items.length})`}
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="rounded-none border-border max-w-3xl max-h-[85vh] flex flex-col" data-testid="dedup-modal">
           <DialogHeader>
             <DialogTitle className="font-head flex items-center justify-between gap-4 pr-6">
-              <span className="flex items-center gap-2"><Sparkles size={16} /> Fusion & identités véhicule (IA)</span>
+              <span className="flex items-center gap-2"><Sparkles size={16} /> {t("veh.dedup_main_label")}</span>
               {admin && available && (
                 <button onClick={onRunNow} disabled={running} data-testid="dedup-run-now"
                         className="text-[10px] uppercase tracking-wider text-[#0044FF] hover:underline disabled:opacity-50 flex items-center gap-1 font-normal normal-case">
                   {running && <Loader2 size={11} className="animate-spin" />}
-                  {running ? "Recherche…" : "Rechercher maintenant"}
+                  {running ? t("veh.searching_label") : t("veh.search_now_btn")}
                 </button>
               )}
             </DialogTitle>
           </DialogHeader>
           {admin && !available && (
             <p className="text-[11px] text-[#FF3333]" data-testid="dedup-unavailable">
-              Connexion impossible — vérifiez la configuration dans Administration → LLM (MG-IA).
+              {t("veh.dedup_unavailable")}
             </p>
           )}
           <div className="flex-1 overflow-y-auto space-y-4 -mx-1 px-1">
             <div>
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
-                Suggestions en attente {items.length > 0 && `(${items.length})`}
+                {t("veh.pending_suggestions_label")} {items.length > 0 && `(${items.length})`}
               </div>
               {items.length === 0 ? (
                 <p className="text-[11px] text-muted-foreground">
-                  Aucune suggestion en attente — tâche automatique une fois par jour, ou lance-la manuellement.
+                  {t("veh.no_pending_dedup")}
                 </p>
               ) : (
                 <div className="space-y-2">
@@ -1527,17 +1528,17 @@ function DedupButton({ items, identities, admin, running, available, onRunNow, o
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                    <Sparkles size={11} /> Suggestions de fusion d'identités (IA) {identitySuggestions.length > 0 && `(${identitySuggestions.length})`}
+                    <Sparkles size={11} /> {t("veh.identity_merge_suggestions_label")} {identitySuggestions.length > 0 && `(${identitySuggestions.length})`}
                   </div>
                   <button onClick={runIdentityMergeAiNow} disabled={identityMergeAiRunning} data-testid="identity-merge-ai-run-now"
                           className="text-[10px] uppercase tracking-wider text-[#0044FF] hover:underline disabled:opacity-50 flex items-center gap-1">
                     {identityMergeAiRunning && <Loader2 size={11} className="animate-spin" />}
-                    {identityMergeAiRunning ? "Recherche…" : "Rechercher maintenant"}
+                    {identityMergeAiRunning ? t("veh.searching_label") : t("veh.search_now_btn")}
                   </button>
                 </div>
                 {identitySuggestions.length === 0 ? (
                   <p className="text-[11px] text-muted-foreground">
-                    Aucune suggestion en attente — tâche automatique une fois par jour (si activée, Administration → LLM), ou lance-la manuellement.
+                    {t("veh.no_pending_identity_dedup")}
                   </p>
                 ) : (
                   <div className="space-y-2">
@@ -1570,24 +1571,24 @@ function DedupButton({ items, identities, admin, running, available, onRunNow, o
                           <div className="text-muted-foreground mt-1">
                             distance {s.min_distance} · confiance {Math.round((s.confidence || 0) * 100)}%
                             {s.confidence_method === "visual"
-                              ? <span className="text-[#00E676]"> (vérifiée par photo)</span>
-                              : <span className="text-[#FFB800]"> (texte seul, pas de photo dispo)</span>}
+                              ? <span className="text-[#00E676]"> {t("veh.verified_by_photo")}</span>
+                              : <span className="text-[#FFB800]"> {t("veh.text_only_no_photo")}</span>}
                             {" — "}{s.reason}
                           </div>
                           <div className="text-muted-foreground/70 mt-0.5 text-[10px]">
-                            Comparez les photos ci-contre avant de fusionner — un texte de plaque proche ne garantit pas le même véhicule.
+                            {t("veh.compare_photos_note")}
                           </div>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
                           <button onClick={() => acceptIdentitySuggestion(s)}
                                   className="px-2 py-1 bg-[#0044FF] text-white text-[10px] uppercase tracking-wider"
                                   data-testid={`identity-merge-suggestion-accept-${s.id}`}>
-                            Fusionner
+                            {t("veh.merge_btn")}
                           </button>
                           <button onClick={() => rejectIdentitySuggestion(s)}
                                   className="px-2 py-1 border border-border text-[10px] uppercase tracking-wider hover:bg-secondary"
                                   data-testid={`identity-merge-suggestion-reject-${s.id}`}>
-                            Rejeter
+                            {t("veh.reject_btn")}
                           </button>
                         </div>
                       </div>
@@ -1600,13 +1601,13 @@ function DedupButton({ items, identities, admin, running, available, onRunNow, o
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                    <Users size={11} /> Identités confirmées ({identities.length})
+                    <Users size={11} /> {t("veh.confirmed_identities_label")} ({identities.length})
                   </div>
                   <button
                     onClick={() => { setMergeMode((v) => !v); setSelectedIds(new Set()); }}
                     className={`text-[10px] uppercase tracking-wider px-2 py-0.5 border ${mergeMode ? "border-[#0044FF] text-[#0044FF] bg-[#0044FF]/5" : "border-border text-muted-foreground hover:bg-secondary"}`}
                     data-testid="identity-merge-mode-toggle">
-                    {mergeMode ? "Annuler" : "Fusionner des identités"}
+                    {mergeMode ? t("veh.cancel_btn") : t("veh.merge_identities_btn")}
                   </button>
                 </div>
                 {mergeMode && (
@@ -1617,15 +1618,15 @@ function DedupButton({ items, identities, admin, running, available, onRunNow, o
                           ? new Set() : new Set(identities.map((id) => id.id)))}
                         className="px-2 py-1 border border-border text-[10px] uppercase tracking-wider hover:bg-secondary/60"
                         data-testid="identity-select-all">
-                        {selectedIds.size === identities.length ? "Tout désélectionner" : "Tout sélectionner"}
+                        {selectedIds.size === identities.length ? t("veh.deselect_all_btn") : t("veh.select_all_btn")}
                       </button>
-                      <span>{selectedIds.size} sélectionnée{selectedIds.size > 1 ? "s" : ""} — clique 2+ cartes ci-dessous.</span>
+                      <span>{selectedIds.size} {t(selectedIds.size > 1 ? "veh.selected_many" : "veh.selected_one")} {t("veh.click_more_cards_note")}</span>
                     </div>
                     <button onClick={confirmMergeIdentities} disabled={selectedIds.size < 2 || merging}
                             className="flex items-center gap-1 px-2 py-1 bg-[#0044FF] text-white text-[10px] uppercase tracking-wider disabled:opacity-40"
                             data-testid="identity-merge-confirm">
                       {merging ? <Loader2 size={11} className="animate-spin" /> : <GitMerge size={11} />}
-                      Fusionner ({selectedIds.size})
+                      {t("veh.merge_btn_tpl").replace("{n}", selectedIds.size)}
                     </button>
                   </div>
                 )}
@@ -1644,7 +1645,7 @@ function DedupButton({ items, identities, admin, running, available, onRunNow, o
                           {id.name}
                         </div>
                         <div className="text-muted-foreground text-[10px]">
-                          {id.plates.length} plaque{id.plates.length > 1 ? "s" : ""} · {id.vehicle_make || "—"} {id.vehicle_color || ""}
+                          {id.plates.length} {t("veh.plate_word")}{id.plates.length > 1 ? "s" : ""} · {id.vehicle_make || "—"} {id.vehicle_color || ""}
                         </div>
                         <div className="flex flex-wrap gap-1 mt-1">
                           {id.plates.map((p) => (
@@ -1674,6 +1675,7 @@ function DedupButton({ items, identities, admin, running, available, onRunNow, o
 // tri manuel demandé — les attributs seuls ne montrent pas si c'est
 // visuellement la même voiture.
 function DedupRow({ s, onAccept, onReject }) {
+  const { t } = useApp();
   const [hover, setHover] = useState(null); // "a" | "b" | null
   const thumbA = passageThumbUrl(s.stats_a?.sample_plate_id, "vehicle");
   const thumbB = passageThumbUrl(s.stats_b?.sample_plate_id, "vehicle");
@@ -1690,12 +1692,12 @@ function DedupRow({ s, onAccept, onReject }) {
         {hover === side && st && (
           <div className="absolute z-10 top-full left-0 mt-1 bg-black/90 border border-[#0044FF]/40 p-2 text-[10px] text-white w-48 space-y-0.5"
                data-testid={`dedup-hover-info-${side}-${s.id}`}>
-            <div>Marque : {st.make || "—"}</div>
-            <div>Modèle : {st.model || "—"}</div>
-            <div>Couleur : {st.color || "—"}</div>
-            <div>Type : {st.type || "—"}</div>
-            <div>Lectures : {st.count ?? "—"}</div>
-            <div>Dernière vue : {st.last_seen ? new Date(st.last_seen).toLocaleString("fr-FR") : "—"}</div>
+            <div>{t("veh.inline_make_label")}{st.make || "—"}</div>
+            <div>{t("veh.inline_model_label")}{st.model || "—"}</div>
+            <div>{t("veh.inline_color_label")}{st.color || "—"}</div>
+            <div>{t("veh.filter_type_label")} : {st.type || "—"}</div>
+            <div>{t("veh.inline_reads_label")}{st.count ?? "—"}</div>
+            <div>{t("veh.inline_last_seen_label")}{st.last_seen ? new Date(st.last_seen).toLocaleString("fr-FR") : "—"}</div>
           </div>
         )}
       </div>
@@ -1721,17 +1723,17 @@ function DedupRow({ s, onAccept, onReject }) {
       {s.confidence != null && (
         <span className="text-[10px] uppercase tracking-wider shrink-0"
               style={{ color: s.confidence_method === "visual" ? "#00E676" : "#FFB800" }}
-              title={s.confidence_method === "visual" ? "Confirmé par comparaison photo réelle" : "Texte seul — aucune photo disponible pour comparaison"}>
+              title={s.confidence_method === "visual" ? t("veh.confirmed_by_photo_title") : t("veh.text_only_no_photo_title")}>
           confiance {Math.round(s.confidence * 100)}% {s.confidence_method === "visual" ? "📷" : "texte"}
         </span>
       )}
       <button onClick={() => onAccept(s.id)} data-testid={`dedup-accept-${s.id}`}
               className="px-2 py-1 border border-[#00E676] text-[#00E676] hover:bg-[#00E676]/10 shrink-0 uppercase tracking-wider text-[10px]">
-        Fusionner
+        {t("veh.merge_btn")}
       </button>
       <button onClick={() => onReject(s.id)} data-testid={`dedup-reject-${s.id}`}
               className="px-2 py-1 border border-border text-muted-foreground hover:text-foreground shrink-0 uppercase tracking-wider text-[10px]">
-        Ignorer
+        {t("veh.ignore_btn")}
       </button>
     </div>
   );
@@ -1827,6 +1829,7 @@ function PassageThumb({ passageId, alt }) {
 // séparé. Réutilise le même mécanisme "fixed + suit la souris" que
 // PassageThumb ci-dessus pour rester cohérent visuellement.
 function CameraHoverStat({ camera_id, camera_name, statsByCamera }) {
+  const { t } = useApp();
   const [hoverPos, setHoverPos] = useState(null);
   const stat = statsByCamera.get(camera_id);
   return (
@@ -1846,9 +1849,9 @@ function CameraHoverStat({ camera_id, camera_name, statsByCamera }) {
                top: Math.min(hoverPos.y + 16, window.innerHeight - 90),
              }}>
           <div className="flex items-center gap-1 text-foreground font-medium"><CameraIcon size={11} className="text-[#0044FF]" /> {camera_name}</div>
-          <div>{stat.count} passage{stat.count > 1 ? "s" : ""}</div>
-          <div className="text-muted-foreground">Dernier : {fmtDateTime(stat.last_seen)}</div>
-          <div className="text-muted-foreground">Premier : {fmtDateTime(stat.first_seen)}</div>
+          <div>{stat.count} {t("veh.passage_singular")}{stat.count > 1 ? "s" : ""}</div>
+          <div className="text-muted-foreground">{t("veh.last_label")}{fmtDateTime(stat.last_seen)}</div>
+          <div className="text-muted-foreground">{t("veh.first_label")}{fmtDateTime(stat.first_seen)}</div>
         </div>
       )}
     </>
@@ -1856,6 +1859,7 @@ function CameraHoverStat({ camera_id, camera_name, statsByCamera }) {
 }
 
 function TabTimeline({ plate }) {
+  const { t } = useApp();
   const [items, setItems] = useState([]);
   const [cameras, setCameras] = useState([]);
   useEffect(() => {
@@ -1882,7 +1886,7 @@ function TabTimeline({ plate }) {
     <div className="space-y-4" data-testid="drawer-timeline">
       {groups.map(([day, rows]) => (
         <div key={day}>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 sticky top-0 bg-card py-1">{day} · {rows.length} passage{rows.length > 1 ? "s" : ""}</div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 sticky top-0 bg-card py-1">{day} · {rows.length} {t("veh.passage_singular")}{rows.length > 1 ? "s" : ""}</div>
           <div className="border-l-2 border-[#0044FF]/40 pl-3 space-y-2">
             {rows.map((p) => (
               <div key={p.id} className="flex items-center gap-3 text-xs" data-testid={`timeline-item-${p.id}`}>
@@ -1914,7 +1918,7 @@ function TabHeatmap({ plate }) {
     <div className="space-y-5" data-testid="drawer-heatmap">
       <div>
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1">
-          <BarChart3 size={11} /> Passages par heure
+          <BarChart3 size={11} /> {t("veh.passages_per_hour")}
         </div>
         <div className="space-y-1 text-[10px] mono">
           {d.by_hour.map((count, h) => (
@@ -1930,7 +1934,7 @@ function TabHeatmap({ plate }) {
       </div>
       <div>
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1">
-          <BarChart3 size={11} /> Passages par jour
+          <BarChart3 size={11} /> {t("veh.passages_per_day")}
         </div>
         <div className="space-y-1 text-[10px] mono">
           {d.by_dow.map((count, i) => (
@@ -1964,6 +1968,7 @@ function Stat({ label, value }) {
 // alternative aux tuiles avec miniatures (demandé : plus léger/rapide,
 // pas de chargement d'image par ligne).
 function VehicleListRow({ v, onOpen, selectable = false, selected = false }) {
+  const { t } = useApp();
   return (
     <button
       onClick={onOpen}
@@ -1993,7 +1998,7 @@ function VehicleListRow({ v, onOpen, selectable = false, selected = false }) {
       </div>
       <div className="w-24 text-[11px] text-muted-foreground shrink-0 flex items-center gap-1"><Activity size={11} /> {v.passages_count}</div>
       <div className="w-24 text-[11px] text-muted-foreground shrink-0 flex items-center gap-1"><CameraIcon size={11} /> {v.cameras_count}</div>
-      <div className="w-36 text-[11px] text-muted-foreground shrink-0 flex items-center gap-1"><Clock size={11} /> {fmtRelative(v.last_seen)}</div>
+      <div className="w-36 text-[11px] text-muted-foreground shrink-0 flex items-center gap-1"><Clock size={11} /> {fmtRelative(v.last_seen, t)}</div>
     </button>
   );
 }
@@ -2034,13 +2039,14 @@ function fmtDuration(totalSeconds) {
   return `${m} min`;
 }
 
-function fmtRelative(iso) {
+function fmtRelative(iso, t) {
   if (!iso) return "—";
   const d = new Date(iso);
   const diff = (Date.now() - d.getTime()) / 1000;
-  if (diff < 60) return "il y a quelques secondes";
-  if (diff < 3600) return `il y a ${Math.round(diff / 60)} min`;
-  if (diff < 86400) return `il y a ${Math.round(diff / 3600)} h`;
+  const tr = (k) => (t ? t(k) : k);
+  if (diff < 60) return tr("veh.time_ago_now");
+  if (diff < 3600) return tr("veh.time_ago_min_tpl").replace("{n}", Math.round(diff / 60));
+  if (diff < 86400) return tr("veh.time_ago_hour_tpl").replace("{n}", Math.round(diff / 3600));
   return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 

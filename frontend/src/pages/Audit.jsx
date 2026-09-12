@@ -23,7 +23,7 @@ export default function Audit() {
       <div className="border border-border bg-card overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-            <th className="px-3 py-2">{t("common.date")}</th><th className="px-3 py-2">{t("audit.user")}</th><th className="px-3 py-2">{t("audit.action")}</th><th className="px-3 py-2">{t("audit.target")}</th><th className="px-3 py-2">Détails</th>
+            <th className="px-3 py-2">{t("common.date")}</th><th className="px-3 py-2">{t("audit.user")}</th><th className="px-3 py-2">{t("audit.action")}</th><th className="px-3 py-2">{t("audit.target")}</th><th className="px-3 py-2">{t("audit.details")}</th>
           </tr></thead>
           <tbody>
             {logs.map((l) => (

@@ -133,6 +133,7 @@ function OverlayCanvas({ cam, boxes, frameTs, showOverlay }) {
 }
 
 function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onToggleFocus }) {
+  const { t } = useApp();
   const [hover, setHover] = useState(false);
   const [showPtz, setShowPtz] = useState(false);
   const online = cam?.status === "online";
@@ -146,14 +147,14 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
   // (prompt du nom, nom auto si vide).
   const addPreset = async (e) => {
     e.stopPropagation();
-    const name = window.prompt("Nom du point de surveillance (optionnel)", "");
+    const name = window.prompt(t("live.add_preset_prompt"), "");
     if (name === null) return;
     setAddingPreset(true);
     try {
       const r = await api.post(`/devices/${cam.id}/ptz/presets`, { name: name.trim() || undefined });
-      toast.success(`Point de surveillance ajouté : ${r.data.name}`);
+      toast.success(`${t("live.preset_added")} : ${r.data.name}`);
     } catch (err) {
-      toast.error(err.response?.data?.detail?.message || err.response?.data?.detail || "Échec de l'ajout du point");
+      toast.error(err.response?.data?.detail?.message || err.response?.data?.detail || t("live.add_preset_error"));
     } finally {
       setAddingPreset(false);
     }
@@ -170,7 +171,7 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
       className={`relative bg-black overflow-hidden group aspect-video cursor-pointer transition-shadow ${focused ? "ring-2 ring-[#00E5FF]" : "hover:ring-1 hover:ring-[#0044FF]/60"}`}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       onClick={(e) => { if (!e.target.closest("[data-ptz-btn]")) onToggleFocus?.(cam?.id); }}
-      title={cam ? (focused ? "Cliquez pour revenir à la mosaïque" : "Cliquez pour agrandir") : ""}
+      title={cam ? (focused ? t("live.click_return_mosaic") : t("live.click_expand")) : ""}
       data-testid="video-feed"
     >
       {cam?.id ? (
@@ -217,7 +218,7 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
       {isSubStream && (
         <div className="absolute top-8 inset-x-0 px-2" data-testid="substream-warning">
           <div className="text-[10px] mono px-2 py-1 bg-[#FFB800]/95 text-black flex items-center gap-1.5">
-            ⚠ Sous-flux détecté ({cam.resolution}) — ouvrez le diagnostic pour re-sélectionner le profil principal.
+            ⚠ {t("live.substream_detected")} ({cam.resolution}) — {t("live.substream_hint")}
           </div>
         </div>
       )}
@@ -251,7 +252,7 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
       {online && cam?.ptz_enabled && canPtz && (hover || showPtz) && (
         <button data-ptz-btn onClick={(e) => { e.stopPropagation(); setShowPtz((v) => !v); }}
                 className={`absolute top-16 right-2 w-7 h-7 flex items-center justify-center text-white transition-colors ${showPtz ? "bg-[#0044FF]" : "bg-black/70 hover:bg-[#0044FF]"}`}
-                data-testid="ptz-toggle" title={showPtz ? "Masquer les contrôles PTZ" : "Afficher les contrôles PTZ"}>
+                data-testid="ptz-toggle" title={showPtz ? t("live.hide_ptz_controls") : t("live.show_ptz_controls")}>
           <Move size={14} />
         </button>
       )}
@@ -263,29 +264,29 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
               <div />
               <button data-ptz-btn onClick={(e) => { e.stopPropagation(); ptz("tilt_up"); }}
                       className="w-7 h-7 bg-black/70 hover:bg-[#0044FF] flex items-center justify-center text-white transition-colors"
-                      data-testid="ptz-up" title="Tilt up">
+                      data-testid="ptz-up" title={t("live.ptz_tilt_up")}>
                 <ArrowUp size={14} />
               </button>
               <div />
               <button data-ptz-btn onClick={(e) => { e.stopPropagation(); ptz("pan_left"); }}
                       className="w-7 h-7 bg-black/70 hover:bg-[#0044FF] flex items-center justify-center text-white transition-colors"
-                      data-testid="ptz-left" title="Pan left">
+                      data-testid="ptz-left" title={t("live.ptz_pan_left")}>
                 <ArrowLeft size={14} />
               </button>
               <button data-ptz-btn onClick={(e) => { e.stopPropagation(); ptz("home"); }}
                       className="w-7 h-7 bg-black/70 hover:bg-[#00E676] flex items-center justify-center text-white transition-colors"
-                      data-testid="ptz-home" title="Home preset">
+                      data-testid="ptz-home" title={t("live.ptz_home")}>
                 <Home size={12} />
               </button>
               <button data-ptz-btn onClick={(e) => { e.stopPropagation(); ptz("pan_right"); }}
                       className="w-7 h-7 bg-black/70 hover:bg-[#0044FF] flex items-center justify-center text-white transition-colors"
-                      data-testid="ptz-right" title="Pan right">
+                      data-testid="ptz-right" title={t("live.ptz_pan_right")}>
                 <ArrowRight size={14} />
               </button>
               <div />
               <button data-ptz-btn onClick={(e) => { e.stopPropagation(); ptz("tilt_down"); }}
                       className="w-7 h-7 bg-black/70 hover:bg-[#0044FF] flex items-center justify-center text-white transition-colors"
-                      data-testid="ptz-down" title="Tilt down">
+                      data-testid="ptz-down" title={t("live.ptz_tilt_down")}>
                 <ArrowDown size={14} />
               </button>
               <div />
@@ -294,19 +295,19 @@ function FeedInner({ cam, idx, canPtz, hd, showOverlay, aiState, focused, onTogg
             <div className="flex flex-col gap-0.5">
               <button data-ptz-btn onClick={(e) => { e.stopPropagation(); ptz("zoom_in"); }}
                       className="w-7 h-7 bg-black/70 hover:bg-[#0044FF] flex items-center justify-center text-white transition-colors"
-                      data-testid="ptz-zoom-in" title="Zoom in">
+                      data-testid="ptz-zoom-in" title={t("live.ptz_zoom_in")}>
                 <ZoomIn size={14} />
               </button>
               <button data-ptz-btn onClick={(e) => { e.stopPropagation(); ptz("zoom_out"); }}
                       className="w-7 h-7 bg-black/70 hover:bg-[#0044FF] flex items-center justify-center text-white transition-colors"
-                      data-testid="ptz-zoom-out" title="Zoom out">
+                      data-testid="ptz-zoom-out" title={t("live.ptz_zoom_out")}>
                 <ZoomOut size={14} />
               </button>
             </div>
           </div>
           <button data-ptz-btn onClick={addPreset} disabled={addingPreset}
                   className="mt-1 w-full flex items-center justify-center gap-1 h-7 bg-black/70 hover:bg-[#00E676] hover:text-black text-white text-[10px] uppercase tracking-wide transition-colors disabled:opacity-50"
-                  data-testid="ptz-add-preset" title="Ajouter un point de surveillance ici">
+                  data-testid="ptz-add-preset" title={t("live.ptz_add_preset_here")}>
             {addingPreset ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />} PDS
           </button>
         </div>
@@ -356,27 +357,27 @@ const Feed = React.memo(FeedInner, (prev, next) => {
 // 🟥 Animal, 🟫 Vélo. Les alertes critiques (feu/arme/bagarre) restent
 // en rouge/orange pour cohérence sémantique.
 const EVENT_KIND_META = {
-  person:     { icon: User,        label: "Personne", color: "#0044FF" },   // 🟦 bleu
-  car:        { icon: Car,         label: "Voiture",  color: "#00E676" },   // 🟩 vert
-  motorbike:  { icon: Bike,        label: "Moto",     color: "#FFB800" },   // 🟨 jaune
-  motorcycle: { icon: Bike,        label: "Moto",     color: "#FFB800" },
-  truck:      { icon: Truck,       label: "Camion",   color: "#FF6600" },   // 🟧 orange
-  bus:        { icon: Truck,       label: "Bus",      color: "#9333EA" },   // 🟪 violet
-  animal:     { icon: PawPrint,    label: "Animal",   color: "#FF3333" },   // 🟥 rouge
-  dog:        { icon: PawPrint,    label: "Chien",    color: "#FF3333" },
-  cat:        { icon: PawPrint,    label: "Chat",     color: "#FF3333" },
-  bird:       { icon: PawPrint,    label: "Oiseau",   color: "#FF3333" },
-  bicycle:    { icon: Bike,        label: "Vélo",     color: "#8B4513" },   // 🟫 marron
-  plate:      { icon: ScanLine,    label: "Plaque",   color: "#FFD700" },   // jaune vif (spécifique ANPR)
+  person:     { icon: User,        label: "live.kind_person",   color: "#0044FF" },   // 🟦 bleu
+  car:        { icon: Car,         label: "live.kind_car",      color: "#00E676" },   // 🟩 vert
+  motorbike:  { icon: Bike,        label: "live.kind_motorbike",color: "#FFB800" },   // 🟨 jaune
+  motorcycle: { icon: Bike,        label: "live.kind_motorbike",color: "#FFB800" },
+  truck:      { icon: Truck,       label: "live.kind_truck",    color: "#FF6600" },   // 🟧 orange
+  bus:        { icon: Truck,       label: "live.kind_bus",      color: "#9333EA" },   // 🟪 violet
+  animal:     { icon: PawPrint,    label: "live.kind_animal",   color: "#FF3333" },   // 🟥 rouge
+  dog:        { icon: PawPrint,    label: "live.kind_dog",      color: "#FF3333" },
+  cat:        { icon: PawPrint,    label: "live.kind_cat",      color: "#FF3333" },
+  bird:       { icon: PawPrint,    label: "live.kind_bird",     color: "#FF3333" },
+  bicycle:    { icon: Bike,        label: "live.kind_bicycle",  color: "#8B4513" },   // 🟫 marron
+  plate:      { icon: ScanLine,    label: "live.kind_plate",    color: "#FFD700" },   // jaune vif (spécifique ANPR)
   // Alertes critiques (priorité visuelle rouge/orange)
-  fire:       { icon: Flame,       label: "Feu",      color: "#FF3333" },
-  smoke:      { icon: Flame,       label: "Fumée",    color: "#FF6600" },
-  weapon:     { icon: AlertOctagon,label: "Arme",     color: "#FF3333" },
-  fight:      { icon: AlertOctagon,label: "Bagarre",  color: "#FF3333" },
-  fall:       { icon: AlertOctagon,label: "Chute",    color: "#FF6600" },
-  ppe:        { icon: HardHat,     label: "EPI",      color: "#FFB800" },
-  zone:       { icon: MapPin,      label: "Zone",     color: "#0044FF" },
-  motion:     { icon: Activity,    label: "Mouvement",color: "#66CCFF" },   // cyan discret (bas signal)
+  fire:       { icon: Flame,       label: "live.kind_fire",     color: "#FF3333" },
+  smoke:      { icon: Flame,       label: "live.kind_smoke",    color: "#FF6600" },
+  weapon:     { icon: AlertOctagon,label: "live.kind_weapon",   color: "#FF3333" },
+  fight:      { icon: AlertOctagon,label: "live.kind_fight",    color: "#FF3333" },
+  fall:       { icon: AlertOctagon,label: "live.kind_fall",     color: "#FF6600" },
+  ppe:        { icon: HardHat,     label: "live.kind_ppe",      color: "#FFB800" },
+  zone:       { icon: MapPin,      label: "live.kind_zone",     color: "#0044FF" },
+  motion:     { icon: Activity,    label: "live.kind_motion",   color: "#66CCFF" },   // cyan discret (bas signal)
 };
 
 function _kindFromEvent(ev) {
@@ -418,6 +419,13 @@ function FocusTimeline({ cameraId, onSelect }) {
   // fenêtres glissantes, aucun ne correspond à "les événements du jour".
   const [windowMode, setWindowMode] = useState(30); // minutes (nombre) ou "today"
   const [hoverEvent, setHoverEvent] = useState(null);
+
+  // Résout le libellé traduit d'un kind d'événement — retombe sur le kind
+  // brut (comportement historique) si absent de EVENT_KIND_META.
+  const kindLabel = (kind) => {
+    const m = EVENT_KIND_META[kind];
+    return m ? t(m.label) : (kind || "");
+  };
 
   const windowStartMs = (mode) => {
     if (mode === "today") {
@@ -479,7 +487,7 @@ function FocusTimeline({ cameraId, onSelect }) {
       <div className="bg-black/85 border border-white/10 px-2 py-2 space-y-1.5">
         <div className="flex items-center justify-between">
           <span className="text-[9px] uppercase tracking-wider text-white/60 mono">
-            Timeline — {events.length} événement(s) {loading && <span className="text-[#00E5FF]">…</span>}
+            {t("live.timeline_label")} — {events.length} {t("live.event_count_suffix")} {loading && <span className="text-[#00E5FF]">…</span>}
           </span>
           <div className="flex items-center gap-1">
             {[15, 30, 60, 180].map((m) => (
@@ -492,7 +500,7 @@ function FocusTimeline({ cameraId, onSelect }) {
             <button onClick={() => setWindowMode("today")}
                     data-testid="focus-timeline-window-today"
                     className={`text-[9px] mono px-1 py-0.5 border ${windowMode === "today" ? "border-[#00E5FF] text-[#00E5FF]" : "border-white/10 text-white/50"}`}>
-              Aujourd'hui
+              {t("live.today")}
             </button>
           </div>
         </div>
@@ -506,7 +514,7 @@ function FocusTimeline({ cameraId, onSelect }) {
               return (
                 <span key={k} className="flex items-center gap-0.5 text-[9px] mono text-white/70"
                       style={{ color: m.color }}>
-                  <Ic size={9} /> {m.label} <span className="text-white/40">×{kindCounts[k]}</span>
+                  <Ic size={9} /> {kindLabel(k)} <span className="text-white/40">×{kindCounts[k]}</span>
                 </span>
               );
             })}
@@ -531,7 +539,7 @@ function FocusTimeline({ cameraId, onSelect }) {
                     style={{ left: `${posPct(ev.timestamp)}%`, color: m.color }}
                     data-testid={`focus-timeline-marker-${ev._kind}`}
                     className="absolute top-0 -translate-x-1/2 h-full w-4 hover:scale-110 transition-transform flex items-center justify-center"
-                    title={`${m.label} · ${new Date(ev.timestamp).toLocaleTimeString("fr-FR")}`}
+                    title={`${kindLabel(ev._kind)} · ${new Date(ev.timestamp).toLocaleTimeString("fr-FR")}`}
                   >
                     <Ic size={11} strokeWidth={2.5} />
                   </button>
@@ -553,8 +561,8 @@ function FocusTimeline({ cameraId, onSelect }) {
                   <button key={`th-${ev.id}`} onClick={() => onSelect?.(ev)}
                           data-testid={`timeline-event-${ev.id}`}
                           className="relative flex-shrink-0 w-24 border border-white/10 hover:border-[#00E5FF] bg-black/60 text-left"
-                          title={`${m.label} · ${ev.label || ev.type} · ${time}`}>
-                    <img src={thumb} alt={m.label} className="w-full h-14 object-cover" />
+                          title={`${kindLabel(ev._kind)} · ${ev.label || ev.type} · ${time}`}>
+                    <img src={thumb} alt={kindLabel(ev._kind)} className="w-full h-14 object-cover" />
                     <span className="absolute top-0.5 left-0.5 w-4 h-4 flex items-center justify-center rounded-full"
                           style={{ background: m.color + "cc" }}>
                       <Ic size={9} color="#fff" strokeWidth={2.5} />
@@ -574,7 +582,7 @@ function FocusTimeline({ cameraId, onSelect }) {
       {/* Tooltip flottant */}
       {hoverEvent && (
         <div className="absolute -top-16 left-1/2 -translate-x-1/2 border border-white/20 bg-black/90 px-2 py-1 text-[10px] mono text-white pointer-events-none">
-          {(EVENT_KIND_META[hoverEvent._kind] || {}).label} · {hoverEvent.label || hoverEvent.type}
+          {kindLabel(hoverEvent._kind)} · {hoverEvent.label || hoverEvent.type}
           <div className="text-white/60">{new Date(hoverEvent.timestamp).toLocaleString("fr-FR")}</div>
         </div>
       )}
@@ -664,9 +672,9 @@ export default function LiveView() {
     setSavingLayout(true);
     try {
       await api.put(`/live/layout/${layout}`, { camera_ids: orderedCams.map((c) => c.id) });
-      toast.success("Disposition enregistrée — conservée après une mise à jour");
+      toast.success(t("live.layout_saved"));
       setEditingLayout(false);
-    } catch (e) { toast.error("Échec de l'enregistrement de la disposition"); }
+    } catch (e) { toast.error(t("live.layout_save_error")); }
     finally { setSavingLayout(false); }
   };
 
@@ -675,8 +683,8 @@ export default function LiveView() {
     try {
       await api.put(`/live/layout/${layout}`, { camera_ids: [] });
       setSavedOrder((prev) => ({ ...prev, [layout]: [] }));
-      toast.success("Disposition réinitialisée (ordre par défaut)");
-    } catch (e) { toast.error("Échec"); }
+      toast.success(t("live.layout_reset_success"));
+    } catch (e) { toast.error(t("live.layout_reset_error")); }
     finally { setSavingLayout(false); }
   };
 
@@ -748,23 +756,23 @@ export default function LiveView() {
               </button>
               <button onClick={() => { setFocusedId(null); setPreviewEvent(null); }} data-testid="exit-focus"
                       className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[#00E5FF] text-[#00E5FF] hover:bg-[#00E5FF] hover:text-black">
-                <X size={13} /> Fermer le focus
+                <X size={13} /> {t("live.close_focus")}
               </button>
             </>
           )}
           <button onClick={() => setShowOverlay((v) => !v)} data-testid="toggle-ai-overlay"
             className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs border ${showOverlay ? "bg-[#0044FF] text-white border-[#0044FF]" : "border-border hover:bg-secondary"}`}
             title={t("lv.toggle_ai")}>
-            {showOverlay ? <Eye size={13} /> : <EyeOff size={13} />} Overlay IA
+            {showOverlay ? <Eye size={13} /> : <EyeOff size={13} />} {t("live.ai_overlay_label")}
           </button>
-          <button onClick={() => setHd(!hd)} data-testid="hd-toggle" className={`px-2.5 py-1.5 text-xs border ${hd ? "bg-[#00E676] text-black border-[#00E676]" : "border-border"} hover:opacity-80`}>{hd ? "HD" : "SD"}</button>
+          <button onClick={() => setHd(!hd)} data-testid="hd-toggle" className={`px-2.5 py-1.5 text-xs border ${hd ? "bg-[#00E676] text-black border-[#00E676]" : "border-border"} hover:opacity-80`}>{hd ? t("live.hd") : t("live.sd")}</button>
           {!focusedCam && LAYOUTS.map((n) => (
             <button key={n} onClick={() => setLayout(n)} data-testid={`layout-${n}`}
               className={`px-2.5 py-1.5 text-xs mono ${layout === n ? "bg-[#0044FF] text-white" : "border border-border hover:bg-secondary"}`}>{n}</button>
           ))}
           {!focusedCam && pageCount > 1 && (
             <span className="text-[10px] mono text-muted-foreground px-1" data-testid="live-page-indicator">
-              page {page + 1}/{pageCount}
+              {t("live.page_word")} {page + 1}/{pageCount}
             </span>
           )}
           {!focusedCam && canEditLayout && (
@@ -772,22 +780,22 @@ export default function LiveView() {
               <>
                 <button onClick={saveLayout} disabled={savingLayout} data-testid="live-layout-save"
                         className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[#00E676] text-[#00E676] hover:bg-[#00E676]/10">
-                  <Save size={13} /> Enregistrer la disposition
+                  <Save size={13} /> {t("live.save_layout")}
                 </button>
                 <button onClick={resetLayout} disabled={savingLayout} data-testid="live-layout-reset"
-                        className="p-1.5 border border-border hover:bg-secondary" title="Réinitialiser (ordre par défaut)">
+                        className="p-1.5 border border-border hover:bg-secondary" title={t("live.reset_layout_title")}>
                   <RotateCcw size={13} />
                 </button>
                 <button onClick={() => setEditingLayout(false)} data-testid="live-layout-cancel"
-                        className="p-1.5 border border-border hover:bg-secondary" title="Annuler">
+                        className="p-1.5 border border-border hover:bg-secondary" title={t("live.cancel")}>
                   <X size={13} />
                 </button>
               </>
             ) : (
               <button onClick={() => setEditingLayout(true)} data-testid="live-layout-edit"
-                      title="Glisser-déposer les tuiles pour choisir quelles caméras apparaissent ici"
+                      title={t("live.drag_drop_hint")}
                       className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-border hover:bg-secondary">
-                <LayoutGrid size={13} /> Organiser
+                <LayoutGrid size={13} /> {t("live.organize")}
               </button>
             )
           )}
@@ -833,28 +841,28 @@ export default function LiveView() {
                     <button disabled={i - cols < 0}
                             onClick={() => swapPositions(i, i - cols)}
                             className="w-5 h-5 flex items-center justify-center bg-[#0044FF] text-white disabled:opacity-30 disabled:cursor-not-allowed"
-                            title="Déplacer vers le haut" data-testid={`live-move-up-${i}`}>
+                            title={t("live.move_up")} data-testid={`live-move-up-${i}`}>
                       <ArrowUp size={11} />
                     </button>
                     <div />
                     <button disabled={i % cols === 0}
                             onClick={() => swapPositions(i, i - 1)}
                             className="w-5 h-5 flex items-center justify-center bg-[#0044FF] text-white disabled:opacity-30 disabled:cursor-not-allowed"
-                            title="Déplacer vers la gauche" data-testid={`live-move-left-${i}`}>
+                            title={t("live.move_left")} data-testid={`live-move-left-${i}`}>
                       <ArrowLeft size={11} />
                     </button>
                     <div />
                     <button disabled={i % cols === cols - 1 || i + 1 >= layout}
                             onClick={() => swapPositions(i, i + 1)}
                             className="w-5 h-5 flex items-center justify-center bg-[#0044FF] text-white disabled:opacity-30 disabled:cursor-not-allowed"
-                            title="Déplacer vers la droite" data-testid={`live-move-right-${i}`}>
+                            title={t("live.move_right")} data-testid={`live-move-right-${i}`}>
                       <ArrowRight size={11} />
                     </button>
                     <div />
                     <button disabled={i + cols >= layout}
                             onClick={() => swapPositions(i, i + cols)}
                             className="w-5 h-5 flex items-center justify-center bg-[#0044FF] text-white disabled:opacity-30 disabled:cursor-not-allowed"
-                            title="Déplacer vers le bas" data-testid={`live-move-down-${i}`}>
+                            title={t("live.move_down")} data-testid={`live-move-down-${i}`}>
                       <ArrowDown size={11} />
                     </button>
                     <div />
@@ -867,11 +875,11 @@ export default function LiveView() {
         )}
         {!focusedCam && pageCount > 1 && (
           <>
-            <button onClick={() => gotoPage(-1)} data-testid="live-page-prev" title="Page précédente"
+            <button onClick={() => gotoPage(-1)} data-testid="live-page-prev" title={t("live.page_prev")}
                     className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 z-20 p-2 bg-black/60 text-white border border-white/20 hover:bg-black/80">
               <ChevronLeft size={18} />
             </button>
-            <button onClick={() => gotoPage(+1)} data-testid="live-page-next" title="Page suivante"
+            <button onClick={() => gotoPage(+1)} data-testid="live-page-next" title={t("live.page_next")}
                     className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 z-20 p-2 bg-black/60 text-white border border-white/20 hover:bg-black/80">
               <ChevronRight size={18} />
             </button>
@@ -902,7 +910,7 @@ export default function LiveView() {
           <div className="max-w-5xl w-full" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <div>
-                <div className="text-white font-head font-semibold text-lg">{previewEvent.type || previewEvent.label || "Événement"}</div>
+                <div className="text-white font-head font-semibold text-lg">{previewEvent.type || previewEvent.label || t("live.event_fallback")}</div>
                 <div className="text-white/60 text-xs mono">
                   {previewEvent.timestamp ? new Date(previewEvent.timestamp).toLocaleString("fr-FR") : ""}
                   {previewEvent.camera_name ? ` · ${previewEvent.camera_name}` : ""}
@@ -913,7 +921,7 @@ export default function LiveView() {
                 {!previewVideo && (
                   <button
                     onClick={async () => {
-                      if (!previewEvent.id) { setPreviewVideoError("Événement sans identifiant — vidéo indisponible"); return; }
+                      if (!previewEvent.id) { setPreviewVideoError(t("live.event_no_id_error")); return; }
                       setPreviewVideoLoading(true); setPreviewVideoError("");
                       try {
                         const { data } = await api.get(`/events/${previewEvent.id}/recording`);
@@ -924,13 +932,13 @@ export default function LiveView() {
                           offset_sec: Math.max(0, data.offset_sec || 0),
                         });
                       } catch (e) {
-                        setPreviewVideoError(e.response?.status === 404 ? "Aucun enregistrement ne couvre cet événement" : "Échec de la lecture vidéo");
+                        setPreviewVideoError(e.response?.status === 404 ? t("live.no_recording_error") : t("live.video_playback_error"));
                       } finally { setPreviewVideoLoading(false); }
                     }}
                     disabled={previewVideoLoading} data-testid="event-preview-play-video"
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-[#00E5FF] text-[#00E5FF] hover:bg-[#00E5FF]/10">
                     {previewVideoLoading ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-                    Lire la vidéo
+                    {t("live.play_video")}
                   </button>
                 )}
                 <button onClick={() => { setPreviewEvent(null); setPreviewVideo(null); setPreviewVideoError(""); }}

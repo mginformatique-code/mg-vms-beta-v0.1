@@ -49,7 +49,7 @@ export default function Dashboard() {
   const viewerItems = alerts.map((a) => ({
     id: a.id, thumbnail: a.thumbnail || a.plate_crop,
     camera_id: a.camera_id, camera_name: a.camera_name, site_name: a.site_name,
-    timestamp: a.timestamp, plugin: a.plugin || (a.scenario ? `IA · ${a.scenario}` : "Alerte"),
+    timestamp: a.timestamp, plugin: a.plugin || (a.scenario ? `${t("health.ai_label")} · ${a.scenario}` : t("dash.alert_fallback")),
     type: a.type || a.scenario || "alert", label: a.message, plate: a.plate,
   }));
   const viewerIdx = viewerId !== null ? viewerItems.findIndex((x) => x.id === viewerId) : -1;

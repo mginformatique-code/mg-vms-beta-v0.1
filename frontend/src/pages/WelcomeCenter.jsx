@@ -45,28 +45,32 @@ const SEVERITY_COLOR = {
   critical: "#FF3333",
 };
 
-const COMPONENT_META = {
-  gpu:      { icon: Zap,          label: "GPU / CUDA" },
-  mongo:    { icon: Database,     label: "MongoDB" },
-  pipeline: { icon: Layers,       label: "Pipeline IA" },
-  go2rtc:   { icon: Monitor,      label: "go2rtc" },
-  disk:     { icon: HardDrive,    label: "Stockage" },
-  cpu:      { icon: Cpu,          label: "CPU" },
-  ram:      { icon: MemoryStick,  label: "RAM" },
-  cameras:  { icon: CamIcon,      label: "Caméras" },
-  plugins:  { icon: Puzzle,       label: "Plugins" },
-};
+function componentMeta(t) {
+  return {
+    gpu:      { icon: Zap,          label: "GPU / CUDA" },
+    mongo:    { icon: Database,     label: "MongoDB" },
+    pipeline: { icon: Layers,       label: t("welcome.component_pipeline_ia") },
+    go2rtc:   { icon: Monitor,      label: "go2rtc" },
+    disk:     { icon: HardDrive,    label: t("welcome.component_storage") },
+    cpu:      { icon: Cpu,          label: "CPU" },
+    ram:      { icon: MemoryStick,  label: "RAM" },
+    cameras:  { icon: CamIcon,      label: t("welcome.component_cameras") },
+    plugins:  { icon: Puzzle,       label: "Plugins" },
+  };
+}
 
-const CENTERS = [
-  { to: "/live",             label: "Live",             icon: Monitor, desc: "Mosaïque temps réel des caméras" },
-  { to: "/cameras",          label: "Camera Center",    icon: CamIcon, desc: "Découverte, config et probe capacités" },
-  { to: "/pipeline-center",  label: "Pipeline Center",  icon: Layers,  desc: "Graphe IA, FPS et diagnostic par caméra" },
-  { to: "/plugins",          label: "Plugin Center",    icon: Puzzle,  desc: "Marketplace, runtime & logs des plugins" },
-  { to: "/events",           label: "Event Center",     icon: Bell,    desc: "Événements ANPR / IA / alarmes" },
-  { to: "/recordings",       label: "Recording Center", icon: Activity,desc: "Enregistrements et timeline vidéo" },
-  { to: "/dashboard",        label: "Dashboard",        icon: Server,  desc: "KPIs et graphes agrégés" },
-  { to: "/settings",         label: "Settings Center",  icon: Settings,desc: "Utilisateurs, réseau, backups et 2FA" },
-];
+function centers(t) {
+  return [
+    { to: "/live",             label: "Live",             icon: Monitor, desc: t("welcome.center_live_desc") },
+    { to: "/cameras",          label: "Camera Center",    icon: CamIcon, desc: t("welcome.center_camera_desc") },
+    { to: "/pipeline-center",  label: "Pipeline Center",  icon: Layers,  desc: t("welcome.center_pipeline_desc") },
+    { to: "/plugins",          label: "Plugin Center",    icon: Puzzle,  desc: t("welcome.center_plugin_desc") },
+    { to: "/events",           label: "Event Center",     icon: Bell,    desc: t("welcome.center_event_desc") },
+    { to: "/recordings",       label: "Recording Center", icon: Activity,desc: t("welcome.center_recording_desc") },
+    { to: "/dashboard",        label: "Dashboard",        icon: Server,  desc: t("welcome.center_dashboard_desc") },
+    { to: "/settings",         label: "Settings Center",  icon: Settings,desc: t("welcome.center_settings_desc") },
+  ];
+}
 
 // v3.1.2 · Les 4 liens pointaient vers des URLs factices (mg-vms.local
 // n'existe pas, github.com/mg-vms n'est pas le vrai dépôt) — jamais
@@ -159,11 +163,12 @@ function SectionHeader({ icon: Icon, title, right }) {
 // Sections
 // ─────────────────────────────────────────────────────────────────────
 
-function HealthSection({ health, version }) {
+function HealthSection({ health, version, t }) {
   const components = health?.components || {};
+  const compMeta = componentMeta(t);
   const rows = Object.entries(components).map(([k, v]) => ({
     key: k,
-    meta: COMPONENT_META[k] || { icon: Activity, label: k },
+    meta: compMeta[k] || { icon: Activity, label: k },
     status: v.status,
     score: v.score,
   }));
@@ -172,7 +177,7 @@ function HealthSection({ health, version }) {
     <div className="bg-card border border-border p-4 lg:col-span-2" data-testid="welcome-health">
       <SectionHeader
         icon={Activity}
-        title="Santé système"
+        title={t("welcome.health_title")}
         right={
           <div className="text-[10px] mono text-muted-foreground">
             MG-VMS <span className="text-foreground">{version?.installed || "—"}</span>
@@ -207,7 +212,7 @@ function HealthSection({ health, version }) {
 // diffusé reste valable après un rechangement de page.
 const MGVMS_CENTER_DISMISSED_KEY = "mgvms_center_dismissed_messages";
 
-function MgvmsCenterMessagesBanner() {
+function MgvmsCenterMessagesBanner({ t }) {
   const [messages, setMessages] = useState([]);
   const [dismissed, setDismissed] = useState(() => {
     try { return new Set(JSON.parse(localStorage.getItem(MGVMS_CENTER_DISMISSED_KEY) || "[]")); }
@@ -247,7 +252,7 @@ function MgvmsCenterMessagesBanner() {
               </div>
               <button onClick={() => dismiss(m.id)} data-testid="mgvms-center-message-dismiss"
                       className="text-[10px] text-muted-foreground hover:text-foreground uppercase tracking-wider shrink-0">
-                Masquer
+                {t("welcome.hide")}
               </button>
             </div>
           </div>
@@ -266,7 +271,7 @@ function MgvmsCenterMessagesBanner() {
 // (session), pas persistant comme les messages ci-dessus : ce n'est pas
 // une info ponctuelle mais un état qui doit réapparaître à la prochaine
 // visite tant qu'il n'est pas réellement résolu.
-function LicenseCenterWarningBanner() {
+function LicenseCenterWarningBanner({ t }) {
   const [warning, setWarning] = useState(null);
   const [dismissed, setDismissed] = useState(false);
 
@@ -286,41 +291,40 @@ function LicenseCenterWarningBanner() {
         <div className="flex items-start gap-2">
           <AlertTriangle size={14} style={{ color: "#FF3333" }} className="shrink-0 mt-0.5" />
           <div>
-            <div className="font-medium" style={{ color: "#FF3333" }}>Licence non valide selon MG-VMS Center</div>
+            <div className="font-medium" style={{ color: "#FF3333" }}>{t("welcome.license_warning_title")}</div>
             <div className="text-muted-foreground mt-0.5">
-              MG-VMS Center signale que la licence active de ce déploiement n'a pas pu être confirmée valide auprès de mg-vms.com.
-              Aucune fonctionnalité n'est bloquée — vérifiez la licence dans Réglages &gt; Licence dès que possible.
+              {t("welcome.license_warning_body")}
             </div>
           </div>
         </div>
         <button onClick={() => setDismissed(true)} data-testid="license-center-warning-dismiss"
                 className="text-[10px] text-muted-foreground hover:text-foreground uppercase tracking-wider shrink-0">
-          Masquer
+          {t("welcome.hide")}
         </button>
       </div>
     </div>
   );
 }
 
-function VersionSection({ version, hasNewVersion, onOpenChangelog }) {
+function VersionSection({ version, hasNewVersion, onOpenChangelog, t }) {
   return (
     <div className="bg-card border border-border p-4" data-testid="welcome-version">
-      <SectionHeader icon={Package} title="Version" />
+      <SectionHeader icon={Package} title={t("welcome.version_title")} />
       <div className="text-3xl font-head font-black tracking-tight mono mb-1">
         {version?.installed || "—"}
       </div>
       <div className="text-xs text-muted-foreground mb-4">
-        {version?.build_date ? `Build ${version.build_date}` : "Build inconnu"}
+        {version?.build_date ? `${t("welcome.build_label")} ${version.build_date}` : t("welcome.build_unknown")}
       </div>
       {hasNewVersion ? (
         <div className="flex items-center gap-2 border border-[#0044FF]/40 bg-[#0044FF]/10 p-2 mb-2">
           <Sparkles size={14} className="text-[#0044FF]" />
-          <span className="text-xs flex-1">Nouveautés disponibles depuis votre dernière visite.</span>
+          <span className="text-xs flex-1">{t("welcome.new_version_available")}</span>
         </div>
       ) : (
         <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
           <CheckCircle2 size={14} className="text-[#00E676]" />
-          À jour · dernière version connue
+          {t("welcome.up_to_date")}
         </div>
       )}
       <button
@@ -328,24 +332,24 @@ function VersionSection({ version, hasNewVersion, onOpenChangelog }) {
         className="w-full text-xs uppercase tracking-[0.15em] text-[#0044FF] hover:bg-secondary/50 border border-border py-2 transition flex items-center justify-center gap-2"
         data-testid="welcome-version-changelog-btn"
       >
-        Voir le changelog <ArrowRight size={12} />
+        {t("welcome.view_changelog")} <ArrowRight size={12} />
       </button>
     </div>
   );
 }
 
-function AlertsSection({ alerts }) {
+function AlertsSection({ alerts, t }) {
   return (
     <div className="bg-card border border-border p-4" data-testid="welcome-alerts">
       <SectionHeader
         icon={AlertTriangle}
-        title="Alertes système"
+        title={t("welcome.alerts_title")}
         right={<span className="text-xs mono text-muted-foreground">{alerts.length}</span>}
       />
       {alerts.length === 0 ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground py-3">
           <CheckCircle2 size={14} className="text-[#00E676]" />
-          Aucune alerte système en cours.
+          {t("welcome.no_alerts")}
         </div>
       ) : (
         <div className="divide-y divide-border">
@@ -367,13 +371,13 @@ function AlertsSection({ alerts }) {
   );
 }
 
-function StatsSection({ stats }) {
+function StatsSection({ stats, t }) {
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-2" data-testid="welcome-stats">
-      <StatCard testId="welcome-stat-cameras" icon={CamIcon} label="Caméras en ligne" accent="#00E676" value={`${stats?.cameras_online ?? 0}/${stats?.cameras_total ?? 0}`} />
-      <StatCard testId="welcome-stat-events" icon={Zap} label="Événements 24h" accent="#0044FF" value={stats?.events_today ?? 0} />
-      <StatCard testId="welcome-stat-plates" icon={ScanLine} label="Plaques 24h" value={stats?.plates_today ?? 0} />
-      <StatCard testId="welcome-stat-alerts" icon={Bell} label="Alertes actives" accent="#FFB800" value={stats?.alerts_active ?? 0} />
+      <StatCard testId="welcome-stat-cameras" icon={CamIcon} label={t("welcome.stat_cameras_online")} accent="#00E676" value={`${stats?.cameras_online ?? 0}/${stats?.cameras_total ?? 0}`} />
+      <StatCard testId="welcome-stat-events" icon={Zap} label={t("welcome.stat_events_24h")} accent="#0044FF" value={stats?.events_today ?? 0} />
+      <StatCard testId="welcome-stat-plates" icon={ScanLine} label={t("welcome.stat_plates_24h")} value={stats?.plates_today ?? 0} />
+      <StatCard testId="welcome-stat-alerts" icon={Bell} label={t("welcome.stat_alerts_active")} accent="#FFB800" value={stats?.alerts_active ?? 0} />
     </div>
   );
 }
@@ -401,7 +405,7 @@ function TutorialsSection({ tutorials, isAdmin, onCreate, onDelete, t }) {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ title: "", url: "", description: "" });
   const submit = async () => {
-    if (!form.title.trim() || !form.url.trim()) { toast.error("Titre + URL requis"); return; }
+    if (!form.title.trim() || !form.url.trim()) { toast.error(t("welcome.title_url_required")); return; }
     await onCreate(form);
     setForm({ title: "", url: "", description: "" });
     setCreating(false);
@@ -464,7 +468,7 @@ function TutorialsSection({ tutorials, isAdmin, onCreate, onDelete, t }) {
               </div>
               {isAdmin && (
                 <button onClick={() => onDelete(tt.id)}
-                  className="opacity-0 group-hover:opacity-100 text-[#FF3333]" title="Supprimer">
+                  className="opacity-0 group-hover:opacity-100 text-[#FF3333]" title={t("common.delete")}>
                   <Trash2 size={12} />
                 </button>
               )}
@@ -538,7 +542,7 @@ function WidgetsSection({ widgets, isAdmin, onCreate, onDelete, t }) {
               onChange={(e) => setForm({ ...form, body: e.target.value })} />
           ) : (
             <textarea className="w-full bg-background border border-border px-2 py-1.5 text-xs mono min-h-[60px]"
-              placeholder="Label | https://…\nAutre lien | https://…"
+              placeholder={t("welcome.widget_links_placeholder")}
               value={form.items}
               onChange={(e) => setForm({ ...form, items: e.target.value })} />
           )}
@@ -560,7 +564,7 @@ function WidgetsSection({ widgets, isAdmin, onCreate, onDelete, t }) {
                 <span className="text-xs font-medium flex-1 truncate">{w.title}</span>
                 {isAdmin && (
                   <button onClick={() => onDelete(w.id)}
-                    className="opacity-0 group-hover:opacity-100 text-[#FF3333]" title="Supprimer">
+                    className="opacity-0 group-hover:opacity-100 text-[#FF3333]" title={t("common.delete")}>
                     <Trash2 size={11} />
                   </button>
                 )}
@@ -587,14 +591,14 @@ function WidgetsSection({ widgets, isAdmin, onCreate, onDelete, t }) {
   );
 }
 
-function ChangelogSection({ changelog, expanded, onToggle }) {
+function ChangelogSection({ changelog, expanded, onToggle, t }) {
   // v1.0-rc4.5 · Priorité aux nouveautés depuis last_seen_version, sinon
   // fallback sur les 5 dernières entrées (historique récent) pour ne
   // jamais afficher une section vide alors que CHANGELOG.md est peuplé.
   const newEntries = changelog?.new_since_last_seen || [];
   const recentEntries = changelog?.recent || [];
   const entries = newEntries.length > 0 ? newEntries : recentEntries;
-  const sectionTitle = newEntries.length > 0 ? "Nouveautés" : "Historique récent";
+  const sectionTitle = newEntries.length > 0 ? t("welcome.changelog_new") : t("welcome.changelog_recent");
   return (
     <div className="bg-card border border-border p-4" data-testid="welcome-changelog" id="changelog">
       <SectionHeader
@@ -606,12 +610,12 @@ function ChangelogSection({ changelog, expanded, onToggle }) {
             className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
             data-testid="welcome-changelog-toggle"
           >
-            {expanded ? "Réduire" : "Voir tout"} {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            {expanded ? t("welcome.collapse") : t("welcome.view_all")} {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
           </button>
         }
       />
       {entries.length === 0 ? (
-        <div className="text-xs text-muted-foreground py-2">Aucune entrée dans le changelog.</div>
+        <div className="text-xs text-muted-foreground py-2">{t("welcome.no_changelog_entries")}</div>
       ) : (
         <div className="space-y-3">
           {(expanded ? entries : entries.slice(0, 3)).map((e) => (
@@ -634,13 +638,13 @@ function ChangelogSection({ changelog, expanded, onToggle }) {
   );
 }
 
-function NewsSection({ news, isAdmin, onCreate, onDelete }) {
+function NewsSection({ news, isAdmin, onCreate, onDelete, t }) {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ title: "", body: "", severity: "info", pinned: false });
 
   const submit = async () => {
     if (!form.title.trim() || !form.body.trim()) {
-      toast.error("Titre et contenu obligatoires");
+      toast.error(t("welcome.title_content_required"));
       return;
     }
     await onCreate(form);
@@ -652,7 +656,7 @@ function NewsSection({ news, isAdmin, onCreate, onDelete }) {
     <div className="bg-card border border-border p-4" data-testid="welcome-news">
       <SectionHeader
         icon={Newspaper}
-        title="Actualités"
+        title={t("welcome.news_title")}
         right={
           isAdmin && (
             <button
@@ -660,7 +664,7 @@ function NewsSection({ news, isAdmin, onCreate, onDelete }) {
               className="text-xs text-[#0044FF] hover:underline flex items-center gap-1"
               data-testid="welcome-news-create-btn"
             >
-              <PenSquare size={12} /> {creating ? "Annuler" : "Publier"}
+              <PenSquare size={12} /> {creating ? t("common.cancel") : t("welcome.publish")}
             </button>
           )
         }
@@ -669,14 +673,14 @@ function NewsSection({ news, isAdmin, onCreate, onDelete }) {
         <div className="mb-3 border border-border p-2 space-y-2" data-testid="welcome-news-form">
           <input
             className="w-full bg-background border border-border px-2 py-1.5 text-sm"
-            placeholder="Titre"
+            placeholder={t("welcome.news_placeholder_title")}
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}
             data-testid="welcome-news-title"
           />
           <textarea
             className="w-full bg-background border border-border px-2 py-1.5 text-sm min-h-[80px]"
-            placeholder="Contenu"
+            placeholder={t("welcome.news_placeholder_body")}
             value={form.body}
             onChange={(e) => setForm({ ...form, body: e.target.value })}
             data-testid="welcome-news-body"
@@ -688,9 +692,9 @@ function NewsSection({ news, isAdmin, onCreate, onDelete }) {
               onChange={(e) => setForm({ ...form, severity: e.target.value })}
               data-testid="welcome-news-severity"
             >
-              <option value="info">Info</option>
-              <option value="warning">Attention</option>
-              <option value="critical">Critique</option>
+              <option value="info">{t("welcome.severity_info")}</option>
+              <option value="warning">{t("welcome.severity_warning")}</option>
+              <option value="critical">{t("welcome.severity_critical")}</option>
             </select>
             <label className="text-xs flex items-center gap-1 cursor-pointer">
               <input
@@ -699,20 +703,20 @@ function NewsSection({ news, isAdmin, onCreate, onDelete }) {
                 onChange={(e) => setForm({ ...form, pinned: e.target.checked })}
                 data-testid="welcome-news-pinned"
               />
-              Épingler
+              {t("welcome.pin_label")}
             </label>
             <button
               onClick={submit}
               className="ml-auto bg-[#0044FF] text-white px-3 py-1 text-xs uppercase tracking-wider"
               data-testid="welcome-news-submit"
             >
-              Publier
+              {t("welcome.publish")}
             </button>
           </div>
         </div>
       )}
       {news.length === 0 ? (
-        <div className="text-xs text-muted-foreground py-2">Aucune actualité pour le moment.</div>
+        <div className="text-xs text-muted-foreground py-2">{t("welcome.no_news")}</div>
       ) : (
         <div className="divide-y divide-border">
           {news.map((n) => (
@@ -736,7 +740,7 @@ function NewsSection({ news, isAdmin, onCreate, onDelete }) {
                   <button
                     onClick={() => onDelete(n.id)}
                     className="text-muted-foreground hover:text-[#FF3333]"
-                    title="Supprimer"
+                    title={t("common.delete")}
                     data-testid={`welcome-news-delete-${n.id}`}
                   >
                     <Trash2 size={13} />
@@ -751,10 +755,11 @@ function NewsSection({ news, isAdmin, onCreate, onDelete }) {
   );
 }
 
-function CentersSection() {
+function CentersSection({ t }) {
+  const CENTERS = centers(t);
   return (
     <div className="bg-card border border-border p-4" data-testid="welcome-centers">
-      <SectionHeader icon={Layers} title="Accès rapide aux Centers" />
+      <SectionHeader icon={Layers} title={t("welcome.centers_title")} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {CENTERS.map((c) => {
           const Icon = c.icon;
@@ -776,10 +781,10 @@ function CentersSection() {
   );
 }
 
-function DocsSection({ onOpenChangelog }) {
+function DocsSection({ onOpenChangelog, t }) {
   return (
     <div className="bg-card border border-border p-4" data-testid="welcome-docs">
-      <SectionHeader icon={BookOpen} title="Documentation" />
+      <SectionHeader icon={BookOpen} title={t("welcome.docs_title")} />
       <div className="grid grid-cols-2 gap-2">
         {DOC_LINKS.map((d) => {
           const Icon = d.icon;
@@ -813,7 +818,7 @@ function DocsSection({ onOpenChangelog }) {
   );
 }
 
-function PrefsSection({ prefs, currentVersion, onSave }) {
+function PrefsSection({ prefs, currentVersion, onSave, t }) {
   const [local, setLocal] = useState({
     hide_until_next_version: !!prefs?.hide_until_next_version,
     always_show: !!prefs?.always_show,
@@ -838,17 +843,17 @@ function PrefsSection({ prefs, currentVersion, onSave }) {
 
   const markSeen = () => {
     onSave({ last_seen_version: currentVersion });
-    toast.success("Version marquée comme vue");
+    toast.success(t("welcome.version_marked_seen"));
   };
 
   return (
     <div className="bg-card border border-border p-4" data-testid="welcome-prefs">
-      <SectionHeader icon={Settings} title="Préférences d'accueil" />
+      <SectionHeader icon={Settings} title={t("welcome.prefs_title")} />
       <div className="space-y-2">
         {[
-          { key: "hide_until_next_version", label: `Ne plus afficher pour ${currentVersion}` },
-          { key: "always_show", label: "Toujours afficher (par défaut)" },
-          { key: "important_only", label: "Afficher uniquement les nouveautés importantes" },
+          { key: "hide_until_next_version", label: `${t("welcome.pref_hide_until_prefix")} ${currentVersion}` },
+          { key: "always_show", label: t("welcome.pref_always_show") },
+          { key: "important_only", label: t("welcome.pref_important_only") },
         ].map((p) => (
           <label
             key={p.key}
@@ -869,11 +874,11 @@ function PrefsSection({ prefs, currentVersion, onSave }) {
           className="w-full mt-2 border border-border px-3 py-1.5 text-xs hover:bg-secondary/40 flex items-center justify-center gap-2"
           data-testid="welcome-pref-mark-seen"
         >
-          <CheckCircle2 size={13} /> Marquer comme lu
+          <CheckCircle2 size={13} /> {t("welcome.mark_read")}
         </button>
       </div>
       <div className="mt-3 text-[10px] text-muted-foreground">
-        Version vue actuellement : <span className="mono text-foreground">{prefs?.last_seen_version || "—"}</span>
+        {t("welcome.current_seen_version")} <span className="mono text-foreground">{prefs?.last_seen_version || "—"}</span>
       </div>
     </div>
   );
@@ -916,7 +921,7 @@ export default function WelcomeCenter() {
       const r = await api.put("/welcome/preferences", patch);
       setData((d) => (d ? { ...d, prefs: r.data } : d));
     } catch (e) {
-      toast.error("Échec sauvegarde préférences");
+      toast.error(t("welcome.save_prefs_failed"));
     }
   };
 
@@ -970,16 +975,16 @@ export default function WelcomeCenter() {
 
   const greeting = useMemo(() => {
     const h = new Date().getHours();
-    if (h < 6) return "Bonne nuit";
-    if (h < 12) return "Bonjour";
-    if (h < 18) return "Bon après-midi";
-    return "Bonsoir";
-  }, []);
+    if (h < 6) return t("welcome.greeting_night");
+    if (h < 12) return t("welcome.greeting_morning");
+    if (h < 18) return t("welcome.greeting_afternoon");
+    return t("welcome.greeting_evening");
+  }, [t]);
 
   if (loading || !data) {
     return (
       <div className="p-8 text-muted-foreground" data-testid="welcome-loading">
-        Chargement du Welcome Center...
+        {t("welcome.loading")}
       </div>
     );
   }
@@ -1000,7 +1005,7 @@ export default function WelcomeCenter() {
           </h1>
         </div>
         <div className="text-right hidden sm:block">
-          <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">Score système</div>
+          <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">{t("welcome.system_score")}</div>
           <div
             className="font-head font-black text-3xl mono"
             style={{
@@ -1014,16 +1019,17 @@ export default function WelcomeCenter() {
         </div>
       </div>
 
-      <MgvmsCenterMessagesBanner />
-      <LicenseCenterWarningBanner />
+      <MgvmsCenterMessagesBanner t={t} />
+      <LicenseCenterWarningBanner t={t} />
 
       {/* Ligne 1 : Health (2 cols) + Version */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">
-        <HealthSection health={health} version={version} />
+        <HealthSection health={health} version={version} t={t} />
         <VersionSection
           version={version}
           hasNewVersion={changelog?.has_new_version}
           onOpenChangelog={openChangelog}
+          t={t}
         />
       </div>
 
@@ -1034,6 +1040,7 @@ export default function WelcomeCenter() {
           isAdmin={isAdmin}
           onCreate={createNews}
           onDelete={deleteNews}
+          t={t}
         />
         <TipsSection tips={tips || []} t={t} />
         <TutorialsSection tutorials={tutorials} isAdmin={isAdmin} t={t}
@@ -1045,7 +1052,7 @@ export default function WelcomeCenter() {
         onCreate={createWidget} onDelete={deleteWidget} />
 
       {/* Ligne 4 : Centers */}
-      <CentersSection />
+      <CentersSection t={t} />
 
       {/* Ligne 5 : Changelog + Docs + Prefs */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">
@@ -1054,14 +1061,16 @@ export default function WelcomeCenter() {
             changelog={changelog}
             expanded={changelogExpanded}
             onToggle={() => setChangelogExpanded((v) => !v)}
+            t={t}
           />
         </div>
         <div className="space-y-2">
-          <DocsSection onOpenChangelog={openChangelog} />
+          <DocsSection onOpenChangelog={openChangelog} t={t} />
           <PrefsSection
             prefs={prefs}
             currentVersion={version?.installed}
             onSave={savePrefs}
+            t={t}
           />
         </div>
       </div>

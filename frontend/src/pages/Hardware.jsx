@@ -9,7 +9,7 @@ import { toast } from "sonner";
 
 const OPT_LABEL = {
   cpu: "CPU", gpu: "GPU", auto: "Auto", nvdec: "NVIDIA NVDEC", nvenc: "NVIDIA NVENC",
-  quicksync: "Intel QuickSync", amf: "AMD AMF", gpu_priority: "Priorité GPU", cpu_priority: "Priorité CPU",
+  quicksync: "Intel QuickSync", amf: "AMD AMF",
   gpu0: "GPU 0", gpu1: "GPU 1", gpu2: "GPU 2", coral: "Google Coral",
 };
 const VENDOR_COLOR = { NVIDIA: "#76B900", Intel: "#0071C5", AMD: "#ED1C24", Google: "#FBBC05" };
@@ -58,12 +58,18 @@ export default function Hardware() {
 
   const setAssign = (fn, val) => setCfg((c) => ({ ...c, assignments: { ...c.assignments, [fn]: val } }));
 
+  const optLabel = (o) => {
+    if (o === "gpu_priority") return t("hw.opt_gpu_priority");
+    if (o === "cpu_priority") return t("hw.opt_cpu_priority");
+    return OPT_LABEL[o] || o;
+  };
+
   const saveConfig = async () => {
     setSaving(true);
     try {
       await api.put("/hardware/config", { assignments: cfg.assignments });
       toast.success(t("hw.saved")); loadCfg();
-    } catch (e) { toast.error("Échec"); } finally { setSaving(false); }
+    } catch (e) { toast.error(t("hw.save_failed")); } finally { setSaving(false); }
   };
 
   const TABS = [["hardware", t("hw.tab.hardware")], ["resources", t("hw.tab.resources")], ["monitor", t("hw.tab.monitor")]];
@@ -75,7 +81,7 @@ export default function Hardware() {
           <button key={k} onClick={() => setTab(k)} data-testid={`hw-tab-${k}`}
             className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${tab === k ? "border-[#0044FF] text-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{lbl}</button>
         ))}
-        {info?.gpus?.length === 0 && <span className="ml-auto text-[10px] uppercase tracking-wider text-muted-foreground">Aucun GPU détecté</span>}
+        {info?.gpus?.length === 0 && <span className="ml-auto text-[10px] uppercase tracking-wider text-muted-foreground">{t("hw.no_gpu_detected")}</span>}
       </div>
 
       {/* MATÉRIEL */}
@@ -90,7 +96,7 @@ export default function Hardware() {
             <div className="border border-border bg-card p-4">
               <div className="flex items-center gap-2 mb-2"><MemoryStick size={18} className="text-[#0044FF]" /><span className="font-head font-bold">{t("hw.ram")}</span></div>
               <div className="text-sm mono">{(info.ram.total_mb / 1024).toFixed(1)} GB</div>
-              <div className="text-xs text-muted-foreground mt-1">Disponible: <span className="mono">{(info.ram.available_mb / 1024).toFixed(1)} GB</span></div>
+              <div className="text-xs text-muted-foreground mt-1">{t("hw.ram_available")}: <span className="mono">{(info.ram.available_mb / 1024).toFixed(1)} GB</span></div>
             </div>
           </div>
 
@@ -131,7 +137,7 @@ export default function Hardware() {
                 <span className="text-sm font-medium">{cfg.labels[fn]}</span>
                 <select value={cfg.assignments[fn]} onChange={(e) => setAssign(fn, e.target.value)} disabled={!can("admin")}
                   data-testid={`hw-assign-${fn}`} className="px-3 py-1.5 bg-background border border-input text-sm outline-none min-w-[180px] disabled:opacity-60">
-                  {cfg.options[fn].map((o) => <option key={o} value={o}>{OPT_LABEL[o] || o}</option>)}
+                  {cfg.options[fn].map((o) => <option key={o} value={o}>{optLabel(o)}</option>)}
                 </select>
               </div>
             ))}
@@ -183,7 +189,7 @@ export default function Hardware() {
                       {g.vram_mb > 0 && <Bar value={Math.round((g.vram_used_mb / g.vram_mb) * 100)} label={`VRAM ${(g.vram_used_mb / 1024).toFixed(1)}/${(g.vram_mb / 1024).toFixed(0)}GB`} unit="%" />}
                       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                         <span className="flex items-center gap-1"><Zap size={12} /> {g.power_w} W</span>
-                        <span>Fan {g.fan_pct}%</span>
+                        <span>{t("hw.fan")} {g.fan_pct}%</span>
                       </div>
                     </div>
                   </div>

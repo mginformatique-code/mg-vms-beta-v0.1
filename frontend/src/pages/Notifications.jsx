@@ -58,7 +58,7 @@ export default function Notifications() {
     </div>
   );
 
-  const placeholder = (has) => (has ? "•••••••• (déjà enregistré, laisser vide pour conserver)" : "");
+  const placeholder = (has) => (has ? t("notif.pwd_placeholder") : "");
 
   return (
     <div className="p-4 max-w-2xl">
@@ -67,7 +67,7 @@ export default function Notifications() {
 
       <Tabs defaultValue="smtp">
         <TabsList className="rounded-none bg-card border border-border">
-          <TabsTrigger value="smtp" className="rounded-none" data-testid="tab-smtp"><Mail size={14} className="mr-1.5" /> Email</TabsTrigger>
+          <TabsTrigger value="smtp" className="rounded-none" data-testid="tab-smtp"><Mail size={14} className="mr-1.5" /> {t("common.email")}</TabsTrigger>
           <TabsTrigger value="discord" className="rounded-none" data-testid="tab-discord"><MessageSquare size={14} className="mr-1.5" /> Discord</TabsTrigger>
           <TabsTrigger value="telegram" className="rounded-none" data-testid="tab-telegram"><Send size={14} className="mr-1.5" /> Telegram</TabsTrigger>
         </TabsList>
@@ -76,13 +76,13 @@ export default function Notifications() {
           <div className="bg-card border border-border p-5">
             <ChannelHead ch="smtp" icon={Mail} name="SMTP / Email" />
             <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2"><Lbl>Serveur SMTP (host)</Lbl><Inp value={cfg.smtp.host} disabled={!isAdmin} onChange={(e) => upd("smtp", "host", e.target.value)} placeholder="smtp.gmail.com" data-testid="smtp-host" /></div>
+              <div className="col-span-2"><Lbl>{t("notif.smtp_host_label")}</Lbl><Inp value={cfg.smtp.host} disabled={!isAdmin} onChange={(e) => upd("smtp", "host", e.target.value)} placeholder="smtp.gmail.com" data-testid="smtp-host" /></div>
               <div><Lbl>Port</Lbl><Inp type="number" value={cfg.smtp.port} disabled={!isAdmin} onChange={(e) => upd("smtp", "port", e.target.value)} data-testid="smtp-port" /></div>
               <label className="flex items-end gap-2 pb-2 text-sm"><Switch checked={cfg.smtp.tls} disabled={!isAdmin} onCheckedChange={(v) => upd("smtp", "tls", v)} /> TLS</label>
               <div><Lbl>{t("common.email")} (login)</Lbl><Inp value={cfg.smtp.username} disabled={!isAdmin} onChange={(e) => upd("smtp", "username", e.target.value)} data-testid="smtp-username" /></div>
               <div><Lbl>{t("common.password")}</Lbl><Inp type="password" value={cfg.smtp.password} disabled={!isAdmin} onChange={(e) => upd("smtp", "password", e.target.value)} placeholder={placeholder(cfg.smtp.has_password)} data-testid="smtp-password" /></div>
-              <div><Lbl>Expéditeur (from)</Lbl><Inp value={cfg.smtp.from_email} disabled={!isAdmin} onChange={(e) => upd("smtp", "from_email", e.target.value)} data-testid="smtp-from" /></div>
-              <div><Lbl>Destinataire (to)</Lbl><Inp value={cfg.smtp.to_email} disabled={!isAdmin} onChange={(e) => upd("smtp", "to_email", e.target.value)} data-testid="smtp-to" /></div>
+              <div><Lbl>{t("notif.smtp_from_label")}</Lbl><Inp value={cfg.smtp.from_email} disabled={!isAdmin} onChange={(e) => upd("smtp", "from_email", e.target.value)} data-testid="smtp-from" /></div>
+              <div><Lbl>{t("notif.smtp_to_label")}</Lbl><Inp value={cfg.smtp.to_email} disabled={!isAdmin} onChange={(e) => upd("smtp", "to_email", e.target.value)} data-testid="smtp-to" /></div>
             </div>
           </div>
         </TabsContent>
@@ -91,8 +91,8 @@ export default function Notifications() {
           <div className="bg-card border border-border p-5">
             <ChannelHead ch="discord" icon={MessageSquare} name="Discord" />
             <Lbl>Webhook URL</Lbl>
-            <Inp type="password" value={cfg.discord.webhook_url} disabled={!isAdmin} onChange={(e) => upd("discord", "webhook_url", e.target.value)} placeholder={cfg.discord.has_webhook_url ? "•••••••• (déjà enregistré)" : "https://discord.com/api/webhooks/..."} data-testid="discord-webhook" />
-            <p className="text-[11px] text-muted-foreground mt-2">Discord → Paramètres du salon → Intégrations → Webhooks → Nouveau webhook → Copier l'URL.</p>
+            <Inp type="password" value={cfg.discord.webhook_url} disabled={!isAdmin} onChange={(e) => upd("discord", "webhook_url", e.target.value)} placeholder={cfg.discord.has_webhook_url ? t("notif.saved_placeholder") : "https://discord.com/api/webhooks/..."} data-testid="discord-webhook" />
+            <p className="text-[11px] text-muted-foreground mt-2">{t("notif.discord_help")}</p>
           </div>
         </TabsContent>
 
@@ -100,10 +100,10 @@ export default function Notifications() {
           <div className="bg-card border border-border p-5">
             <ChannelHead ch="telegram" icon={Send} name="Telegram" />
             <div className="space-y-3">
-              <div><Lbl>Bot Token</Lbl><Inp type="password" value={cfg.telegram.bot_token} disabled={!isAdmin} onChange={(e) => upd("telegram", "bot_token", e.target.value)} placeholder={cfg.telegram.has_bot_token ? "•••••••• (déjà enregistré)" : "123456:ABC-DEF..."} data-testid="telegram-token" /></div>
+              <div><Lbl>Bot Token</Lbl><Inp type="password" value={cfg.telegram.bot_token} disabled={!isAdmin} onChange={(e) => upd("telegram", "bot_token", e.target.value)} placeholder={cfg.telegram.has_bot_token ? t("notif.saved_placeholder") : "123456:ABC-DEF..."} data-testid="telegram-token" /></div>
               <div><Lbl>Chat ID</Lbl><Inp value={cfg.telegram.chat_id} disabled={!isAdmin} onChange={(e) => upd("telegram", "chat_id", e.target.value)} placeholder="-1001234567890" data-testid="telegram-chatid" /></div>
             </div>
-            <p className="text-[11px] text-muted-foreground mt-2">Créez un bot via @BotFather, puis récupérez le chat_id (le bot doit être membre du salon).</p>
+            <p className="text-[11px] text-muted-foreground mt-2">{t("notif.telegram_help")}</p>
           </div>
         </TabsContent>
       </Tabs>

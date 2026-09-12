@@ -27,29 +27,29 @@ export default function UsersPage() {
   useEffect(() => { load(); api.get("/sites").then((r) => setSites(r.data)).catch(() => {}); }, []);
 
   const submit = async () => {
-    if (!form.email || !form.password || !form.name) return toast.error("Tous les champs requis");
+    if (!form.email || !form.password || !form.name) return toast.error(t("users.all_fields_required"));
     setSaving(true);
-    try { await api.post("/users", form); toast.success("Utilisateur créé"); setOpen(false); setForm({ email: "", password: "", name: "", role: "client" }); load(); }
+    try { await api.post("/users", form); toast.success(t("users.created")); setOpen(false); setForm({ email: "", password: "", name: "", role: "client" }); load(); }
     catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); } finally { setSaving(false); }
   };
-  const changeRole = async (u, role) => { await api.put(`/users/${u.id}`, { role }); toast.success("Rôle modifié"); load(); };
+  const changeRole = async (u, role) => { await api.put(`/users/${u.id}`, { role }); toast.success(t("users.role_changed")); load(); };
   const toggleActive = async (u) => { await api.put(`/users/${u.id}`, { active: !u.active }); load(); };
-  const del = async (u) => { if (!window.confirm(`Supprimer ${u.email} ?`)) return; try { await api.delete(`/users/${u.id}`); toast.success("Supprimé"); load(); } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); } };
+  const del = async (u) => { if (!window.confirm(`${t("common.delete")} ${u.email} ?`)) return; try { await api.delete(`/users/${u.id}`); toast.success(t("users.deleted")); load(); } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); } };
   const unlockUser = async (u) => {
-    if (!window.confirm(`Déverrouiller le compte ${u.email} ?\n\nLe compteur d'échecs sera remis à zéro.`)) return;
+    if (!window.confirm(`${t("users.confirm_unlock_prefix")} ${u.email} ?\n\n${t("users.confirm_unlock_suffix")}`)) return;
     try {
       await api.post(`/users/${u.id}/unlock`);
-      toast.success(`${u.email} déverrouillé`);
+      toast.success(`${u.email} ${t("users.unlocked_suffix")}`);
       load();
     } catch (e) {
       toast.error(formatApiErrorDetail(e.response?.data?.detail));
     }
   };
   const disableMfa = async (u) => {
-    if (!window.confirm(`Désactiver la MFA de ${u.email} ?\n\nL'utilisateur pourra se reconnecter avec son seul mot de passe et devra refaire un enrollement MFA depuis son compte.`)) return;
+    if (!window.confirm(`${t("users.confirm_disable_mfa_prefix")} ${u.email} ?\n\n${t("users.confirm_disable_mfa_suffix")}`)) return;
     try {
       await api.delete(`/users/${u.id}/mfa`);
-      toast.success(`MFA désactivée pour ${u.email}`);
+      toast.success(`${t("users.mfa_disabled_prefix")} ${u.email}`);
       load();
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
@@ -64,20 +64,20 @@ export default function UsersPage() {
     setShowEditPwd(false);
   };
   const saveEdit = async () => {
-    if (!editForm.name.trim() || !editForm.email.trim()) return toast.error("Nom et email requis");
+    if (!editForm.name.trim() || !editForm.email.trim()) return toast.error(t("users.name_email_required"));
     // Construit le payload : ne pas envoyer les champs inchangés
     const payload = {};
     if (editForm.name.trim() !== editUser.name) payload.name = editForm.name.trim();
     if (editForm.email.trim().toLowerCase() !== editUser.email) payload.email = editForm.email.trim();
     if (editForm.password) {
-      if (editForm.password.length < 8) return toast.error("Mot de passe : minimum 8 caractères");
+      if (editForm.password.length < 8) return toast.error(t("users.password_min_length"));
       payload.password = editForm.password;
     }
-    if (Object.keys(payload).length === 0) { setEditUser(null); return toast.info("Aucune modification"); }
+    if (Object.keys(payload).length === 0) { setEditUser(null); return toast.info(t("users.no_changes")); }
     setEditSaving(true);
     try {
       await api.put(`/users/${editUser.id}`, payload);
-      toast.success("Utilisateur modifié");
+      toast.success(t("users.updated"));
       setEditUser(null);
       load();
     } catch (e) {
@@ -119,7 +119,7 @@ export default function UsersPage() {
                 <td className="px-3 py-2">
                   {u.twofa_enabled ? (
                     <span className="inline-flex items-center gap-1 text-[10px] mono uppercase tracking-wider px-1.5 py-0.5 bg-[#00E676]/15 text-[#00E676] border border-[#00E676]/40" data-testid={`user-mfa-${u.id}`}>
-                      <ShieldCheck size={10} /> Activée
+                      <ShieldCheck size={10} /> {t("users.mfa_enabled")}
                     </span>
                   ) : (
                     <span className="text-[10px] mono uppercase tracking-wider text-muted-foreground" data-testid={`user-mfa-${u.id}`}>—</span>
@@ -129,24 +129,24 @@ export default function UsersPage() {
                   {u.locked ? (
                     <span
                       className="inline-flex items-center gap-1 text-[10px] mono uppercase tracking-wider px-1.5 py-0.5 bg-[#FF3333]/15 text-[#FF3333] border border-[#FF3333]/40"
-                      title={`Verrouillé le ${u.locked_at || "?"} · ${u.failed_login_count || 0} échecs · IP ${u.last_failed_login_ip || "?"}`}
+                      title={`${t("users.locked_on")} ${u.locked_at || "?"} · ${u.failed_login_count || 0} ${t("users.failures")} · IP ${u.last_failed_login_ip || "?"}`}
                       data-testid={`user-locked-${u.id}`}
                     >
-                      <Lock size={10} /> Verrouillé
+                      <Lock size={10} /> {t("users.locked")}
                     </span>
                   ) : (
-                    <button onClick={() => toggleActive(u)} disabled={u.id === me.id} className={`text-xs px-2 py-0.5 border ${u.active ? "mg-online border-[#00E676]/40" : "mg-offline border-[#FF3333]/40"}`}>{u.active ? t("common.active") : "Inactif"}</button>
+                    <button onClick={() => toggleActive(u)} disabled={u.id === me.id} className={`text-xs px-2 py-0.5 border ${u.active ? "mg-online border-[#00E676]/40" : "mg-offline border-[#FF3333]/40"}`}>{u.active ? t("common.active") : t("users.inactive")}</button>
                   )}
                 </td>
                 <td className="px-3 py-2">
                   <div className="flex items-center justify-end gap-1">
-                    <button onClick={() => openEdit(u)} data-testid="edit-user-btn" title="Modifier" className="p-1.5 hover:bg-secondary text-[#00E5FF]"><Pencil size={15} /></button>
+                    <button onClick={() => openEdit(u)} data-testid="edit-user-btn" title={t("common.edit")} className="p-1.5 hover:bg-secondary text-[#00E5FF]"><Pencil size={15} /></button>
                     {!["admin", "technician"].includes(u.role) && <button onClick={() => openSites(u)} data-testid="user-sites-btn" title={t("users.sites")} className="p-1.5 hover:bg-secondary"><Building2 size={15} /></button>}
                     {u.locked && !u.is_main_admin && (
                       <button
                         onClick={() => unlockUser(u)}
                         data-testid={`user-unlock-${u.id}`}
-                        title={`Déverrouiller (${u.failed_login_count || 0} échecs)`}
+                        title={`${t("users.unlock_label")} (${u.failed_login_count || 0} ${t("users.failures")})`}
                         className="p-1.5 hover:bg-secondary text-[#00E676]"
                       >
                         <Unlock size={15} />
@@ -154,7 +154,7 @@ export default function UsersPage() {
                     )}
                     {u.locked && u.is_main_admin && (
                       <span
-                        title="Admin principal — déverrouillage CLI uniquement : mgvms-admin unlock-user <email>"
+                        title={t("users.main_admin_cli_only")}
                         className="p-1.5 text-muted-foreground cursor-help"
                         data-testid={`user-main-admin-cli-only-${u.id}`}
                       >
@@ -162,7 +162,7 @@ export default function UsersPage() {
                       </span>
                     )}
                     {u.twofa_enabled && u.id !== me.id && (
-                      <button onClick={() => disableMfa(u)} data-testid={`user-disable-mfa-${u.id}`} title="Désactiver la MFA (perte du téléphone)" className="p-1.5 hover:bg-secondary text-[#FFB800]">
+                      <button onClick={() => disableMfa(u)} data-testid={`user-disable-mfa-${u.id}`} title={t("users.disable_mfa_title")} className="p-1.5 hover:bg-secondary text-[#FFB800]">
                         <ShieldOff size={15} />
                       </button>
                     )}
@@ -215,45 +215,45 @@ export default function UsersPage() {
         <DialogContent className="rounded-none border-border" data-testid="user-edit-dialog">
           <DialogHeader>
             <DialogTitle className="font-head flex items-center gap-2">
-              <Pencil size={18} className="text-[#00E5FF]" /> Modifier — {editUser?.name}
+              <Pencil size={18} className="text-[#00E5FF]" /> {t("common.edit")} — {editUser?.name}
             </DialogTitle>
           </DialogHeader>
           <p className="text-xs text-muted-foreground mb-2">
-            Modifiez le nom, l&apos;email ou le mot de passe. Laissez le champ mot de passe vide pour le conserver.
+            {t("users.edit_hint")}
           </p>
           <div className="space-y-3">
             <div>
-              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Nom complet</label>
+              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("users.full_name")}</label>
               <input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
                 data-testid="user-edit-name"
                 className="w-full px-3 py-2 bg-card border border-input outline-none focus:border-[#00E5FF] text-sm" />
             </div>
             <div>
-              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Email</label>
+              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("common.email")}</label>
               <input type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
                 data-testid="user-edit-email"
                 className="w-full px-3 py-2 bg-card border border-input outline-none focus:border-[#00E5FF] text-sm mono" />
             </div>
             <div>
               <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                Nouveau mot de passe <span className="text-muted-foreground/60">(optionnel · min. 8 caractères)</span>
+                {t("users.new_password")} <span className="text-muted-foreground/60">{t("users.new_password_hint")}</span>
               </label>
               <div className="relative">
                 <input type={showEditPwd ? "text" : "password"} value={editForm.password}
                   onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
-                  placeholder="Laisser vide pour ne pas changer"
+                  placeholder={t("users.leave_blank_password")}
                   data-testid="user-edit-password" autoComplete="new-password"
                   className="w-full px-3 py-2 pr-10 bg-card border border-input outline-none focus:border-[#00E5FF] text-sm" />
                 <button type="button" onClick={() => setShowEditPwd((v) => !v)}
                   className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
-                  title={showEditPwd ? "Masquer" : "Afficher"} tabIndex={-1}>
+                  title={showEditPwd ? t("users.hide_password") : t("users.show_password")} tabIndex={-1}>
                   {showEditPwd ? <EyeOff size={15} /> : <Eye size={15} />}
                 </button>
               </div>
             </div>
             {editUser?.id === me?.id && (
               <div className="text-[11px] p-2 border border-[#FFB800]/40 bg-[#FFB800]/10 text-[#FFB800]">
-                Vous modifiez votre propre compte. Si vous changez l&apos;email ou le mot de passe, vous devrez vous reconnecter.
+                {t("users.self_edit_warning")}
               </div>
             )}
           </div>
