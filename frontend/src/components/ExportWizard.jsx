@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { toast } from "sonner";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { ChevronLeft, ChevronRight, Loader2, Cctv, Film, Monitor, PlaySquare, Check } from "lucide-react";
+import { useApp } from "@/context/AppContext";
 
 /**
  * v3.74 · Assistant d'export vidéo multi-étapes (gros chantier "Export
@@ -15,16 +16,16 @@ import { ChevronLeft, ChevronRight, Loader2, Cctv, Film, Monitor, PlaySquare, Ch
  * seul ce qui suit "cliquer Exporter" est ici.
  */
 
-const STEPS = ["Caméras & période", "Format", "Système cible", "Lecteur"];
-
 const OS_OPTIONS = [
-  { id: "any", label: "Tous systèmes" },
+  { id: "any", labelKey: "expwiz.os_any" },
   { id: "windows", label: "Windows" },
   { id: "macos", label: "macOS" },
   { id: "linux", label: "Linux" },
 ];
 
 export default function ExportWizard({ open, onClose, cams, primaryCameraId, start, end, durationLabel, onExported }) {
+  const { t } = useApp();
+  const STEPS = [t("expwiz.step_cameras_period"), t("expwiz.step_format"), t("expwiz.step_target_os"), t("expwiz.step_player")];
   const [step, setStep] = useState(0);
   const [selectedCams, setSelectedCams] = useState(() => new Set(primaryCameraId ? [primaryCameraId] : []));
   const [format, setFormat] = useState("zip");
@@ -58,11 +59,11 @@ export default function ExportWizard({ open, onClose, cams, primaryCameraId, sta
         format: multi ? "zip" : format, codec, target_os: targetOs,
         include_player: format === "zip" ? includePlayer : false,
       });
-      toast.success(data.message || "Export créé");
+      toast.success(data.message || t("expwiz.export_created"));
       onExported?.(data);
       close();
     } catch (e) {
-      toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec de la création de l'export");
+      toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("expwiz.export_failed"));
     } finally { setCreating(false); }
   };
 
@@ -70,7 +71,7 @@ export default function ExportWizard({ open, onClose, cams, primaryCameraId, sta
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
       <DialogContent className="rounded-none border-border max-w-lg" data-testid="export-wizard">
         <DialogHeader>
-          <DialogTitle className="font-head flex items-center gap-2"><Film size={16} /> Export vidéo — étape {step + 1}/4</DialogTitle>
+          <DialogTitle className="font-head flex items-center gap-2"><Film size={16} /> {t("expwiz.dialog_title")} — {t("expwiz.step_label")} {step + 1}/4</DialogTitle>
         </DialogHeader>
 
         <div className="flex items-center gap-1 mb-3">
@@ -91,7 +92,7 @@ export default function ExportWizard({ open, onClose, cams, primaryCameraId, sta
               </label>
             ))}
             {selectedCams.size > 1 && (
-              <p className="text-[11px] text-[#FFB800] pt-1">Plusieurs caméras sélectionnées — le format sera ZIP (un fichier vidéo par caméra).</p>
+              <p className="text-[11px] text-[#FFB800] pt-1">{t("expwiz.multi_cam_notice")}</p>
             )}
           </div>
         )}
@@ -100,9 +101,9 @@ export default function ExportWizard({ open, onClose, cams, primaryCameraId, sta
           <div className="space-y-3">
             {!multi && (
               <div>
-                <label className="text-xs uppercase tracking-wider text-muted-foreground">Format</label>
+                <label className="text-xs uppercase tracking-wider text-muted-foreground">{t("expwiz.format_label")}</label>
                 <div className="flex gap-2 mt-1">
-                  {[["zip", "ZIP (dossier structuré)"], ["mp4", "MP4 (fichier unique)"]].map(([v, l]) => (
+                  {[["zip", t("expwiz.format_zip")], ["mp4", t("expwiz.format_mp4")]].map(([v, l]) => (
                     <button key={v} onClick={() => setFormat(v)}
                       className={`flex-1 px-3 py-2 text-xs border ${format === v ? "border-[#0044FF] bg-[#0044FF]/10 text-[#0044FF]" : "border-border"}`}>
                       {l}
@@ -112,28 +113,28 @@ export default function ExportWizard({ open, onClose, cams, primaryCameraId, sta
               </div>
             )}
             <div>
-              <label className="text-xs uppercase tracking-wider text-muted-foreground">Codec vidéo</label>
+              <label className="text-xs uppercase tracking-wider text-muted-foreground">{t("expwiz.codec_label")}</label>
               <div className="flex gap-2 mt-1">
-                {[["h264", "H.264 (par défaut, rapide)"], ["h265", "H.265 / HEVC (plus léger, réencodage)"]].map(([v, l]) => (
+                {[["h264", t("expwiz.codec_h264")], ["h265", t("expwiz.codec_h265")]].map(([v, l]) => (
                   <button key={v} onClick={() => setCodec(v)}
                     className={`flex-1 px-3 py-2 text-xs border ${codec === v ? "border-[#0044FF] bg-[#0044FF]/10 text-[#0044FF]" : "border-border"}`}>
                     {l}
                   </button>
                 ))}
               </div>
-              {codec === "h265" && <p className="text-[11px] text-muted-foreground mt-1">Le réencodage HEVC prend plus de temps que la copie H.264 — la création de l'export sera plus longue.</p>}
+              {codec === "h265" && <p className="text-[11px] text-muted-foreground mt-1">{t("expwiz.h265_notice")}</p>}
             </div>
           </div>
         )}
 
         {step === 2 && (
           <div className="space-y-2" data-testid="export-wizard-os">
-            <label className="text-xs uppercase tracking-wider text-muted-foreground">Système cible (indicatif — adapte le README)</label>
+            <label className="text-xs uppercase tracking-wider text-muted-foreground">{t("expwiz.target_os_label")}</label>
             <div className="grid grid-cols-2 gap-2 mt-1">
               {OS_OPTIONS.map((o) => (
                 <button key={o.id} onClick={() => setTargetOs(o.id)}
                   className={`flex items-center gap-2 px-3 py-2 text-xs border ${targetOs === o.id ? "border-[#0044FF] bg-[#0044FF]/10 text-[#0044FF]" : "border-border"}`}>
-                  <Monitor size={13} /> {o.label}
+                  <Monitor size={13} /> {o.labelKey ? t(o.labelKey) : o.label}
                 </button>
               ))}
             </div>
@@ -148,18 +149,18 @@ export default function ExportWizard({ open, onClose, cams, primaryCameraId, sta
                   <input type="checkbox" checked={includePlayer} onChange={(e) => setIncludePlayer(e.target.checked)} />
                   <PlaySquare size={16} className="text-muted-foreground" />
                   <div>
-                    <div className="text-sm font-medium">Inclure MG-VMS Player</div>
-                    <div className="text-[11px] text-muted-foreground">Lecteur HTML autonome (dossier PLAYER/) — s'ouvre en double-clic dans un navigateur, sans installation.</div>
+                    <div className="text-sm font-medium">{t("expwiz.include_player")}</div>
+                    <div className="text-[11px] text-muted-foreground">{t("expwiz.include_player_desc")}</div>
                   </div>
                 </label>
               </>
             ) : (
-              <p className="text-xs text-muted-foreground">Le lecteur intégré n'est disponible qu'avec le format ZIP.</p>
+              <p className="text-xs text-muted-foreground">{t("expwiz.player_zip_only")}</p>
             )}
             <div className="border border-border p-3 text-xs space-y-1">
-              <div className="flex items-center gap-2"><Check size={13} className="text-[#00E676]" /> {selectedCams.size} caméra(s)</div>
+              <div className="flex items-center gap-2"><Check size={13} className="text-[#00E676]" /> {selectedCams.size} {t("expwiz.summary_cameras")}</div>
               <div className="flex items-center gap-2"><Check size={13} className="text-[#00E676]" /> {multi ? "ZIP" : format.toUpperCase()} · {codec.toUpperCase()}</div>
-              <div className="flex items-center gap-2"><Check size={13} className="text-[#00E676]" /> {OS_OPTIONS.find((o) => o.id === targetOs)?.label}</div>
+              <div className="flex items-center gap-2"><Check size={13} className="text-[#00E676]" /> {OS_OPTIONS.find((o) => o.id === targetOs)?.labelKey ? t(OS_OPTIONS.find((o) => o.id === targetOs).labelKey) : OS_OPTIONS.find((o) => o.id === targetOs)?.label}</div>
             </div>
           </div>
         )}
@@ -167,17 +168,17 @@ export default function ExportWizard({ open, onClose, cams, primaryCameraId, sta
         <div className="flex justify-between pt-3">
           <button onClick={() => step === 0 ? close() : setStep((s) => s - 1)}
             className="flex items-center gap-1 px-3 py-1.5 text-xs border border-border hover:bg-secondary">
-            <ChevronLeft size={13} /> {step === 0 ? "Annuler" : "Précédent"}
+            <ChevronLeft size={13} /> {step === 0 ? t("expwiz.cancel") : t("expwiz.previous")}
           </button>
           {step < 3 ? (
             <button onClick={() => canNext() && setStep((s) => s + 1)} disabled={!canNext()}
               className="flex items-center gap-1 px-3 py-1.5 text-xs bg-[#0044FF] text-white disabled:opacity-40">
-              Suivant <ChevronRight size={13} />
+              {t("expwiz.next")} <ChevronRight size={13} />
             </button>
           ) : (
             <button onClick={submit} disabled={creating} data-testid="export-wizard-create"
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[#0044FF] text-white disabled:opacity-50">
-              {creating && <Loader2 size={13} className="animate-spin" />} Créer l'export
+              {creating && <Loader2 size={13} className="animate-spin" />} {t("expwiz.create_export")}
             </button>
           )}
         </div>

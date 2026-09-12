@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { X, Undo2, Trash2, Save } from "lucide-react";
+import { useApp } from "@/context/AppContext";
 
 /**
  * PolygonEditor — Dessine un polygone (ROI, zone parking, etc.) sur un fond image.
@@ -12,7 +13,9 @@ import { X, Undo2, Trash2, Save } from "lucide-react";
  *  - onCancel(): callback fermeture sans sauver
  *  - minPoints (default 3)
  */
-export default function PolygonEditor({ imageSrc, initialPolygon = [], onSave, onCancel, minPoints = 3, maxPoints = Infinity, title = "Dessiner la zone" }) {
+export default function PolygonEditor({ imageSrc, initialPolygon = [], onSave, onCancel, minPoints = 3, maxPoints = Infinity, title }) {
+  const { t } = useApp();
+  const displayTitle = title ?? t("polyedit.default_title");
   const [points, setPoints] = useState(initialPolygon);
   const [size, setSize] = useState({ w: 640, h: 360 });
   const imgRef = useRef(null);
@@ -85,7 +88,7 @@ export default function PolygonEditor({ imageSrc, initialPolygon = [], onSave, o
   const clear = () => setPoints([]);
   const save = () => {
     if (points.length && points.length < minPoints) {
-      alert(`Le polygone doit contenir au moins ${minPoints} points (ou être vide pour désactiver la ROI).`);
+      alert(`${t("polyedit.min_points_alert_pre")} ${minPoints} ${t("polyedit.min_points_alert_post")}`);
       return;
     }
     onSave?.(points);
@@ -95,13 +98,13 @@ export default function PolygonEditor({ imageSrc, initialPolygon = [], onSave, o
     <div className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4" data-testid="polygon-editor">
       <div className="bg-card border border-border w-full max-w-4xl flex flex-col max-h-[92vh]">
         <div className="flex items-center justify-between p-3 border-b border-border">
-          <div className="font-head font-semibold text-sm">{title}</div>
+          <div className="font-head font-semibold text-sm">{displayTitle}</div>
           <div className="flex items-center gap-2">
             <button onClick={undo} disabled={!points.length} className="flex items-center gap-1 text-xs px-2 py-1 border border-border hover:bg-secondary disabled:opacity-40" data-testid="polygon-undo">
-              <Undo2 size={12} /> Annuler dernier
+              <Undo2 size={12} /> {t("polyedit.undo_last")}
             </button>
             <button onClick={clear} disabled={!points.length} className="flex items-center gap-1 text-xs px-2 py-1 border border-[#FF3333] text-[#FF3333] hover:bg-[#FF3333]/10 disabled:opacity-40" data-testid="polygon-clear">
-              <Trash2 size={12} /> Tout effacer
+              <Trash2 size={12} /> {t("polyedit.clear_all")}
             </button>
             <button onClick={onCancel} className="p-1 hover:bg-secondary" data-testid="polygon-close"><X size={14} /></button>
           </div>
@@ -111,7 +114,7 @@ export default function PolygonEditor({ imageSrc, initialPolygon = [], onSave, o
             <img ref={imgRef} src={imageSrc} alt="snapshot" onLoad={onImgLoad}
                  className="block max-w-full max-h-[60vh] bg-black"
                  crossOrigin="anonymous"
-                 onError={(e) => { e.target.src = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='640' height='360'><rect width='100%' height='100%' fill='%23222'/><text x='50%' y='50%' fill='%23666' text-anchor='middle' font-family='sans-serif'>Snapshot indisponible</text></svg>"; }} />
+                 onError={(e) => { e.target.src = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='640' height='360'><rect width='100%' height='100%' fill='%23222'/><text x='50%' y='50%' fill='%23666' text-anchor='middle' font-family='sans-serif'>${encodeURIComponent(t("polyedit.snapshot_unavailable"))}</text></svg>`; }} />
             <canvas ref={canvasRef} width={size.w} height={size.h}
                     onMouseDown={onCanvasDown} onMouseMove={onCanvasMove} onMouseUp={onCanvasUp} onMouseLeave={onCanvasUp}
                     className="absolute inset-0 cursor-crosshair"
@@ -119,15 +122,15 @@ export default function PolygonEditor({ imageSrc, initialPolygon = [], onSave, o
                     data-testid="polygon-canvas" />
           </div>
           <p className="text-xs text-muted-foreground mt-2">
-            Cliquez pour ajouter un sommet · Glissez une poignée pour la déplacer ·{" "}
-            {Number.isFinite(maxPoints) ? `${minPoints} points requis` : `Minimum ${minPoints} points`} · {points.length}
-            {Number.isFinite(maxPoints) ? `/${maxPoints}` : ""} point(s) actuellement
+            {t("polyedit.hint_add_vertex")} · {t("polyedit.hint_drag_handle")} ·{" "}
+            {Number.isFinite(maxPoints) ? `${minPoints} ${t("polyedit.points_required")}` : `${t("polyedit.minimum")} ${minPoints} ${t("polyedit.points_word")}`} · {points.length}
+            {Number.isFinite(maxPoints) ? `/${maxPoints}` : ""} {t("polyedit.points_currently")}
           </p>
         </div>
         <div className="p-3 border-t border-border flex justify-end gap-2">
-          <button onClick={onCancel} className="text-sm px-3 py-1.5 border border-border hover:bg-secondary" data-testid="polygon-cancel">Annuler</button>
+          <button onClick={onCancel} className="text-sm px-3 py-1.5 border border-border hover:bg-secondary" data-testid="polygon-cancel">{t("polyedit.cancel")}</button>
           <button onClick={save} className="flex items-center gap-1.5 text-sm px-3 py-1.5 bg-[#0044FF] text-white hover:bg-[#0033cc]" data-testid="polygon-save">
-            <Save size={14} /> Enregistrer ({points.length} points)
+            <Save size={14} /> {t("polyedit.save")} ({points.length} {t("polyedit.points_word")})
           </button>
         </div>
       </div>

@@ -62,62 +62,61 @@ export default function WelcomePopup() {
         <div className="p-6 md:p-8 border-b border-border flex items-center gap-3">
           <Logo size={40} className="w-10 h-10 shrink-0" />
           <div>
-            <h2 className="font-head font-black text-2xl tracking-tight">Bienvenue sur MG-VMS</h2>
+            <h2 className="font-head font-black text-2xl tracking-tight">{t("wpop.title")}</h2>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Merci d&apos;avoir installé MG-VMS{user?.name ? `, ${user.name}` : ""} — voici de quoi bien démarrer.
+              {t("wpop.subtitle")}{user?.name ? `, ${user.name}` : ""} — {t("wpop.subtitle_suffix")}
             </p>
           </div>
         </div>
 
         <div className="p-6 md:p-8 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Section icon={ListChecks} title="Premiers pas" accent="#0044FF">
-              <Step n={1}>Ajoutez vos caméras dans <button onClick={() => go("/cameras")} className="text-[#0044FF] hover:underline">Caméras</button>.</Step>
-              <Step n={2}>Choisissez vos disques (BDD sur NVMe/SSD, vidéo sur HDD) dans <button onClick={() => go("/settings")} className="text-[#0044FF] hover:underline">Stockage</button>.</Step>
-              <Step n={3}>Configurez la rétention et les zones intelligentes selon vos besoins.</Step>
-              <Step n={4}>Activez les alertes pour les événements qui comptent vraiment.</Step>
+            <Section icon={ListChecks} title={t("wpop.first_steps_title")} accent="#0044FF">
+              <Step n={1}>{t("wpop.step1_pre")} <button onClick={() => go("/cameras")} className="text-[#0044FF] hover:underline">{t("wpop.step1_link")}</button>.</Step>
+              <Step n={2}>{t("wpop.step2_pre")} <button onClick={() => go("/settings")} className="text-[#0044FF] hover:underline">{t("wpop.step2_link")}</button>.</Step>
+              <Step n={3}>{t("wpop.step3")}</Step>
+              <Step n={4}>{t("wpop.step4")}</Step>
             </Section>
 
-            <Section icon={Lightbulb} title="Bonnes pratiques" accent="#FFB800">
-              <p>Un disque <b className="text-foreground">dédié par rôle</b> change tout : NVMe/SSD pour la base de données (écritures aléatoires), HDD pour la vidéo (gros volumes séquentiels, moins cher au Go).</p>
-              <p>Vérifiez régulièrement <button onClick={() => go("/settings")} className="text-[#0044FF] hover:underline">l&apos;espace disque et la rétention</button> — un disque plein arrête les nouveaux enregistrements.</p>
-              <p>Gardez le firmware de vos caméras à jour et testez vos flux RTSP après chaque changement réseau.</p>
+            <Section icon={Lightbulb} title={t("wpop.best_practices_title")} accent="#FFB800">
+              <p>{t("wpop.practice1_pre")} <b className="text-foreground">{t("wpop.practice1_bold")}</b> {t("wpop.practice1_post")}</p>
+              <p>{t("wpop.practice2_pre")} <button onClick={() => go("/settings")} className="text-[#0044FF] hover:underline">{t("wpop.practice2_link")}</button> — {t("wpop.practice2_post")}</p>
+              <p>{t("wpop.practice3")}</p>
             </Section>
 
-            <Section icon={ShieldAlert} title="Sécurité" accent="#FF3333">
-              <p>Changez le mot de passe admin par défaut si ce n&apos;est pas déjà fait.</p>
-              <p>Activez la <button onClick={() => go("/security-center/mfa")} className="text-[#0044FF] hover:underline">double authentification (MFA)</button> sur les comptes admin.</p>
-              <p>Vérifiez que votre <button onClick={() => go("/network/tls")} className="text-[#0044FF] hover:underline">certificat HTTPS</button> est valide et revoyez les <button onClick={() => go("/security-center/rbac")} className="text-[#0044FF] hover:underline">rôles utilisateurs</button> périodiquement.</p>
-              <p>Le <button onClick={() => go("/audit")} className="text-[#0044FF] hover:underline">journal d&apos;audit</button> trace toute action sensible — utile en cas de doute.</p>
+            <Section icon={ShieldAlert} title={t("wpop.security_title")} accent="#FF3333">
+              <p>{t("wpop.security1")}</p>
+              <p>{t("wpop.security2_pre")} <button onClick={() => go("/security-center/mfa")} className="text-[#0044FF] hover:underline">{t("wpop.security2_link")}</button> {t("wpop.security2_post")}</p>
+              <p>{t("wpop.security3_pre")} <button onClick={() => go("/network/tls")} className="text-[#0044FF] hover:underline">{t("wpop.security3_link1")}</button> {t("wpop.security3_mid")} <button onClick={() => go("/security-center/rbac")} className="text-[#0044FF] hover:underline">{t("wpop.security3_link2")}</button> {t("wpop.security3_post")}</p>
+              <p>{t("wpop.security4_pre")} <button onClick={() => go("/audit")} className="text-[#0044FF] hover:underline">{t("wpop.security4_link")}</button> {t("wpop.security4_post")}</p>
             </Section>
 
-            <Section icon={Youtube} title="Tutoriels vidéo" accent="#8892a0">
-              <p>Des tutoriels vidéo pas-à-pas (installation, caméras, IA, sécurité) sont en préparation.</p>
-              <p className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider px-2 py-0.5 border border-border text-muted-foreground">Bientôt disponible</p>
-              <p>En attendant, la <a href="https://docs.mg-vms.com" target="_blank" rel="noopener noreferrer" className="text-[#0044FF] hover:underline">documentation</a> couvre l&apos;essentiel.</p>
+            <Section icon={Youtube} title={t("wpop.tutorials_title")} accent="#8892a0">
+              <p>{t("wpop.tutorials_body")}</p>
+              <p className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider px-2 py-0.5 border border-border text-muted-foreground">{t("wpop.tutorials_soon")}</p>
+              <p>{t("wpop.tutorials_meanwhile_pre")} <a href="https://docs.mg-vms.com" target="_blank" rel="noopener noreferrer" className="text-[#0044FF] hover:underline">{t("wpop.tutorials_doc_link")}</a> {t("wpop.tutorials_meanwhile_post")}</p>
             </Section>
           </div>
 
           {user?.role === "admin" && (
             <div>
               <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-muted-foreground mb-2">
-                <KeyRound size={14} /> Support Gold
+                <KeyRound size={14} /> {t("wpop.gold_support_title")}
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed mb-3">
-                Le support Gold débloque une assistance prioritaire et des fonctionnalités avancées. Activez une licence
-                ci-dessous, ou retrouvez cette section à tout moment dans le menu utilisateur → À propos.
+                {t("wpop.gold_support_body")}
               </p>
               <LicenseSection t={t} />
             </div>
           )}
 
-          <Section icon={LifeBuoy} title="Besoin d'aide ?" accent="#00E676">
+          <Section icon={LifeBuoy} title={t("wpop.help_title")} accent="#00E676">
             <p>
-              <a href="https://mg-vms.com/fr/contact" target="_blank" rel="noopener noreferrer" className="text-[#0044FF] hover:underline">Support MG Informatique</a>
+              <a href="https://mg-vms.com/fr/contact" target="_blank" rel="noopener noreferrer" className="text-[#0044FF] hover:underline">{t("wpop.help_support_link")}</a>
               {" · "}
-              <a href="https://docs.mg-vms.com" target="_blank" rel="noopener noreferrer" className="text-[#0044FF] hover:underline">Documentation</a>
+              <a href="https://docs.mg-vms.com" target="_blank" rel="noopener noreferrer" className="text-[#0044FF] hover:underline">{t("wpop.help_doc_link")}</a>
               {" · "}
-              <button onClick={() => go("/welcome")} className="text-[#0044FF] hover:underline">Changelog des nouveautés</button>
+              <button onClick={() => go("/welcome")} className="text-[#0044FF] hover:underline">{t("wpop.help_changelog_link")}</button>
             </p>
           </Section>
         </div>
@@ -125,10 +124,10 @@ export default function WelcomePopup() {
         <div className="p-4 border-t border-border flex items-center justify-between gap-4">
           <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
             <input type="checkbox" checked={dontShowAgain} onChange={(e) => setDontShowAgain(e.target.checked)} data-testid="welcome-popup-dismiss-checkbox" />
-            Ne plus afficher au démarrage
+            {t("wpop.dont_show_again")}
           </label>
           <button onClick={close} className="px-5 py-2 bg-[#0044FF] text-white text-sm" data-testid="welcome-popup-close-btn">
-            C&apos;est parti
+            {t("wpop.lets_go")}
           </button>
         </div>
       </div>

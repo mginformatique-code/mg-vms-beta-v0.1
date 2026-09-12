@@ -3,6 +3,11 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.80-i18n-wave3] — 2026-09-12 — Traduction : dernière vague (pages restantes + composants partagés)
+
+### Added
+- **310 nouvelles clés de traduction** (FR + EN) sur 4 pages qui avaient échappé aux deux premières vagues (Diagnostics, Pipeline Center, Logs système, Logs LLM) et 9 composants partagés jusqu'ici jamais audités (popup de bienvenue, bannière de consentement cookies, écran d'erreur, éditeur de polygone, assistant d'export vidéo, etc.). Le fichier de traduction passe de 2673 à 2983 clés — **couverture i18n désormais complète sur l'ensemble des pages ET des composants partagés de l'application**.
+
 ## [v3.79-i18n-wave2] — 2026-09-12 — Traduction : deuxième vague (pages partiellement traduites)
 
 ### Added

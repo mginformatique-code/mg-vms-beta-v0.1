@@ -57,7 +57,7 @@ export default function PipelineCenter() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">{t("nav.pipeline_center")}</h1>
           <p className="text-sm text-muted-foreground">
-            Diagnostic complet du pipeline temps réel — capture, IA, tracking, plugins.
+            {t("pcenter.subtitle")}
           </p>
         </div>
       </div>
@@ -90,6 +90,7 @@ export default function PipelineCenter() {
 
 // ───────── Overview : synthèse temps réel ─────────
 function OverviewPanel() {
+  const { t } = useApp();
   const [capture, setCapture] = useState({ workers: {}, mode: null });
   const [pipeline, setPipeline] = useState({ per_camera: {} });
   const [loading, setLoading] = useState(true);
@@ -115,18 +116,17 @@ function OverviewPanel() {
   return (
     <div className="space-y-4" data-testid="pipeline-overview">
       <div className="flex items-center gap-2">
-        <Badge variant="outline">Mode capture : {capture.mode || "—"}</Badge>
+        <Badge variant="outline">{t("pcenter.capture_mode_label")} : {capture.mode || "—"}</Badge>
         <Badge variant={capture.cuvid_available ? "default" : "secondary"}>
-          NVDEC : {capture.cuvid_available ? "OK" : "indispo"}
+          NVDEC : {capture.cuvid_available ? "OK" : t("pcenter.unavailable")}
         </Badge>
         <Button size="sm" variant="ghost" onClick={refresh} data-testid="overview-refresh">
-          <RefreshCw className="w-4 h-4 mr-2" />Rafraîchir
+          <RefreshCw className="w-4 h-4 mr-2" />{t("pcenter.refresh_btn")}
         </Button>
       </div>
       {cams.length === 0 && !loading && (
         <Card className="p-6 text-sm text-muted-foreground" data-testid="pipeline-empty">
-          Aucune caméra active. Activer <code>detect_enabled</code> sur une caméra
-          pour voir le pipeline en action.
+          {t("pcenter.empty_desc_1")} <code>detect_enabled</code> {t("pcenter.empty_desc_2")}
         </Card>
       )}
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -139,19 +139,19 @@ function OverviewPanel() {
               <div className="flex items-center justify-between">
                 <div className="font-mono text-sm truncate">{camId}</div>
                 <Badge variant={w.alive ? "default" : "destructive"}>
-                  {w.alive ? "en ligne" : "hors ligne"}
+                  {w.alive ? t("pcenter.online") : t("pcenter.offline")}
                 </Badge>
               </div>
               <div className="text-xs text-muted-foreground">
                 {w.resolution} · {w.codec} · GPU:{String(w.gpu)}
               </div>
               <div className="grid grid-cols-2 gap-2 text-sm">
-                <Stat label="FPS capture" value={w.fps_capture_1min ?? "—"} />
-                <Stat label="Age frame" value={fmtMs(w.last_frame_age_ms)} />
-                <Stat label="Produites" value={w.frames_produced ?? 0} />
-                <Stat label="Droppées" value={w.frames_dropped ?? 0} />
-                <Stat label="Plugins actifs" value={nPlugins} />
-                <Stat label="Reconnect" value={w.reconnect_count ?? 0} />
+                <Stat label={t("pcenter.stat_fps_capture")} value={w.fps_capture_1min ?? "—"} />
+                <Stat label={t("pcenter.stat_frame_age")} value={fmtMs(w.last_frame_age_ms)} />
+                <Stat label={t("pcenter.stat_produced")} value={w.frames_produced ?? 0} />
+                <Stat label={t("pcenter.stat_dropped")} value={w.frames_dropped ?? 0} />
+                <Stat label={t("pcenter.stat_active_plugins")} value={nPlugins} />
+                <Stat label={t("pcenter.stat_reconnect")} value={w.reconnect_count ?? 0} />
               </div>
             </Card>
           );
@@ -174,6 +174,7 @@ const fmtMs = (v) => (v == null ? "—" : `${v} ms`);
 
 // ───────── AI, Tracking, Workflows, Plugins, Debug (panneaux légers) ─────────
 function TrackingPanel() {
+  const { t } = useApp();
   const [snap, setSnap] = useState(null);
   useEffect(() => {
     api.get("/diagnostics/pipeline-inspector").then((r) => setSnap(r.data)).catch(() => setSnap({}));
@@ -194,25 +195,25 @@ function TrackingPanel() {
   return (
     <Card className="p-4" data-testid="tracking-panel">
       <div className="text-sm text-muted-foreground mb-3">
-        Un tracker par caméra active (v0.4.3). Algo par défaut : ByteTrack.
+        {t("pcenter.tracking_desc")}
       </div>
       <table className="w-full text-sm">
         <thead className="text-left text-muted-foreground">
           <tr>
-            <th>Caméra</th><th>Algo</th><th>Objets suivis</th>
+            <th>{t("pcenter.th_camera")}</th><th>Algo</th><th>{t("pcenter.th_tracked_objects")}</th>
           </tr>
         </thead>
         <tbody>
-          {trackers.map((t) => (
-            <tr key={t.camera_id} className="border-t border-border/40">
-              <td className="py-2 font-mono">{t.camera_id}</td>
-              <td>{t.algo || "bytetrack"}</td>
-              <td className="font-mono">{t.active_tracks ?? "—"}</td>
+          {trackers.map((tr) => (
+            <tr key={tr.camera_id} className="border-t border-border/40">
+              <td className="py-2 font-mono">{tr.camera_id}</td>
+              <td>{tr.algo || "bytetrack"}</td>
+              <td className="font-mono">{tr.active_tracks ?? "—"}</td>
             </tr>
           ))}
           {trackers.length === 0 && (
             <tr><td colSpan={3} className="py-6 text-center text-muted-foreground">
-              Aucun tracker actif.
+              {t("pcenter.no_active_tracker")}
             </td></tr>
           )}
         </tbody>
@@ -222,6 +223,7 @@ function TrackingPanel() {
 }
 
 function PluginsPanel() {
+  const { t } = useApp();
   const [stats, setStats] = useState({ per_plugin: [] });
   useEffect(() => {
     const load = async () => {
@@ -237,7 +239,7 @@ function PluginsPanel() {
       <table className="w-full text-sm">
         <thead className="text-left text-muted-foreground">
           <tr>
-            <th>Plugin</th><th>État</th><th>Interface</th>
+            <th>Plugin</th><th>{t("pcenter.th_state")}</th><th>Interface</th>
             <th>Calls</th><th>Errors</th><th>Timeouts</th><th>Last ms</th>
           </tr>
         </thead>
@@ -264,12 +266,12 @@ function PluginsPanel() {
 }
 
 function WorkflowsPanel() {
+  const { t } = useApp();
   return (
     <Card className="p-4" data-testid="workflows-panel">
       <div className="text-sm text-muted-foreground">
-        Les workflows sont pilotés dans la page dédiée{" "}
-        <a href="/workflows" className="underline">Workflows</a>. Cette vue affichera
-        prochainement les compteurs d&apos;exécution par workflow.
+        {t("pcenter.workflows_desc_1")}{" "}
+        <a href="/workflows" className="underline">Workflows</a>{t("pcenter.workflows_desc_2")}
       </div>
     </Card>
   );
@@ -294,6 +296,7 @@ function DebugPanel() {
 // le panneau app — chaque tuile de la mosaïque live enregistre un accès à
 // son propre TrackInterpolator à son montage, retiré à son démontage.
 function TrackingDiagnosticsPanel() {
+  const { t } = useApp();
   const [snapshot, setSnapshot] = useState({});
   useEffect(() => {
     const poll = () => setSnapshot(DiagnosticsRegistry.snapshotAll());
@@ -304,21 +307,17 @@ function TrackingDiagnosticsPanel() {
   const rows = Object.entries(snapshot);
   return (
     <Card className="p-4" data-testid="tracking-diagnostics-panel">
-      <div className="text-sm font-medium mb-1">Diagnostic tracking (temps réel, côté client)</div>
+      <div className="text-sm font-medium mb-1">{t("pcenter.tracking_diag_title")}</div>
       <div className="text-xs text-muted-foreground mb-3">
-        Une caméra n'apparaît ici que si une tuile est actuellement montée dans Vues en direct
-        (Overlay IA activé) — ouvrez cette page dans un autre onglet pour peupler la liste.
-        Prediction = extrapolation en cours entre 2 détections réelles (lissage actif sur cette
-        caméra) — YES en continu sur une caméra sans détection récente indiquerait que le
-        lissage masque un vrai décrochage plutôt que de le compenser.
+        {t("pcenter.tracking_diag_desc")}
       </div>
       <table className="w-full text-sm">
         <thead className="text-left text-muted-foreground text-xs uppercase tracking-wider">
           <tr>
-            <th className="pb-1">Caméra</th><th className="pb-1">Detect. FPS</th>
+            <th className="pb-1">{t("pcenter.th_camera")}</th><th className="pb-1">{t("pcenter.th_detect_fps")}</th>
             <th className="pb-1">Display FPS</th><th className="pb-1">Prediction</th>
-            <th className="pb-1">Dern. détection</th><th className="pb-1">Pistes</th>
-            <th className="pb-1">Lissage</th>
+            <th className="pb-1">{t("pcenter.th_last_detection")}</th><th className="pb-1">{t("pcenter.th_tracks")}</th>
+            <th className="pb-1">{t("pcenter.th_smoothing")}</th>
           </tr>
         </thead>
         <tbody>
@@ -332,12 +331,12 @@ function TrackingDiagnosticsPanel() {
                 {d.lastDetectionAgeMs != null ? `${Math.round(d.lastDetectionAgeMs)}ms` : "—"}
               </td>
               <td>{d.trackedCount ?? "—"}</td>
-              <td className={d.smoothingEnabled ? "text-[#00E5FF]" : "text-muted-foreground"}>{d.smoothingEnabled ? "actif" : "off"}</td>
+              <td className={d.smoothingEnabled ? "text-[#00E5FF]" : "text-muted-foreground"}>{d.smoothingEnabled ? t("pcenter.value_active") : "off"}</td>
             </tr>
           ))}
           {rows.length === 0 && (
             <tr><td colSpan={7} className="py-6 text-center text-muted-foreground">
-              Aucune tuile live montée actuellement.
+              {t("pcenter.no_live_tile")}
             </td></tr>
           )}
         </tbody>

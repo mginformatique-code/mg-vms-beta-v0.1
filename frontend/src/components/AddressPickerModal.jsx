@@ -11,6 +11,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MapPin, LocateFixed, Search } from "lucide-react";
 import api from "@/lib/api";
+import { useApp } from "@/context/AppContext";
 
 // Nominatim demande un débit raisonnable (politique d'usage public) — un
 // débounce de 450ms évite une requête par frappe clavier, largement
@@ -19,6 +20,7 @@ import api from "@/lib/api";
 const DEBOUNCE_MS = 450;
 
 export default function AddressPickerModal({ open, onClose, onPick }) {
+  const { t } = useApp();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -63,7 +65,7 @@ export default function AddressPickerModal({ open, onClose, onPick }) {
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent data-testid="address-picker-modal">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><MapPin size={16} /> Emplacement de la carte</DialogTitle>
+          <DialogTitle className="flex items-center gap-2"><MapPin size={16} /> {t("addrpick.title")}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <div className="relative">
@@ -72,13 +74,13 @@ export default function AddressPickerModal({ open, onClose, onPick }) {
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Adresse, ville, lieu-dit…"
+              placeholder={t("addrpick.input_placeholder")}
               className="w-full bg-secondary/30 border border-border pl-8 pr-3 py-2 text-sm focus:outline-none focus:border-[#0044FF] transition"
               data-testid="address-picker-input"
             />
           </div>
 
-          {searching && <div className="text-xs text-muted-foreground">Recherche…</div>}
+          {searching && <div className="text-xs text-muted-foreground">{t("addrpick.searching")}</div>}
 
           {results.length > 0 && (
             <div className="border border-border divide-y divide-border max-h-56 overflow-y-auto" data-testid="address-picker-results">
@@ -100,11 +102,11 @@ export default function AddressPickerModal({ open, onClose, onPick }) {
             className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs border border-border hover:bg-secondary/50 transition"
             data-testid="address-picker-geolocate"
           >
-            <LocateFixed size={13} /> Utiliser ma position actuelle
+            <LocateFixed size={13} /> {t("addrpick.use_my_location")}
           </button>
 
           <p className="text-[10px] text-muted-foreground">
-            Recherche d'adresse via OpenStreetMap (Nominatim) — gratuit, sans clé API.
+            {t("addrpick.footer_note")}
           </p>
         </div>
       </DialogContent>

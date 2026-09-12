@@ -4,6 +4,7 @@ import PolygonEditor from "@/components/PolygonEditor";
 import LivePlayer from "@/components/video/LivePlayer";
 import api from "@/lib/api";
 import { toast } from "sonner";
+import { useApp } from "@/context/AppContext";
 
 /**
  * SpeedCalibrationEditor — v3.37 · Calibration vitesse par homographie.
@@ -26,6 +27,7 @@ import { toast } from "sonner";
  * en capturer une frame est fiable indépendamment du codec source.
  */
 export default function SpeedCalibrationEditor({ camera, existing, onClose, onSaved }) {
+  const { t } = useApp();
   const [step, setStep] = useState("capture");
   const [points, setPoints] = useState(existing?.image_points || []);
   const [widthM, setWidthM] = useState(existing?.width_m ?? "");
@@ -65,7 +67,7 @@ export default function SpeedCalibrationEditor({ camera, existing, onClose, onSa
       <div className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4" data-testid="speed-calibration-capture">
         <div className="bg-card border border-border w-full max-w-lg p-4 space-y-3">
           <div className="flex items-center justify-between">
-            <div className="font-head font-semibold text-sm flex items-center gap-2"><Gauge size={14} /> Capture du flux…</div>
+            <div className="font-head font-semibold text-sm flex items-center gap-2"><Gauge size={14} /> {t("speedcal.capturing_stream")}</div>
             <button onClick={onClose} className="p-1 hover:bg-secondary" data-testid="speed-calibration-close"><X size={14} /></button>
           </div>
           <div className="relative aspect-video bg-black overflow-hidden">
@@ -73,11 +75,11 @@ export default function SpeedCalibrationEditor({ camera, existing, onClose, onSa
           </div>
           {captureError ? (
             <p className="text-xs text-[#FF3333]">
-              Flux indisponible — vérifiez que la caméra est en ligne, puis réessayez.
+              {t("speedcal.stream_unavailable")}
             </p>
           ) : (
             <p className="text-xs text-muted-foreground">
-              Connexion au flux en cours pour capturer une image de référence…
+              {t("speedcal.connecting_stream")}
             </p>
           )}
         </div>
@@ -92,7 +94,7 @@ export default function SpeedCalibrationEditor({ camera, existing, onClose, onSa
         initialPolygon={points}
         minPoints={4}
         maxPoints={4}
-        title={`Calibrer la vitesse — ${camera?.name || ""} (ordre : proche-gauche, proche-droite, loin-droite, loin-gauche)`}
+        title={`${t("speedcal.calibrate_title")} — ${camera?.name || ""} ${t("speedcal.calibrate_order")}`}
         onSave={(pts) => { setPoints(pts); setStep("dims"); }}
         onCancel={onClose}
       />
@@ -101,16 +103,16 @@ export default function SpeedCalibrationEditor({ camera, existing, onClose, onSa
 
   const save = async () => {
     const w = parseFloat(widthM), l = parseFloat(lengthM);
-    if (!(w > 0) || !(l > 0)) { toast.error("Largeur et longueur réelles requises (mètres)"); return; }
+    if (!(w > 0) || !(l > 0)) { toast.error(t("speedcal.dims_required")); return; }
     setSaving(true);
     try {
       const { data } = await api.put(`/cameras/${camera.id}/speed-calibration`, {
         image_points: points, width_m: w, length_m: l,
       });
-      toast.success("Calibration vitesse enregistrée");
+      toast.success(t("speedcal.calibration_saved"));
       onSaved?.(data.calibration);
     } catch (e) {
-      toast.error(e?.response?.data?.detail || "Échec de la calibration");
+      toast.error(e?.response?.data?.detail || t("speedcal.calibration_failed"));
     } finally {
       setSaving(false);
     }
@@ -120,22 +122,21 @@ export default function SpeedCalibrationEditor({ camera, existing, onClose, onSa
     <div className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4" data-testid="speed-calibration-dims">
       <div className="bg-card border border-border w-full max-w-md">
         <div className="flex items-center justify-between p-3 border-b border-border">
-          <div className="font-head font-semibold text-sm flex items-center gap-2"><Gauge size={14} /> Dimensions réelles</div>
+          <div className="font-head font-semibold text-sm flex items-center gap-2"><Gauge size={14} /> {t("speedcal.real_dims_title")}</div>
           <button onClick={onClose} className="p-1 hover:bg-secondary" data-testid="speed-calibration-close"><X size={14} /></button>
         </div>
         <div className="p-4 space-y-3">
           <p className="text-xs text-muted-foreground">
-            Le rectangle tracé au sol : largeur = distance entre les points 1 et 2 (proche-gauche → proche-droite),
-            longueur = distance entre les points 1 et 4 (proche → loin). En mètres.
+            {t("speedcal.dims_explainer")}
           </p>
           <label className="block text-xs">
-            Largeur (m)
+            {t("speedcal.width_label")}
             <input type="number" min="0.1" step="0.1" value={widthM} onChange={(e) => setWidthM(e.target.value)}
                    className="w-full mt-1 px-2 py-1.5 bg-secondary border border-border text-sm"
                    data-testid="speed-calibration-width" />
           </label>
           <label className="block text-xs">
-            Longueur (m)
+            {t("speedcal.length_label")}
             <input type="number" min="0.1" step="0.1" value={lengthM} onChange={(e) => setLengthM(e.target.value)}
                    className="w-full mt-1 px-2 py-1.5 bg-secondary border border-border text-sm"
                    data-testid="speed-calibration-length" />
@@ -143,12 +144,12 @@ export default function SpeedCalibrationEditor({ camera, existing, onClose, onSa
         </div>
         <div className="p-3 border-t border-border flex justify-between gap-2">
           <button onClick={() => setStep("points")} className="text-sm px-3 py-1.5 border border-border hover:bg-secondary">
-            ← Revoir les points
+            ← {t("speedcal.review_points")}
           </button>
           <button onClick={save} disabled={saving}
                   className="text-sm px-3 py-1.5 bg-[#0044FF] text-white hover:bg-[#0033cc] disabled:opacity-50"
                   data-testid="speed-calibration-save">
-            {saving ? "Calcul…" : "Calibrer"}
+            {saving ? t("speedcal.calculating") : t("speedcal.calibrate")}
           </button>
         </div>
       </div>

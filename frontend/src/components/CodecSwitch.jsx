@@ -18,10 +18,12 @@ import React, { useState } from "react";
 import { Loader2, Lock } from "lucide-react";
 import api from "@/lib/api";
 import { toast } from "sonner";
+import { useApp } from "@/context/AppContext";
 
 const NORM = (c) => String(c || "").toLowerCase().replace("hevc", "h265").replace(".", "");
 
 export default function CodecSwitch({ camera, onChanged }) {
+  const { t } = useApp();
   const [codec, setCodec] = useState(NORM(camera?.codec));
   const [busy, setBusy] = useState(false);
   const [locked, setLocked] = useState(null);   // null = pas encore vérifié
@@ -38,19 +40,19 @@ export default function CodecSwitch({ camera, onChanged }) {
       const { data: info } = await api.get(`/devices/${camera.id}/encoding`);
       if (!info.changeable) {
         setLocked(true);
-        setReason(info.reason || "Codec non modifiable sur ce modèle");
+        setReason(info.reason || t("codec.not_changeable"));
         if (info.current) setCodec(NORM(info.current));
-        toast.info(info.reason || "Codec non modifiable sur ce modèle");
+        toast.info(info.reason || t("codec.not_changeable"));
         return;
       }
       await api.post(`/devices/${camera.id}/encoding`, { codec: target });
       setCodec(target);
       setLocked(false);
-      toast.success(`Flux principal basculé en ${target.toUpperCase()}`);
+      toast.success(`${t("codec.switched_to")} ${target.toUpperCase()}`);
       onChanged?.(camera.id, target);
     } catch (err) {
       const d = err.response?.data?.detail;
-      const msg = d?.message || d || "Changement de codec impossible";
+      const msg = d?.message || d || t("codec.change_failed");
       if (d?.error === "unsupported_capability") {
         setLocked(true);
         setReason(msg);
@@ -65,7 +67,7 @@ export default function CodecSwitch({ camera, onChanged }) {
 
   const title = locked
     ? reason
-    : `Basculer le flux principal en ${target.toUpperCase()} (actuellement ${codec.toUpperCase() || "?"})`;
+    : `${t("codec.switch_to")} ${target.toUpperCase()} (${t("codec.currently")} ${codec.toUpperCase() || "?"})`;
 
   return (
     <button

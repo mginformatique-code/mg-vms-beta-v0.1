@@ -37,7 +37,7 @@ export default function SystemLogs() {
       setStatus("loaded");
     } catch (e2) {
       setPassword("");
-      setError(e2.response?.data?.detail || "Échec de la récupération des logs");
+      setError(e2.response?.data?.detail || t("syslog.fetch_failed"));
       setStatus("error");
     }
   };
@@ -56,7 +56,7 @@ export default function SystemLogs() {
           <Terminal size={22} /> {t("nav.system_logs")}
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Derniers logs Debian (journalctl) et de chaque conteneur Docker de l'hôte.
+          {t("syslog.subtitle")}
         </p>
       </div>
 
@@ -64,30 +64,30 @@ export default function SystemLogs() {
         {status === "form" && (
           <form onSubmit={fetchLogs} className="space-y-2 max-w-sm" data-testid="system-logs-login-form">
             <p className="text-[11px] text-muted-foreground">
-              Identifiants Linux réels de la machine — jamais ceux de MG-VMS, jamais stockés (utilisés une seule fois pour la connexion SSH sortante).
+              {t("syslog.login_notice")}
             </p>
             <div>
-              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Utilisateur</label>
+              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("syslog.field_username")}</label>
               <input value={username} onChange={(e) => setUsername(e.target.value)}
                      autoComplete="off" data-testid="system-logs-username"
                      className="w-full px-3 py-2 bg-background border border-input outline-none text-sm focus:border-[#0044FF]" />
             </div>
             <div>
-              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Mot de passe</label>
+              <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("syslog.field_password")}</label>
               <HoldToRevealInput value={password} onChange={(e) => setPassword(e.target.value)}
                      autoComplete="off" data-testid="system-logs-password"
                      className="w-full px-3 py-2 bg-background border border-input outline-none text-sm focus:border-[#0044FF]" />
             </div>
             <button type="submit" disabled={!username || !password} data-testid="system-logs-fetch-btn"
                     className="px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40">
-              Récupérer les logs
+              {t("syslog.fetch_btn")}
             </button>
           </form>
         )}
 
         {status === "loading" && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 size={15} className="animate-spin" /> Connexion SSH et récupération des logs…
+            <Loader2 size={15} className="animate-spin" /> {t("syslog.connecting")}
           </div>
         )}
 
@@ -96,7 +96,7 @@ export default function SystemLogs() {
             <p className="text-[12px] text-[#FF3333]">{typeof error === "string" ? error : JSON.stringify(error)}</p>
             <button onClick={reset} data-testid="system-logs-retry"
                     className="px-3 py-1.5 border border-border hover:bg-secondary text-xs">
-              Réessayer
+              {t("syslog.retry_btn")}
             </button>
           </div>
         )}
@@ -108,7 +108,7 @@ export default function SystemLogs() {
                 <button onClick={() => setActiveTab("syslog")}
                         className={`px-3 py-1.5 text-xs ${activeTab === "syslog" ? "bg-[#0044FF] text-white" : "hover:bg-secondary"}`}
                         data-testid="system-logs-tab-syslog">
-                  Système (journalctl)
+                  {t("syslog.tab_system")}
                 </button>
                 {containers.map((name) => (
                   <button key={name} onClick={() => setActiveTab(name)}
@@ -121,16 +121,16 @@ export default function SystemLogs() {
               <div className="flex items-center gap-2">
                 <button onClick={reset} className="text-[11px] flex items-center gap-1 px-2 py-1 border border-border hover:bg-secondary"
                         data-testid="system-logs-refresh">
-                  <RefreshCw size={12} /> Rafraîchir (redemande les identifiants)
+                  <RefreshCw size={12} /> {t("syslog.refresh_btn")}
                 </button>
                 <button onClick={reset} data-testid="system-logs-disconnect"
                         className="text-[11px] flex items-center gap-1 px-2 py-1 border border-border hover:bg-secondary">
-                  <LogOut size={12} /> Fermer
+                  <LogOut size={12} /> {t("syslog.close_btn")}
                 </button>
               </div>
             </div>
             <pre className="text-xs font-mono bg-black/40 p-3 rounded max-h-[65vh] overflow-auto" data-testid="system-logs-content">
-              {activeText || "(aucune sortie)"}
+              {activeText || t("syslog.no_output")}
             </pre>
           </>
         )}

@@ -20,19 +20,20 @@ function fmtDateTime(iso) {
 }
 
 const SOURCE_LABELS = {
-  color_ai: "Couleur (vision)",
-  make_ai: "Marque (vision)",
-  dedup: "Dédoublonnage",
-  anpr_tuning: "Réglage ANPR",
-  smart_search: "Recherche IA",
+  color_ai: "llmlog.source_color_ai",
+  make_ai: "llmlog.source_make_ai",
+  dedup: "llmlog.source_dedup",
+  anpr_tuning: "llmlog.source_anpr_tuning",
+  smart_search: "llmlog.source_smart_search",
 };
-function sourceLabel(source) {
-  if (SOURCE_LABELS[source]) return SOURCE_LABELS[source];
-  if (source?.startsWith("anomaly_ai:")) return `Anomalies (${source.split(":")[1]})`;
+function sourceLabel(source, t) {
+  if (SOURCE_LABELS[source]) return t(SOURCE_LABELS[source]);
+  if (source?.startsWith("anomaly_ai:")) return `${t("llmlog.source_anomalies")} (${source.split(":")[1]})`;
   return source || "—";
 }
 
 function LogRow({ log }) {
+  const { t } = useApp();
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -40,13 +41,13 @@ function LogRow({ log }) {
           data-testid="llm-log-row">
         <td className="py-2 pr-2">{open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</td>
         <td className="py-2 pr-4 font-mono text-xs whitespace-nowrap">{fmtDateTime(log.ts)}</td>
-        <td className="py-2 pr-4">{sourceLabel(log.source)}</td>
+        <td className="py-2 pr-4">{sourceLabel(log.source, t)}</td>
         <td className="py-2 pr-4 font-mono text-xs">{log.model || "—"}</td>
         <td className="py-2 pr-4">
           {log.ok ? (
             <span className="flex items-center gap-1 text-[11px] text-emerald-500"><CheckCircle2 size={12} /> {log.status_code ?? "OK"}</span>
           ) : (
-            <span className="flex items-center gap-1 text-[11px] text-[#FF3333]"><XCircle size={12} /> {log.status_code ?? "Erreur"}</span>
+            <span className="flex items-center gap-1 text-[11px] text-[#FF3333]"><XCircle size={12} /> {log.status_code ?? t("llmlog.error_word")}</span>
           )}
         </td>
         <td className="py-2 font-mono text-xs text-muted-foreground">{log.latency_ms != null ? `${log.latency_ms} ms` : "—"}</td>
@@ -58,17 +59,17 @@ function LogRow({ log }) {
             <div className="font-mono text-xs break-all">{log.url}</div>
             {log.error && (
               <>
-                <div className="text-[10px] uppercase tracking-wider text-[#FF3333] mt-2">Erreur</div>
+                <div className="text-[10px] uppercase tracking-wider text-[#FF3333] mt-2">{t("llmlog.error_word")}</div>
                 <pre className="text-xs font-mono bg-black/30 p-2 rounded overflow-x-auto whitespace-pre-wrap">{log.error}</pre>
               </>
             )}
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mt-2">Requête</div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mt-2">{t("llmlog.request_label")}</div>
             <pre className="text-xs font-mono bg-black/30 p-2 rounded overflow-x-auto whitespace-pre-wrap max-h-64">
               {typeof log.request === "string" ? log.request : JSON.stringify(log.request, null, 2)}
             </pre>
             {log.response && (
               <>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mt-2">Réponse</div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mt-2">{t("llmlog.response_label")}</div>
                 <pre className="text-xs font-mono bg-black/30 p-2 rounded overflow-x-auto whitespace-pre-wrap max-h-64">
                   {typeof log.response === "string" ? log.response : JSON.stringify(log.response, null, 2)}
                 </pre>
@@ -113,7 +114,7 @@ export default function LlmLogs() {
           <Brain size={22} /> {t("nav.llm_logs")}
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Chaque appel réseau vers le LLM (couleur, marque, anomalies, dédoublonnage, réglage ANPR, recherche IA) — succès ou échec, avec latence. Purgé automatiquement après 14 jours.
+          {t("llmlog.subtitle")}
         </p>
       </div>
 
@@ -122,20 +123,20 @@ export default function LlmLogs() {
           <div className="flex flex-wrap gap-2">
             <select value={source} onChange={(e) => setSource(e.target.value)}
                     className="px-2 py-1.5 bg-card border border-input outline-none text-xs" data-testid="llm-log-source-filter">
-              <option value="">Toutes les sources</option>
-              {sources.map((s) => <option key={s} value={s}>{sourceLabel(s)}</option>)}
+              <option value="">{t("llmlog.filter_all_sources")}</option>
+              {sources.map((s) => <option key={s} value={s}>{sourceLabel(s, t)}</option>)}
             </select>
             <select value={status} onChange={(e) => setStatus(e.target.value)}
                     className="px-2 py-1.5 bg-card border border-input outline-none text-xs" data-testid="llm-log-status-filter">
-              <option value="">Tous les statuts</option>
-              <option value="ok">Succès</option>
-              <option value="error">Erreurs</option>
+              <option value="">{t("llmlog.filter_all_statuses")}</option>
+              <option value="ok">{t("llmlog.status_success")}</option>
+              <option value="error">{t("llmlog.status_errors")}</option>
             </select>
           </div>
           <div className="flex items-center gap-3">
-            <div className="text-sm text-muted-foreground">{items.length} appel(s)</div>
+            <div className="text-sm text-muted-foreground">{items.length} {t("llmlog.calls_suffix")}</div>
             <Button size="sm" variant="ghost" onClick={load} disabled={loading}>
-              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />Rafraîchir
+              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />{t("llmlog.refresh_btn")}
             </Button>
           </div>
         </div>
@@ -144,18 +145,18 @@ export default function LlmLogs() {
             <thead className="text-left text-muted-foreground">
               <tr>
                 <th className="pb-2 pr-2 w-4"></th>
-                <th className="pb-2 pr-4">Horodatage</th>
-                <th className="pb-2 pr-4">Source</th>
-                <th className="pb-2 pr-4">Modèle</th>
-                <th className="pb-2 pr-4">Statut</th>
-                <th className="pb-2">Latence</th>
+                <th className="pb-2 pr-4">{t("llmlog.th_timestamp")}</th>
+                <th className="pb-2 pr-4">{t("llmlog.th_source")}</th>
+                <th className="pb-2 pr-4">{t("llmlog.th_model")}</th>
+                <th className="pb-2 pr-4">{t("llmlog.th_status")}</th>
+                <th className="pb-2">{t("llmlog.th_latency")}</th>
               </tr>
             </thead>
             <tbody>
               {items.map((log, i) => <LogRow key={i} log={log} />)}
               {items.length === 0 && !loading && (
                 <tr><td colSpan={6} className="py-6 text-center text-muted-foreground" data-testid="llm-logs-empty">
-                  Aucun appel LLM enregistré.
+                  {t("llmlog.empty_state")}
                 </td></tr>
               )}
             </tbody>
