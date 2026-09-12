@@ -3,6 +3,11 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.77-i18n-newline-fix] — 2026-09-12 — Correctif build (v3.76)
+
+### Fixed
+- Une valeur de traduction contenait un retour à la ligne littéral au lieu d'un caractère échappé, cassant la compilation du frontend — corrigé (bouton de confirmation redémarrage caméra, FR + EN).
+
 ## [v3.76-i18n-full-coverage] — 2026-09-12 — Traduction complète de l'interface (34 pages auparavant en dur)
 
 ### Added
