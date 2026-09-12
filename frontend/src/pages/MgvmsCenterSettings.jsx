@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import api from "@/lib/api";
 import { Building2, Loader2, ShieldCheck, Unplug, CheckCircle2, XCircle } from "lucide-react";
 import { toast } from "sonner";
+import { useApp } from "@/context/AppContext";
 
 /**
  * MgvmsCenterSettings — Réglages > MG-VMS Center (v3.49).
@@ -33,6 +34,7 @@ function fmtDateTime(unixOrIso) {
 }
 
 export default function MgvmsCenterSettings() {
+  const { t } = useApp();
   const [status, setStatus] = useState(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
 
@@ -71,7 +73,7 @@ export default function MgvmsCenterSettings() {
       setMfaToken(data.mfa_token);
       setStep("mfa");
     } catch (e) {
-      setError(e.response?.data?.detail || "Échec de connexion");
+      setError(e.response?.data?.detail || t("mgvmscs.err_login_failed"));
     } finally { setBusy(false); }
   };
 
@@ -85,7 +87,7 @@ export default function MgvmsCenterSettings() {
       setLabel(`${window.location.hostname} - MG-VMS`);
       setStep("pairing");
     } catch (e) {
-      setError(e.response?.data?.detail || "Code invalide");
+      setError(e.response?.data?.detail || t("mgvmscs.err_invalid_code"));
     } finally { setBusy(false); }
   };
 
@@ -98,21 +100,21 @@ export default function MgvmsCenterSettings() {
         tenant_id: tenantChoice || null, new_tenant_name: tenantChoice ? null : newTenantName,
         label,
       });
-      toast.success("Connecté à MG-VMS Center");
+      toast.success(t("mgvmscs.connected"));
       reset();
       loadStatus();
     } catch (e) {
-      setError(e.response?.data?.detail || "Échec de la connexion");
+      setError(e.response?.data?.detail || t("mgvmscs.err_connection_failed"));
     } finally { setBusy(false); }
   };
 
   const disconnect = async () => {
-    if (!window.confirm("Déconnecter ce MG-VMS de MG-VMS Center ?")) return;
+    if (!window.confirm(t("mgvmscs.confirm_disconnect"))) return;
     try {
       await api.post("/mgvms-center/disconnect");
-      toast.success("Déconnecté");
+      toast.success(t("mgvmscs.toast_disconnected"));
       loadStatus();
-    } catch { toast.error("Échec de la déconnexion"); }
+    } catch { toast.error(t("mgvmscs.err_disconnect_failed")); }
   };
 
   return (
@@ -122,7 +124,7 @@ export default function MgvmsCenterSettings() {
           <Building2 size={22} className="text-[#0044FF]" /> MG-VMS Center
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Connecte ce déploiement au tableau de bord central MG Informatique — suivi de version, alerte de mise à jour.
+          {t("mgvmscs.subtitle")}
         </p>
       </div>
 
@@ -132,27 +134,27 @@ export default function MgvmsCenterSettings() {
         <div className="bg-card border border-border p-5" data-testid="mgvms-center-connected">
           <div className="flex items-center gap-2 mb-3">
             <CheckCircle2 size={16} className="text-[#00E676]" />
-            <span className="font-medium">Connecté à MG-VMS Center</span>
+            <span className="font-medium">{t("mgvmscs.connected")}</span>
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm mb-4">
-            <div><div className="text-[10px] uppercase text-muted-foreground">URL</div>{status.url}</div>
-            <div><div className="text-[10px] uppercase text-muted-foreground">Nom du déploiement</div>{status.label}</div>
-            <div><div className="text-[10px] uppercase text-muted-foreground">Dernier rapport envoyé</div>{fmtDateTime(status.last_report_at)}</div>
+            <div><div className="text-[10px] uppercase text-muted-foreground">{t("mgvmscs.url_label")}</div>{status.url}</div>
+            <div><div className="text-[10px] uppercase text-muted-foreground">{t("mgvmscs.deployment_name_label")}</div>{status.label}</div>
+            <div><div className="text-[10px] uppercase text-muted-foreground">{t("mgvmscs.last_report_label")}</div>{fmtDateTime(status.last_report_at)}</div>
             <div>
-              <div className="text-[10px] uppercase text-muted-foreground">État du dernier envoi</div>
+              <div className="text-[10px] uppercase text-muted-foreground">{t("mgvmscs.last_report_status_label")}</div>
               {status.last_report_ok === false
-                ? <span className="text-[#FF3333] flex items-center gap-1"><XCircle size={13} /> Échec</span>
-                : <span className="text-[#00E676] flex items-center gap-1"><CheckCircle2 size={13} /> OK</span>}
+                ? <span className="text-[#FF3333] flex items-center gap-1"><XCircle size={13} /> {t("mgvmscs.failed")}</span>
+                : <span className="text-[#00E676] flex items-center gap-1"><CheckCircle2 size={13} /> {t("mgvmscs.ok")}</span>}
             </div>
           </div>
           {status.update_available && (
             <div className="border border-[#FFB800]/50 bg-[#FFB800]/10 p-3 text-sm mb-4">
-              Mise à jour disponible : <span className="mono">{status.latest_version}</span>
+              {t("mgvmscs.update_available")} <span className="mono">{status.latest_version}</span>
             </div>
           )}
           <button onClick={disconnect}
                   className="flex items-center gap-2 px-3 py-2 border border-border text-sm hover:bg-secondary text-[#FF3333]">
-            <Unplug size={14} /> Déconnecter
+            <Unplug size={14} /> {t("mgvmscs.disconnect")}
           </button>
         </div>
       ) : (
@@ -160,28 +162,28 @@ export default function MgvmsCenterSettings() {
           {step === "idle" && (
             <div>
               <div className="mb-3">
-                <Lbl>URL de MG-VMS Center</Lbl>
+                <Lbl>{t("mgvmscs.url_field_label")}</Lbl>
                 <Inp value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://center.mginformatique.com" />
               </div>
               <div className="text-xs text-muted-foreground mb-3 flex items-start gap-2 border border-border p-2.5">
                 <ShieldCheck size={14} className="text-muted-foreground shrink-0 mt-0.5" />
-                La connexion nécessite un compte MG-VMS Center (personnel MG Informatique uniquement, protégé par mot de passe + MFA).
+                {t("mgvmscs.login_required_hint")}
               </div>
               <button onClick={() => setStep("login")} className="px-4 py-2 bg-[#0044FF] text-white text-sm">
-                Se connecter
+                {t("mgvmscs.connect_btn")}
               </button>
             </div>
           )}
 
           {step === "login" && (
             <form onSubmit={submitLogin}>
-              <div className="mb-3"><Lbl>E-mail (MG-VMS Center)</Lbl><Inp type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus /></div>
-              <div className="mb-3"><Lbl>Mot de passe</Lbl><Inp type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></div>
+              <div className="mb-3"><Lbl>{t("mgvmscs.email_label")}</Lbl><Inp type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus /></div>
+              <div className="mb-3"><Lbl>{t("mgvmscs.password_label")}</Lbl><Inp type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></div>
               {error && <div className="text-xs text-[#FF3333] mb-3">{error}</div>}
               <div className="flex gap-2">
-                <button type="button" onClick={reset} className="px-3 py-2 border border-border text-sm hover:bg-secondary">Annuler</button>
+                <button type="button" onClick={reset} className="px-3 py-2 border border-border text-sm hover:bg-secondary">{t("mgvmscs.cancel")}</button>
                 <button type="submit" disabled={busy} className="px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40">
-                  {busy ? <Loader2 size={14} className="animate-spin" /> : "Continuer"}
+                  {busy ? <Loader2 size={14} className="animate-spin" /> : t("mgvmscs.continue")}
                 </button>
               </div>
             </form>
@@ -190,15 +192,15 @@ export default function MgvmsCenterSettings() {
           {step === "mfa" && (
             <form onSubmit={submitMfa}>
               <div className="mb-3">
-                <Lbl>Code MFA à 6 chiffres</Lbl>
+                <Lbl>{t("mgvmscs.mfa_code_label")}</Lbl>
                 <Inp value={code} inputMode="numeric" maxLength={6}
                      onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} required autoFocus />
               </div>
               {error && <div className="text-xs text-[#FF3333] mb-3">{error}</div>}
               <div className="flex gap-2">
-                <button type="button" onClick={reset} className="px-3 py-2 border border-border text-sm hover:bg-secondary">Annuler</button>
+                <button type="button" onClick={reset} className="px-3 py-2 border border-border text-sm hover:bg-secondary">{t("mgvmscs.cancel")}</button>
                 <button type="submit" disabled={busy || code.length !== 6} className="px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40">
-                  {busy ? <Loader2 size={14} className="animate-spin" /> : "Valider"}
+                  {busy ? <Loader2 size={14} className="animate-spin" /> : t("mgvmscs.validate")}
                 </button>
               </div>
             </form>
@@ -207,31 +209,31 @@ export default function MgvmsCenterSettings() {
           {step === "pairing" && (
             <form onSubmit={submitPairing}>
               <div className="mb-3">
-                <Lbl>Tenant (client)</Lbl>
+                <Lbl>{t("mgvmscs.tenant_label")}</Lbl>
                 <Sel value={tenantChoice} onChange={(e) => { setTenantChoice(e.target.value); setSiteChoice(""); }}>
-                  <option value="">— créer un nouveau tenant —</option>
+                  <option value="">{t("mgvmscs.new_tenant_option")}</option>
                   {tenants.map((tn) => <option key={tn.id} value={tn.id}>{tn.name}</option>)}
                 </Sel>
                 {!tenantChoice && (
                   <div className="mt-2">
                     <Inp value={newTenantName} onChange={(e) => setNewTenantName(e.target.value)}
-                         placeholder="Nom du nouveau tenant" required />
+                         placeholder={t("mgvmscs.new_tenant_placeholder")} required />
                   </div>
                 )}
               </div>
               <div className="text-xs text-muted-foreground mb-3 flex items-start gap-2 border border-border p-2.5">
                 <ShieldCheck size={14} className="text-muted-foreground shrink-0 mt-0.5" />
-                Les sites de ce déploiement apparaîtront automatiquement dans MG-VMS Center dès le premier rapport — rien à choisir ici.
+                {t("mgvmscs.sites_hint")}
               </div>
               <div className="mb-3">
-                <Lbl>Nom de ce déploiement</Lbl>
+                <Lbl>{t("mgvmscs.deployment_name_field_label")}</Lbl>
                 <Inp value={label} onChange={(e) => setLabel(e.target.value)} required />
               </div>
               {error && <div className="text-xs text-[#FF3333] mb-3">{error}</div>}
               <div className="flex gap-2">
-                <button type="button" onClick={reset} className="px-3 py-2 border border-border text-sm hover:bg-secondary">Annuler</button>
+                <button type="button" onClick={reset} className="px-3 py-2 border border-border text-sm hover:bg-secondary">{t("mgvmscs.cancel")}</button>
                 <button type="submit" disabled={busy} className="px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40">
-                  {busy ? <Loader2 size={14} className="animate-spin" /> : "Terminer la connexion"}
+                  {busy ? <Loader2 size={14} className="animate-spin" /> : t("mgvmscs.finish_connection")}
                 </button>
               </div>
             </form>

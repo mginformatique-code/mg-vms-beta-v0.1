@@ -13,6 +13,7 @@ import {
   ShieldCheck, ShieldAlert, ShieldOff, RefreshCw, Info, CheckCircle2, XCircle,
   Lock, Users, Server, HardDrive, Camera, Zap, Database, Key, Cloud, LogOut,
 } from "lucide-react";
+import { useApp } from "@/context/AppContext";
 
 const CRITERION_ICON = {
   https:            Lock,
@@ -28,6 +29,7 @@ const CRITERION_ICON = {
 };
 
 function ScoreRing({ score, grade }) {
+  const { t } = useApp();
   const color = score >= 90 ? "#00E676" : score >= 75 ? "#88CC00"
                : score >= 60 ? "#FFB800" : score >= 40 ? "#FF7043" : "#FF3333";
   const r = 74, c = 2 * Math.PI * r;
@@ -43,7 +45,7 @@ function ScoreRing({ score, grade }) {
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <div className="text-5xl font-head font-black tracking-tight mono" style={{ color }}>{score}</div>
         <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mt-1">
-          Score / 100
+          {t("sec.score_out_of_100")}
         </div>
         <div className="mt-1 text-xl mono font-black" style={{ color }}>{grade}</div>
       </div>
@@ -82,6 +84,7 @@ function CheckRow({ id, item }) {
 }
 
 export default function SecurityCenter() {
+  const { t } = useApp();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -90,13 +93,13 @@ export default function SecurityCenter() {
     try {
       const r = await api.get("/security/score");
       setData(r.data);
-    } catch (e) { toast.error("Impossible de charger le score sécurité"); }
+    } catch (e) { toast.error(t("sec.load_error")); }
     finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
 
   if (loading || !data) {
-    return <div className="p-8 text-muted-foreground" data-testid="secc-loading">Analyse sécurité en cours…</div>;
+    return <div className="p-8 text-muted-foreground" data-testid="secc-loading">{t("sec.analyzing")}</div>;
   }
   const okCount = Object.values(data.checks).filter((v) => v.ok).length;
   const koCount = Object.keys(data.checks).length - okCount;
@@ -106,12 +109,12 @@ export default function SecurityCenter() {
       <div className="flex items-end justify-between border-b border-border pb-3">
         <div>
           <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground mb-1">
-            MG-VMS · Administration
+            {t("sec.breadcrumb")}
           </div>
-          <h1 className="font-head font-black text-3xl tracking-tight">Centre de sécurité</h1>
+          <h1 className="font-head font-black text-3xl tracking-tight">{t("sec.title")}</h1>
         </div>
         <button onClick={load} className="flex items-center gap-2 border border-border px-3 py-2 text-xs hover:bg-secondary/50" data-testid="secc-refresh">
-          <RefreshCw size={13} /> Réévaluer
+          <RefreshCw size={13} /> {t("sec.reevaluate")}
         </button>
       </div>
 
@@ -119,8 +122,8 @@ export default function SecurityCenter() {
         <div className="bg-card border border-border p-4 flex flex-col items-center justify-center">
           <ScoreRing score={data.score} grade={data.grade} />
           <div className="mt-3 flex items-center gap-4 text-xs">
-            <span className="flex items-center gap-1"><CheckCircle2 size={12} className="text-[#00E676]" /> {okCount} conformes</span>
-            <span className="flex items-center gap-1"><XCircle size={12} className="text-[#FF3333]" /> {koCount} à corriger</span>
+            <span className="flex items-center gap-1"><CheckCircle2 size={12} className="text-[#00E676]" /> {okCount} {t("sec.compliant")}</span>
+            <span className="flex items-center gap-1"><XCircle size={12} className="text-[#FF3333]" /> {koCount} {t("sec.needs_fixing")}</span>
           </div>
         </div>
         <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -132,33 +135,33 @@ export default function SecurityCenter() {
 
       <div className="bg-card border border-border p-4">
         <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground mb-3 flex items-center gap-1">
-          <ShieldAlert size={12} /> Actions rapides
+          <ShieldAlert size={12} /> {t("sec.quick_actions")}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           <Link to="/network/tls" className="border border-border p-3 hover:border-[#0044FF] hover:bg-secondary/40 transition" data-testid="secc-action-tls">
             <Lock size={14} className="text-[#0044FF] mb-1" />
             <div className="text-xs font-medium">HTTPS / TLS</div>
-            <div className="text-[10px] text-muted-foreground">Domaines &amp; certificats</div>
+            <div className="text-[10px] text-muted-foreground">{t("sec.action_tls_desc")}</div>
           </Link>
           <Link to="/settings" className="border border-border p-3 hover:border-[#0044FF] hover:bg-secondary/40 transition" data-testid="secc-action-sessions">
             <LogOut size={14} className="text-muted-foreground mb-1" />
-            <div className="text-xs font-medium">Sessions actives</div>
-            <div className="text-[10px] text-muted-foreground">Gérer & révoquer</div>
+            <div className="text-xs font-medium">{t("sec.action_sessions")}</div>
+            <div className="text-[10px] text-muted-foreground">{t("sec.action_sessions_desc")}</div>
           </Link>
           <Link to="/users" className="border border-border p-3 hover:border-[#0044FF] hover:bg-secondary/40 transition" data-testid="secc-action-users">
             <Users size={14} className="text-muted-foreground mb-1" />
-            <div className="text-xs font-medium">Utilisateurs</div>
-            <div className="text-[10px] text-muted-foreground">Rôles & 2FA</div>
+            <div className="text-xs font-medium">{t("sec.action_users")}</div>
+            <div className="text-[10px] text-muted-foreground">{t("sec.action_users_desc")}</div>
           </Link>
           <Link to="/audit" className="border border-border p-3 hover:border-[#0044FF] hover:bg-secondary/40 transition" data-testid="secc-action-audit">
             <Info size={14} className="text-muted-foreground mb-1" />
-            <div className="text-xs font-medium">Journal d&apos;audit</div>
-            <div className="text-[10px] text-muted-foreground">Événements tracés</div>
+            <div className="text-xs font-medium">{t("sec.action_audit")}</div>
+            <div className="text-[10px] text-muted-foreground">{t("sec.action_audit_desc")}</div>
           </Link>
           <Link to="/cameras" className="border border-border p-3 hover:border-[#0044FF] hover:bg-secondary/40 transition" data-testid="secc-action-cams">
             <Camera size={14} className="text-muted-foreground mb-1" />
-            <div className="text-xs font-medium">Caméras</div>
-            <div className="text-[10px] text-muted-foreground">Firmware & mots de passe</div>
+            <div className="text-xs font-medium">{t("sec.action_cams")}</div>
+            <div className="text-[10px] text-muted-foreground">{t("sec.action_cams_desc")}</div>
           </Link>
         </div>
       </div>

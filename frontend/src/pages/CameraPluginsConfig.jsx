@@ -12,6 +12,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Search, CheckSquare, Square, ChevronDown, ChevronUp, Zap, X } from "lucide-react";
 import api from "@/lib/api";
+import { useApp } from "@/context/AppContext";
 
 const CATEGORY_COLORS = {
   "ANPR / LPR": "#00E676",
@@ -30,6 +31,7 @@ const CATEGORY_COLORS = {
 };
 
 export default function CameraPluginsConfig({ value = [], onChange }) {
+  const { t } = useApp();
   const [catalog, setCatalog] = useState({ groups: [], total: 0, available: 0 });
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
@@ -95,19 +97,19 @@ export default function CameraPluginsConfig({ value = [], onChange }) {
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           <Zap size={14} className="text-[#00E676]" />
-          <span className="text-xs font-medium">Config IA modulaire</span>
+          <span className="text-xs font-medium">{t("campcfg.title")}</span>
           <span className="text-[10px] mono text-muted-foreground">
-            {totalSel} / {totalAvail} plugin{totalSel > 1 ? "s" : ""} actif{totalSel > 1 ? "s" : ""}
+            {totalSel} / {totalAvail} {t("campcfg.active_plugins")}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
           <button type="button" onClick={selectAll}
             className="text-[10px] px-2 py-1 border border-border hover:bg-secondary"
-            data-testid="plugins-select-all">Tout activer</button>
+            data-testid="plugins-select-all">{t("campcfg.select_all")}</button>
           <button type="button" onClick={clearAll}
             className="text-[10px] px-2 py-1 border border-border hover:bg-secondary"
             data-testid="plugins-clear-all">
-            <X size={10} className="inline mr-0.5" /> Tout retirer
+            <X size={10} className="inline mr-0.5" /> {t("campcfg.clear_all")}
           </button>
         </div>
       </div>
@@ -115,8 +117,7 @@ export default function CameraPluginsConfig({ value = [], onChange }) {
       {/* Hint */}
       {totalSel === 0 && (
         <div className="text-[10px] text-muted-foreground border-l-2 border-yellow-500/60 pl-2">
-          Aucun plugin sélectionné → détection IA <b>désactivée</b> sur cette caméra.
-          Cochez ≥ 1 plugin pour activer l&apos;analyse (ex. <code>yolo-detection</code> + <code>bytetrack</code> + <code>anpr-eps</code>).
+          {t("campcfg.hint_prefix")} <b>{t("campcfg.hint_disabled")}</b> {t("campcfg.hint_suffix")} <code>yolo-detection</code> + <code>bytetrack</code> + <code>anpr-eps</code>).
         </div>
       )}
 
@@ -124,7 +125,7 @@ export default function CameraPluginsConfig({ value = [], onChange }) {
       <div className="relative">
         <Search size={12} className="absolute left-2 top-2 text-muted-foreground" />
         <input
-          type="text" placeholder="Rechercher un plugin…"
+          type="text" placeholder={t("campcfg.search_placeholder")}
           value={query} onChange={(e) => setQuery(e.target.value)}
           className="w-full pl-7 pr-2 py-1.5 text-xs bg-card border border-input"
           data-testid="plugins-search"
@@ -133,7 +134,7 @@ export default function CameraPluginsConfig({ value = [], onChange }) {
 
       {/* Groups */}
       {loading ? (
-        <div className="text-[11px] text-muted-foreground text-center py-4">Chargement du catalogue…</div>
+        <div className="text-[11px] text-muted-foreground text-center py-4">{t("campcfg.loading_catalog")}</div>
       ) : (
         <div className="max-h-96 overflow-y-auto space-y-2" data-testid="plugins-groups">
           {filteredGroups.map((g) => {
@@ -155,7 +156,7 @@ export default function CameraPluginsConfig({ value = [], onChange }) {
                   </button>
                   <button type="button" onClick={() => toggleGroup(g)}
                     className="text-[10px] px-1.5 py-0.5 border border-border hover:bg-secondary">
-                    {groupSelected === groupTotal ? "Décocher tout" : "Cocher tout"}
+                    {groupSelected === groupTotal ? t("campcfg.uncheck_all") : t("campcfg.check_all")}
                   </button>
                 </div>
                 {isOpen && (
@@ -177,7 +178,7 @@ export default function CameraPluginsConfig({ value = [], onChange }) {
                             )}
                             <div className="flex items-center gap-1.5 mt-0.5">
                               <span className="text-[9px] mono px-1 py-0.5 bg-secondary/50" style={{ color }}>{p.interface}</span>
-                              {!p.available && <span className="text-[9px] text-red-400">indisponible</span>}
+                              {!p.available && <span className="text-[9px] text-red-400">{t("campcfg.unavailable")}</span>}
                             </div>
                           </div>
                         </label>
@@ -189,7 +190,7 @@ export default function CameraPluginsConfig({ value = [], onChange }) {
             );
           })}
           {filteredGroups.length === 0 && (
-            <div className="text-[11px] text-muted-foreground text-center py-4">Aucun plugin ne correspond à « {query} »</div>
+            <div className="text-[11px] text-muted-foreground text-center py-4">{t("campcfg.no_match")} « {query} »</div>
           )}
         </div>
       )}

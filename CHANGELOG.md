@@ -3,6 +3,12 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.76-i18n-full-coverage] — 2026-09-12 — Traduction complète de l'interface (34 pages auparavant en dur)
+
+### Added
+- **1365 nouvelles clés de traduction** (FR + EN) couvrant les 34 pages de l'application qui n'utilisaient jusqu'ici aucun système de traduction — texte entièrement codé en dur en français, y compris des pages majeures (Carte interactive, Centre de sécurité, Timeline, Anomalies IA, Smart Zones, Workflows, Health Dashboard, gestion des plugins...). Passer l'interface en anglais affichait auparavant la majorité de l'application en français malgré le changement de langue.
+- Le fichier de traduction passe de 528 à 1893 clés (FR et EN parfaitement alignées, vérifié). Basculer la langue de l'interface (Paramètres) affiche désormais un texte cohérent sur l'ensemble de l'application, pas seulement une poignée de pages.
+
 ## [v3.75-export-codec-duration-fix] — 2026-09-12 — Correctif export vidéo : codec réel + durée aberrante
 
 ### Fixed

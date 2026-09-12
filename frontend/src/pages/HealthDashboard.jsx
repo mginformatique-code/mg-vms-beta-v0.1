@@ -5,6 +5,7 @@
  */
 import React, { useEffect, useState } from "react";
 import api from "@/lib/api";
+import { useApp } from "@/context/AppContext";
 import {
   Activity, Cpu, HardDrive, Database, Zap, Video, Package,
   AlertTriangle, CheckCircle2, XCircle, RefreshCw,
@@ -33,6 +34,7 @@ function Metric({ label, value, unit = "", color, warn, err, icon: Icon }) {
 }
 
 export default function HealthDashboard() {
+  const { t } = useApp();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
@@ -55,10 +57,10 @@ export default function HealthDashboard() {
   }, []);
 
   if (!data && !error) {
-    return <div className="p-6 text-sm text-muted-foreground">Chargement Health Dashboard…</div>;
+    return <div className="p-6 text-sm text-muted-foreground">{t("health.loading")}</div>;
   }
   if (error) {
-    return <div className="p-6 text-sm text-[#FF3333]">Erreur : {error}</div>;
+    return <div className="p-6 text-sm text-[#FF3333]">{t("health.error_prefix")} {error}</div>;
   }
 
   const s = data.system || {};
@@ -79,24 +81,24 @@ export default function HealthDashboard() {
             <span className="text-[10px] px-1.5 py-0.5 border border-[#00E676] text-[#00E676] mono uppercase">P1</span>
           </h1>
           <p className="text-xs text-muted-foreground">
-            Vue temps-réel de la stabilité du VMS · refresh 5s
+            {t("health.subtitle")}
           </p>
         </div>
         <div className="flex items-center gap-2 text-[10px] mono text-muted-foreground">
           <RefreshCw size={11} className="animate-spin" />
-          {lastUpdate && <span>Dernière MAJ : {lastUpdate.toLocaleTimeString()}</span>}
+          {lastUpdate && <span>{t("health.last_update_prefix")} {lastUpdate.toLocaleTimeString()}</span>}
         </div>
       </div>
 
       {/* Système */}
       <section>
         <h2 className="font-head font-semibold text-sm mb-2 flex items-center gap-1.5">
-          <Cpu size={14} className="text-[#0044FF]" /> Système
+          <Cpu size={14} className="text-[#0044FF]" /> {t("health.system")}
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           <Metric label="CPU" value={s.cpu_percent?.toFixed(1)} unit="%" warn={70} err={90} icon={Cpu} />
           <Metric label="RAM" value={s.ram_percent?.toFixed(1)} unit="%" warn={80} err={95} icon={Cpu} />
-          <Metric label="Disque" value={s.disk_percent?.toFixed(1)} unit="%" warn={80} err={95} icon={HardDrive} />
+          <Metric label={t("health.disk")} value={s.disk_percent?.toFixed(1)} unit="%" warn={80} err={95} icon={HardDrive} />
           <Metric label="Uptime" value={Math.floor((s.uptime_seconds || 0) / 60)} unit=" min" icon={Activity} />
         </div>
       </section>
@@ -121,7 +123,7 @@ export default function HealthDashboard() {
         </div>
         <div className="border border-border p-3 bg-card" data-testid="ai-panel">
           <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-            <Zap size={11} /> IA
+            <Zap size={11} /> {t("health.ai_label")}
           </div>
           <div className="mt-1 space-y-0.5 text-[11px] mono">
             <div>
@@ -159,22 +161,22 @@ export default function HealthDashboard() {
       {/* Caméras */}
       <section>
         <h2 className="font-head font-semibold text-sm mb-2 flex items-center gap-1.5">
-          <Video size={14} className="text-[#FFB800]" /> Caméras ({cams.length})
+          <Video size={14} className="text-[#FFB800]" /> {t("health.cameras")} ({cams.length})
         </h2>
         {cams.length === 0 ? (
           <div className="text-xs text-muted-foreground py-4 text-center border border-border">
-            Aucune caméra configurée
+            {t("health.no_cameras")}
           </div>
         ) : (
           <div className="border border-border overflow-x-auto">
             <table className="w-full text-[11px]">
               <thead className="bg-secondary/40 text-[10px] uppercase tracking-wider">
                 <tr>
-                  <th className="text-left p-2">Caméra</th>
-                  <th className="text-left p-2">État</th>
-                  <th className="text-right p-2">Coupures 24h</th>
-                  <th className="text-right p-2">Reco moy.</th>
-                  <th className="text-left p-2">Dernier segment</th>
+                  <th className="text-left p-2">{t("health.col_camera")}</th>
+                  <th className="text-left p-2">{t("health.col_state")}</th>
+                  <th className="text-right p-2">{t("health.col_disconnects_24h")}</th>
+                  <th className="text-right p-2">{t("health.col_avg_reconnect")}</th>
+                  <th className="text-left p-2">{t("health.col_last_segment")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -213,11 +215,11 @@ export default function HealthDashboard() {
       {/* Recorder */}
       <section>
         <h2 className="font-head font-semibold text-sm mb-2 flex items-center gap-1.5">
-          <HardDrive size={14} className="text-[#A855F7]" /> Recorder ({(rec.cameras || []).filter(c => c.ffmpeg_alive).length}/{(rec.cameras || []).length} FFmpeg vivants)
+          <HardDrive size={14} className="text-[#A855F7]" /> Recorder ({(rec.cameras || []).filter(c => c.ffmpeg_alive).length}/{(rec.cameras || []).length} {t("health.ffmpeg_alive_label")})
         </h2>
         {(rec.cameras || []).length === 0 ? (
           <div className="text-xs text-muted-foreground py-2 text-center border border-border">
-            Aucun enregistrement actif
+            {t("health.no_recording")}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
@@ -236,21 +238,21 @@ export default function HealthDashboard() {
                   <div className="font-semibold">{c.camera_name || c.name}</div>
                   <div className="flex items-center gap-2 mt-0.5 mono text-[10px]">
                     <span style={{ color: c.ffmpeg_alive ? OK : ERR }}>
-                      {c.ffmpeg_alive ? "● FFmpeg actif" : "● FFmpeg mort"}
+                      {c.ffmpeg_alive ? `● ${t("health.ffmpeg_active")}` : `● ${t("health.ffmpeg_dead")}`}
                     </span>
                     {c.pid && <span className="text-muted-foreground">pid={c.pid}</span>}
                   </div>
                   <div className="mono text-[10px] text-muted-foreground mt-0.5">
-                    Dernier segment : {c.last_segment_end?.slice(0, 19).replace("T", " ") || "—"}
+                    {t("health.last_segment_prefix")} {c.last_segment_end?.slice(0, 19).replace("T", " ") || "—"}
                     {c.last_segment_age_sec !== null && ` (${c.last_segment_age_sec}s)`}
                   </div>
                   <div className="mono text-[10px]" style={{ color: gapWarn ? WARN : OK }}>
-                    {gapWarn ? (<><AlertTriangle size={9} className="inline" /> Gap détecté</>) : "Continuité OK"}
+                    {gapWarn ? (<><AlertTriangle size={9} className="inline" /> {t("health.gap_detected")}</>) : t("health.continuity_ok")}
                   </div>
                   {c.record_mode === "continuous" && (
                     <div className="mono text-[10px] text-muted-foreground mt-0.5">
-                      Couverture 24h : {cov !== null && cov !== undefined ? `${cov}%` : "—"}
-                      {gapCount > 0 && <span className="ml-1 text-[#FFB800]">· {gapCount} trous</span>}
+                      {t("health.coverage_24h_prefix")} {cov !== null && cov !== undefined ? `${cov}%` : "—"}
+                      {gapCount > 0 && <span className="ml-1 text-[#FFB800]">· {gapCount} {t("health.gap_count_suffix")}</span>}
                     </div>
                   )}
                 </div>
@@ -264,7 +266,7 @@ export default function HealthDashboard() {
       {(p.errors || []).length > 0 && (
         <section className="border border-[#FFB800]/40 bg-[#FFB800]/5 p-3">
           <h2 className="font-head font-semibold text-sm mb-2 flex items-center gap-1.5 text-[#FFB800]">
-            <AlertTriangle size={14} /> Plugins avec erreurs ({p.errors.length})
+            <AlertTriangle size={14} /> {t("health.plugins_errors_label")} ({p.errors.length})
           </h2>
           <div className="space-y-1">
             {p.errors.map((e) => (

@@ -17,6 +17,7 @@ import {
   Activity, ArrowLeft, Cpu, HardDrive, Zap, RefreshCw, AlertTriangle,
   CheckCircle2, TrendingUp, Server, Layers,
 } from "lucide-react";
+import { useApp } from "@/context/AppContext";
 
 const REFRESH_MS = 2000;   // 2s — sans écraser le CPU
 const STAGE_BUDGETS = {
@@ -69,6 +70,7 @@ const StageRow = ({ stage, s }) => {
 };
 
 const CameraCard = ({ camId, snap, name }) => {
+  const { t } = useApp();
   const stages = snap.stages || {};
   const total = Object.values(stages).reduce((sum, s) => sum + (s.avg_ms_60s || 0), 0);
   const totalP95 = Math.max(0, ...Object.values(stages).map((s) => s.p95_60s || 0));
@@ -93,7 +95,7 @@ const CameraCard = ({ camId, snap, name }) => {
         <table className="w-full text-xs" data-testid={`pipe-cam-table-${camId}`}>
           <thead>
             <tr className="text-[10px] uppercase tracking-wide text-muted-foreground border-b border-border/60">
-              <th className="text-left py-1.5 px-2">Étage</th>
+              <th className="text-left py-1.5 px-2">{t("pinspl.th_stage")}</th>
               <th className="text-right py-1.5 px-2">avg 60s</th>
               <th className="text-right py-1.5 px-2">p50</th>
               <th className="text-right py-1.5 px-2">p95</th>
@@ -109,7 +111,7 @@ const CameraCard = ({ camId, snap, name }) => {
               <StageRow key={stage} stage={stage} s={s} />
             ))}
             {Object.keys(stages).length === 0 && (
-              <tr><td colSpan="9" className="text-center py-4 text-muted-foreground text-[11px]">Aucune donnée — la caméra est en démarrage.</td></tr>
+              <tr><td colSpan="9" className="text-center py-4 text-muted-foreground text-[11px]">{t("pinspl.no_data_starting")}</td></tr>
             )}
           </tbody>
         </table>
@@ -126,6 +128,7 @@ const CameraCard = ({ camId, snap, name }) => {
 };
 
 export default function PipelineInspectorLive() {
+  const { t } = useApp();
   const [data, setData] = useState(null);
   const [hot, setHot] = useState(null);
   const [pq, setPq] = useState(null);
@@ -155,7 +158,7 @@ export default function PipelineInspectorLive() {
     return () => clearInterval(iv);
   }, [paused]);
 
-  if (!data) return <div className="p-8 text-muted-foreground" data-testid="pipe-loading">Chargement…</div>;
+  if (!data) return <div className="p-8 text-muted-foreground" data-testid="pipe-loading">{t("pinspl.loading")}</div>;
 
   const sys = data.system || {};
   const cameras = data.cameras || {};
@@ -167,19 +170,19 @@ export default function PipelineInspectorLive() {
       <div className="flex items-end justify-between border-b border-border pb-3">
         <div className="flex items-center gap-4">
           <Link to="/health-dashboard" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1" data-testid="pipe-back">
-            <ArrowLeft size={13}/> Health Dashboard
+            <ArrowLeft size={13}/> {t("pinspl.health_dashboard_link")}
           </Link>
           <div>
-            <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground mb-1">Diagnostics · Pipeline IA</div>
-            <h1 className="font-head font-black text-3xl tracking-tight">Pipeline Inspector <span className="text-muted-foreground mono text-lg">live</span></h1>
+            <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground mb-1">{t("pinspl.subtitle")}</div>
+            <h1 className="font-head font-black text-3xl tracking-tight">{t("nav.pipeline_inspector")} <span className="text-muted-foreground mono text-lg">live</span></h1>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setPaused(!paused)} className="border border-border px-3 py-2 text-xs hover:bg-secondary/50 flex items-center gap-1" data-testid="pipe-pause">
-            {paused ? <><Zap size={12}/> Reprendre</> : <><RefreshCw size={12}/> Pause auto-refresh</>}
+            {paused ? <><Zap size={12}/> {t("pinspl.resume")}</> : <><RefreshCw size={12}/> {t("pinspl.pause_auto_refresh")}</>}
           </button>
           <button onClick={refresh} className="border border-border px-3 py-2 text-xs hover:bg-secondary/50 flex items-center gap-1" data-testid="pipe-refresh">
-            <RefreshCw size={12}/> Actualiser
+            <RefreshCw size={12}/> {t("pinspl.refresh")}
           </button>
         </div>
       </div>
@@ -192,24 +195,24 @@ export default function PipelineInspectorLive() {
 
       {/* System */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-2" data-testid="pipe-system">
-        <Tile label="Caméras suivies" value={camCount} tone={camCount > 0 ? "ok" : "muted"} testid="pipe-cam-count" />
-        <Tile label="CPU système" value={`${sys.cpu_percent ?? "—"}%`} tone={(sys.cpu_percent || 0) > 80 ? "warn" : "ok"} testid="pipe-cpu" />
-        <Tile label="CPU process" value={`${sys.process_cpu_percent ?? "—"}%`} testid="pipe-cpu-proc" />
-        <Tile label="RAM utilisée" value={`${sys.ram?.percent ?? "—"}%`} hint={`${sys.ram?.used_mb ?? "—"} / ${sys.ram?.total_mb ?? "—"} MB`} tone={(sys.ram?.percent || 0) > 85 ? "warn" : "ok"} testid="pipe-ram" />
-        <Tile label="RSS process" value={`${sys.ram?.process_rss_mb ?? "—"} MB`} testid="pipe-rss" />
-        <Tile label="GPU / VRAM" value={sys.gpu?.available === false ? "N/A" : `${sys.gpu?.vram_allocated_mb ?? "—"} MB`} hint={sys.gpu?.device || "aucun GPU"} tone={sys.gpu?.available === false ? "muted" : "info"} testid="pipe-gpu" />
+        <Tile label={t("pinspl.cameras_tracked")} value={camCount} tone={camCount > 0 ? "ok" : "muted"} testid="pipe-cam-count" />
+        <Tile label={t("pinspl.cpu_system")} value={`${sys.cpu_percent ?? "—"}%`} tone={(sys.cpu_percent || 0) > 80 ? "warn" : "ok"} testid="pipe-cpu" />
+        <Tile label={t("pinspl.cpu_process")} value={`${sys.process_cpu_percent ?? "—"}%`} testid="pipe-cpu-proc" />
+        <Tile label={t("pinspl.ram_used")} value={`${sys.ram?.percent ?? "—"}%`} hint={`${sys.ram?.used_mb ?? "—"} / ${sys.ram?.total_mb ?? "—"} MB`} tone={(sys.ram?.percent || 0) > 85 ? "warn" : "ok"} testid="pipe-ram" />
+        <Tile label={t("pinspl.rss_process")} value={`${sys.ram?.process_rss_mb ?? "—"} MB`} testid="pipe-rss" />
+        <Tile label="GPU / VRAM" value={sys.gpu?.available === false ? "N/A" : `${sys.gpu?.vram_allocated_mb ?? "—"} MB`} hint={sys.gpu?.device || t("pinspl.no_gpu")} tone={sys.gpu?.available === false ? "muted" : "info"} testid="pipe-gpu" />
       </div>
 
       {/* Hot Reload signals (Wave A) */}
       {hot && (
         <div className="bg-card border border-border p-3" data-testid="pipe-hot-reload">
           <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2 flex items-center gap-1">
-            <TrendingUp size={11}/> Hot Reload chirurgical (Wave A)
+            <TrendingUp size={11}/> {t("pinspl.hot_reload_title")}
           </div>
           <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
-            <Tile label="Cycles IA" value={hot.cycles_since_boot} testid="pipe-hr-cycles" />
-            <Tile label="Sync full" value={hot.topology_syncs_full} hint="TTL 30s (boot inclus)" testid="pipe-hr-full" />
-            <Tile label="Sync partiel" value={hot.topology_syncs_partial} tone="info" hint="chirurgie ciblée" testid="pipe-hr-partial" />
+            <Tile label={t("pinspl.hr_cycles")} value={hot.cycles_since_boot} testid="pipe-hr-cycles" />
+            <Tile label={t("pinspl.hr_full")} value={hot.topology_syncs_full} hint={t("pinspl.hr_full_hint")} testid="pipe-hr-full" />
+            <Tile label={t("pinspl.hr_partial")} value={hot.topology_syncs_partial} tone="info" hint={t("pinspl.hr_partial_hint")} testid="pipe-hr-partial" />
             <Tile label="fs starts" value={hot.frame_source_starts} testid="pipe-hr-starts" />
             <Tile label="fs stops" value={hot.frame_source_stops} testid="pipe-hr-stops" />
             <Tile label="Config reloads" value={hot.config_reloads + hot.camera_config_reloads} hint="signal-driven" testid="pipe-hr-reloads" />
@@ -221,7 +224,7 @@ export default function PipelineInspectorLive() {
       {pq && (
         <div className="bg-card border border-border p-3" data-testid="pipe-plate-quality">
           <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2 flex items-center gap-1">
-            <CheckCircle2 size={11}/> Gate qualité crop plaque (Wave C)
+            <CheckCircle2 size={11}/> {t("pinspl.plate_quality_title")}
           </div>
           <div className="flex flex-wrap gap-3 text-xs">
             <span><span className="opacity-60">min side:</span> <span className="mono">{pq.thresholds.min_plate_side_px}px</span></span>
@@ -229,10 +232,10 @@ export default function PipelineInspectorLive() {
             <span><span className="opacity-60">good sharpness:</span> <span className="mono">{pq.thresholds.good_enough_sharpness}</span></span>
             <span><span className="opacity-60">good contrast:</span> <span className="mono">{pq.thresholds.good_enough_contrast}</span></span>
             <span><span className="opacity-60">max skew:</span> <span className="mono">{pq.thresholds.max_skew_deg}°</span></span>
-            <span><span className="opacity-60">mode debug:</span> <span className={`mono ${pq.debug_mode.enabled ? "text-[#FFB800]" : "opacity-50"}`}>{pq.debug_mode.enabled ? "ON" : "OFF"}</span></span>
+            <span><span className="opacity-60">{t("pinspl.debug_mode_label")}:</span> <span className={`mono ${pq.debug_mode.enabled ? "text-[#FFB800]" : "opacity-50"}`}>{pq.debug_mode.enabled ? "ON" : "OFF"}</span></span>
           </div>
           <details className="mt-2 text-[10px] mono opacity-70">
-            <summary className="cursor-pointer">Poids moteurs OCR (fusion pondérée)</summary>
+            <summary className="cursor-pointer">{t("pinspl.ocr_weights_summary")}</summary>
             <div className="flex flex-wrap gap-2 mt-1">
               {Object.entries(pq.engine_weights).map(([k, v]) => (
                 <span key={k} className="border border-border px-1.5 py-0.5">{k}: <b>{v}</b></span>
@@ -249,13 +252,13 @@ export default function PipelineInspectorLive() {
         ))}
         {camCount === 0 && (
           <div className="border border-border bg-card p-8 text-center text-muted-foreground text-sm" data-testid="pipe-cameras-empty">
-            Aucune caméra n&apos;a encore émis de mesure pipeline. Le premier cycle IA arrivera d&apos;ici quelques secondes.
+            {t("pinspl.no_cameras_empty")}
           </div>
         )}
       </div>
 
       <div className="text-[10px] text-muted-foreground text-center py-2" data-testid="pipe-footer">
-        Auto-refresh {paused ? "en pause" : `toutes les ${REFRESH_MS/1000}s`} · uptime pipeline {sys.uptime_s}s ·
+        Auto-refresh {paused ? t("pinspl.paused_label") : `${t("pinspl.every_seconds_prefix")} ${REFRESH_MS/1000}s`} · {t("pinspl.uptime_label")} {sys.uptime_s}s ·
         endpoints <span className="mono">/api/diagnostics/pipeline-inspector</span> + <span className="mono">/hot-reload</span> + <span className="mono">/plate-quality</span>
       </div>
     </div>

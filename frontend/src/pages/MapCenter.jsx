@@ -38,6 +38,7 @@ import {
   Link2, Unlink, Pencil, Box as BoxIcon,
 } from "lucide-react";
 import LiveMapCanvas from "./LiveMapCanvas";
+import { useApp } from "@/context/AppContext";
 import MapContextMenu from "@/components/MapContextMenu";
 import AddressPickerModal from "@/components/AddressPickerModal";
 import { generateMapReportPdf } from "@/lib/mapReportPdf";
@@ -73,6 +74,15 @@ const PHOTO_TYPES = [
   { id: "cabinet", label: "Armoire" },
   { id: "env", label: "Environnement" },
 ];
+// Clés i18n correspondant aux ids ci-dessus (PHOTO_TYPES.label reste en
+// français pour compat interne, non utilisé pour l'affichage — voir t() plus bas).
+const PHOTO_TYPE_LABEL_KEYS = {
+  real: "map.photo_real",
+  install: "map.photo_install",
+  cable: "map.photo_cable",
+  cabinet: "map.photo_cabinet",
+  env: "map.photo_env",
+};
 
 // ─────────────────────────────────────────────────────────────────────
 // Helpers
@@ -286,6 +296,7 @@ function LinkLine({ link, from, to, onContextMenu }) {
 // Camera details panel (right side)
 // ─────────────────────────────────────────────────────────────────────
 function CameraPanel({ camera, onClose, onChange, onOpenInCenter }) {
+  const { t } = useApp();
   const [local, setLocal] = useState(camera?.map_position || {});
   useEffect(() => setLocal(camera?.map_position || {}), [camera]);
 
@@ -319,7 +330,7 @@ function CameraPanel({ camera, onClose, onChange, onOpenInCenter }) {
     <div className="w-80 bg-card border-l border-border flex flex-col overflow-y-auto" data-testid="map-camera-panel">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between">
         <div className="min-w-0">
-          <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">Caméra</div>
+          <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">{t("map.camera")}</div>
           <div className="font-medium truncate">{camera.name}</div>
         </div>
         <button onClick={onClose} className="hover:text-[#FF3333]" data-testid="map-camera-panel-close">
@@ -330,7 +341,7 @@ function CameraPanel({ camera, onClose, onChange, onOpenInCenter }) {
       {flags.length > 0 && (
         <div className="px-4 py-2 bg-[#FFB800]/10 border-b border-[#FFB800]/40" data-testid="map-camera-audit-flags">
           <div className="text-[10px] uppercase tracking-[0.15em] text-[#FFB800] mb-1">
-            Audit — {flags.length} point(s)
+            {t("map.audit")} — {flags.length} {t("map.audit_points_unit")}
           </div>
           <div className="flex flex-wrap gap-1">
             {flags.map((f) => (
@@ -344,8 +355,8 @@ function CameraPanel({ camera, onClose, onChange, onOpenInCenter }) {
 
       <div className="p-4 space-y-4 text-sm">
         <div className="grid grid-cols-2 gap-2 text-xs">
-          <div><span className="text-muted-foreground">IP : </span><span className="mono">{camera.ip || "—"}</span></div>
-          <div><span className="text-muted-foreground">Statut : </span>
+          <div><span className="text-muted-foreground">{t("map.ip")} : </span><span className="mono">{camera.ip || "—"}</span></div>
+          <div><span className="text-muted-foreground">{t("map.status")} : </span>
             <span className="mono" style={{ color: STATUS_COLOR[camera.status] || "#71717a" }}>{camera.status || "—"}</span>
           </div>
           {/* v3.58 · Corrige "Marque" qui lisait `camera.brand` — un champ
@@ -355,55 +366,55 @@ function CameraPanel({ camera, onClose, onChange, onOpenInCenter }) {
               (qui, lui, lit déjà le bon champ). "Driver" aligné sur le
               même repli que Camera Center (CameraCenter.jsx) : pas de
               champ dédié en base, toujours "onvif" en pratique. */}
-          <div><span className="text-muted-foreground">Marque : </span>{camera.manufacturer || "—"}</div>
-          <div><span className="text-muted-foreground">Modèle : </span>{camera.model || "—"}</div>
-          <div><span className="text-muted-foreground">Driver : </span>{camera.driver || "onvif"}</div>
-          <div><span className="text-muted-foreground">MAC : </span><span className="mono">{net?.mac || camera.mac || "—"}</span></div>
-          <div className="col-span-2"><span className="text-muted-foreground">Firmware : </span>{camera.firmware || "—"}</div>
+          <div><span className="text-muted-foreground">{t("map.brand")} : </span>{camera.manufacturer || "—"}</div>
+          <div><span className="text-muted-foreground">{t("map.model")} : </span>{camera.model || "—"}</div>
+          <div><span className="text-muted-foreground">{t("map.driver")} : </span>{camera.driver || "onvif"}</div>
+          <div><span className="text-muted-foreground">{t("map.mac")} : </span><span className="mono">{net?.mac || camera.mac || "—"}</span></div>
+          <div className="col-span-2"><span className="text-muted-foreground">{t("map.firmware")} : </span>{camera.firmware || "—"}</div>
         </div>
 
         <div className="pt-3 border-t border-border">
           <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2 flex items-center gap-1">
-            <MapPin size={11} /> Position & FOV
+            <MapPin size={11} /> {t("map.position_fov")}
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <label className="text-xs">Rotation (°)
+            <label className="text-xs">{t("map.rotation_deg")}
               <input type="number" step="1" className="w-full mt-1 px-2 py-1 bg-background border border-border text-sm"
                 value={local.rotation ?? 0} onChange={(e) => set("rotation", num(e.target.value))}
                 data-testid="map-cam-rotation" />
             </label>
-            <label className="text-xs">Portée (m)
+            <label className="text-xs">{t("map.range_m")}
               <input type="number" step="0.5" className="w-full mt-1 px-2 py-1 bg-background border border-border text-sm"
                 value={local.range_m ?? DEFAULT_CAM.range_m} onChange={(e) => set("range_m", num(e.target.value))}
                 data-testid="map-cam-range" />
             </label>
-            <label className="text-xs">Angle H (°)
+            <label className="text-xs">{t("map.angle_h")}
               <input type="number" step="1" className="w-full mt-1 px-2 py-1 bg-background border border-border text-sm"
                 value={local.angle_h ?? DEFAULT_CAM.angle_h} onChange={(e) => set("angle_h", num(e.target.value))} />
             </label>
-            <label className="text-xs">Angle V (°)
+            <label className="text-xs">{t("map.angle_v")}
               <input type="number" step="1" className="w-full mt-1 px-2 py-1 bg-background border border-border text-sm"
                 value={local.angle_v ?? DEFAULT_CAM.angle_v} onChange={(e) => set("angle_v", num(e.target.value))} />
             </label>
-            <label className="text-xs">Hauteur (m)
+            <label className="text-xs">{t("map.height_m")}
               <input type="number" step="0.1" className="w-full mt-1 px-2 py-1 bg-background border border-border text-sm"
                 value={local.height_m ?? DEFAULT_CAM.height_m} onChange={(e) => set("height_m", num(e.target.value))} />
             </label>
-            <label className="text-xs">Objectif (mm)
+            <label className="text-xs">{t("map.lens_mm")}
               <input type="number" step="0.5" className="w-full mt-1 px-2 py-1 bg-background border border-border text-sm"
                 value={local.lens_mm ?? DEFAULT_CAM.lens_mm} onChange={(e) => set("lens_mm", num(e.target.value))} />
             </label>
-            <label className="text-xs col-span-2">Taille de l'icône ({Math.round((local.icon_scale || 1) * 100)}%)
+            <label className="text-xs col-span-2">{t("map.icon_size")} ({Math.round((local.icon_scale || 1) * 100)}%)
               <input type="range" min={0.5} max={2} step={0.1} className="w-full mt-1"
                 value={local.icon_scale || 1} onChange={(e) => set("icon_scale", num(e.target.value))}
                 data-testid="map-cam-icon-scale" />
             </label>
-            <label className="text-xs col-span-2">Fixation
+            <label className="text-xs col-span-2">{t("map.fixture_label")}
               <select className="w-full mt-1 px-2 py-1 bg-background border border-border text-sm"
                 value={local.fixture || "wall"} onChange={(e) => set("fixture", e.target.value)}>
-                <option value="wall">Mur</option>
-                <option value="ceiling">Plafond</option>
-                <option value="pole">Mât</option>
+                <option value="wall">{t("map.fixture_wall")}</option>
+                <option value="ceiling">{t("map.fixture_ceiling")}</option>
+                <option value="pole">{t("map.fixture_pole")}</option>
               </select>
             </label>
           </div>
@@ -411,21 +422,21 @@ function CameraPanel({ camera, onClose, onChange, onOpenInCenter }) {
 
         <div className="pt-3 border-t border-border">
           <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2 flex items-center gap-1">
-            <Settings2 size={11} /> Installation
+            <Settings2 size={11} /> {t("map.installation_section")}
           </div>
-          <label className="text-xs block mb-2">Technicien
+          <label className="text-xs block mb-2">{t("map.technician")}
             <input type="text" className="w-full mt-1 px-2 py-1 bg-background border border-border text-sm"
               value={local.technician || ""} onChange={(e) => set("technician", e.target.value)} />
           </label>
-          <label className="text-xs block mb-2">Numéro de série
+          <label className="text-xs block mb-2">{t("map.serial_number")}
             <input type="text" className="w-full mt-1 px-2 py-1 bg-background border border-border text-sm mono"
               value={local.serial || ""} onChange={(e) => set("serial", e.target.value)} />
           </label>
-          <label className="text-xs block mb-2">Date d&apos;installation
+          <label className="text-xs block mb-2">{t("map.install_date")}
             <input type="date" className="w-full mt-1 px-2 py-1 bg-background border border-border text-sm"
               value={local.install_date || ""} onChange={(e) => set("install_date", e.target.value)} />
           </label>
-          <label className="text-xs block">Notes installateur
+          <label className="text-xs block">{t("map.installer_notes")}
             <textarea className="w-full mt-1 px-2 py-1 bg-background border border-border text-sm min-h-[60px]"
               value={local.install_notes || ""} onChange={(e) => set("install_notes", e.target.value)} />
           </label>
@@ -433,7 +444,7 @@ function CameraPanel({ camera, onClose, onChange, onOpenInCenter }) {
 
         {camera.enabled_plugins?.length > 0 && (
           <div className="pt-3 border-t border-border">
-            <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2">Plugins actifs</div>
+            <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2">{t("map.active_plugins")}</div>
             <div className="flex flex-wrap gap-1">
               {camera.enabled_plugins.map((p) => (
                 <span key={p} className="text-[9px] mono uppercase tracking-wider px-1.5 py-0.5 border border-[#0044FF] text-[#0044FF]">
@@ -447,14 +458,14 @@ function CameraPanel({ camera, onClose, onChange, onOpenInCenter }) {
         {/* v0.5.2.c · Phase 3 — Photos d'installation */}
         <div className="pt-3 border-t border-border">
           <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2 flex items-center gap-1">
-            <CamIcon size={11} /> Photos ({(local.photos || []).length})
+            <CamIcon size={11} /> {t("map.photos_label")} ({(local.photos || []).length})
           </div>
           <div className="grid grid-cols-3 gap-1 mb-2">
             {(local.photos || []).map((ph, i) => (
               <div key={i} className="relative group aspect-square bg-black/30 border border-border overflow-hidden" data-testid={`map-cam-photo-${i}`}>
                 <img src={ph.data_uri} alt={ph.type} className="w-full h-full object-cover" />
                 <div className="absolute top-0 left-0 right-0 text-[8px] uppercase tracking-wider px-1 py-0.5 bg-black/70 text-center">
-                  {PHOTO_TYPES.find((t) => t.id === ph.type)?.label || ph.type}
+                  {t(PHOTO_TYPE_LABEL_KEYS[ph.type]) || ph.type}
                 </div>
                 <button
                   onClick={() => {
@@ -462,7 +473,7 @@ function CameraPanel({ camera, onClose, onChange, onOpenInCenter }) {
                     set("photos", next);
                   }}
                   className="absolute top-0 right-0 bg-black/70 hover:bg-[#FF3333] opacity-0 group-hover:opacity-100 transition p-0.5"
-                  title="Supprimer"
+                  title={t("map.delete")}
                 >
                   <X size={10} />
                 </button>
@@ -471,15 +482,15 @@ function CameraPanel({ camera, onClose, onChange, onOpenInCenter }) {
             <label className="aspect-square border-2 border-dashed border-border flex flex-col items-center justify-center cursor-pointer hover:bg-secondary/40 text-[10px] text-muted-foreground gap-1"
               data-testid="map-cam-photo-upload">
               <Upload size={13} />
-              <span>Ajouter</span>
+              <span>{t("map.add")}</span>
               <input type="file" accept="image/*" className="hidden"
                 onChange={async (e) => {
                   const f = e.target.files?.[0];
                   if (!f) return;
-                  if (f.size > 4 * 1024 * 1024) { toast.error("Photo > 4 MB"); return; }
+                  if (f.size > 4 * 1024 * 1024) { toast.error(t("map.photo_size_limit")); return; }
                   const data = await fileToDataUri(f);
                   const kind = window.prompt(
-                    "Type de photo ? (real / install / cable / cabinet / env)",
+                    t("map.photo_type_prompt"),
                     "install",
                   ) || "install";
                   const next = [...(local.photos || []),
@@ -497,7 +508,7 @@ function CameraPanel({ camera, onClose, onChange, onOpenInCenter }) {
           className="w-full flex items-center justify-center gap-2 border border-border px-3 py-2 text-xs hover:bg-secondary/50"
           data-testid="map-cam-open-center"
         >
-          <ExternalLink size={13} /> Voir dans Camera Center
+          <ExternalLink size={13} /> {t("map.view_in_camera_center")}
         </button>
       </div>
     </div>
@@ -512,6 +523,7 @@ function CameraPanel({ camera, onClose, onChange, onOpenInCenter }) {
 // depuis la Carte, contrairement aux caméras).
 // ─────────────────────────────────────────────────────────────────────
 function EquipmentPanel({ eq, onClose, onScaleChange, onRename, onRemoveFromPlan, onOpenInNetwork }) {
+  const { t } = useApp();
   const [name, setName] = useState(eq?.name || "");
   const [type, setType] = useState(eq?.type || "Générique");
   const [saving, setSaving] = useState(false);
@@ -523,8 +535,8 @@ function EquipmentPanel({ eq, onClose, onScaleChange, onRename, onRemoveFromPlan
 
   const save = async () => {
     setSaving(true);
-    try { await onRename(name, type); toast.success("Équipement mis à jour"); }
-    catch (e) { toast.error("Mise à jour refusée"); }
+    try { await onRename(name, type); toast.success(t("map.equipment_updated")); }
+    catch (e) { toast.error(t("map.equipment_update_denied")); }
     finally { setSaving(false); }
   };
 
@@ -534,7 +546,7 @@ function EquipmentPanel({ eq, onClose, onScaleChange, onRename, onRemoveFromPlan
         <div className="min-w-0 flex items-center gap-2">
           <Icon size={16} className="text-muted-foreground shrink-0" />
           <div>
-            <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">Équipement</div>
+            <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">{t("map.equipment")}</div>
             <div className="font-medium truncate">{eq.name || "—"}</div>
           </div>
         </div>
@@ -545,37 +557,37 @@ function EquipmentPanel({ eq, onClose, onScaleChange, onRename, onRemoveFromPlan
 
       <div className="p-4 space-y-4 text-sm">
         <div className="grid grid-cols-2 gap-2 text-xs">
-          <div><span className="text-muted-foreground">IP : </span><span className="mono">{eq.ip || "—"}</span></div>
-          <div><span className="text-muted-foreground">Statut : </span>
+          <div><span className="text-muted-foreground">{t("map.ip")} : </span><span className="mono">{eq.ip || "—"}</span></div>
+          <div><span className="text-muted-foreground">{t("map.status")} : </span>
             <span className="mono" style={{ color: STATUS_COLOR[eq.status] || "#71717a" }}>{eq.status || "—"}</span>
           </div>
-          <div><span className="text-muted-foreground">Modèle : </span>{eq.model || "—"}</div>
-          <div><span className="text-muted-foreground">Fabricant : </span>{eq.vendor || "—"}</div>
+          <div><span className="text-muted-foreground">{t("map.model")} : </span>{eq.model || "—"}</div>
+          <div><span className="text-muted-foreground">{t("map.vendor")} : </span>{eq.vendor || "—"}</div>
         </div>
 
         <div className="pt-3 border-t border-border space-y-2">
-          <label className="text-xs block">Nom
+          <label className="text-xs block">{t("map.name")}
             <input className="w-full mt-1 px-2 py-1 bg-background border border-border text-sm"
               value={name} onChange={(e) => setName(e.target.value)}
               data-testid="map-eq-name" />
           </label>
-          <label className="text-xs block">Type
+          <label className="text-xs block">{t("map.type_label")}
             <select className="w-full mt-1 px-2 py-1 bg-background border border-border text-sm"
               value={type} onChange={(e) => setType(e.target.value)}
               data-testid="map-eq-type">
-              {EQUIPMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              {EQUIPMENT_TYPES.map((et) => <option key={et} value={et}>{et}</option>)}
             </select>
           </label>
           {dirty && (
             <button type="button" disabled={saving} onClick={save} data-testid="map-eq-save"
               className="w-full px-3 py-1.5 text-xs bg-[#0044FF] text-white disabled:opacity-50">
-              {saving ? "Enregistrement…" : "Enregistrer"}
+              {saving ? t("map.saving_ellipsis") : t("map.save")}
             </button>
           )}
         </div>
 
         <div className="pt-3 border-t border-border">
-          <label className="text-xs block">Taille de l'icône ({Math.round((eq.icon_scale || 1) * 100)}%)
+          <label className="text-xs block">{t("map.icon_size")} ({Math.round((eq.icon_scale || 1) * 100)}%)
             <input type="range" min={0.5} max={2} step={0.1} className="w-full mt-1"
               value={eq.icon_scale || 1}
               onChange={(e) => onScaleChange(Number(e.target.value))}
@@ -586,11 +598,11 @@ function EquipmentPanel({ eq, onClose, onScaleChange, onRename, onRemoveFromPlan
         <div className="pt-3 border-t border-border flex flex-col gap-2">
           <button type="button" onClick={onOpenInNetwork} data-testid="map-eq-open-network"
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border hover:bg-secondary">
-            <ExternalLink size={13} /> Ouvrir dans Supervision réseau
+            <ExternalLink size={13} /> {t("map.open_in_network_supervision")}
           </button>
           <button type="button" onClick={onRemoveFromPlan} data-testid="map-eq-remove"
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border hover:bg-secondary">
-            <Unlink size={13} /> Retirer du plan (garde l'inventaire)
+            <Unlink size={13} /> {t("map.remove_from_plan_keep_inventory")}
           </button>
         </div>
       </div>
@@ -605,6 +617,7 @@ function SiteTree({
   sites, buildings, plans, selectedSite, selectedPlan,
   onSelectSite, onSelectPlan, onCreateBuilding, onCreatePlan, onCreateLiveMap, onDeletePlan, cameraCounts,
 }) {
+  const { t } = useApp();
   const [expanded, setExpanded] = useState({}); // site_id → bool
   const [q, setQ] = useState("");
   const norm = (s) => (s || "").toLowerCase();
@@ -626,11 +639,11 @@ function SiteTree({
     <div className="w-72 bg-card border-r border-border flex flex-col overflow-hidden" data-testid="map-site-tree">
       <div className="p-3 border-b border-border">
         <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2 flex items-center gap-1">
-          <FolderTree size={11} /> Sites & Plans
+          <FolderTree size={11} /> {t("map.sites_and_plans")}
         </div>
         <div className="relative">
           <Search size={12} className="absolute top-2 left-2 text-muted-foreground" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher…"
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("map.search_placeholder")}
             className="w-full pl-7 pr-2 py-1.5 bg-background border border-border text-xs"
             data-testid="map-tree-search" />
         </div>
@@ -678,18 +691,18 @@ function SiteTree({
                     <button onClick={() => onCreateBuilding(s.id)}
                       className="text-[10px] text-[#0044FF] hover:underline flex items-center gap-1"
                       data-testid={`map-add-building-${s.id}`}>
-                      <Plus size={10} /> Bâtiment
+                      <Plus size={10} /> {t("map.building")}
                     </button>
                     <button onClick={() => onCreatePlan(s.id)}
                       className="text-[10px] text-[#0044FF] hover:underline flex items-center gap-1 ml-2"
                       data-testid={`map-add-plan-${s.id}`}>
-                      <FilePlus size={10} /> Plan
+                      <FilePlus size={10} /> {t("map.plan_label")}
                     </button>
                     <button onClick={() => onCreateLiveMap(s.id)}
                       className="text-[10px] text-[#0044FF] hover:underline flex items-center gap-1 ml-2"
-                      title="Carte interactive (OpenStreetMap / satellite, gratuite)"
+                      title={t("map.interactive_map_tooltip")}
                       data-testid={`map-add-livemap-${s.id}`}>
-                      <MapPinned size={10} /> Carte
+                      <MapPinned size={10} /> {t("map.map_label")}
                     </button>
                   </div>
                 </div>
@@ -703,6 +716,7 @@ function SiteTree({
 }
 
 function PlanRow({ p, selected, onSelect, onDelete, count }) {
+  const { t } = useApp();
   const Icon = p.type === "carte_live" ? MapPinned : LayersIcon;
   return (
     <div className={`group flex items-center gap-1.5 px-3 py-1 hover:bg-secondary/40 cursor-pointer ${selected ? "bg-[#0044FF]/15 border-l-2 border-[#0044FF]" : ""}`}
@@ -712,7 +726,7 @@ function PlanRow({ p, selected, onSelect, onDelete, count }) {
       <span className="text-[9px] mono text-muted-foreground">{count}</span>
       <button onClick={(e) => { e.stopPropagation(); onDelete(); }}
         className="opacity-0 group-hover:opacity-100 text-[#FF3333]"
-        title="Supprimer">
+        title={t("map.delete")}>
         <Trash2 size={11} />
       </button>
     </div>
@@ -784,6 +798,7 @@ function MeasureLayer({ tool, measurements, currentPts, setMeasurements, scaleMP
 
 // ─────────────────────────────────────────────────────────────────────
 export default function MapCenter() {
+  const { t } = useApp();
   const navigate = useNavigate();
   const containerRef = useRef(null);
   const stageRef = useRef(null);
@@ -845,7 +860,7 @@ export default function MapCenter() {
       setBuildings(rb.data || []);
       setPlans(rp.data || []);
       if (!selectedSite && rs.data?.length) setSelectedSite(rs.data[0].id);
-    } catch (e) { toast.error("Échec chargement Map Center"); }
+    } catch (e) { toast.error(t("map.load_failed")); }
   }, [selectedSite]);
 
   useEffect(() => { refreshAll(); }, [refreshAll]);
@@ -885,7 +900,7 @@ export default function MapCenter() {
       // Reset zoom & pan quand on change de plan
       setScale(1); setStagePos({ x: 0, y: 0 });
     } catch (e) {
-      toast.error("Impossible de charger ce plan");
+      toast.error(t("map.plan_load_failed"));
     }
   }, []);
 
@@ -922,7 +937,7 @@ export default function MapCenter() {
   const saveCameraPos = useDebouncedCallback(async (camId, pos) => {
     try {
       await api.put(`/site-manager/cameras/${camId}/position`, pos);
-    } catch (e) { toast.error("Sauvegarde position échouée"); }
+    } catch (e) { toast.error(t("map.camera_position_save_failed")); }
   }, 400);
 
   const onCamDrag = (camId, pos) => {
@@ -939,7 +954,7 @@ export default function MapCenter() {
 
   const updateCameraDetails = useDebouncedCallback(async (camId, patch) => {
     try { await api.put(`/site-manager/cameras/${camId}/position`, patch); }
-    catch (e) { toast.error("Sauvegarde caméra échouée"); }
+    catch (e) { toast.error(t("map.camera_save_failed")); }
   }, 500);
 
   const onCameraChange = (patch) => {
@@ -952,12 +967,12 @@ export default function MapCenter() {
 
   // ── Actions bâtiments / plans ────────────────────────────────────
   const createBuilding = async (siteId) => {
-    const name = window.prompt("Nom du bâtiment ?");
+    const name = window.prompt(t("map.building_name_prompt"));
     if (!name) return;
     try {
       await api.post("/site-manager/buildings", { site_id: siteId, name, order: 0 });
       await refreshAll();
-    } catch (e) { toast.error("Création bâtiment refusée"); }
+    } catch (e) { toast.error(t("map.building_create_denied")); }
   };
 
   const createPlan = async (siteId) => {
@@ -965,7 +980,7 @@ export default function MapCenter() {
   };
   const onFilePicked = async (siteId, file) => {
     if (!file) return;
-    if (file.size > 20 * 1024 * 1024) { toast.error("Fichier > 20 MB"); return; }
+    if (file.size > 20 * 1024 * 1024) { toast.error(t("map.file_size_limit")); return; }
     try {
       let dataUri, width, height;
       if (file.type === "application/pdf") {
@@ -986,8 +1001,8 @@ export default function MapCenter() {
       });
       await refreshAll();
       loadPlan(r.data.id);
-      toast.success("Plan importé");
-    } catch (e) { toast.error("Import plan refusé"); }
+      toast.success(t("map.plan_imported"));
+    } catch (e) { toast.error(t("map.plan_import_denied")); }
   };
 
   // v3.54 · Carte interactive (Leaflet/OSM+satellite gratuits) — additive,
@@ -1007,24 +1022,24 @@ export default function MapCenter() {
       });
       await refreshAll();
       loadPlan(r.data.id);
-      toast.success("Carte créée");
-    } catch (e) { toast.error("Création de la carte refusée"); }
+      toast.success(t("map.map_created"));
+    } catch (e) { toast.error(t("map.map_create_denied")); }
     finally { pendingLiveMapRef.current = null; }
   };
   const createLiveMap = (siteId) => {
-    const name = window.prompt("Nom de la carte ?", "Carte");
+    const name = window.prompt(t("map.map_name_prompt"), t("map.map_label"));
     if (!name) return;
     pendingLiveMapRef.current = { siteId, name };
     setAddressPickerOpen(true);
   };
 
   const deletePlan = async (planId) => {
-    if (!window.confirm("Supprimer ce plan (les caméras seront désassociées) ?")) return;
+    if (!window.confirm(t("map.confirm_delete_plan"))) return;
     try {
       await api.delete(`/site-manager/plans/${planId}`);
       if (selectedPlan?.id === planId) { setSelectedPlan(null); setCameras([]); }
       await refreshAll();
-    } catch (e) { toast.error("Suppression refusée"); }
+    } catch (e) { toast.error(t("map.delete_denied")); }
   };
 
   // ── Ajout d'une caméra sur le plan par drag depuis la liste ─────
@@ -1043,7 +1058,7 @@ export default function MapCenter() {
   const [liveMapCenter, setLiveMapCenter] = useState(null);
 
   const placeCameraOnPlan = async (camId) => {
-    if (!selectedPlan) { toast.error("Sélectionnez un plan d'abord"); return; }
+    if (!selectedPlan) { toast.error(t("map.select_plan_first")); return; }
     const isLiveMap = selectedPlan.type === "carte_live";
     const placement = isLiveMap
       ? { lat: liveMapCenter?.lat ?? selectedPlan.center_lat ?? 46.6, lng: liveMapCenter?.lng ?? selectedPlan.center_lng ?? 1.9 }
@@ -1057,7 +1072,7 @@ export default function MapCenter() {
       const r = await api.get(`/site-manager/cameras?plan_id=${selectedPlan.id}`);
       setCameras(r.data || []);
       setSelectedCamId(camId);
-    } catch (e) { toast.error("Placement caméra refusé"); }
+    } catch (e) { toast.error(t("map.camera_placement_denied")); }
   };
 
   // v3.55 · "Retirer du plan" — geste qui existait déjà côté API
@@ -1066,13 +1081,13 @@ export default function MapCenter() {
     try {
       await api.delete(`/site-manager/cameras/${camId}/position`);
       if (selectedPlan) await loadPlan(selectedPlan.id);
-    } catch (e) { toast.error("Retrait refusé"); }
+    } catch (e) { toast.error(t("map.removal_denied")); }
   };
 
   // ── Équipements réseau (db.equipment, backend/network.py) ─────────
   const saveEquipmentPos = useDebouncedCallback(async (eqId, pos) => {
     try { await api.put(`/network/equipment/${eqId}/position`, pos); }
-    catch (e) { toast.error("Sauvegarde position équipement échouée"); }
+    catch (e) { toast.error(t("map.equipment_position_save_failed")); }
   }, 400);
   const onEqDrag = (eqId, pos) => {
     setEquipment((es) => es.map((eq) => eq.id === eqId ? { ...eq, ...pos } : eq));
@@ -1090,7 +1105,7 @@ export default function MapCenter() {
   useEffect(() => { refreshAvailableEquipment(); }, [refreshAvailableEquipment, equipment]);
 
   const placeEquipmentOnPlan = async (eqId) => {
-    if (!selectedPlan) { toast.error("Sélectionnez un plan d'abord"); return; }
+    if (!selectedPlan) { toast.error(t("map.select_plan_first")); return; }
     const placement = selectedPlan.type === "carte_live"
       ? { lat: liveMapCenter?.lat ?? selectedPlan.center_lat ?? 46.6, lng: liveMapCenter?.lng ?? selectedPlan.center_lng ?? 1.9 }
       : { x: planSize.w / 2, y: planSize.h / 2 };
@@ -1098,25 +1113,25 @@ export default function MapCenter() {
       await api.put(`/network/equipment/${eqId}/position`, { plan_id: selectedPlan.id, ...placement });
       await loadPlan(selectedPlan.id);
       setSelectedEqId(eqId);
-    } catch (e) { toast.error("Placement équipement refusé"); }
+    } catch (e) { toast.error(t("map.equipment_placement_denied")); }
   };
 
   // v3.55 · Clic-droit sur une zone vide → "Ajouter un équipement" — crée
   // l'équipement (inventaire réseau réel, voir network.py) puis le
   // positionne directement au point cliqué.
   const createEquipmentAt = async (type, placement) => {
-    const name = window.prompt(`Nom du ${type} ?`, type);
+    const name = window.prompt(`${t("map.name_of")} ${type} ?`, type);
     if (!name || !selectedPlan) return;
     try {
       const r = await api.post("/network/equipment", { name, type, site_id: selectedSite });
       await api.put(`/network/equipment/${r.data.id}/position`, { plan_id: selectedPlan.id, ...placement });
       await loadPlan(selectedPlan.id);
       setSelectedEqId(r.data.id);
-    } catch (e) { toast.error("Création équipement refusée"); }
+    } catch (e) { toast.error(t("map.equipment_create_denied")); }
   };
 
   const renameEquipment = async (eq) => {
-    const name = window.prompt("Nouveau nom ?", eq.name);
+    const name = window.prompt(t("map.new_name_prompt"), eq.name);
     if (!name || name === eq.name) return;
     try {
       // PUT /network/equipment/{id} remplace le document (EquipmentInput) —
@@ -1126,7 +1141,7 @@ export default function MapCenter() {
         model: eq.model || "", vendor: eq.vendor || "", parent_id: eq.parent_id || null,
       });
       if (selectedPlan) await loadPlan(selectedPlan.id);
-    } catch (e) { toast.error("Renommage refusé"); }
+    } catch (e) { toast.error(t("map.rename_denied")); }
   };
 
   // v3.70 · Variante utilisee par EquipmentPanel (champs directement dans
@@ -1148,15 +1163,15 @@ export default function MapCenter() {
     try {
       await api.delete(`/network/equipment/${eqId}/position`);
       if (selectedPlan) await loadPlan(selectedPlan.id);
-    } catch (e) { toast.error("Retrait refusé"); }
+    } catch (e) { toast.error(t("map.removal_denied")); }
   };
 
   const deleteEquipmentEntirely = async (eq) => {
-    if (!window.confirm(`Supprimer définitivement « ${eq.name} » de l'inventaire réseau (pas juste de ce plan) ?`)) return;
+    if (!window.confirm(`${t("map.confirm_delete_equipment_prefix")} ${eq.name} ${t("map.confirm_delete_equipment_suffix")}`)) return;
     try {
       await api.delete(`/network/equipment/${eq.id}`);
       if (selectedPlan) await loadPlan(selectedPlan.id);
-    } catch (e) { toast.error("Suppression refusée"); }
+    } catch (e) { toast.error(t("map.delete_denied")); }
   };
 
   // ── Connexions (site_plan_links, backend/routes/site_manager.py) ──
@@ -1167,21 +1182,21 @@ export default function MapCenter() {
         to_kind: toKind, to_id: toId, link_type: linkType,
       });
       await loadPlan(selectedPlan.id);
-    } catch (e) { toast.error("Connexion refusée"); }
+    } catch (e) { toast.error(t("map.connection_denied")); }
   };
   const renameLink = async (link) => {
-    const label = window.prompt("Nom de la connexion ?", link.label || "");
+    const label = window.prompt(t("map.connection_name_prompt"), link.label || "");
     if (label == null) return;
     try {
       await api.put(`/site-manager/plan-links/${link.id}`, { label });
       if (selectedPlan) await loadPlan(selectedPlan.id);
-    } catch (e) { toast.error("Renommage refusé"); }
+    } catch (e) { toast.error(t("map.rename_denied")); }
   };
   const deleteLink = async (linkId) => {
     try {
       await api.delete(`/site-manager/plan-links/${linkId}`);
       if (selectedPlan) await loadPlan(selectedPlan.id);
-    } catch (e) { toast.error("Suppression refusée"); }
+    } catch (e) { toast.error(t("map.delete_denied")); }
   };
 
   // "Attacher une connexion" : clic sur la 1ère extrémité arme le mode
@@ -1235,26 +1250,26 @@ export default function MapCenter() {
   // v3.55 · Constructeurs de menu contextuel — mêmes items dans les deux
   // modes (Konva/Leaflet), MapContextMenu se charge de l'affichage.
   const buildEquipmentSubmenu = (placement) => ({
-    type: "submenu", label: "Ajouter un équipement", icon: BoxIcon,
-    options: EQUIPMENT_TYPES.map((t) => ({
-      label: t, icon: TYPE_ICON[t], onClick: () => createEquipmentAt(t, placement),
+    type: "submenu", label: t("map.add_equipment"), icon: BoxIcon,
+    options: EQUIPMENT_TYPES.map((et) => ({
+      label: et, icon: TYPE_ICON[et], onClick: () => createEquipmentAt(et, placement),
     })),
   });
   const cameraMenuItems = (camId, clientX, clientY) => [
-    { type: "item", label: "Attacher une connexion", icon: Link2, onClick: () => startLinking("camera", camId) },
-    { type: "item", label: "Retirer du plan", icon: Unlink, onClick: () => retireCameraFromPlan(camId) },
-    { type: "item", label: "Voir dans Camera Center", icon: ExternalLink, onClick: () => navigate(`/cameras?focus=${camId}`) },
+    { type: "item", label: t("map.attach_connection"), icon: Link2, onClick: () => startLinking("camera", camId) },
+    { type: "item", label: t("map.remove_from_plan"), icon: Unlink, onClick: () => retireCameraFromPlan(camId) },
+    { type: "item", label: t("map.view_in_camera_center"), icon: ExternalLink, onClick: () => navigate(`/cameras?focus=${camId}`) },
   ];
   const equipmentMenuItems = (eq) => [
-    { type: "item", label: "Renommer", icon: Pencil, onClick: () => renameEquipment(eq) },
-    { type: "item", label: "Attacher une connexion", icon: Link2, onClick: () => startLinking("equipment", eq.id) },
-    { type: "item", label: "Retirer du plan", icon: Unlink, onClick: () => removeEquipmentFromPlan(eq.id) },
+    { type: "item", label: t("map.rename"), icon: Pencil, onClick: () => renameEquipment(eq) },
+    { type: "item", label: t("map.attach_connection"), icon: Link2, onClick: () => startLinking("equipment", eq.id) },
+    { type: "item", label: t("map.remove_from_plan"), icon: Unlink, onClick: () => removeEquipmentFromPlan(eq.id) },
     { type: "separator" },
-    { type: "item", label: "Supprimer définitivement", icon: Trash2, danger: true, onClick: () => deleteEquipmentEntirely(eq) },
+    { type: "item", label: t("map.delete_permanently"), icon: Trash2, danger: true, onClick: () => deleteEquipmentEntirely(eq) },
   ];
   const linkMenuItems = (link) => [
-    { type: "item", label: "Renommer", icon: Pencil, onClick: () => renameLink(link) },
-    { type: "item", label: "Supprimer", icon: Trash2, danger: true, onClick: () => deleteLink(link.id) },
+    { type: "item", label: t("map.rename"), icon: Pencil, onClick: () => renameLink(link) },
+    { type: "item", label: t("map.delete"), icon: Trash2, danger: true, onClick: () => deleteLink(link.id) },
   ];
 
   // Clic (gauche) sur une caméra/un équipement pendant "Attacher une
@@ -1323,9 +1338,9 @@ export default function MapCenter() {
   };
   const exportCameraCsv = () => {
     const rows = [
-      ["Nom", "IP", "Statut", "Driver", "Modèle", "Hauteur (m)",
-        "Angle H (°)", "Portée (m)", "Rotation (°)", "Objectif (mm)",
-        "Technicien", "N° série", "Date install", "Notes"],
+      [t("map.name"), t("map.ip"), t("map.status"), t("map.driver"), t("map.model"), t("map.height_m"),
+        t("map.angle_h"), t("map.range_m"), t("map.rotation_deg"), t("map.lens_mm"),
+        t("map.technician"), t("map.csv_serial"), t("map.csv_install_date"), t("map.notes")],
     ];
     camerasOnPlan.forEach((c) => {
       const p = c.map_position || {};
@@ -1344,7 +1359,7 @@ export default function MapCenter() {
     a.click();
   };
   const exportAuditCsv = () => {
-    const rows = [["Caméra", "IP", "Statut", "Problèmes"]];
+    const rows = [[t("map.camera"), t("map.ip"), t("map.status"), t("map.issues")]];
     camerasOnPlan.forEach((c) => {
       const flags = auditIndex[c.id] || [];
       if (flags.length === 0) return;
@@ -1366,7 +1381,7 @@ export default function MapCenter() {
   // /map/report-settings, chargés ici à la demande (pas de state global
   // pour un contenu utilisé uniquement au moment de l'export).
   const exportPdf = async () => {
-    if (camerasOnPlan.length === 0) { toast.error("Aucune caméra positionnée sur ce plan"); return; }
+    if (camerasOnPlan.length === 0) { toast.error(t("map.no_camera_positioned")); return; }
     setReportGenerating(true);
     try {
       const [tplRes, catalogRes] = await Promise.all([
@@ -1384,7 +1399,7 @@ export default function MapCenter() {
         catalogList: catalogRes.data,
       });
     } catch (e) {
-      toast.error("Échec de la génération du rapport PDF");
+      toast.error(t("map.pdf_generation_failed"));
     } finally {
       setReportGenerating(false);
     }
@@ -1428,12 +1443,12 @@ export default function MapCenter() {
         {/* Toolbar */}
         <div className="absolute top-2 left-2 right-2 z-10 flex items-center gap-2 pointer-events-none flex-wrap">
           <div className="bg-card/90 backdrop-blur border border-border px-3 py-1.5 text-xs pointer-events-auto flex items-center gap-3">
-            <span className="text-muted-foreground">Plan :</span>
+            <span className="text-muted-foreground">{t("map.plan_label")} :</span>
             <span className="font-medium">{selectedPlan?.name || "—"}</span>
             {selectedPlan && (
               <>
                 <span className="text-muted-foreground">·</span>
-                <span className="text-muted-foreground">Caméras :</span>
+                <span className="text-muted-foreground">{t("map.cameras")} :</span>
                 <span className="mono">{camerasOnPlan.length}</span>
               </>
             )}
@@ -1443,10 +1458,10 @@ export default function MapCenter() {
           <div className="bg-card/90 backdrop-blur border border-border px-2 py-1 text-[11px] pointer-events-auto flex items-center gap-2" data-testid="map-layers">
             <LayersIcon size={12} className="text-muted-foreground" />
             {[
-              { k: "fov", label: "FOV" },
-              { k: "name", label: "Noms" },
-              { k: "badges", label: "IA" },
-              { k: "status", label: "Statut" },
+              { k: "fov", label: t("map.layer_fov") },
+              { k: "name", label: t("map.layer_names") },
+              { k: "badges", label: t("map.layer_ai") },
+              { k: "status", label: t("map.status") },
             ].map((l) => (
               <label key={l.k} className="flex items-center gap-1 cursor-pointer" data-testid={`map-layer-${l.k}`}>
                 <input type="checkbox" checked={layers[l.k]}
@@ -1463,7 +1478,7 @@ export default function MapCenter() {
             className={`bg-card/90 backdrop-blur border px-3 py-1.5 text-xs pointer-events-auto flex items-center gap-2 ${auditMode ? "border-[#FFB800] text-[#FFB800]" : "border-border"}`}
             data-testid="map-audit-toggle"
           >
-            <Activity size={13} /> Audit
+            <Activity size={13} /> {t("map.audit")}
             {auditMode && Object.keys(auditSummary).length > 0 && (
               <span className="mono">{Object.values(auditSummary).reduce((a, b) => a + b, 0)}</span>
             )}
@@ -1473,9 +1488,9 @@ export default function MapCenter() {
           {!isLiveMap && (
             <div className="bg-card/90 backdrop-blur border border-border p-1 pointer-events-auto flex items-center gap-1" data-testid="map-measure">
               {[
-                { id: "distance", label: "D", title: "Distance (2 clics)" },
-                { id: "surface", label: "S", title: "Surface (double-clic pour finir)" },
-                { id: "radius", label: "R", title: "Rayon (centre puis bord)" },
+                { id: "distance", label: "D", title: t("map.measure_distance_title") },
+                { id: "surface", label: "S", title: t("map.measure_surface_title") },
+                { id: "radius", label: "R", title: t("map.measure_radius_title") },
               ].map((m) => (
                 <button key={m.id}
                   onClick={() => { setMeasureTool(measureTool === m.id ? null : m.id); setMeasurePts([]); }}
@@ -1484,7 +1499,7 @@ export default function MapCenter() {
                 >{m.label}</button>
               ))}
               {measurements.length > 0 && (
-                <button onClick={() => setMeasurements([])} className="px-2 py-1 text-[11px] text-[#FF3333]" title="Effacer">
+                <button onClick={() => setMeasurements([])} className="px-2 py-1 text-[11px] text-[#FF3333]" title={t("map.clear")}>
                   <Trash2 size={11} />
                 </button>
               )}
@@ -1498,22 +1513,22 @@ export default function MapCenter() {
               modes. CSV indépendant du rendu, disponible partout. */}
           <div className="bg-card/90 backdrop-blur border border-border p-1 pointer-events-auto flex items-center gap-1" data-testid="map-exports">
             {!isLiveMap && (
-              <button onClick={exportPng} className="px-2 py-1 text-[11px] hover:bg-secondary" title="Export PNG" data-testid="map-export-png">PNG</button>
+              <button onClick={exportPng} className="px-2 py-1 text-[11px] hover:bg-secondary" title={t("map.export_png_title")} data-testid="map-export-png">PNG</button>
             )}
             <button onClick={exportPdf} disabled={reportGenerating}
               className="px-2 py-1 text-[11px] hover:bg-secondary disabled:opacity-50"
-              title="Rapport PDF détaillé (page de garde, vue d'ensemble, une page par caméra)"
+              title={t("map.pdf_report_title")}
               data-testid="map-export-pdf">
-              {reportGenerating ? "Génération…" : "PDF"}
+              {reportGenerating ? t("map.generating_ellipsis") : "PDF"}
             </button>
             <button onClick={() => navigate("/map/report-settings")}
-              className="px-2 py-1 text-[11px] hover:bg-secondary" title="Réglages du rapport PDF"
+              className="px-2 py-1 text-[11px] hover:bg-secondary" title={t("map.pdf_settings_title")}
               data-testid="map-report-settings-link">
               <Settings2 size={12} />
             </button>
-            <button onClick={exportCameraCsv} className="px-2 py-1 text-[11px] hover:bg-secondary" title="CSV caméras" data-testid="map-export-csv">CSV</button>
+            <button onClick={exportCameraCsv} className="px-2 py-1 text-[11px] hover:bg-secondary" title={t("map.csv_cameras_title")} data-testid="map-export-csv">CSV</button>
             {auditMode && (
-              <button onClick={exportAuditCsv} className="px-2 py-1 text-[11px] text-[#FFB800] hover:bg-secondary" title="Rapport audit CSV" data-testid="map-export-audit">AUDIT</button>
+              <button onClick={exportAuditCsv} className="px-2 py-1 text-[11px] text-[#FFB800] hover:bg-secondary" title={t("map.audit_csv_title")} data-testid="map-export-audit">AUDIT</button>
             )}
           </div>
 
@@ -1521,16 +1536,16 @@ export default function MapCenter() {
           {!isLiveMap && (
             <div className="ml-auto flex items-center gap-1 bg-card/90 backdrop-blur border border-border p-1 pointer-events-auto">
               <button onClick={() => setScale((s) => Math.max(STAGE_MIN_ZOOM, s / 1.2))}
-                className="p-1 hover:bg-secondary" title="Zoom -" data-testid="map-zoom-out">
+                className="p-1 hover:bg-secondary" title={t("map.zoom_out_title")} data-testid="map-zoom-out">
                 <ZoomOut size={14} />
               </button>
               <span className="mono text-xs px-2">{Math.round(scale * 100)}%</span>
               <button onClick={() => setScale((s) => Math.min(STAGE_MAX_ZOOM, s * 1.2))}
-                className="p-1 hover:bg-secondary" title="Zoom +" data-testid="map-zoom-in">
+                className="p-1 hover:bg-secondary" title={t("map.zoom_in_title")} data-testid="map-zoom-in">
                 <ZoomIn size={14} />
               </button>
               <button onClick={() => { setScale(1); setStagePos({ x: 0, y: 0 }); }}
-                className="p-1 hover:bg-secondary" title="Recentrer">
+                className="p-1 hover:bg-secondary" title={t("map.recenter_title")}>
                 <Compass size={14} />
               </button>
             </div>
@@ -1542,7 +1557,7 @@ export default function MapCenter() {
           <div className="absolute top-14 right-2 z-10 bg-card/95 border border-[#FFB800]/40 w-72 max-h-[70vh] overflow-y-auto pointer-events-auto" data-testid="map-audit-panel">
             <div className="px-3 py-2 border-b border-border">
               <div className="text-[10px] uppercase tracking-[0.15em] text-[#FFB800] flex items-center gap-1">
-                <Activity size={11} /> Audit — Synthèse
+                <Activity size={11} /> {t("map.audit_summary_title")}
               </div>
               <div className="grid grid-cols-2 gap-1 mt-2 text-[10px]">
                 {Object.entries(auditSummary).map(([f, n]) => (
@@ -1580,7 +1595,7 @@ export default function MapCenter() {
             {unplaced.length > 0 && (
               <div className="bg-card/95 border border-border px-3 py-2 text-xs pointer-events-auto max-w-md" data-testid="map-unplaced">
                 <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-1 flex items-center gap-1">
-                  <CamIcon size={11} /> Caméras à placer ({unplaced.length})
+                  <CamIcon size={11} /> {t("map.cameras_to_place")} ({unplaced.length})
                 </div>
                 <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
                   {unplaced.slice(0, 20).map((c) => (
@@ -1601,7 +1616,7 @@ export default function MapCenter() {
             {unplacedEquipment.length > 0 && (
               <div className="bg-card/95 border border-border px-3 py-2 text-xs pointer-events-auto max-w-md" data-testid="map-unplaced-equipment">
                 <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-1 flex items-center gap-1">
-                  <BoxIcon size={11} /> Équipements à placer ({unplacedEquipment.length})
+                  <BoxIcon size={11} /> {t("map.equipment_to_place")} ({unplacedEquipment.length})
                 </div>
                 <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
                   {unplacedEquipment.slice(0, 20).map((eq) => {
@@ -1676,11 +1691,11 @@ export default function MapCenter() {
                 <PlanBackground src={selectedPlan.image_data_uri} onSize={(w, h) => setPlanSize({ w, h })} />
               )}
               {!selectedPlan && (
-                <Text text="Sélectionnez ou importez un plan pour commencer"
+                <Text text={t("map.select_or_import_plan")}
                   x={40} y={40} fontSize={16} fill="#71717a" />
               )}
               {selectedPlan && camerasOnPlan.length === 0 && equipment.length === 0 && (
-                <Text text="Aucune caméra sur ce plan. Cliquez sur une caméra dans la liste (en bas) pour la placer, ou clic-droit pour ajouter un équipement."
+                <Text text={t("map.empty_plan_hint")}
                   x={40} y={planSize.h / 2} fontSize={13} fill="#a1a1aa" width={planSize.w - 80} align="center" />
               )}
               {links.map((link) => (
@@ -1734,7 +1749,7 @@ export default function MapCenter() {
       {linkingFrom && (
         <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 bg-card border border-[#0044FF] px-3 py-1.5 text-xs flex items-center gap-2">
           <Link2 size={13} className="text-[#0044FF]" />
-          Cliquez sur l'élément à relier — <button className="underline" onClick={() => setLinkingFrom(null)}>Annuler (Échap)</button>
+          {t("map.click_element_to_link")} <button className="underline" onClick={() => setLinkingFrom(null)}>{t("map.cancel_escape")}</button>
         </div>
       )}
 

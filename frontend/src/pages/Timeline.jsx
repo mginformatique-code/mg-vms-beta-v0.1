@@ -2,23 +2,31 @@ import React, { useState, useEffect, useMemo } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { toast } from "sonner";
 import { Clock, Camera as CamIcon, RefreshCw, Loader2, ZoomIn, ZoomOut } from "lucide-react";
+import { useApp } from "@/context/AppContext";
 
-const LAYER_META = {
-  event:     { label: "Événement", color: "#0044FF" },
-  alert:     { label: "Alerte",    color: "#FF3333" },
-  plate:     { label: "Plaque",    color: "#FFB800" },
-  recording: { label: "Segment",   color: "#666" },
-};
+function layerMeta(t) {
+  return {
+    event:     { label: t("tl.layer_event"), color: "#0044FF" },
+    alert:     { label: t("tl.layer_alert"), color: "#FF3333" },
+    plate:     { label: t("tl.layer_plate"), color: "#FFB800" },
+    recording: { label: t("tl.layer_recording"), color: "#666" },
+  };
+}
 
-const RANGE_PRESETS = [
-  { label: "1h", hours: 1 },
-  { label: "6h", hours: 6 },
-  { label: "12h", hours: 12 },
-  { label: "24h", hours: 24 },
-  { label: "7j", hours: 168 },
-];
+function rangePresets(t) {
+  return [
+    { label: "1h", hours: 1 },
+    { label: "6h", hours: 6 },
+    { label: "12h", hours: 12 },
+    { label: "24h", hours: 24 },
+    { label: t("tl.range_7d"), hours: 168 },
+  ];
+}
 
 export default function Timeline() {
+  const { t } = useApp();
+  const LAYER_META = useMemo(() => layerMeta(t), [t]);
+  const RANGE_PRESETS = useMemo(() => rangePresets(t), [t]);
   const [cameras, setCameras] = useState([]);
   const [selectedCams, setSelectedCams] = useState([]);
   const [hours, setHours] = useState(24);
@@ -72,10 +80,10 @@ export default function Timeline() {
   }, [data.since, data.until]);
 
   const posPct = (iso) => {
-    const t = new Date(iso).getTime();
+    const ts = new Date(iso).getTime();
     const span = timeRange.end - timeRange.start;
     if (span <= 0) return 0;
-    return Math.max(0, Math.min(100, ((t - timeRange.start) / span) * 100));
+    return Math.max(0, Math.min(100, ((ts - timeRange.start) / span) * 100));
   };
 
   const totalCount = ["event", "alert", "plate", "recording"]
@@ -89,19 +97,19 @@ export default function Timeline() {
             <Clock size={22} className="text-[#0044FF]" /> Timeline
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Événements · alertes · plaques · segments — <span className="mono">{totalCount}</span> marqueurs
+            {t("tl.subtitle_prefix")} <span className="mono">{totalCount}</span> {t("tl.subtitle_suffix")}
           </p>
         </div>
         <button onClick={load} data-testid="timeline-refresh"
                 className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-xs hover:bg-secondary">
-          <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Rafraîchir
+          <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> {t("tl.refresh")}
         </button>
       </div>
 
       {/* Controls */}
       <div className="border border-border p-3 bg-card mb-4 space-y-3">
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Fenêtre :</span>
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("tl.window_label")}</span>
           {RANGE_PRESETS.map((p) => (
             <button key={p.label}
                     onClick={() => setHours(p.hours)}
@@ -113,7 +121,7 @@ export default function Timeline() {
           ))}
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Couches :</span>
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("tl.layers_label")}</span>
           {Object.entries(LAYER_META).map(([k, m]) => (
             <label key={k} className="flex items-center gap-1.5 text-xs cursor-pointer">
               <input type="checkbox"
@@ -125,11 +133,11 @@ export default function Timeline() {
           ))}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Caméras :</span>
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("tl.cameras_label")}</span>
           <button onClick={() => setSelectedCams(cameras.map((c) => c.id))}
-                  className="text-[10px] px-1.5 py-0.5 border border-border">Toutes</button>
+                  className="text-[10px] px-1.5 py-0.5 border border-border">{t("tl.all")}</button>
           <button onClick={() => setSelectedCams([])}
-                  className="text-[10px] px-1.5 py-0.5 border border-border">Aucune</button>
+                  className="text-[10px] px-1.5 py-0.5 border border-border">{t("tl.none")}</button>
           <div className="flex gap-1 flex-wrap">
             {cameras.map((c) => {
               const on = selectedCams.includes(c.id);
@@ -152,11 +160,11 @@ export default function Timeline() {
       {/* Timeline scrub par caméra */}
       {loading && !data.event.length ? (
         <div className="text-center text-muted-foreground py-12">
-          <Loader2 size={20} className="animate-spin inline mr-2" /> Chargement…
+          <Loader2 size={20} className="animate-spin inline mr-2" /> {t("tl.loading")}
         </div>
       ) : selectedCams.length === 0 ? (
         <div className="border border-dashed border-border p-8 text-center text-muted-foreground text-sm">
-          Sélectionne au moins une caméra
+          {t("tl.select_camera_hint")}
         </div>
       ) : (
         <div className="space-y-2">
@@ -171,6 +179,7 @@ export default function Timeline() {
                 )}
                 posPct={posPct}
                 onHover={setHovered}
+                layerMeta={LAYER_META}
               />
             );
           })}
@@ -190,11 +199,11 @@ export default function Timeline() {
           </div>
           {hovered.message && <div className="text-xs mt-1">{hovered.message}</div>}
           {hovered.engine && (
-            <div className="text-[10px] mono text-[#0044FF] mt-1">Moteur : {hovered.engine}</div>
+            <div className="text-[10px] mono text-[#0044FF] mt-1">{t("tl.engine_label")} {hovered.engine}</div>
           )}
           {hovered.detectors?.length > 0 && (
             <div className="text-[10px] mono text-muted-foreground mt-1">
-              Détecteurs : {hovered.detectors.join(", ")}
+              {t("tl.detectors_label")} {hovered.detectors.join(", ")}
             </div>
           )}
         </div>
@@ -204,7 +213,7 @@ export default function Timeline() {
 }
 
 
-function TimelineRow({ camera, items, posPct, onHover }) {
+function TimelineRow({ camera, items, posPct, onHover, layerMeta }) {
   return (
     <div className="flex items-stretch gap-2 border border-border bg-card">
       <div className="w-40 flex-shrink-0 px-3 py-2 border-r border-border flex items-center gap-2">
@@ -221,10 +230,10 @@ function TimelineRow({ camera, items, posPct, onHover }) {
             className="absolute top-0 bottom-0 w-1 hover:w-2 cursor-pointer transition-all"
             style={{
               left: `${posPct(it.timestamp)}%`,
-              background: LAYER_META[it.kind]?.color || "#fff",
+              background: layerMeta[it.kind]?.color || "#fff",
               boxShadow: it.severity === "critical" ? "0 0 4px #FF3333" : "none",
             }}
-            title={`${LAYER_META[it.kind]?.label} · ${it.label} · ${new Date(it.timestamp).toLocaleTimeString()}`}
+            title={`${layerMeta[it.kind]?.label} · ${it.label} · ${new Date(it.timestamp).toLocaleTimeString()}`}
             data-testid={`marker-${it.kind}-${it.id}`}
           />
         ))}

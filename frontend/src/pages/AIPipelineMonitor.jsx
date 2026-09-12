@@ -13,6 +13,7 @@
  *   - drops_5s = 0 (backpressure)
  */
 import React, { useEffect, useMemo, useState } from "react";
+import { useApp } from "@/context/AppContext";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { Cpu, Zap, RefreshCw, Save, AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Boxes, Radar } from "lucide-react";
@@ -38,6 +39,7 @@ function StatusPill({ ok, warn, label, value, unit = "" }) {
 }
 
 function StageBar({ stage, stats }) {
+  const { t } = useApp();
   const meta = STAGE_META[stage];
   if (!meta || !stats) return null;
   const avg = stats.avg || 0;
@@ -61,13 +63,14 @@ function StageBar({ stage, stats }) {
       <div className="h-1 bg-secondary/40 relative overflow-hidden">
         <div className="h-full transition-all" style={{ width: `${pct}%`, backgroundColor: overBudget ? "#FF3333" : meta.color }} />
         {/* target marker */}
-        <div className="absolute top-0 h-full border-r border-white/40" style={{ left: `${(target / (target * 1.5)) * 100}%` }} title={`Cible ${target} ms`} />
+        <div className="absolute top-0 h-full border-r border-white/40" style={{ left: `${(target / (target * 1.5)) * 100}%` }} title={`${t("aipm.lbl_target")} ${target} ms`} />
       </div>
     </div>
   );
 }
 
 function CameraCard({ id, cam, name }) {
+  const { t } = useApp();
   const [open, setOpen] = useState(false);
   const fps = cam.fps_5s || 0;
   const rt = cam.stages?.realtime_ms?.avg || 0;
@@ -99,7 +102,7 @@ function CameraCard({ id, cam, name }) {
           <StatusPill ok={dropsOk} warn={false} label="Drops" value={drops} />
           {budget && (
             <StatusPill ok={budget.bottleneck === "ok"} warn={budget.bottleneck === "inference"}
-                        label="Rés. IA" value={budget.ai_resolution} />
+                        label={t("aipm.lbl_ai_res")} value={budget.ai_resolution} />
           )}
           {errors > 0 && <StatusPill ok={false} warn={false} label="Err" value={errors} />}
           {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -107,16 +110,16 @@ function CameraCard({ id, cam, name }) {
       </button>
       {open && (
         <div className="border-t border-border p-3 bg-background/30" data-testid={`cam-detail-${id}`}>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Latences par étape</div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">{t("aipm.lbl_stage_latencies")}</div>
           {budget && (budget.advice || budget.bottleneck !== "ok") && (
             <div className="mb-3 border-l-2 border-[#FFAA00] pl-2 py-1" data-testid={`cam-budget-${id}`}>
               <div className="text-[10px] uppercase tracking-wider text-[#FFAA00] mb-0.5">
-                Goulot : {budget.bottleneck === "acquisition" ? "acquisition de l'image" : budget.bottleneck === "inference" ? "inférence IA" : "aucun"}
+                {t("aipm.lbl_bottleneck")} {budget.bottleneck === "acquisition" ? t("aipm.bottleneck_acquisition") : budget.bottleneck === "inference" ? t("aipm.bottleneck_inference") : t("aipm.bottleneck_none")}
               </div>
               <div className="text-[11px] text-muted-foreground leading-relaxed">
-                Résolution IA <b>{budget.ai_resolution}</b>
-                {budget.ai_pixels > 0 && ` (${(budget.ai_pixels / 1e6).toFixed(1)} Mpx par image)`}
-                {" · "}{budget.plugins_enabled} plugin(s) activé(s).
+                {t("aipm.lbl_ai_resolution")} <b>{budget.ai_resolution}</b>
+                {budget.ai_pixels > 0 && ` (${(budget.ai_pixels / 1e6).toFixed(1)} ${t("aipm.lbl_mpx_per_image")})`}
+                {" · "}{budget.plugins_enabled} {t("aipm.lbl_plugins_enabled")}
                 {budget.advice && <><br />{budget.advice}</>}
               </div>
             </div>
@@ -126,7 +129,7 @@ function CameraCard({ id, cam, name }) {
           ))}
           {(plugins.detectors?.length > 0 || plugins.trackers?.length > 0 || plugins.business?.length > 0) && (
             <div className="mt-3 pt-3 border-t border-border/40">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">Plugins actifs sur le dernier cycle</div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">{t("aipm.lbl_active_plugins_last_cycle")}</div>
               <div className="flex flex-wrap gap-1.5">
                 {(plugins.detectors || []).map((p, i) => (
                   <span key={`d${i}`} className="text-[10px] mono px-1.5 py-0.5 border border-[#00E5FF]/40 text-[#00E5FF]">detect · {p}</span>
@@ -147,17 +150,18 @@ function CameraCard({ id, cam, name }) {
 }
 
 function ByteTrackTuner({ cfg, onChange, onSave, saving }) {
+  const { t } = useApp();
   const set = (k, v) => onChange({ ...cfg, [k]: v });
   return (
     <div className="border border-border p-3" data-testid="bytetrack-tuner">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Boxes size={14} className="text-[#00E676]" />
-          <span className="text-xs font-medium">ByteTrack · Tuning temps réel</span>
+          <span className="text-xs font-medium">{t("aipm.bt_title")}</span>
         </div>
         <label className="flex items-center gap-2 text-xs cursor-pointer">
           <input type="checkbox" checked={!!cfg.enabled} onChange={(e) => set("enabled", e.target.checked)} data-testid="bt-enabled" />
-          <span>Activé</span>
+          <span>{t("aipm.lbl_enabled")}</span>
         </label>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
@@ -166,21 +170,21 @@ function ByteTrackTuner({ cfg, onChange, onSave, saving }) {
           <input type="number" step="0.05" min="0.1" max="0.9" value={cfg.track_thresh || 0.25}
             onChange={(e) => set("track_thresh", parseFloat(e.target.value))}
             className="w-full px-2 py-1 bg-card border border-input mono" data-testid="bt-track-thresh" />
-          <div className="text-[10px] text-muted-foreground mt-0.5">Bas = plus permissif (0.25 recommandé)</div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">{t("aipm.hint_track_thresh")}</div>
         </div>
         <div>
           <div className="text-[10px] uppercase text-muted-foreground mb-1">Match threshold</div>
           <input type="number" step="0.05" min="0.5" max="0.95" value={cfg.match_thresh || 0.85}
             onChange={(e) => set("match_thresh", parseFloat(e.target.value))}
             className="w-full px-2 py-1 bg-card border border-input mono" data-testid="bt-match-thresh" />
-          <div className="text-[10px] text-muted-foreground mt-0.5">Haut = matching strict (0.85)</div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">{t("aipm.hint_match_thresh")}</div>
         </div>
         <div>
           <div className="text-[10px] uppercase text-muted-foreground mb-1">Track buffer (frames)</div>
           <input type="number" step="5" min="5" max="300" value={cfg.track_buffer || 60}
             onChange={(e) => set("track_buffer", parseInt(e.target.value))}
             className="w-full px-2 py-1 bg-card border border-input mono" data-testid="bt-track-buffer" />
-          <div className="text-[10px] text-muted-foreground mt-0.5">Durée avant perte d&apos;ID (60 ≈ 30s @2FPS)</div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">{t("aipm.hint_track_buffer")}</div>
         </div>
         <div>
           <div className="text-[10px] uppercase text-muted-foreground mb-1">Min box area (px²)</div>
@@ -199,15 +203,16 @@ function ByteTrackTuner({ cfg, onChange, onSave, saving }) {
         <button onClick={onSave} disabled={saving}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[#00E676] text-black hover:opacity-90 disabled:opacity-50"
           data-testid="bt-save">
-          <Save size={12} /> {saving ? "Enregistrement…" : "Appliquer"}
+          <Save size={12} /> {saving ? t("aipm.btn_saving") : t("aipm.btn_apply")}
         </button>
-        <span className="text-[10px] text-muted-foreground">La config est appliquée au prochain cycle IA (~2s).</span>
+        <span className="text-[10px] text-muted-foreground">{t("aipm.hint_config_applies_next_cycle")}</span>
       </div>
     </div>
   );
 }
 
 export default function AIPipelineMonitor() {
+  const { t } = useApp();
   const [metrics, setMetrics] = useState({});
   const [cams, setCams] = useState([]);
   const [bt, setBt] = useState({});
@@ -250,10 +255,10 @@ export default function AIPipelineMonitor() {
     setSaving(true);
     try {
       await api.put("/plugins/tracking/config", bt);
-      toast.success("ByteTrack : config appliquée");
+      toast.success(t("aipm.toast_bt_saved"));
       await loadBt();
     } catch (e) {
-      toast.error("Impossible d'enregistrer la config ByteTrack");
+      toast.error(t("aipm.err_bt_save_failed"));
     } finally {
       setSaving(false);
     }
@@ -302,12 +307,12 @@ export default function AIPipelineMonitor() {
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-1.5 text-[11px] cursor-pointer">
             <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} data-testid="auto-refresh" />
-            Auto (2s)
+            {t("aipm.lbl_auto_refresh")}
           </label>
           <button onClick={load} className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border hover:bg-secondary" data-testid="reload-btn">
-            <RefreshCw size={12} /> Actualiser
+            <RefreshCw size={12} /> {t("aipm.btn_refresh")}
           </button>
-          {lastUpdate && <span className="text-[10px] mono text-muted-foreground">MàJ {lastUpdate.toLocaleTimeString("fr-FR")}</span>}
+          {lastUpdate && <span className="text-[10px] mono text-muted-foreground">{t("aipm.lbl_updated_at")} {lastUpdate.toLocaleTimeString("fr-FR")}</span>}
         </div>
       </div>
 
@@ -315,11 +320,11 @@ export default function AIPipelineMonitor() {
       {agg && (
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 mb-4" data-testid="global-agg">
           <div className="border border-border p-2.5">
-            <div className="text-[10px] uppercase text-muted-foreground">Caméras actives</div>
+            <div className="text-[10px] uppercase text-muted-foreground">{t("aipm.lbl_active_cameras")}</div>
             <div className="text-lg font-bold mono">{agg.cams}</div>
           </div>
           <div className="border border-border p-2.5">
-            <div className="text-[10px] uppercase text-muted-foreground">FPS moyen</div>
+            <div className="text-[10px] uppercase text-muted-foreground">{t("aipm.lbl_avg_fps")}</div>
             <div className="text-lg font-bold mono" style={{ color: agg.fpsAvg >= 15 ? "#00E676" : agg.fpsAvg >= 5 ? "#FFB800" : "#FF3333" }}>{agg.fpsAvg.toFixed(1)}</div>
           </div>
           <div className="border border-border p-2.5">
@@ -348,10 +353,10 @@ export default function AIPipelineMonitor() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Camera list */}
         <div className="lg:col-span-2 space-y-2" data-testid="cameras-list">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Caméras · pipeline par instance</div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("aipm.lbl_cameras_pipeline_per_instance")}</div>
           {Object.keys(metrics).length === 0 ? (
             <div className="border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
-              Aucune métrique. Assurez-vous qu&apos;au moins une caméra a <code>detect_enabled=true</code> et <code>status=online</code>.
+              {t("aipm.empty_no_metrics_prefix")} <code>detect_enabled=true</code> {t("aipm.empty_no_metrics_and")} <code>status=online</code>.
             </div>
           ) : (
             Object.entries(metrics).map(([id, m]) => (
@@ -367,10 +372,10 @@ export default function AIPipelineMonitor() {
           <div className="border border-border p-3">
             <div className="flex items-center gap-2 mb-2">
               <Radar size={14} className="text-[#00B0FF]" />
-              <span className="text-xs font-medium">Streaming go2rtc <span className="text-[10px] text-muted-foreground">(indépendant IA)</span></span>
+              <span className="text-xs font-medium">Streaming go2rtc <span className="text-[10px] text-muted-foreground">{t("aipm.lbl_independent_ai")}</span></span>
             </div>
             {!streaming.go2rtc_reachable ? (
-              <div className="text-[11px] text-muted-foreground">go2rtc injoignable</div>
+              <div className="text-[11px] text-muted-foreground">{t("aipm.lbl_go2rtc_unreachable")}</div>
             ) : (
               <div className="space-y-1 max-h-56 overflow-y-auto" data-testid="streaming-panel">
                 {Object.entries(streaming.streams || {}).slice(0, 20).map(([sid, s]) => (
@@ -394,13 +399,13 @@ export default function AIPipelineMonitor() {
           <div className="border border-border p-3">
             <div className="flex items-center gap-2 mb-2">
               <Boxes size={14} className="text-[#B085FF]" />
-              <span className="text-xs font-medium">ANPR Tracker · véhicules suivis</span>
+              <span className="text-xs font-medium">{t("aipm.lbl_anpr_tracker_title")}</span>
             </div>
             <div className="text-[10px] text-muted-foreground mb-1.5">
               min_readings={anprTracker.config?.min_readings ?? "-"} · lost_cycles={anprTracker.config?.lost_cycles ?? "-"} · min_conf={anprTracker.config?.min_confidence ?? "-"}
             </div>
             {Object.keys(anprTracker.cameras || {}).length === 0 ? (
-              <div className="text-[10px] text-muted-foreground" data-testid="anpr-tracker-panel">Aucun véhicule suivi</div>
+              <div className="text-[10px] text-muted-foreground" data-testid="anpr-tracker-panel">{t("aipm.lbl_no_vehicle_tracked")}</div>
             ) : (
               <div className="space-y-1.5 max-h-56 overflow-y-auto" data-testid="anpr-tracker-panel">
                 {Object.entries(anprTracker.cameras || {}).map(([cid, list]) => (
@@ -423,15 +428,15 @@ export default function AIPipelineMonitor() {
           <div className="border border-border p-3">
             <div className="flex items-center gap-2 mb-2">
               <Radar size={14} className="text-[#B085FF]" />
-              <span className="text-xs font-medium">Objectifs P0 · 1080p</span>
+              <span className="text-xs font-medium">{t("aipm.lbl_objectives_title")}</span>
             </div>
             <ul className="text-[11px] space-y-1.5 text-muted-foreground">
-              <li className="flex items-start gap-1.5"><Zap size={11} className="mt-0.5 text-[#00E676]" /> <span>FPS caméra : <span className="text-foreground mono">20-30</span></span></li>
-              <li className="flex items-start gap-1.5"><Zap size={11} className="mt-0.5 text-[#00E676]" /> <span>Tracking : <span className="text-foreground mono">&lt; 50 ms</span></span></li>
-              <li className="flex items-start gap-1.5"><Zap size={11} className="mt-0.5 text-[#00E676]" /> <span>Live path : <span className="text-foreground mono">&lt; 200 ms</span></span></li>
-              <li className="flex items-start gap-1.5"><Zap size={11} className="mt-0.5 text-[#00E676]" /> <span>Perte d&apos;ID : <span className="text-foreground mono">minimale</span></span></li>
-              <li className="flex items-start gap-1.5"><Zap size={11} className="mt-0.5 text-[#00E676]" /> <span>Plugins simultanés indépendants</span></li>
-              <li className="flex items-start gap-1.5"><Zap size={11} className="mt-0.5 text-[#00E676]" /> <span>ANPR anti-doublons (état Entrée/Présence/Sortie)</span></li>
+              <li className="flex items-start gap-1.5"><Zap size={11} className="mt-0.5 text-[#00E676]" /> <span>{t("aipm.lbl_fps_camera")} <span className="text-foreground mono">20-30</span></span></li>
+              <li className="flex items-start gap-1.5"><Zap size={11} className="mt-0.5 text-[#00E676]" /> <span>{t("aipm.lbl_tracking")} <span className="text-foreground mono">&lt; 50 ms</span></span></li>
+              <li className="flex items-start gap-1.5"><Zap size={11} className="mt-0.5 text-[#00E676]" /> <span>{t("aipm.lbl_live_path")} <span className="text-foreground mono">&lt; 200 ms</span></span></li>
+              <li className="flex items-start gap-1.5"><Zap size={11} className="mt-0.5 text-[#00E676]" /> <span>{t("aipm.lbl_id_loss")} <span className="text-foreground mono">{t("aipm.val_minimal")}</span></span></li>
+              <li className="flex items-start gap-1.5"><Zap size={11} className="mt-0.5 text-[#00E676]" /> <span>{t("aipm.lbl_concurrent_plugins")}</span></li>
+              <li className="flex items-start gap-1.5"><Zap size={11} className="mt-0.5 text-[#00E676]" /> <span>{t("aipm.lbl_anpr_dedup")}</span></li>
             </ul>
           </div>
 

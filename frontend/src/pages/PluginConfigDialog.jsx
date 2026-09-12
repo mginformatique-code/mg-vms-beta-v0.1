@@ -21,10 +21,12 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { AlertTriangle, Info } from "lucide-react";
+import { useApp } from "@/context/AppContext";
 
 const SENSITIVE_KEYS = new Set(["api_token", "secret_key", "api_key", "password", "token", "subscription_key"]);
 
 export default function PluginConfigDialog({ open, pluginName, onOpenChange, onSaved }) {
+  const { t } = useApp();
   const [schema, setSchema] = useState(null);
   const [config, setConfig] = useState({});
   const [keysSet, setKeysSet] = useState([]);
@@ -52,11 +54,11 @@ export default function PluginConfigDialog({ open, pluginName, onOpenChange, onS
     setSaving(true);
     try {
       await api.put(`/plugins/${pluginName}/config`, config);
-      toast.success(`Config de ${pluginName} enregistrée · rechargement à chaud effectué`);
+      toast.success(`${t("plugcfg.toast_saved_prefix")} ${pluginName} ${t("plugcfg.toast_saved_suffix")}`);
       onSaved?.();
       onOpenChange(false);
     } catch (e) {
-      toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Erreur d'enregistrement");
+      toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("plugcfg.save_error"));
     } finally {
       setSaving(false);
     }
@@ -76,7 +78,7 @@ export default function PluginConfigDialog({ open, pluginName, onOpenChange, onS
           className="w-full bg-background border border-border h-9 px-2 text-sm"
           data-testid={`config-field-${key}`}
         >
-          <option value="">— choisir —</option>
+          <option value="">{t("plugcfg.choose_option")}</option>
           {prop.enum.map((o) => <option key={o} value={o}>{o}</option>)}
         </select>
       );
@@ -113,7 +115,7 @@ export default function PluginConfigDialog({ open, pluginName, onOpenChange, onS
         <Input
           value={arrValue.join(",")}
           onChange={(e) => handleField(key, e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
-          placeholder="valeurs séparées par virgule (ex: fr,us,de)"
+          placeholder={t("plugcfg.comma_values_placeholder")}
           className="h-9 text-sm mono"
           data-testid={`config-field-${key}`}
         />
@@ -125,7 +127,7 @@ export default function PluginConfigDialog({ open, pluginName, onOpenChange, onS
         type={isSensitive ? "password" : "text"}
         value={value ?? ""}
         onChange={(e) => handleField(key, e.target.value)}
-        placeholder={isSensitive && keysSet.includes(key) ? "*** (déjà configuré — laisser vide pour conserver)" : (prop.default || "")}
+        placeholder={isSensitive && keysSet.includes(key) ? t("plugcfg.sensitive_placeholder") : (prop.default || "")}
         className="h-9 text-sm"
         data-testid={`config-field-${key}`}
       />
@@ -139,15 +141,15 @@ export default function PluginConfigDialog({ open, pluginName, onOpenChange, onS
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto" data-testid="plugin-config-dialog">
         <DialogHeader>
           <DialogTitle className="font-head">
-            Configurer&nbsp;: <span className="mono text-[#0044FF]">{pluginName}</span>
+            {t("plugcfg.configure_title")}&nbsp;: <span className="mono text-[#0044FF]">{pluginName}</span>
           </DialogTitle>
         </DialogHeader>
 
         {loading ? (
-          <div className="text-sm text-muted-foreground py-8 text-center">Chargement du schéma…</div>
+          <div className="text-sm text-muted-foreground py-8 text-center">{t("plugcfg.loading_schema")}</div>
         ) : !schema ? (
           <div className="text-sm text-muted-foreground py-8 text-center flex items-center justify-center gap-2">
-            <AlertTriangle size={14} className="text-[#FFB800]" /> Aucun schéma de configuration défini pour ce plugin.
+            <AlertTriangle size={14} className="text-[#FFB800]" /> {t("plugcfg.no_schema")}
           </div>
         ) : (
           <div className="space-y-4 py-2" data-testid="config-fields">
@@ -179,14 +181,14 @@ export default function PluginConfigDialog({ open, pluginName, onOpenChange, onS
 
         <DialogFooter className="border-t border-border pt-3">
           <Button variant="outline" onClick={() => onOpenChange(false)} data-testid="config-cancel">
-            Annuler
+            {t("common.cancel")}
           </Button>
           <Button
             onClick={save}
             disabled={saving || loading || !schema}
             data-testid="config-save"
           >
-            {saving ? "Enregistrement…" : "Enregistrer et recharger"}
+            {saving ? t("plugcfg.saving") : t("plugcfg.save_and_reload")}
           </Button>
         </DialogFooter>
       </DialogContent>

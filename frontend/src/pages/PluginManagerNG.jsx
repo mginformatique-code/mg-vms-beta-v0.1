@@ -14,12 +14,13 @@ import {
 import { toast } from "sonner";
 import PluginConfigDialog from "@/pages/PluginConfigDialog";
 import PipelineTestPanel from "@/pages/PipelineTestPanel";
+import { useApp } from "@/context/AppContext";
 
 const FUSION_MODES = [
-  { id: "cascade", label: "Cascade", desc: "Séquentiel, stop dès confidence ≥ seuil (économise quota cloud)", Icon: GitBranch },
-  { id: "highest", label: "Meilleure confidence", desc: "Parallèle, retient le résultat le plus confiant", Icon: Trophy },
-  { id: "compare", label: "Comparaison", desc: "Parallèle, remonte toutes les divergences (QA)", Icon: ClipboardList },
-  { id: "vote",    label: "Vote majoritaire", desc: "Parallèle, vote caractère par caractère (fusion)", Icon: Vote },
+  { id: "cascade", labelKey: "pmng.mode_cascade_label", descKey: "pmng.mode_cascade_desc", Icon: GitBranch },
+  { id: "highest", labelKey: "pmng.mode_highest_label", descKey: "pmng.mode_highest_desc", Icon: Trophy },
+  { id: "compare", labelKey: "pmng.mode_compare_label", descKey: "pmng.mode_compare_desc", Icon: ClipboardList },
+  { id: "vote",    labelKey: "pmng.mode_vote_label",    descKey: "pmng.mode_vote_desc",    Icon: Vote },
 ];
 
 const IFACE_BADGE = {
@@ -29,14 +30,15 @@ const IFACE_BADGE = {
 };
 
 const STATE_META = {
-  ready:              { color: "#00E676", label: "READY",       Icon: CheckCircle2, desc: "Prêt à recevoir des frames" },
-  not_configured:    { color: "#FFB800", label: "À CONFIGURER", Icon: Settings2,   desc: "Configuration requise" },
-  missing_dependency:{ color: "#A855F7", label: "DEP MANQUANTE",Icon: PackageX,    desc: "Dépendance Python/système absente" },
-  error:              { color: "#FF3333", label: "ERREUR",       Icon: XCircle,    desc: "Erreur au chargement" },
-  disabled:           { color: "#666",    label: "DÉSACTIVÉ",    Icon: WrenchIcon,   desc: "Désactivé manuellement" },
+  ready:              { color: "#00E676", labelKey: "pmng.state_ready_label",           Icon: CheckCircle2, descKey: "pmng.state_ready_desc" },
+  not_configured:    { color: "#FFB800", labelKey: "pmng.state_not_configured_label",   Icon: Settings2,   descKey: "pmng.state_not_configured_desc" },
+  missing_dependency:{ color: "#A855F7", labelKey: "pmng.state_missing_dep_label",      Icon: PackageX,    descKey: "pmng.state_missing_dep_desc" },
+  error:              { color: "#FF3333", labelKey: "pmng.state_error_label",           Icon: XCircle,    descKey: "pmng.state_error_desc" },
+  disabled:           { color: "#666",    labelKey: "pmng.state_disabled_label",        Icon: WrenchIcon,   descKey: "pmng.state_disabled_desc" },
 };
 
 export default function PluginManagerNG() {
+  const { t } = useApp();
   const [bus, setBus] = useState(null);
   const [policy, setPolicy] = useState(null);
   const [loaderData, setLoaderData] = useState(null);
@@ -73,7 +75,7 @@ export default function PluginManagerNG() {
       setPolicy(polR.data);
       setLoaderData(ldR.data);
     } catch (e) {
-      toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Erreur chargement bus");
+      toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("pmng.load_bus_error"));
     } finally {
       setRefreshing(false);
     }
@@ -83,7 +85,7 @@ export default function PluginManagerNG() {
   const toggleEntry = async (name, enabled) => {
     try {
       await api.post(`/plugins/bus/${name}/${enabled ? "enable" : "disable"}`);
-      toast.success(`${name} ${enabled ? "activé" : "désactivé"} sur le bus`);
+      toast.success(`${name} ${enabled ? t("pmng.enabled_word") : t("pmng.disabled_word")} ${t("pmng.on_bus_suffix")}`);
       load();
     } catch (e) {
       toast.error(formatApiErrorDetail(e.response?.data?.detail));
@@ -95,7 +97,7 @@ export default function PluginManagerNG() {
     try {
       const { data } = await api.post(`/plugins/${name}/install-deps`, {});
       setInstallJobs((prev) => ({ ...prev, [name]: data }));
-      toast.info(`Installation en cours pour ${name}…`);
+      toast.info(`${t("pmng.install_in_progress_prefix")} ${name}…`);
       // Polling
       const iv = setInterval(async () => {
         try {
@@ -104,10 +106,10 @@ export default function PluginManagerNG() {
           if (r.data.status !== "running") {
             clearInterval(iv);
             if (r.data.status === "success") {
-              toast.success(`${name} : dépendances installées · état re-évalué`);
+              toast.success(`${name} : ${t("pmng.deps_installed_suffix")}`);
               load();
             } else {
-              toast.error(`${name} : installation ${r.data.status} (rc=${r.data.returncode})`);
+              toast.error(`${name} : ${t("pmng.install_word")} ${r.data.status} (rc=${r.data.returncode})`);
             }
           }
         } catch (err) {
@@ -131,7 +133,7 @@ export default function PluginManagerNG() {
     try {
       const { data } = await api.put("/plugins/policy/anpr", patch);
       setPolicy((prev) => ({ ...prev, anpr: data }));
-      toast.success("Politique ANPR mise à jour");
+      toast.success(t("pmng.policy_updated"));
     } catch (e) {
       toast.error(formatApiErrorDetail(e.response?.data?.detail));
     } finally {
@@ -176,9 +178,9 @@ export default function PluginManagerNG() {
             <label
               className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[#00E676] text-[#00E676] hover:bg-[#00E676]/10 cursor-pointer"
               data-testid="plugin-ng-upload"
-              title="Installer un plugin depuis un fichier .mgpkg"
+              title={t("pmng.upload_title_attr")}
             >
-              <Download size={13} /> Installer .mgpkg
+              <Download size={13} /> {t("pmng.upload_button")}
               <input
                 type="file"
                 accept=".mgpkg"
@@ -192,7 +194,7 @@ export default function PluginManagerNG() {
                     const { data } = await api.post("/plugins/marketplace/upload", fd, {
                       headers: { "Content-Type": "multipart/form-data" },
                     });
-                    toast.success(`Plugin ${data.name} v${data.version} installé`);
+                    toast.success(`Plugin ${data.name} v${data.version} ${t("pmng.installed_suffix")}`);
                     load();
                   } catch (err) {
                     toast.error(formatApiErrorDetail(err.response?.data?.detail) || err.message);
@@ -206,13 +208,12 @@ export default function PluginManagerNG() {
               data-testid="plugin-ng-refresh"
               className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-border hover:bg-secondary"
             >
-              <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} /> Rafraîchir
+              <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} /> {t("pmng.refresh_button")}
             </button>
           </div>
         </div>
         <p className="text-sm text-muted-foreground">
-          Bus multi-plugin conforme au chapitre 11 (§11.6). Chaque frame vidéo est dispatchée en parallèle
-          vers tous les plugins actifs de l&apos;interface concernée, avec isolation crash + timeout par plugin.
+          {t("pmng.bus_description")}
         </p>
       </div>
 
@@ -220,23 +221,23 @@ export default function PluginManagerNG() {
       <section className="bg-card border border-border p-4" data-testid="plugin-bus-section">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-head font-semibold text-base flex items-center gap-2">
-            <Zap size={16} className="text-[#00E676]" /> Bus runtime
+            <Zap size={16} className="text-[#00E676]" /> {t("pmng.bus_runtime_title")}
           </h3>
           {bus && (
             <div className="text-[11px] text-muted-foreground mono flex items-center gap-3 flex-wrap">
-              <span>Total : <b className="text-foreground">{bus.counts.total}</b></span>
+              <span>{t("pmng.total_label")} : <b className="text-foreground">{bus.counts.total}</b></span>
               <span>FrameAnalyzer : <b className="text-foreground">{bus.counts.frame_analyzers}</b></span>
               <span>PlateRecognizer : <b className="text-foreground">{bus.counts.plate_recognizers}</b></span>
-              <span>Actifs : <b className="text-[#00E676]">{bus.counts.enabled}</b></span>
-              <span>Dispatch : <b className="text-[#00E676]">{bus.entries.filter((e) => e.dispatchable).length}</b></span>
+              <span>{t("pmng.active_label")} : <b className="text-[#00E676]">{bus.counts.enabled}</b></span>
+              <span>{t("pmng.dispatch_label")} : <b className="text-[#00E676]">{bus.entries.filter((e) => e.dispatchable).length}</b></span>
             </div>
           )}
         </div>
 
         {!bus ? (
-          <div className="text-xs text-muted-foreground">Chargement…</div>
+          <div className="text-xs text-muted-foreground">{t("common.loading")}</div>
         ) : bus.entries.length === 0 ? (
-          <div className="text-xs text-muted-foreground py-4 text-center">Aucun plugin enregistré sur le bus.</div>
+          <div className="text-xs text-muted-foreground py-4 text-center">{t("pmng.no_plugins_registered")}</div>
         ) : (
           <div className="space-y-3" data-testid="plugin-bus-entries">
             {(() => {
@@ -259,31 +260,31 @@ export default function PluginManagerNG() {
                 (groups[g] = groups[g] || []).push(e);
               }
               const GROUP_META = {
-                "anpr":             { label: "ANPR / LPR — Lecture de plaques", color: "#FFB800",
-                                       desc: "Reconnaissance de plaques d'immatriculation — activez plusieurs moteurs (local + cloud) et combinez-les via cascade / vote / meilleure confidence" },
-                "object-detection": { label: "Détection IA — Objets & personnes", color: "#0044FF",
-                                       desc: "Détecteurs d'objets — activez le provider adapté à votre matériel (YOLO CPU / GPU / TensorRT / OpenVINO / ONNX)" },
-                "tracking":         { label: "Tracking — Suivi multi-objets", color: "#00E676",
-                                       desc: "Suivi avec identité persistante (ByteTrack, BoTSORT, DeepSORT, StrongSORT, OCSORT) — indispensable pour E/P/S ANPR et comptage" },
-                "segmentation":     { label: "Segmentation — Masques pixel-perfect", color: "#EA580C",
-                                       desc: "Segmentation d'instances (SAM2, Detectron2, Mask R-CNN) — utile pour zones intelligentes et intrusion pixel-précise" },
-                "fire":             { label: "Gestion feu — Incendie & fumée", color: "#DC2626",
-                                       desc: "Détection précoce d'incendie et fumée sur flux vidéo — alertes critiques temps réel" },
-                "safety":           { label: "Sûreté active — Violence, chutes, armes", color: "#B91C1C",
-                                       desc: "Détection de bagarres, chutes de personnes, armes visibles — alertes critiques et actions immédiates" },
-                "ppe":              { label: "EPI — Équipements de protection", color: "#F59E0B",
-                                       desc: "Casque, gilet, gants, lunettes — conformité chantier / industrie / atelier" },
-                "counting":         { label: "Comptage — Personnes, véhicules, occupation", color: "#06B6D4",
-                                       desc: "Comptage temps réel + occupation de zones (retail, industrie, événementiel)" },
-                "commerce":         { label: "Retail — Heatmap, files, temps passé", color: "#EC4899",
-                                       desc: "Analytics commerce : heatmaps, files d'attente, dwell time" },
-                "parking":          { label: "Parking — Places & durées", color: "#0891B2",
-                                       desc: "Détection places libres/occupées + calcul durée stationnement" },
-                "agriculture":      { label: "Agriculture — Animaux & intrusion", color: "#65A30D",
-                                       desc: "Détection d'animaux, oiseaux, intrusion parcelle — protection cultures et élevage" },
-                "notifications":    { label: "Notifications — Alertes sortantes", color: "#A855F7",
-                                       desc: "Envoi d'événements vers Telegram, Discord, SMTP, webhooks personnalisés" },
-                "other":            { label: "Autres", color: "#666", desc: "" },
+                "anpr":             { label: t("pmng.group_anpr_label"), color: "#FFB800",
+                                       desc: t("pmng.group_anpr_desc") },
+                "object-detection": { label: t("pmng.group_objdet_label"), color: "#0044FF",
+                                       desc: t("pmng.group_objdet_desc") },
+                "tracking":         { label: t("pmng.group_tracking_label"), color: "#00E676",
+                                       desc: t("pmng.group_tracking_desc") },
+                "segmentation":     { label: t("pmng.group_segmentation_label"), color: "#EA580C",
+                                       desc: t("pmng.group_segmentation_desc") },
+                "fire":             { label: t("pmng.group_fire_label"), color: "#DC2626",
+                                       desc: t("pmng.group_fire_desc") },
+                "safety":           { label: t("pmng.group_safety_label"), color: "#B91C1C",
+                                       desc: t("pmng.group_safety_desc") },
+                "ppe":              { label: t("pmng.group_ppe_label"), color: "#F59E0B",
+                                       desc: t("pmng.group_ppe_desc") },
+                "counting":         { label: t("pmng.group_counting_label"), color: "#06B6D4",
+                                       desc: t("pmng.group_counting_desc") },
+                "commerce":         { label: t("pmng.group_commerce_label"), color: "#EC4899",
+                                       desc: t("pmng.group_commerce_desc") },
+                "parking":          { label: t("pmng.group_parking_label"), color: "#0891B2",
+                                       desc: t("pmng.group_parking_desc") },
+                "agriculture":      { label: t("pmng.group_agri_label"), color: "#65A30D",
+                                       desc: t("pmng.group_agri_desc") },
+                "notifications":    { label: t("pmng.group_notif_label"), color: "#A855F7",
+                                       desc: t("pmng.group_notif_desc") },
+                "other":            { label: t("pmng.group_other_label"), color: "#666", desc: "" },
               };
               const sorted = Object.keys(groups).sort((a, b) => {
                 const order = ["anpr", "object-detection", "tracking", "segmentation",
@@ -384,9 +385,9 @@ export default function PluginManagerNG() {
                                     className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 border flex items-center gap-1"
                                     style={{ borderColor: state.color, color: state.color }}
                                     data-testid={`bus-state-${e.name}`}
-                                    title={state.desc}
+                                    title={t(state.descKey)}
                                   >
-                                    <StateIcon size={9} /> {state.label}
+                                    <StateIcon size={9} /> {t(state.labelKey)}
                                   </span>
                                   <span className="text-[10px] mono text-muted-foreground">order {e.order}</span>
                                   {dyn && dyn.loaded && (
@@ -405,15 +406,15 @@ export default function PluginManagerNG() {
                                 )}
                                 {installing && (
                                   <div className="text-[10px] mt-1 text-[#0044FF] flex items-center gap-1">
-                                    <RefreshCw size={10} className="animate-spin" /> Installation pip en cours ({installJob.deps?.join(", ")})…
+                                    <RefreshCw size={10} className="animate-spin" /> {t("pmng.pip_install_in_progress")} ({installJob.deps?.join(", ")})…
                                   </div>
                                 )}
                                 {installJob && installJob.status && installJob.status !== "running" && (
                                   <details className="mt-1">
                                     <summary className="text-[10px] cursor-pointer text-muted-foreground">
-                                      Log installation (rc={installJob.returncode}, {installJob.status})
+                                      {t("pmng.install_log_prefix")} (rc={installJob.returncode}, {installJob.status})
                                     </summary>
-                                    <pre className="text-[9px] mono bg-black/40 p-2 mt-1 overflow-x-auto max-h-40 whitespace-pre-wrap">{installJob.log || "(vide)"}</pre>
+                                    <pre className="text-[9px] mono bg-black/40 p-2 mt-1 overflow-x-auto max-h-40 whitespace-pre-wrap">{installJob.log || t("pmng.empty_paren")}</pre>
                                   </details>
                                 )}
                                 <div className="flex items-center gap-4 mt-1 text-[10px] mono text-muted-foreground">
@@ -429,7 +430,7 @@ export default function PluginManagerNG() {
                                     to="/anpr-benchmark"
                                     className="flex items-center gap-1 px-2 py-1 text-[11px] border border-[#FFB800]/60 text-[#FFB800] hover:bg-[#FFB800]/10 transition-colors"
                                     data-testid={`bus-benchmark-${e.name}`}
-                                    title="Ouvrir le Benchmark ANPR"
+                                    title={t("pmng.open_benchmark_title")}
                                   >
                                     <Gauge size={11} /> Benchmark
                                   </Link>
@@ -442,7 +443,7 @@ export default function PluginManagerNG() {
                                     data-testid={`bus-install-${e.name}`}
                                     title={`pip install ${(dyn?.python_dependencies || []).join(' ')}`}
                                   >
-                                    <Download size={11} /> Installer
+                                    <Download size={11} /> {t("pmng.install_button")}
                                   </button>
                                 )}
                                 {hasSchema && (
@@ -450,9 +451,9 @@ export default function PluginManagerNG() {
                                     onClick={() => setConfigPlugin(e.name)}
                                     className="flex items-center gap-1 px-2 py-1 text-[11px] border border-border hover:border-[#0044FF] hover:text-[#0044FF] transition-colors"
                                     data-testid={`bus-configure-${e.name}`}
-                                    title="Configurer ce plugin"
+                                    title={t("pmng.configure_title")}
                                   >
-                                    <Settings2 size={11} /> Configurer
+                                    <Settings2 size={11} /> {t("pmng.configure_button")}
                                   </button>
                                 )}
                                 <Switch
@@ -479,7 +480,7 @@ export default function PluginManagerNG() {
         {loaderData?.loaded?.some((p) => p.error) && (
           <div className="mt-3 border border-[#FFB800]/40 bg-[#FFB800]/5 p-2 text-[11px]" data-testid="loader-errors">
             <div className="flex items-center gap-1.5 font-semibold text-[#FFB800] mb-1">
-              <AlertTriangle size={12} /> Erreurs du loader dynamique
+              <AlertTriangle size={12} /> {t("pmng.loader_errors_title")}
             </div>
             {loaderData.loaded.filter((p) => p.error).map((p) => (
               <div key={p.name} className="mono">
@@ -493,10 +494,10 @@ export default function PluginManagerNG() {
       {/* Multi-ANPR policy */}
       <section className="bg-card border border-border p-4" data-testid="plugin-policy-section">
         <h3 className="font-head font-semibold text-base flex items-center gap-2 mb-3">
-          <Package size={16} className="text-[#FFB800]" /> Politique multi-ANPR
+          <Package size={16} className="text-[#FFB800]" /> {t("pmng.policy_section_title")}
         </h3>
         {!policy ? (
-          <div className="text-xs text-muted-foreground">Chargement…</div>
+          <div className="text-xs text-muted-foreground">{t("common.loading")}</div>
         ) : (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 mb-4" data-testid="policy-mode-grid">
@@ -517,10 +518,10 @@ export default function PluginManagerNG() {
                   >
                     <div className="flex items-center gap-1.5 mb-1">
                       <M size={14} className={active ? "text-[#0044FF]" : "text-muted-foreground"} />
-                      <span className="font-head font-semibold text-sm">{m.label}</span>
+                      <span className="font-head font-semibold text-sm">{t(m.labelKey)}</span>
                       {active && <CheckCircle2 size={12} className="text-[#00E676] ml-auto" />}
                     </div>
-                    <div className="text-[10px] text-muted-foreground leading-snug">{m.desc}</div>
+                    <div className="text-[10px] text-muted-foreground leading-snug">{t(m.descKey)}</div>
                   </button>
                 );
               })}
@@ -529,7 +530,7 @@ export default function PluginManagerNG() {
             {policy.anpr.mode === "cascade" && (
               <div className="border-t border-border pt-3" data-testid="cascade-threshold-config">
                 <Label className="text-xs mb-2 block">
-                  Seuil de confiance pour stopper la cascade :{" "}
+                  {t("pmng.cascade_threshold_label")}{" "}
                   <span className="mono text-foreground font-bold">
                     {(policy.anpr.cascade_threshold * 100).toFixed(0)}%
                   </span>
@@ -543,8 +544,7 @@ export default function PluginManagerNG() {
                   data-testid="cascade-threshold-slider"
                 />
                 <p className="text-[10px] text-muted-foreground mt-1">
-                  Dès qu&apos;un moteur retourne une plaque avec confidence ≥ seuil, les moteurs suivants
-                  ne sont pas appelés. Utile pour économiser un quota cloud coûteux.
+                  {t("pmng.cascade_threshold_desc")}
                 </p>
               </div>
             )}
@@ -556,7 +556,7 @@ export default function PluginManagerNG() {
       <section className="bg-card border border-border p-4" data-testid="plugin-test-section">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-head font-semibold text-base flex items-center gap-2">
-            <PlayCircle size={16} className="text-[#A855F7]" /> Test multi-ANPR (avec mocks)
+            <PlayCircle size={16} className="text-[#A855F7]" /> {t("pmng.test_section_title")}
           </h3>
           <Button
             onClick={runTest}
@@ -564,20 +564,19 @@ export default function PluginManagerNG() {
             size="sm"
             data-testid="run-multi-anpr-test"
           >
-            {running ? "Exécution…" : "Lancer le test"}
+            {running ? t("pmng.running_test") : t("pmng.run_test_button")}
           </Button>
         </div>
 
         <p className="text-xs text-muted-foreground mb-3">
-          Injecte temporairement N moteurs ANPR factices sur le bus, exécute un cycle
-          complet avec la politique choisie, puis nettoie. Aucune caméra ni quota consommé.
+          {t("pmng.test_description")}
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Config */}
           <div className="space-y-3">
             <div>
-              <Label className="text-xs">Mode fusion</Label>
+              <Label className="text-xs">{t("pmng.fusion_mode_label")}</Label>
               <div className="grid grid-cols-4 gap-1 mt-1">
                 {FUSION_MODES.map((m) => (
                   <button
@@ -590,7 +589,7 @@ export default function PluginManagerNG() {
                         : "border-border hover:border-[#0044FF]/60"
                     }`}
                   >
-                    {m.label}
+                    {t(m.labelKey)}
                   </button>
                 ))}
               </div>
@@ -598,7 +597,7 @@ export default function PluginManagerNG() {
 
             {testMode === "cascade" && (
               <div>
-                <Label className="text-xs">Seuil cascade : <span className="mono">{(testThreshold * 100).toFixed(0)}%</span></Label>
+                <Label className="text-xs">{t("pmng.test_cascade_threshold_label")} <span className="mono">{(testThreshold * 100).toFixed(0)}%</span></Label>
                 <Slider
                   value={[testThreshold]}
                   min={0.5}
@@ -612,7 +611,7 @@ export default function PluginManagerNG() {
             )}
 
             <div>
-              <Label className="text-xs mb-1 block">Mocks injectés</Label>
+              <Label className="text-xs mb-1 block">{t("pmng.mocks_label")}</Label>
               <div className="space-y-1.5" data-testid="test-mocks">
                 {testMocks.map((m, i) => (
                   <div key={i} className="grid grid-cols-[1fr_1fr_80px] gap-1.5 text-xs">
@@ -649,16 +648,16 @@ export default function PluginManagerNG() {
           {/* Result */}
           <div className="border border-border bg-background/60 p-3">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
-              Résultat
+              {t("pmng.result_label")}
             </div>
             {!testResult ? (
               <div className="text-xs text-muted-foreground italic">
-                Cliquez sur « Lancer le test » pour exécuter le pipeline.
+                {t("pmng.result_empty_prefix")} « {t("pmng.run_test_button")} » {t("pmng.result_empty_suffix")}
               </div>
             ) : (
               <div className="space-y-2 text-xs" data-testid="test-result">
                 <div>
-                  <span className="text-muted-foreground">Mode : </span>
+                  <span className="text-muted-foreground">{t("pmng.mode_colon_label")} </span>
                   <span className="mono font-bold">{testResult.mode}</span>
                   {testResult.divergence && (
                     <span className="ml-2 text-[10px] px-1.5 py-0.5 border border-[#FFB800] text-[#FFB800]">
@@ -667,13 +666,13 @@ export default function PluginManagerNG() {
                   )}
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Moteurs appelés : </span>
+                  <span className="text-muted-foreground">{t("pmng.engines_called_label")} </span>
                   <span className="mono">{testResult.engines_called.join(", ") || "—"}</span>
                 </div>
                 {testResult.final ? (
                   <div className="border border-[#00E676] bg-[#00E676]/5 p-2" data-testid="test-final-plate">
                     <div className="text-[10px] uppercase tracking-wider text-[#00E676] mb-1 flex items-center gap-1">
-                      <CheckCircle2 size={10} /> Plaque retenue
+                      <CheckCircle2 size={10} /> {t("pmng.plate_selected_label")}
                     </div>
                     <div className="mono font-bold text-lg">{testResult.final.text}</div>
                     <div className="mono text-[10px] text-muted-foreground">
@@ -686,19 +685,19 @@ export default function PluginManagerNG() {
                   </div>
                 ) : (
                   <div className="border border-[#FF3333]/40 p-2 text-[#FF3333] text-[11px]">
-                    <XCircle size={12} className="inline mr-1" /> Aucune plaque retenue
+                    <XCircle size={12} className="inline mr-1" /> {t("pmng.no_plate_selected")}
                   </div>
                 )}
                 <details className="mt-2">
                   <summary className="text-[10px] uppercase tracking-wider text-muted-foreground cursor-pointer">
-                    Détail par moteur ({testResult.all_results.length})
+                    {t("pmng.detail_by_engine_prefix")} ({testResult.all_results.length})
                   </summary>
                   <div className="mt-1.5 space-y-1">
                     {testResult.all_results.map((r) => (
                       <div key={r.engine} className="mono text-[11px] border-l-2 border-border pl-2">
                         <b>{r.engine}</b>{" "}
                         {r.plates.length === 0 ? (
-                          <span className="text-muted-foreground italic">aucun résultat</span>
+                          <span className="text-muted-foreground italic">{t("pmng.no_result_word")}</span>
                         ) : (
                           r.plates.map((p, i) => (
                             <span key={i} className="ml-2">

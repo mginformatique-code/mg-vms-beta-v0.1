@@ -16,6 +16,7 @@ import {
   ShieldCheck, ShieldAlert, Globe, Lock, Zap, Upload, KeyRound,
   Sparkles, Trash2, Check, AlertTriangle, Copy, Download, Info, X, RefreshCw,
 } from "lucide-react";
+import { useApp } from "@/context/AppContext";
 
 // ────────────────────────────────────────────────────────────────
 // UI atoms
@@ -60,14 +61,15 @@ const Badge = ({ tone = "muted", children, ...p }) => {
 // Sections
 // ────────────────────────────────────────────────────────────────
 function DomainsPanel({ config, onSave }) {
+  const { t } = useApp();
   const [d, setD] = useState(config.domains);
   useEffect(() => setD(config.domains), [config.domains]);
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
     setSaving(true);
-    try { await onSave(d); toast.success("Domaines enregistrés"); }
-    catch (e) { toast.error(e.response?.data?.detail?.error || "Erreur enregistrement"); }
+    try { await onSave(d); toast.success(t("tls.domains_saved")); }
+    catch (e) { toast.error(e.response?.data?.detail?.error || t("tls.save_error")); }
     finally { setSaving(false); }
   };
 
@@ -75,15 +77,15 @@ function DomainsPanel({ config, onSave }) {
     <div className="bg-card border border-border p-4 space-y-4" data-testid="tls-domains-panel">
       <div className="flex items-center gap-2 border-b border-border pb-2">
         <Globe size={14} className="text-[#0044FF]" />
-        <h2 className="font-head font-black text-sm tracking-tight">Domaines & routing</h2>
+        <h2 className="font-head font-black text-sm tracking-tight">{t("tls.domains_routing_title")}</h2>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <Field label="Domaine local (LAN / intranet)" hint="Ex : mgvms.local · résolu par mDNS ou DNS interne" testid="tls-domain-internal">
+        <Field label={t("tls.domain_internal_label")} hint={t("tls.domain_internal_hint")} testid="tls-domain-internal">
           <Input value={d.internal} onChange={(e) => setD({ ...d, internal: e.target.value })}
                  placeholder="mgvms.local" data-testid="tls-domain-internal-input" />
         </Field>
-        <Field label="Domaine externe (Internet public)" hint="Ex : vms.exemple.com · requis pour Let's Encrypt" testid="tls-domain-external">
+        <Field label={t("tls.domain_external_label")} hint={t("tls.domain_external_hint")} testid="tls-domain-external">
           <Input value={d.external} onChange={(e) => setD({ ...d, external: e.target.value })}
                  placeholder="vms.exemple.com" data-testid="tls-domain-external-input" />
         </Field>
@@ -93,8 +95,8 @@ function DomainsPanel({ config, onSave }) {
         <label className="flex items-start gap-2 cursor-pointer border border-border p-2 hover:bg-secondary/40" data-testid="tls-toggle-force-https">
           <input type="checkbox" checked={d.force_https} onChange={(e) => setD({ ...d, force_https: e.target.checked })} className="mt-0.5" />
           <div>
-            <div className="text-sm font-medium">Forcer HTTPS</div>
-            <div className="text-[10px] text-muted-foreground">Redirige tout HTTP → HTTPS</div>
+            <div className="text-sm font-medium">{t("tls.force_https_label")}</div>
+            <div className="text-[10px] text-muted-foreground">{t("tls.force_https_hint")}</div>
           </div>
         </label>
         <label className="flex items-start gap-2 cursor-pointer border border-border p-2 hover:bg-secondary/40" data-testid="tls-toggle-hsts">
@@ -104,7 +106,7 @@ function DomainsPanel({ config, onSave }) {
             <div className="text-[10px] text-muted-foreground">Strict-Transport-Security header</div>
           </div>
         </label>
-        <Field label="HSTS max-age (secondes)" hint="180 j = 15552000 · max 2 ans" testid="tls-hsts-maxage">
+        <Field label={t("tls.hsts_maxage_label")} hint={t("tls.hsts_maxage_hint")} testid="tls-hsts-maxage">
           <Input type="number" min="0" max="63072000" value={d.hsts_max_age_seconds}
                  onChange={(e) => setD({ ...d, hsts_max_age_seconds: parseInt(e.target.value, 10) || 0 })}
                  disabled={!d.hsts_enabled} data-testid="tls-hsts-maxage-input" />
@@ -113,7 +115,7 @@ function DomainsPanel({ config, onSave }) {
 
       <div className="flex justify-end pt-2 border-t border-border">
         <Btn onClick={save} disabled={saving} data-testid="tls-domains-save">
-          {saving ? "Enregistrement…" : (<><Check size={13} /> Enregistrer</>)}
+          {saving ? t("tls.saving") : (<><Check size={13} /> {t("common.save")}</>)}
         </Btn>
       </div>
     </div>
@@ -121,11 +123,12 @@ function DomainsPanel({ config, onSave }) {
 }
 
 function CertificateRow({ cert, onActivate, onDelete, onExport }) {
+  const { t } = useApp();
   const badge = cert.expired
-    ? <Badge tone="err"><AlertTriangle size={10}/> Expiré</Badge>
+    ? <Badge tone="err"><AlertTriangle size={10}/> {t("tls.cert_expired")}</Badge>
     : cert.days_left < 30
-      ? <Badge tone="warn"><AlertTriangle size={10}/> {cert.days_left} j restants</Badge>
-      : <Badge tone="ok">{cert.days_left} j</Badge>;
+      ? <Badge tone="warn"><AlertTriangle size={10}/> {cert.days_left} {t("tls.days_left_suffix")}</Badge>
+      : <Badge tone="ok">{cert.days_left} {t("tls.days_suffix")}</Badge>;
 
   return (
     <div className={`border ${cert.active ? "border-[#00E676] bg-[#00E676]/5" : "border-border bg-card"} p-3`}
@@ -137,10 +140,10 @@ function CertificateRow({ cert, onActivate, onDelete, onExport }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium text-sm truncate">{cert.name}</span>
-            {cert.active && <Badge tone="ok"><Check size={10}/> Actif</Badge>}
-            {cert.self_signed && <Badge tone="warn">Auto-signé</Badge>}
-            {cert.source === "uploaded" && <Badge tone="info">Importé</Badge>}
-            {cert.source === "self-signed" && <Badge tone="muted"><Sparkles size={10}/> Généré</Badge>}
+            {cert.active && <Badge tone="ok"><Check size={10}/> {t("tls.cert_active_badge")}</Badge>}
+            {cert.self_signed && <Badge tone="warn">{t("tls.self_signed_badge")}</Badge>}
+            {cert.source === "uploaded" && <Badge tone="info">{t("tls.imported_badge")}</Badge>}
+            {cert.source === "self-signed" && <Badge tone="muted"><Sparkles size={10}/> {t("tls.generated_badge")}</Badge>}
             {badge}
           </div>
           <div className="text-xs text-muted-foreground mt-1 mono truncate" title={cert.common_name}>
@@ -155,22 +158,22 @@ function CertificateRow({ cert, onActivate, onDelete, onExport }) {
             <span className="opacity-60">SHA-256 :</span> {cert.fingerprint_sha256?.slice(0, 24)}…{cert.fingerprint_sha256?.slice(-8)}
           </div>
           <div className="text-[10px] text-muted-foreground mt-0.5">
-            <span className="opacity-60">Valide du</span> {new Date(cert.not_before).toLocaleDateString("fr-FR")}
-            <span className="opacity-60"> au</span> {new Date(cert.not_after).toLocaleDateString("fr-FR")}
+            <span className="opacity-60">{t("tls.valid_from")}</span> {new Date(cert.not_before).toLocaleDateString("fr-FR")}
+            <span className="opacity-60"> {t("tls.valid_until")}</span> {new Date(cert.not_after).toLocaleDateString("fr-FR")}
           </div>
         </div>
         <div className="flex flex-col gap-1 shrink-0">
           {!cert.active && (
             <Btn variant="ok" onClick={() => onActivate(cert)} data-testid={`tls-cert-activate-${cert.id}`}>
-              <ShieldCheck size={12}/> Activer
+              <ShieldCheck size={12}/> {t("tls.activate")}
             </Btn>
           )}
           <Btn variant="ghost" onClick={() => onExport(cert)} data-testid={`tls-cert-export-${cert.id}`}>
-            <Download size={12}/> Exporter
+            <Download size={12}/> {t("tls.export")}
           </Btn>
           {!cert.active && (
             <Btn variant="danger" onClick={() => onDelete(cert)} data-testid={`tls-cert-delete-${cert.id}`}>
-              <Trash2 size={12}/> Supprimer
+              <Trash2 size={12}/> {t("common.delete")}
             </Btn>
           )}
         </div>
@@ -180,17 +183,18 @@ function CertificateRow({ cert, onActivate, onDelete, onExport }) {
 }
 
 function CertificatesPanel({ config, onReload }) {
+  const { t } = useApp();
   const onActivate = async (cert) => {
-    try { await api.put(`/security/tls/certificates/${cert.id}/activate`); toast.success(`« ${cert.name} » activé`); onReload(); }
-    catch (e) { toast.error(e.response?.data?.detail?.error || "Échec activation"); }
+    try { await api.put(`/security/tls/certificates/${cert.id}/activate`); toast.success(`« ${cert.name} » ${t("tls.activated_suffix")}`); onReload(); }
+    catch (e) { toast.error(e.response?.data?.detail?.error || t("tls.activate_failed")); }
   };
   const onDelete = async (cert) => {
-    if (!window.confirm(`Supprimer définitivement « ${cert.name} » ?`)) return;
-    try { await api.delete(`/security/tls/certificates/${cert.id}`); toast.success("Supprimé"); onReload(); }
-    catch (e) { toast.error(e.response?.data?.detail?.message || e.response?.data?.detail?.error || "Échec suppression"); }
+    if (!window.confirm(`${t("tls.delete_confirm_prefix")} « ${cert.name} » ?`)) return;
+    try { await api.delete(`/security/tls/certificates/${cert.id}`); toast.success(t("tls.deleted")); onReload(); }
+    catch (e) { toast.error(e.response?.data?.detail?.message || e.response?.data?.detail?.error || t("tls.delete_failed")); }
   };
   const onExport = async (cert) => {
-    const includeKey = window.confirm(`Exporter aussi la clé privée ?\n\nOK = cert + clé (audité, sensible)\nAnnuler = cert seul (public)`);
+    const includeKey = window.confirm(t("tls.export_confirm"));
     try {
       const r = await api.get(`/security/tls/certificates/${cert.id}/pem`, { params: { include_key: includeKey } });
       const bundle = includeKey ? `${r.data.cert_pem}\n${r.data.key_pem}` : r.data.cert_pem;
@@ -200,8 +204,8 @@ function CertificatesPanel({ config, onReload }) {
       a.download = `${cert.name.replace(/\W+/g, "_")}${includeKey ? "_full" : "_cert"}.pem`;
       a.click();
       URL.revokeObjectURL(a.href);
-      toast.success("Téléchargement démarré");
-    } catch (e) { toast.error("Échec export"); }
+      toast.success(t("tls.download_started"));
+    } catch (e) { toast.error(t("tls.export_failed")); }
   };
 
   const certs = config.certificates || [];
@@ -209,14 +213,14 @@ function CertificatesPanel({ config, onReload }) {
     <div className="bg-card border border-border p-4 space-y-3" data-testid="tls-certificates-panel">
       <div className="flex items-center gap-2 border-b border-border pb-2">
         <Lock size={14} className="text-[#0044FF]" />
-        <h2 className="font-head font-black text-sm tracking-tight">Certificats stockés <span className="text-muted-foreground mono ml-1">({certs.length})</span></h2>
+        <h2 className="font-head font-black text-sm tracking-tight">{t("tls.certificates_stored_title")} <span className="text-muted-foreground mono ml-1">({certs.length})</span></h2>
         <button onClick={onReload} className="ml-auto text-xs text-muted-foreground hover:text-foreground flex items-center gap-1" data-testid="tls-certs-refresh">
-          <RefreshCw size={11} /> Recharger
+          <RefreshCw size={11} /> {t("tls.reload_button")}
         </button>
       </div>
       {certs.length === 0 ? (
         <div className="text-xs text-muted-foreground text-center py-8" data-testid="tls-certs-empty">
-          Aucun certificat stocké. Importe un cert existant ou génère un auto-signé ci-dessous.
+          {t("tls.certs_empty")}
         </div>
       ) : (
         <div className="space-y-2">
@@ -230,6 +234,7 @@ function CertificatesPanel({ config, onReload }) {
 }
 
 function UploadCertPanel({ onCreated }) {
+  const { t } = useApp();
   const [name, setName] = useState("");
   const [certPem, setCertPem] = useState("");
   const [keyPem, setKeyPem] = useState("");
@@ -237,17 +242,17 @@ function UploadCertPanel({ onCreated }) {
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
-    if (!name || !certPem || !keyPem) return toast.error("Nom + cert + clé requis");
+    if (!name || !certPem || !keyPem) return toast.error(t("tls.upload_missing_fields"));
     setBusy(true);
     try {
       await api.post("/security/tls/certificates/upload", {
         name, cert_pem: certPem, key_pem: keyPem, activate,
       });
-      toast.success("Certificat importé");
+      toast.success(t("tls.cert_imported"));
       setName(""); setCertPem(""); setKeyPem(""); setActivate(false);
       onCreated();
     } catch (e) {
-      toast.error(e.response?.data?.detail?.error || e.response?.data?.detail?.message || "Échec import");
+      toast.error(e.response?.data?.detail?.error || e.response?.data?.detail?.message || t("tls.import_failed"));
     } finally { setBusy(false); }
   };
 
@@ -262,24 +267,24 @@ function UploadCertPanel({ onCreated }) {
     <div className="bg-card border border-border p-4 space-y-3" data-testid="tls-upload-panel">
       <div className="flex items-center gap-2 border-b border-border pb-2">
         <Upload size={14} className="text-[#0044FF]" />
-        <h2 className="font-head font-black text-sm tracking-tight">Importer un certificat existant</h2>
+        <h2 className="font-head font-black text-sm tracking-tight">{t("tls.upload_title")}</h2>
       </div>
       <div className="text-xs text-muted-foreground flex items-start gap-1">
         <Info size={11} className="mt-0.5 shrink-0" />
-        Colle le PEM du certificat public + celui de la clé privée. Ex : sortie <span className="mono">Let&apos;s Encrypt</span> (fichiers <span className="mono">fullchain.pem</span> + <span className="mono">privkey.pem</span>).
+        {t("tls.upload_info_prefix")} <span className="mono">Let&apos;s Encrypt</span> {t("tls.upload_info_files_prefix")} <span className="mono">fullchain.pem</span> + <span className="mono">privkey.pem</span>).
       </div>
 
-      <Field label="Nom convivial" testid="tls-upload-name">
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex : Let's Encrypt vms.exemple.com" data-testid="tls-upload-name-input" />
+      <Field label={t("tls.friendly_name_label")} testid="tls-upload-name">
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("tls.upload_name_placeholder")} data-testid="tls-upload-name-input" />
       </Field>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <Field label="Certificat public (fullchain.pem)" testid="tls-upload-cert">
+        <Field label={t("tls.cert_public_label")} testid="tls-upload-cert">
           <textarea value={certPem} onChange={(e) => setCertPem(e.target.value)}
                      rows={7} placeholder="-----BEGIN CERTIFICATE-----&#10;…&#10;-----END CERTIFICATE-----"
                      className="w-full bg-secondary/30 border border-border px-3 py-2 text-[11px] mono font-mono focus:outline-none focus:border-[#0044FF]" data-testid="tls-upload-cert-input" />
           <input type="file" accept=".pem,.crt,.cer" onChange={readFile(setCertPem)} className="text-[10px] mt-1" data-testid="tls-upload-cert-file" />
         </Field>
-        <Field label="Clé privée (privkey.pem)" testid="tls-upload-key">
+        <Field label={t("tls.private_key_label")} testid="tls-upload-key">
           <textarea value={keyPem} onChange={(e) => setKeyPem(e.target.value)}
                      rows={7} placeholder="-----BEGIN PRIVATE KEY-----&#10;…&#10;-----END PRIVATE KEY-----"
                      className="w-full bg-secondary/30 border border-border px-3 py-2 text-[11px] mono font-mono focus:outline-none focus:border-[#0044FF]" data-testid="tls-upload-key-input" />
@@ -288,10 +293,10 @@ function UploadCertPanel({ onCreated }) {
       </div>
       <div className="flex items-center justify-between pt-2 border-t border-border">
         <label className="flex items-center gap-2 text-xs cursor-pointer" data-testid="tls-upload-activate-toggle">
-          <input type="checkbox" checked={activate} onChange={(e) => setActivate(e.target.checked)} /> Activer immédiatement
+          <input type="checkbox" checked={activate} onChange={(e) => setActivate(e.target.checked)} /> {t("tls.activate_immediately")}
         </label>
         <Btn onClick={submit} disabled={busy} data-testid="tls-upload-submit">
-          {busy ? "Import…" : (<><Upload size={12}/> Importer</>)}
+          {busy ? t("tls.importing") : (<><Upload size={12}/> {t("tls.import_button")}</>)}
         </Btn>
       </div>
     </div>
@@ -299,6 +304,7 @@ function UploadCertPanel({ onCreated }) {
 }
 
 function SelfSignedPanel({ onCreated, defaultDomain }) {
+  const { t } = useApp();
   const [name, setName] = useState("Auto-signé LAN");
   const [cn, setCn] = useState(defaultDomain || "mgvms.local");
   const [sansTxt, setSansTxt] = useState("*.mgvms.local");
@@ -311,7 +317,7 @@ function SelfSignedPanel({ onCreated, defaultDomain }) {
   useEffect(() => { if (defaultDomain) setCn(defaultDomain); }, [defaultDomain]);
 
   const submit = async () => {
-    if (!name || !cn) return toast.error("Nom + Common Name requis");
+    if (!name || !cn) return toast.error(t("tls.selfsigned_missing_fields"));
     setBusy(true);
     const sans = sansTxt.split(/[\s,;\n]+/).map((s) => s.trim()).filter(Boolean);
     try {
@@ -320,10 +326,10 @@ function SelfSignedPanel({ onCreated, defaultDomain }) {
         country: country.slice(0, 2).toUpperCase(),
         validity_days: days, key_bits: keyBits, activate,
       });
-      toast.success("Certificat auto-signé généré");
+      toast.success(t("tls.selfsigned_generated"));
       onCreated();
     } catch (e) {
-      toast.error(e.response?.data?.detail?.error || "Échec génération");
+      toast.error(e.response?.data?.detail?.error || t("tls.generate_failed"));
     } finally { setBusy(false); }
   };
 
@@ -331,51 +337,51 @@ function SelfSignedPanel({ onCreated, defaultDomain }) {
     <div className="bg-card border border-border p-4 space-y-3" data-testid="tls-selfsigned-panel">
       <div className="flex items-center gap-2 border-b border-border pb-2">
         <Sparkles size={14} className="text-[#FFB800]" />
-        <h2 className="font-head font-black text-sm tracking-tight">Générer un certificat auto-signé</h2>
+        <h2 className="font-head font-black text-sm tracking-tight">{t("tls.selfsigned_title")}</h2>
       </div>
       <div className="text-xs text-muted-foreground flex items-start gap-1">
         <AlertTriangle size={11} className="mt-0.5 shrink-0 text-[#FFB800]" />
-        Recommandé pour <b className="text-foreground">LAN / intranet uniquement</b>. Les navigateurs afficheront un avertissement tant que le cert n&apos;est pas ajouté aux <span className="mono">trust stores</span> clients.
+        {t("tls.selfsigned_warning_prefix")} <b className="text-foreground">{t("tls.selfsigned_lan_only")}</b>. {t("tls.selfsigned_warning_suffix")} <span className="mono">trust stores</span> {t("tls.selfsigned_warning_suffix2")}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <Field label="Nom convivial" testid="tls-ss-name">
+        <Field label={t("tls.friendly_name_label")} testid="tls-ss-name">
           <Input value={name} onChange={(e) => setName(e.target.value)} data-testid="tls-ss-name-input" />
         </Field>
-        <Field label="Common Name (CN)" hint="Le domaine principal — doit correspondre à l'hôte" testid="tls-ss-cn">
+        <Field label="Common Name (CN)" hint={t("tls.cn_hint")} testid="tls-ss-cn">
           <Input value={cn} onChange={(e) => setCn(e.target.value)} placeholder="mgvms.local" data-testid="tls-ss-cn-input" />
         </Field>
       </div>
-      <Field label="Subject Alternative Names (SAN)" hint="Domaines & IPs supplémentaires — un par ligne ou séparés par virgules. Wildcard supporté (*.mgvms.local)" testid="tls-ss-sans">
+      <Field label="Subject Alternative Names (SAN)" hint={t("tls.sans_hint")} testid="tls-ss-sans">
         <textarea value={sansTxt} onChange={(e) => setSansTxt(e.target.value)} rows={3}
                    placeholder="*.mgvms.local, 192.168.1.10"
                    className="w-full bg-secondary/30 border border-border px-3 py-2 text-[12px] mono focus:outline-none focus:border-[#0044FF]" data-testid="tls-ss-sans-input" />
       </Field>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Field label="Organisation (O)" testid="tls-ss-org">
+        <Field label={t("tls.org_label")} testid="tls-ss-org">
           <Input value={org} onChange={(e) => setOrg(e.target.value)} data-testid="tls-ss-org-input" />
         </Field>
-        <Field label="Pays (2 lettres)" testid="tls-ss-country">
+        <Field label={t("tls.country_label")} testid="tls-ss-country">
           <Input value={country} onChange={(e) => setCountry(e.target.value)} maxLength={2} data-testid="tls-ss-country-input" />
         </Field>
-        <Field label="Validité (jours)" hint="1 - 3650" testid="tls-ss-days">
+        <Field label={t("tls.validity_label")} hint="1 - 3650" testid="tls-ss-days">
           <Input type="number" min="1" max="3650" value={days} onChange={(e) => setDays(parseInt(e.target.value, 10) || 365)} data-testid="tls-ss-days-input" />
         </Field>
-        <Field label="Taille clé RSA (bits)" testid="tls-ss-keybits">
+        <Field label={t("tls.keysize_label")} testid="tls-ss-keybits">
           <select value={keyBits} onChange={(e) => setKeyBits(parseInt(e.target.value, 10))}
                   className="w-full bg-secondary/30 border border-border px-3 py-2 text-sm focus:outline-none focus:border-[#0044FF]" data-testid="tls-ss-keybits-input">
-            <option value={2048}>2048 (rapide, standard)</option>
+            <option value={2048}>2048 {t("tls.keysize_2048_suffix")}</option>
             <option value={3072}>3072</option>
-            <option value={4096}>4096 (sécurité max, plus lent)</option>
+            <option value={4096}>4096 {t("tls.keysize_4096_suffix")}</option>
           </select>
         </Field>
       </div>
       <div className="flex items-center justify-between pt-2 border-t border-border">
         <label className="flex items-center gap-2 text-xs cursor-pointer" data-testid="tls-ss-activate-toggle">
-          <input type="checkbox" checked={activate} onChange={(e) => setActivate(e.target.checked)} /> Activer immédiatement
+          <input type="checkbox" checked={activate} onChange={(e) => setActivate(e.target.checked)} /> {t("tls.activate_immediately")}
         </label>
         <Btn variant="primary" onClick={submit} disabled={busy} data-testid="tls-ss-submit">
-          {busy ? "Génération…" : (<><Sparkles size={12}/> Générer</>)}
+          {busy ? t("tls.generating") : (<><Sparkles size={12}/> {t("tls.generate_button")}</>)}
         </Btn>
       </div>
     </div>
@@ -386,6 +392,7 @@ function SelfSignedPanel({ onCreated, defaultDomain }) {
 // Page
 // ────────────────────────────────────────────────────────────────
 function SystemIdentityPanel() {
+  const { t } = useApp();
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -396,8 +403,8 @@ function SystemIdentityPanel() {
 
   const save = async () => {
     setSaving(true);
-    try { await api.put("/system/identity", { system_name: name }); toast.success("Nom du système enregistré"); }
-    catch (e) { toast.error("Erreur enregistrement"); }
+    try { await api.put("/system/identity", { system_name: name }); toast.success(t("tls.system_name_saved")); }
+    catch (e) { toast.error(t("tls.save_error")); }
     finally { setSaving(false); }
   };
 
@@ -407,16 +414,16 @@ function SystemIdentityPanel() {
     <div className="bg-card border border-border p-4 space-y-3" data-testid="tls-identity-panel">
       <div className="flex items-center gap-2 border-b border-border pb-2">
         <ShieldCheck size={14} className="text-[#0044FF]" />
-        <h2 className="font-head font-black text-sm tracking-tight">Identité du système</h2>
+        <h2 className="font-head font-black text-sm tracking-tight">{t("tls.identity_title")}</h2>
       </div>
       <div className="flex items-end gap-3">
         <div className="flex-1">
-          <Field label="Nom du système" hint="Affiché dans MG-VMS et remonté à MG-VMS Center s'il est connecté" testid="tls-system-name">
+          <Field label={t("tls.system_name_label")} hint={t("tls.system_name_hint")} testid="tls-system-name">
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="MG-VMS" data-testid="tls-system-name-input" />
           </Field>
         </div>
         <Btn onClick={save} disabled={saving} data-testid="tls-identity-save">
-          {saving ? "Enregistrement…" : (<><Check size={13} /> Enregistrer</>)}
+          {saving ? t("tls.saving") : (<><Check size={13} /> {t("common.save")}</>)}
         </Btn>
       </div>
     </div>
@@ -424,13 +431,14 @@ function SystemIdentityPanel() {
 }
 
 export default function TlsSettings() {
+  const { t } = useApp();
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
     setLoading(true);
     try { const { data } = await api.get("/security/tls/config"); setConfig(data); }
-    catch (e) { toast.error("Impossible de charger les paramètres TLS"); }
+    catch (e) { toast.error(t("tls.load_failed")); }
     finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
@@ -441,7 +449,7 @@ export default function TlsSettings() {
   };
 
   if (loading || !config) {
-    return <div className="p-8 text-muted-foreground" data-testid="tls-loading">Chargement…</div>;
+    return <div className="p-8 text-muted-foreground" data-testid="tls-loading">{t("common.loading")}</div>;
   }
 
   const active = config.certificates.find((c) => c.active);
@@ -453,35 +461,35 @@ export default function TlsSettings() {
       {/* Header */}
       <div className="flex items-end justify-between border-b border-border pb-3">
         <div>
-          <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground mb-1">Réseau · HTTPS / TLS</div>
-          <h1 className="font-head font-black text-3xl tracking-tight">Paramètres HTTPS &amp; certificats</h1>
+          <div className="text-xs uppercase tracking-[0.15em] text-muted-foreground mb-1">{t("tls.header_eyebrow")}</div>
+          <h1 className="font-head font-black text-3xl tracking-tight">{t("tls.page_title")}</h1>
         </div>
         <div className="flex items-center gap-2">
           {active
             ? <Badge tone="ok"><ShieldCheck size={11}/> {active.name}</Badge>
-            : <Badge tone="warn"><ShieldAlert size={11}/> Aucun certificat actif</Badge>}
-          {expiredCount > 0 && <Badge tone="err">{expiredCount} expiré{expiredCount>1?'s':''}</Badge>}
-          {nearExpiryCount > 0 && <Badge tone="warn">{nearExpiryCount} expire bientôt</Badge>}
+            : <Badge tone="warn"><ShieldAlert size={11}/> {t("tls.no_active_cert")}</Badge>}
+          {expiredCount > 0 && <Badge tone="err">{expiredCount} {t("tls.expired_word")}{expiredCount>1?'s':''}</Badge>}
+          {nearExpiryCount > 0 && <Badge tone="warn">{nearExpiryCount} {t("tls.expiring_soon")}</Badge>}
         </div>
       </div>
 
       {/* Résumé état actuel */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2" data-testid="tls-summary">
         <div className="bg-card border border-border p-3">
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-1"><Globe size={11}/> Domaine externe</div>
-          <div className="font-mono text-sm truncate">{config.domains.external || <span className="text-muted-foreground italic">(non défini)</span>}</div>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-1"><Globe size={11}/> {t("tls.summary_external")}</div>
+          <div className="font-mono text-sm truncate">{config.domains.external || <span className="text-muted-foreground italic">{t("tls.not_defined")}</span>}</div>
         </div>
         <div className="bg-card border border-border p-3">
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-1"><Globe size={11}/> Domaine local</div>
-          <div className="font-mono text-sm truncate">{config.domains.internal || <span className="text-muted-foreground italic">(non défini)</span>}</div>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-1"><Globe size={11}/> {t("tls.summary_internal")}</div>
+          <div className="font-mono text-sm truncate">{config.domains.internal || <span className="text-muted-foreground italic">{t("tls.not_defined")}</span>}</div>
         </div>
         <div className="bg-card border border-border p-3">
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-1"><Zap size={11}/> Force HTTPS</div>
-          <div className="text-sm">{config.domains.force_https ? <Badge tone="ok">Activé</Badge> : <Badge tone="muted">Désactivé</Badge>}</div>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-1"><Zap size={11}/> {t("tls.summary_force_https")}</div>
+          <div className="text-sm">{config.domains.force_https ? <Badge tone="ok">{t("tls.enabled_badge")}</Badge> : <Badge tone="muted">{t("tls.disabled_badge")}</Badge>}</div>
         </div>
         <div className="bg-card border border-border p-3">
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-1"><Lock size={11}/> Let&apos;s Encrypt</div>
-          <div className="text-sm">{config.letsencrypt_enabled ? <Badge tone="ok">Détecté</Badge> : <Badge tone="muted">Non configuré</Badge>}</div>
+          <div className="text-sm">{config.letsencrypt_enabled ? <Badge tone="ok">{t("tls.detected_badge")}</Badge> : <Badge tone="muted">{t("tls.not_configured_badge")}</Badge>}</div>
         </div>
       </div>
 
@@ -497,11 +505,11 @@ export default function TlsSettings() {
 
       {/* Guide de bas de page */}
       <div className="bg-secondary/30 border border-border p-4 text-xs text-muted-foreground" data-testid="tls-help">
-        <div className="font-medium text-foreground mb-2 flex items-center gap-1"><Info size={12}/> Aide rapide</div>
+        <div className="font-medium text-foreground mb-2 flex items-center gap-1"><Info size={12}/> {t("tls.help_title")}</div>
         <ul className="space-y-1 list-disc list-inside">
-          <li><b>LAN uniquement</b> : génère un cert auto-signé avec ton domaine <span className="mono">.local</span> comme CN + ton IP LAN en SAN. Importe-le sur les postes clients.</li>
-          <li><b>Production Internet</b> : renseigne le domaine externe, laisse <span className="mono">certbot</span> obtenir un cert Let&apos;s Encrypt (compose <span className="mono">docker-compose.prod.yml</span>), puis importe <span className="mono">fullchain.pem</span> + <span className="mono">privkey.pem</span>.</li>
-          <li><b>Force HTTPS + HSTS</b> : à activer <b>seulement</b> après avoir un cert public trusté — un HSTS activé sur cert auto-signé bloque l&apos;accès aux navigateurs.</li>
+          <li><b>{t("tls.help_lan_only_title")}</b> {t("tls.help_lan_only_body1")} <span className="mono">.local</span> {t("tls.help_lan_only_body2")}</li>
+          <li><b>{t("tls.help_prod_title")}</b> {t("tls.help_prod_body1")} <span className="mono">certbot</span> {t("tls.help_prod_body2")} <span className="mono">docker-compose.prod.yml</span>{t("tls.help_prod_body3")} <span className="mono">fullchain.pem</span> + <span className="mono">privkey.pem</span>.</li>
+          <li><b>{t("tls.help_force_hsts_title")}</b> : {t("tls.help_force_hsts_body1")} <b>{t("tls.help_force_hsts_emphasis")}</b> {t("tls.help_force_hsts_body2")}</li>
         </ul>
       </div>
     </div>

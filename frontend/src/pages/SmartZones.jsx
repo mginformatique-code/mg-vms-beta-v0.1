@@ -44,7 +44,7 @@ export default function SmartZones() {
 
   const save = async () => {
     if (!editing.name || !editing.camera_id) {
-      toast.error("Nom et caméra requis");
+      toast.error(t("sz.err_name_camera_required"));
       return;
     }
     setSaving(true);
@@ -60,10 +60,10 @@ export default function SmartZones() {
       };
       if (editing.id) {
         await api.put(`/smart-zones/${editing.id}`, payload);
-        toast.success("Zone mise à jour");
+        toast.success(t("sz.toast_updated"));
       } else {
         await api.post("/smart-zones", payload);
-        toast.success("Zone créée");
+        toast.success(t("sz.toast_created"));
       }
       setEditing(null);
       loadAll();
@@ -73,10 +73,10 @@ export default function SmartZones() {
   };
 
   const remove = async (id) => {
-    if (!window.confirm("Supprimer cette zone ?")) return;
+    if (!window.confirm(t("sz.confirm_delete"))) return;
     try {
       await api.delete(`/smart-zones/${id}`);
-      toast.success("Zone supprimée");
+      toast.success(t("sz.toast_deleted"));
       loadAll();
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || e.message); }
   };
@@ -85,7 +85,7 @@ export default function SmartZones() {
     try {
       const { data } = await api.post(`/smart-zones/${zoneId}/test-action/${idx}`);
       const ok = data.result?.ok;
-      toast[ok ? "success" : "error"](`Action ${data.result?.type} → ${ok ? "OK" : (data.result?.error || "échec")}`);
+      toast[ok ? "success" : "error"](`Action ${data.result?.type} → ${ok ? "OK" : (data.result?.error || t("sz.lbl_failure"))}`);
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || e.message); }
   };
 
@@ -97,7 +97,7 @@ export default function SmartZones() {
             <MapPin size={22} className="text-[#00E676]" /> Smart Zones
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Zones intelligentes : détecter · mesurer · déclencher (webhook, MQTT, Home Assistant, Tuya, plugins, TTS)
+            {t("sz.subtitle")}
           </p>
         </div>
         <button
@@ -105,17 +105,17 @@ export default function SmartZones() {
           data-testid="zone-create-btn"
           className="flex items-center gap-2 px-3 py-2 bg-[#0044FF] text-white text-sm hover:bg-[#0044FF]/90"
         >
-          <Plus size={14} /> Nouvelle zone
+          <Plus size={14} /> {t("sz.btn_new_zone")}
         </button>
       </div>
 
       {loading ? (
         <div className="text-center text-muted-foreground py-12">
-          <Loader2 size={20} className="animate-spin inline mr-2" /> Chargement…
+          <Loader2 size={20} className="animate-spin inline mr-2" /> {t("common.loading")}
         </div>
       ) : zones.length === 0 ? (
         <div className="border border-dashed border-border p-8 text-center text-muted-foreground text-sm">
-          Aucune zone configurée. Cliquez sur &quot;Nouvelle zone&quot; pour commencer.
+          {t("sz.empty_state")}
         </div>
       ) : (
         <div className="space-y-2" data-testid="zones-list">
@@ -131,10 +131,10 @@ export default function SmartZones() {
                     <span className="text-[10px] mono text-muted-foreground">· {cam?.name || z.camera_id}</span>
                   </div>
                   <div className="text-xs text-muted-foreground mono mt-1 flex flex-wrap gap-x-3">
-                    <span>classes: {z.detect?.classes?.join(",") || "—"}</span>
-                    <span>triggers: {z.trigger_on?.join(",") || "—"}</span>
-                    <span>actions: {(z.actions || []).length}</span>
-                    <span>déclenchée: {z.trigger_count || 0}×</span>
+                    <span>{t("sz.lbl_classes")} {z.detect?.classes?.join(",") || "—"}</span>
+                    <span>{t("sz.lbl_triggers")} {z.trigger_on?.join(",") || "—"}</span>
+                    <span>{t("sz.lbl_actions_count")} {(z.actions || []).length}</span>
+                    <span>{t("sz.lbl_triggered_count")} {z.trigger_count || 0}×</span>
                   </div>
                   {(z.actions || []).length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1">
@@ -183,6 +183,7 @@ export default function SmartZones() {
 
 
 function ZoneEditor({ zone, cameras, actuatorTypes, onChange, onSave, onCancel, saving }) {
+  const { t } = useApp();
   const update = (patch) => onChange({ ...zone, ...patch });
   const updateDetect = (patch) => onChange({ ...zone, detect: { ...zone.detect, ...patch } });
 
@@ -206,7 +207,7 @@ function ZoneEditor({ zone, cameras, actuatorTypes, onChange, onSave, onCancel, 
            onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-border sticky top-0 bg-card">
           <div className="font-head font-semibold">
-            {zone.id ? "Modifier" : "Nouvelle"} zone intelligente
+            {zone.id ? t("sz.editor_title_edit") : t("sz.editor_title_new")}
           </div>
           <button onClick={onCancel} data-testid="zone-editor-close"><X size={16} /></button>
         </div>
@@ -214,17 +215,17 @@ function ZoneEditor({ zone, cameras, actuatorTypes, onChange, onSave, onCancel, 
         <div className="p-5 space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Nom</label>
+              <label className="text-xs text-muted-foreground block mb-1">{t("common.name")}</label>
               <input value={zone.name} onChange={(e) => update({ name: e.target.value })}
                      data-testid="zone-name-input"
                      className="w-full px-2 py-1.5 bg-background border border-input outline-none text-sm" />
             </div>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Caméra</label>
+              <label className="text-xs text-muted-foreground block mb-1">{t("common.camera")}</label>
               <select value={zone.camera_id} onChange={(e) => update({ camera_id: e.target.value })}
                       data-testid="zone-camera-select"
                       className="w-full px-2 py-1.5 bg-background border border-input outline-none text-sm">
-                <option value="">— Sélectionner —</option>
+                <option value="">{t("sz.opt_select")}</option>
                 {cameras.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
@@ -234,15 +235,15 @@ function ZoneEditor({ zone, cameras, actuatorTypes, onChange, onSave, onCancel, 
             <input type="checkbox" checked={zone.enabled}
                    onChange={(e) => update({ enabled: e.target.checked })}
                    data-testid="zone-enabled-toggle" />
-            Zone active
+            {t("sz.lbl_zone_active")}
           </label>
 
           <div className="border border-border p-3">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Détection</div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">{t("sz.lbl_detection")}</div>
             <div className="space-y-2">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">
-                  Classes (séparées par virgule — ex: person,car,plate:AB-123-CD)
+                  {t("sz.lbl_classes_hint")}
                 </label>
                 <input
                   value={(zone.detect.classes || []).join(",")}
@@ -253,21 +254,21 @@ function ZoneEditor({ zone, cameras, actuatorTypes, onChange, onSave, onCancel, 
               </div>
               <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Confidence min</label>
+                  <label className="text-xs text-muted-foreground block mb-1">{t("sz.lbl_confidence_min")}</label>
                   <input type="number" step="0.05" min="0" max="1"
                          value={zone.detect.min_confidence}
                          onChange={(e) => updateDetect({ min_confidence: parseFloat(e.target.value) })}
                          className="w-full px-2 py-1.5 bg-background border border-input outline-none text-sm mono" />
                 </div>
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Dwell min (s)</label>
+                  <label className="text-xs text-muted-foreground block mb-1">{t("sz.lbl_dwell_min")}</label>
                   <input type="number" min="0"
                          value={zone.detect.min_dwell_seconds}
                          onChange={(e) => updateDetect({ min_dwell_seconds: parseInt(e.target.value || 0) })}
                          className="w-full px-2 py-1.5 bg-background border border-input outline-none text-sm mono" />
                 </div>
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Cooldown (s)</label>
+                  <label className="text-xs text-muted-foreground block mb-1">{t("sz.lbl_cooldown")}</label>
                   <input type="number" min="0"
                          value={zone.detect.cooldown_seconds}
                          onChange={(e) => updateDetect({ cooldown_seconds: parseInt(e.target.value || 0) })}
@@ -275,7 +276,7 @@ function ZoneEditor({ zone, cameras, actuatorTypes, onChange, onSave, onCancel, 
                 </div>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Déclencheurs</label>
+                <label className="text-xs text-muted-foreground block mb-1">{t("sz.lbl_triggers_field")}</label>
                 <div className="flex gap-3">
                   {["enter", "present", "exit"].map((k) => (
                     <label key={k} className="flex items-center gap-1 text-sm">
@@ -302,17 +303,17 @@ function ZoneEditor({ zone, cameras, actuatorTypes, onChange, onSave, onCancel, 
 
           <div className="border border-border p-3">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Actions</div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("common.actions")}</div>
               <select onChange={(e) => { if (e.target.value) { addAction(e.target.value); e.target.value = ""; } }}
                       data-testid="zone-add-action-select"
                       defaultValue=""
                       className="text-xs px-2 py-1 bg-background border border-input">
-                <option value="">+ Ajouter action…</option>
+                <option value="">{t("sz.opt_add_action")}</option>
                 {actuatorTypes.map((a) => <option key={a.type} value={a.type}>{a.label}</option>)}
               </select>
             </div>
             {(zone.actions || []).length === 0 ? (
-              <div className="text-xs text-muted-foreground py-2 text-center">Aucune action</div>
+              <div className="text-xs text-muted-foreground py-2 text-center">{t("sz.empty_no_actions")}</div>
             ) : (
               <div className="space-y-2">
                 {(zone.actions || []).map((a, i) => (
@@ -345,12 +346,12 @@ function ZoneEditor({ zone, cameras, actuatorTypes, onChange, onSave, onCancel, 
         <div className="flex justify-end gap-2 px-5 py-3 border-t border-border sticky bottom-0 bg-card">
           <button onClick={onCancel}
                   data-testid="zone-editor-cancel"
-                  className="px-4 py-2 border border-border text-sm hover:bg-secondary">Annuler</button>
+                  className="px-4 py-2 border border-border text-sm hover:bg-secondary">{t("common.cancel")}</button>
           <button onClick={onSave} disabled={saving}
                   data-testid="zone-editor-save"
                   className="flex items-center gap-2 px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40">
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-            Enregistrer
+            {t("common.save")}
           </button>
         </div>
       </div>
@@ -361,6 +362,7 @@ function ZoneEditor({ zone, cameras, actuatorTypes, onChange, onSave, onCancel, 
 
 
 function PolygonEditor({ cameraId, polygon, onChange }) {
+  const { t } = useApp();
   const [snapshotUrl, setSnapshotUrl] = useState(null);
   const [imgSize, setImgSize] = useState({ w: 640, h: 360 });
   const canvasRef = React.useRef(null);
@@ -421,7 +423,7 @@ function PolygonEditor({ cameraId, polygon, onChange }) {
   if (!cameraId) {
     return (
       <div className="text-[11px] text-muted-foreground border border-dashed border-border p-3 text-center">
-        Sélectionnez une caméra pour dessiner la zone
+        {t("sz.select_camera_to_draw")}
       </div>
     );
   }
@@ -429,22 +431,22 @@ function PolygonEditor({ cameraId, polygon, onChange }) {
   return (
     <div>
       <label className="text-xs text-muted-foreground block mb-1 flex items-center justify-between">
-        <span>Polygone de la zone ({(polygon || []).length} points)</span>
+        <span>{t("sz.lbl_polygon_points_prefix")} ({(polygon || []).length} points)</span>
         <span className="flex gap-2">
-          <button type="button" onClick={() => setRefreshTick(t => t + 1)}
+          <button type="button" onClick={() => setRefreshTick(v => v + 1)}
                   data-testid="poly-refresh-snapshot"
                   className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 border border-border hover:bg-secondary">
-            <RefreshCw size={9} /> Rafraîchir
+            <RefreshCw size={9} /> {t("sz.btn_refresh")}
           </button>
           <button type="button" onClick={undo} disabled={(polygon || []).length === 0}
                   data-testid="poly-undo"
                   className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 border border-border hover:bg-secondary disabled:opacity-40">
-            <RotateCcw size={9} /> Annuler
+            <RotateCcw size={9} /> {t("sz.btn_undo")}
           </button>
           <button type="button" onClick={clear} disabled={(polygon || []).length === 0}
                   data-testid="poly-clear"
                   className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 border border-[#FF3333] text-[#FF3333] hover:bg-[#FF3333]/10 disabled:opacity-40">
-            <Trash2 size={9} /> Effacer
+            <Trash2 size={9} /> {t("sz.btn_clear")}
           </button>
         </span>
       </label>
@@ -466,8 +468,8 @@ function PolygonEditor({ cameraId, polygon, onChange }) {
         />
       </div>
       <div className="text-[10px] text-muted-foreground mt-1 mono">
-        Clique sur l&apos;image pour ajouter des points. Le premier point est jaune. Ferme automatiquement à partir de 3 points.
-        {(polygon || []).length === 0 && <span className="ml-1 text-[#FFB800]">— zone vide = couvre tout le frame</span>}
+        {t("sz.hint_polygon_instructions")}
+        {(polygon || []).length === 0 && <span className="ml-1 text-[#FFB800]">{t("sz.hint_empty_zone_covers_all")}</span>}
       </div>
     </div>
   );

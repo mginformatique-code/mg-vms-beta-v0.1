@@ -13,6 +13,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { MapContainer, TileLayer, Marker, Polygon, Polyline, ZoomControl, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { useApp } from "@/context/AppContext";
 import {
   STATUS_COLOR, COVERAGE_COLOR, coverageQuality, detectCameraRoles,
   ROLE_LABELS, ROLE_COLORS, fovPolygon, LINK_TYPES,
@@ -142,6 +143,7 @@ export default function LiveMapCanvas({
   onSelectCamera, onSelectEquipment, onCameraDragEnd, onEquipmentDragEnd, onCenterChange, onDblClickCamera,
   onContextMenuCamera, onContextMenuEquipment, onContextMenuLink, onContextMenuEmpty,
 }) {
+  const { t } = useApp();
   const [tileKind, setTileKind] = useState("satellite");
   const initialCenter = useMemo(
     () => [plan.center_lat ?? 46.6, plan.center_lng ?? 1.9],
@@ -264,17 +266,17 @@ export default function LiveMapCanvas({
           le canvas Konva, voir MapCenter.jsx) */}
       {linkingFrom && (
         <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1000] bg-card border border-[#0044FF] px-3 py-1.5 text-xs">
-          Cliquez sur l'élément à relier — Annuler (Échap)
+          {t("livemap.linking_hint")}
         </div>
       )}
 
       {/* Bascule fond de carte — Rues / Satellite */}
       <div className="absolute bottom-2 right-2 z-[1000] bg-card/90 backdrop-blur border border-border p-1 flex items-center gap-1 text-[11px]">
-        {[["street", "Rues"], ["satellite", "Satellite"]].map(([k, label]) => (
+        {[["street", "livemap.tile_street"], ["satellite", "livemap.tile_satellite"]].map(([k, labelKey]) => (
           <button key={k} onClick={() => setTileKind(k)}
             className={`px-2 py-1 ${tileKind === k ? "bg-[#0044FF] text-white" : "hover:bg-secondary"}`}
             data-testid={`live-map-tiles-${k}`}>
-            {label}
+            {t(labelKey)}
           </button>
         ))}
       </div>

@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { PlayCircle, AlertTriangle, CheckCircle2, Zap } from "lucide-react";
 import { toast } from "sonner";
+import { useApp } from "@/context/AppContext";
 
 const PRESETS = {
   "Personne+Voiture (counting)": [
@@ -49,7 +50,15 @@ const LABEL_COLORS = {
   gun: "#DC2626",
 };
 
+const PRESET_LABEL_KEYS = {
+  "Personne+Voiture (counting)": "ptest.preset_person_car",
+  "Feu + Arme (alerte critique)": "ptest.preset_fire_weapon",
+  "Chute (personne allongée)": "ptest.preset_fall",
+  "Foule (over-capacity)": "ptest.preset_crowd",
+};
+
 export default function PipelineTestPanel() {
+  const { t } = useApp();
   const [preset, setPreset] = useState("Personne+Voiture (counting)");
   const [seedJson, setSeedJson] = useState(JSON.stringify(PRESETS[preset], null, 2));
   const [runSegmentation, setRunSegmentation] = useState(false);
@@ -68,7 +77,7 @@ export default function PipelineTestPanel() {
     try {
       seed = JSON.parse(seedJson);
     } catch (e) {
-      toast.error("JSON invalide dans les détections seed");
+      toast.error(t("ptest.err_invalid_json"));
       return;
     }
     setRunning(true);
@@ -160,10 +169,10 @@ export default function PipelineTestPanel() {
             </label>
             <label className="flex items-center gap-1 text-[11px]">
               <Switch checked={emitEvents} onCheckedChange={setEmitEvents} data-testid="pipeline-toggle-emit" />
-              <span>Émettre events</span>
+              <span>{t("ptest.emit_events")}</span>
             </label>
             <Button onClick={run} disabled={running} size="sm" data-testid="pipeline-run">
-              <PlayCircle size={13} className="mr-1" /> {running ? "Exécution…" : "Lancer"}
+              <PlayCircle size={13} className="mr-1" /> {running ? t("ptest.running") : t("ptest.run")}
             </Button>
           </div>
         </div>
@@ -171,7 +180,7 @@ export default function PipelineTestPanel() {
         <div className="grid grid-cols-1 lg:grid-cols-[280px_640px_1fr] gap-3">
           {/* Presets + JSON */}
           <div className="space-y-2">
-            <Label className="text-[11px]">Scénarios prédéfinis</Label>
+            <Label className="text-[11px]">{t("ptest.presets_label")}</Label>
             <div className="space-y-1">
               {Object.keys(PRESETS).map((name) => (
                 <button
@@ -184,11 +193,11 @@ export default function PipelineTestPanel() {
                       : "border-border hover:border-[#0044FF]/60"
                   }`}
                 >
-                  {name}
+                  {t(PRESET_LABEL_KEYS[name])}
                 </button>
               ))}
             </div>
-            <Label className="text-[11px] mt-3 block">Détections JSON (bbox = [x1,y1,x2,y2])</Label>
+            <Label className="text-[11px] mt-3 block">{t("ptest.detections_json_label")}</Label>
             <textarea
               value={seedJson}
               onChange={(e) => setSeedJson(e.target.value)}
@@ -200,7 +209,7 @@ export default function PipelineTestPanel() {
 
           {/* Canvas visualization */}
           <div>
-            <Label className="text-[11px]">Visualisation (640×480 · fond noir)</Label>
+            <Label className="text-[11px]">{t("ptest.visualization_label")}</Label>
             <canvas
               ref={canvasRef}
               width={640}
@@ -211,13 +220,13 @@ export default function PipelineTestPanel() {
             {result && (
               <div className="mt-2 text-[10px] mono text-muted-foreground grid grid-cols-3 gap-2">
                 <div>
-                  <b className="text-foreground">{result.detections.length}</b> détections
+                  <b className="text-foreground">{result.detections.length}</b> {t("ptest.detections_word")}
                 </div>
                 <div>
                   <b className="text-[#00E676]">{result.tracks.length}</b> tracks
                 </div>
                 <div>
-                  <b className="text-[#EA580C]">{result.masks.length}</b> masques
+                  <b className="text-[#EA580C]">{result.masks.length}</b> {t("ptest.masks_word")}
                 </div>
                 <div>Detect: {result.timing_ms.detection_ms || 0}ms</div>
                 <div>Track: {result.timing_ms.tracking_ms || 0}ms</div>
@@ -228,14 +237,14 @@ export default function PipelineTestPanel() {
 
           {/* Events */}
           <div>
-            <Label className="text-[11px]">Événements métier générés</Label>
+            <Label className="text-[11px]">{t("ptest.business_events_label")}</Label>
             {!result ? (
               <div className="text-[11px] text-muted-foreground italic mt-2 py-4 text-center">
-                Cliquez sur « Lancer » pour exécuter le pipeline.
+                {t("ptest.click_run_hint")}
               </div>
             ) : result.business_events.length === 0 ? (
               <div className="text-[11px] text-muted-foreground italic mt-2 py-4 text-center">
-                Aucun événement métier généré pour ce scénario.
+                {t("ptest.no_events")}
               </div>
             ) : (
               <div className="space-y-1.5 mt-1 max-h-[440px] overflow-y-auto" data-testid="pipeline-events">

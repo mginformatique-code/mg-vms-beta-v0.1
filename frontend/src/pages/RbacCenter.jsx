@@ -14,6 +14,7 @@
 import React, { useEffect, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { toast } from "sonner";
+import { useApp } from "@/context/AppContext";
 import {
   ShieldCheck, Save, RotateCcw, Loader2, Info, Users, Eye, Cog, ShieldAlert,
   History, RefreshCw,
@@ -23,6 +24,7 @@ const GROUP_ICON = { video: Eye, manage: Cog, security: ShieldAlert };
 const ROLE_COLOR = { admin: "#FF3333", technician: "#0044FF", client: "#00E676", readonly: "#FFB800", guest: "#71717a" };
 
 export default function RbacCenter() {
+  const { t } = useApp();
   const [tab, setTab] = useState("matrix"); // matrix | history
   const [data, setData] = useState(null);
   const [draft, setDraft] = useState({});
@@ -38,7 +40,7 @@ export default function RbacCenter() {
       setData(r.data);
       // Init draft = effective (ce qui est vraiment appliqué).
       setDraft(JSON.parse(JSON.stringify(r.data.effective)));
-    } catch (e) { toast.error("Impossible de charger la matrice RBAC"); }
+    } catch (e) { toast.error(t("rbac.err_load_matrix")); }
     finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
@@ -48,7 +50,7 @@ export default function RbacCenter() {
     try {
       const r = await api.get("/audit", { params: { action_prefix: "rbac_", limit: 200 } });
       setHistory(Array.isArray(r.data) ? r.data : []);
-    } catch (e) { toast.error("Impossible de charger l'historique"); }
+    } catch (e) { toast.error(t("rbac.err_load_history")); }
     finally { setHistoryLoading(false); }
   };
   useEffect(() => { if (tab === "history") loadHistory(); }, [tab]);
@@ -74,26 +76,26 @@ export default function RbacCenter() {
       const r = await api.put("/security/rbac", { role, permissions: draft[role] });
       setData(r.data);
       setDraft(JSON.parse(JSON.stringify(r.data.effective)));
-      toast.success(`Permissions du rôle ${role} enregistrées`);
+      toast.success(`${t("rbac.perms_saved_prefix")} ${role} ${t("rbac.perms_saved_suffix")}`);
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
     finally { setSaving((s) => ({ ...s, [role]: false })); }
   };
 
   const resetRole = async (role) => {
-    if (!window.confirm(`Réinitialiser le rôle ${role} à ses valeurs par défaut ?`)) return;
+    if (!window.confirm(`${t("rbac.confirm_reset_prefix")} ${role} ${t("rbac.confirm_reset_suffix")}`)) return;
     setSaving((s) => ({ ...s, [role]: true }));
     try {
       const r = await api.delete(`/security/rbac/${role}`);
       setData(r.data);
       setDraft(JSON.parse(JSON.stringify(r.data.effective)));
-      toast.success(`Rôle ${role} réinitialisé`);
+      toast.success(`${t("rbac.role_reset_prefix")} ${role} ${t("rbac.role_reset_suffix")}`);
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
     finally { setSaving((s) => ({ ...s, [role]: false })); }
   };
 
   if (loading || !data) return (
     <div className="p-6 flex items-center gap-2 text-muted-foreground">
-      <Loader2 size={16} className="animate-spin" /> Chargement de la matrice RBAC...
+      <Loader2 size={16} className="animate-spin" /> {t("rbac.loading_matrix")}
     </div>
   );
 
@@ -107,10 +109,9 @@ export default function RbacCenter() {
       <div className="flex items-center gap-3 mb-6">
         <ShieldCheck size={26} className="text-[#0044FF]" />
         <div>
-          <h1 className="font-head font-bold text-2xl tracking-tight">Rôles & Permissions</h1>
+          <h1 className="font-head font-bold text-2xl tracking-tight">{t("rbac.title")}</h1>
           <p className="text-xs text-muted-foreground">
-            Contrôle d&apos;accès basé sur les rôles (RBAC) — les valeurs
-            s&apos;appliquent à tous les utilisateurs du rôle, sauf overrides individuels.
+            {t("rbac.subtitle")}
           </p>
         </div>
       </div>
@@ -119,11 +120,11 @@ export default function RbacCenter() {
       <div className="flex items-center gap-1 mb-4 border-b border-border">
         <button onClick={() => setTab("matrix")} data-testid="rbac-tab-matrix"
           className={`px-4 py-2 text-sm border-b-2 flex items-center gap-2 ${tab === "matrix" ? "border-[#0044FF] text-[#0044FF]" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
-          <Cog size={14} /> Matrice de permissions
+          <Cog size={14} /> {t("rbac.tab_matrix")}
         </button>
         <button onClick={() => setTab("history")} data-testid="rbac-tab-history"
           className={`px-4 py-2 text-sm border-b-2 flex items-center gap-2 ${tab === "history" ? "border-[#0044FF] text-[#0044FF]" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
-          <History size={14} /> Historique des changements
+          <History size={14} /> {t("rbac.tab_history")}
         </button>
       </div>
 
@@ -131,36 +132,36 @@ export default function RbacCenter() {
         <div className="border border-border bg-card" data-testid="rbac-history">
           <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-muted">
             <div className="text-xs uppercase tracking-widest text-muted-foreground">
-              {history.length} entrée(s) — actions filtrées : rbac_*
+              {history.length} {t("rbac.history_count_suffix")}
             </div>
             <button onClick={loadHistory} disabled={historyLoading}
               className="px-2 py-1 text-xs border border-border hover:bg-secondary flex items-center gap-1">
-              <RefreshCw size={11} className={historyLoading ? "animate-spin" : ""} /> Actualiser
+              <RefreshCw size={11} className={historyLoading ? "animate-spin" : ""} /> {t("rbac.refresh")}
             </button>
           </div>
           {historyLoading && (
             <div className="p-6 text-center text-sm text-muted-foreground flex items-center justify-center gap-2">
-              <Loader2 size={14} className="animate-spin" /> Chargement...
+              <Loader2 size={14} className="animate-spin" /> {t("rbac.loading")}
             </div>
           )}
           {!historyLoading && history.length === 0 && (
             <div className="p-6 text-center text-sm text-muted-foreground">
-              Aucun changement RBAC enregistré pour le moment.
+              {t("rbac.no_history")}
             </div>
           )}
           {history.map((h, i) => (
             <div key={i} className="grid grid-cols-[160px_140px_1fr_160px] gap-3 px-3 py-2 border-b border-border/50 last:border-0 items-center text-xs" data-testid={`rbac-history-row-${i}`}>
               <div className="mono text-muted-foreground">{h.timestamp ? new Date(h.timestamp).toLocaleString() : "—"}</div>
               <div className="mono">
-                {h.action === "rbac_role_updated" && <span className="text-[#0044FF]">Modification</span>}
-                {h.action === "rbac_role_reset" && <span className="text-[#FFB800]">Reset</span>}
+                {h.action === "rbac_role_updated" && <span className="text-[#0044FF]">{t("rbac.action_modification")}</span>}
+                {h.action === "rbac_role_reset" && <span className="text-[#FFB800]">{t("rbac.reset")}</span>}
                 {!["rbac_role_updated", "rbac_role_reset"].includes(h.action) && h.action}
               </div>
               <div>
-                Rôle <span className="uppercase font-medium" style={{ color: ROLE_COLOR[h.target] || "inherit" }}>{h.target}</span>
+                {t("rbac.row_role_label")} <span className="uppercase font-medium" style={{ color: ROLE_COLOR[h.target] || "inherit" }}>{h.target}</span>
                 {h.details && <span className="text-muted-foreground"> — {h.details}</span>}
               </div>
-              <div className="text-right text-muted-foreground">par {h.user_email || h.user || "—"}</div>
+              <div className="text-right text-muted-foreground">{t("rbac.by_label")} {h.user_email || h.user || "—"}</div>
             </div>
           ))}
         </div>
@@ -169,10 +170,9 @@ export default function RbacCenter() {
       <div className="border border-border p-3 bg-card flex items-start gap-2 mb-4">
         <Info size={14} className="text-[#0044FF] mt-0.5 shrink-0" />
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Le rôle <b>admin</b> conserve toujours toutes les permissions et ne peut
-          pas être modifié. Les permissions individuelles (page Utilisateurs)
-          <b> surchargent</b> les valeurs de rôle. Pensez à cliquer sur
-          <b> Enregistrer</b> pour chaque colonne modifiée.
+          {t("rbac.info_p1")} <b>admin</b> {t("rbac.info_p2")}
+          <b> {t("rbac.overrides")}</b> {t("rbac.info_p3")}
+          <b> {t("rbac.save")}</b> {t("rbac.info_p4")}
         </p>
       </div>
 
@@ -182,7 +182,7 @@ export default function RbacCenter() {
           <thead>
             <tr className="border-b border-border bg-muted">
               <th className="px-3 py-2 text-left text-[10px] uppercase tracking-widest text-muted-foreground min-w-[280px]">
-                Permission
+                {t("rbac.perm_header")}
               </th>
               {data.roles.map((r) => (
                 <th key={r} className="px-3 py-2 text-center text-[10px] uppercase tracking-widest">
@@ -235,13 +235,13 @@ export default function RbacCenter() {
           </tbody>
           <tfoot>
             <tr className="border-t border-border bg-muted">
-              <td className="px-3 py-2 text-[10px] uppercase tracking-widest text-muted-foreground">Actions</td>
+              <td className="px-3 py-2 text-[10px] uppercase tracking-widest text-muted-foreground">{t("rbac.actions_label")}</td>
               {data.roles.map((r) => {
                 const dirty = isDirty(r);
                 const busy = saving[r];
                 const hasOverride = !!data.overrides[r] && Object.keys(data.overrides[r]).length > 0;
                 if (r === "admin") {
-                  return <td key={r} className="px-3 py-2 text-center text-[10px] text-muted-foreground">immuable</td>;
+                  return <td key={r} className="px-3 py-2 text-center text-[10px] text-muted-foreground">{t("rbac.immutable")}</td>;
                 }
                 return (
                   <td key={r} className="px-3 py-2 text-center">
@@ -250,13 +250,13 @@ export default function RbacCenter() {
                         className={`px-2 py-1 text-[10px] flex items-center gap-1 border ${dirty ? "border-[#0044FF] bg-[#0044FF]/10 text-[#0044FF] hover:bg-[#0044FF]/20" : "border-border text-muted-foreground opacity-60"}`}
                         data-testid={`rbac-save-${r}`}>
                         {busy ? <Loader2 size={10} className="animate-spin" /> : <Save size={10} />}
-                        Enregistrer
+                        {t("rbac.save")}
                       </button>
                       {hasOverride && (
                         <button onClick={() => resetRole(r)} disabled={busy}
                           className="text-[10px] text-muted-foreground hover:text-[#FF3333] flex items-center gap-1"
                           data-testid={`rbac-reset-${r}`}>
-                          <RotateCcw size={9} /> Reset
+                          <RotateCcw size={9} /> {t("rbac.reset")}
                         </button>
                       )}
                     </div>
@@ -270,10 +270,10 @@ export default function RbacCenter() {
 
       <div className="mt-3 text-[10px] text-muted-foreground flex items-center gap-4 flex-wrap">
         <span className="flex items-center gap-1">
-          <span className="w-3 h-3 border-2 border-[#FFB800] inline-block" /> Modifié (non enregistré)
+          <span className="w-3 h-3 border-2 border-[#FFB800] inline-block" /> {t("rbac.legend_modified")}
         </span>
         <span>·</span>
-        <span>Les changements sont enregistrés par rôle (colonne).</span>
+        <span>{t("rbac.legend_note")}</span>
       </div>
       </>
       )}

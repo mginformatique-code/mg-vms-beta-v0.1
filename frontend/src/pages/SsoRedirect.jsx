@@ -11,7 +11,7 @@ import Logo from "@/components/Logo";
 // via POST /api/mgvms-center/sso/redeem (le backend rappelle LUI-MÊME le
 // Center pour vérifier le code — jamais ce navigateur directement).
 export default function SsoRedirect() {
-  const { setUser } = useApp();
+  const { setUser, t } = useApp();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [error, setError] = useState("");
@@ -21,7 +21,7 @@ export default function SsoRedirect() {
     if (ranOnce.current) return;
     ranOnce.current = true;
     const code = searchParams.get("code");
-    if (!code) { setError("Lien SSO invalide : code manquant."); return; }
+    if (!code) { setError(t("sso.invalid_link")); return; }
 
     const run = async () => {
       try {
@@ -47,13 +47,13 @@ export default function SsoRedirect() {
             <ShieldAlert className="h-8 w-8 text-destructive" />
             <p className="text-sm text-muted-foreground">{error}</p>
             <a href="/login" className="text-sm text-primary underline underline-offset-4">
-              Aller à la page de connexion
+              {t("sso.go_to_login")}
             </a>
           </>
         ) : (
           <>
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">Connexion via MG-VMS Center…</p>
+            <p className="text-sm text-muted-foreground">{t("sso.connecting")}</p>
           </>
         )}
       </div>

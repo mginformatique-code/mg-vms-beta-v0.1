@@ -8,6 +8,7 @@ import {
 import { toast } from "sonner";
 import EventViewer from "@/components/EventViewer";
 import { VehiclesSection, VehicleDrawer } from "@/pages/Vehicles";
+import { useApp } from "@/context/AppContext";
 
 const TYPE_COLORS = {
   "Personne": "#FF3333", "Voiture": "#0044FF", "Camion": "#0044FF", "Bus": "#0044FF",
@@ -15,15 +16,7 @@ const TYPE_COLORS = {
 };
 
 // Types d'événements générés par les plugins (identifiants techniques "namespace.action") :
-// libellé FR + couleur, distincts des types du pipeline principal ci-dessus (déjà en FR).
-const PLUGIN_TYPE_LABELS = {
-  "occupancy.zone": "Occupation zone",
-  "occupancy.alert": "Capacité dépassée",
-  "counting.vehicle": "Comptage véhicules",
-  "counting.person": "Comptage personnes",
-  "alert.critical": "Alerte critique",
-  "alert.warning": "Alerte",
-};
+// libellé (via i18n) + couleur, distincts des types du pipeline principal ci-dessus.
 const PLUGIN_TYPE_COLORS = {
   "occupancy.zone": "#0044FF",
   "occupancy.alert": "#FF3333",
@@ -34,8 +27,25 @@ const PLUGIN_TYPE_COLORS = {
 };
 // Repli générique pour un type de plugin pas encore mappé ci-dessus (ex. nouveau plugin installé)
 // plutôt que d'afficher l'identifiant technique brut ("some.new_type").
-function eventTypeLabel(type) {
-  if (TYPE_COLORS[type] || PLUGIN_TYPE_LABELS[type]) return PLUGIN_TYPE_LABELS[type] || type;
+const TYPE_LABEL_KEYS = {
+  "Personne": "events.type_person",
+  "Voiture": "events.type_car",
+  "Camion": "events.type_truck",
+  "Bus": "events.type_bus",
+  "Moto": "events.type_motorcycle",
+  "Vélo": "events.type_bike",
+  "Animal": "events.type_animal",
+  "Mouvement": "events.type_motion",
+  "occupancy.zone": "events.type_occupancy_zone",
+  "occupancy.alert": "events.type_occupancy_alert",
+  "counting.vehicle": "events.type_counting_vehicle",
+  "counting.person": "events.type_counting_person",
+  "alert.critical": "events.type_alert_critical",
+  "alert.warning": "events.type_alert_warning",
+};
+function eventTypeLabel(type, t) {
+  const key = TYPE_LABEL_KEYS[type];
+  if (key) return t(key);
   return String(type || "").replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 function eventTypeColor(type) {
@@ -81,13 +91,13 @@ function pickPrimary(members) {
 // séparé, inchangé — il complète toujours les autres filtres par type
 // (Personnes, Camions...), qui eux gardent le flux événements classique.
 const FILTERS = [
-  { id: "tous",       label: "Informations véhicules", icon: CreditCard, types: null },
-  { id: "vehicules",  label: "Véhicules",  icon: Car,        types: ["Voiture", "Camion", "Bus", "Moto"] },
-  { id: "personnes",  label: "Personnes",  icon: User,       types: ["Personne"] },
-  { id: "camions",    label: "Camions",    icon: Truck,      types: ["Camion"] },
-  { id: "bus",        label: "Bus",        icon: BusIcon,    types: ["Bus"] },
-  { id: "deux-roues", label: "Deux roues", icon: Bike,       types: ["Moto", "Vélo"] },
-  { id: "animaux",    label: "Animaux",    icon: PawPrint,   types: ["Animal"] },
+  { id: "tous",       labelKey: "events.filter_vehicle_info", icon: CreditCard, types: null },
+  { id: "vehicules",  labelKey: "events.filter_vehicles",     icon: Car,        types: ["Voiture", "Camion", "Bus", "Moto"] },
+  { id: "personnes",  labelKey: "events.filter_persons",      icon: User,       types: ["Personne"] },
+  { id: "camions",    labelKey: "events.filter_trucks",       icon: Truck,      types: ["Camion"] },
+  { id: "bus",        labelKey: "events.filter_buses",        icon: BusIcon,    types: ["Bus"] },
+  { id: "deux-roues", labelKey: "events.filter_two_wheelers", icon: Bike,       types: ["Moto", "Vélo"] },
+  { id: "animaux",    labelKey: "events.filter_animals",      icon: PawPrint,   types: ["Animal"] },
 ];
 
 // v3.48 · Rappel visible "ANPR suspendu" — l'état existait déjà côté
@@ -103,6 +113,7 @@ const FILTERS = [
 // caméras ANPR dédiées (`is_specialized`, ex. Dahua ITC/Hikvision
 // DeepInView) ne sont jamais concernées — jamais listées ici.
 function AnprSuspendedBanner({ cams }) {
+  const { t } = useApp();
   const [states, setStates] = useState(null);
   const [dismissed, setDismissed] = useState(false);
   useEffect(() => {
@@ -131,13 +142,13 @@ function AnprSuspendedBanner({ cams }) {
         <div className="flex items-start gap-2">
           <AlertTriangle size={14} className="text-[#FFB800] shrink-0 mt-0.5" />
           <div className="text-[#FFB800] font-medium">
-            Rappel : sur {concerned.length} caméra{concerned.length > 1 ? "s" : ""}, la lecture de plaques (ANPR) n'est pas fiable après la tombée de la nuit — sauf caméra ANPR dédiée (IR/WDR adapté).
+            {t("events.anpr_banner_prefix")} {concerned.length} {t("events.camera_lower")}{concerned.length > 1 ? "s" : ""}, {t("events.anpr_banner_suffix")}
           </div>
         </div>
         <button onClick={() => setDismissed(true)}
                 data-testid="anpr-suspended-dismiss"
                 className="text-[10px] text-muted-foreground hover:text-foreground uppercase tracking-wider shrink-0">
-          Masquer
+          {t("events.hide")}
         </button>
       </div>
       <div className="space-y-1 pl-[22px]">
@@ -145,8 +156,8 @@ function AnprSuspendedBanner({ cams }) {
           <div key={s.camera_id} className="text-muted-foreground">
             <span className="text-foreground">{camName(s.camera_id)}</span>
             {s.suspended
-              ? <> — <span className="text-[#FF6666]">ANPR suspendu</span> depuis {s.suspended_since ? new Date(s.suspended_since * 1000).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "?"} · {s.last_reason}</>
-              : <> — nuit depuis {fmtTime(s.sunset_utc)}, lectures possiblement peu fiables (reflets IR)</>}
+              ? <> — <span className="text-[#FF6666]">{t("events.anpr_suspended")}</span> {t("events.since")} {s.suspended_since ? new Date(s.suspended_since * 1000).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "?"} · {s.last_reason}</>
+              : <> — {t("events.night_label")} {t("events.since")} {fmtTime(s.sunset_utc)}, {t("events.night_unreliable_suffix")}</>}
           </div>
         ))}
       </div>
@@ -155,6 +166,7 @@ function AnprSuspendedBanner({ cams }) {
 }
 
 export default function Events() {
+  const { t } = useApp();
   const [searchParams, setSearchParams] = useSearchParams();
   const filtre = searchParams.get("filtre") || "tous";
   const [events, setEvents] = useState([]);
@@ -194,13 +206,13 @@ export default function Events() {
     try {
       const { data } = await api.post("/smart-search", { query: q });
       setSmartResult(data);
-      toast.success(`${data.events_count || 0} événement(s) trouvé(s) pour « ${q} »`);
+      toast.success(`${data.events_count || 0} ${t("events.smart_found_for")} « ${q} »`);
     } catch (e) {
       // v1.0-rc4 · Fallback : IA indisponible → revient au listing classique
       // sans casser la vue Events. Message explicite du backend (SMART_SEARCH_LLM_*).
       setSmartResult(null);
       const d = e.response?.data?.detail;
-      toast.error(d?.message || d?.error || "Recherche IA indisponible — filtres classiques toujours actifs");
+      toast.error(d?.message || d?.error || t("events.smart_search_unavailable"));
     } finally { setSmartLoading(false); }
   }, [smart]);
 
@@ -303,17 +315,17 @@ export default function Events() {
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="font-head font-bold text-2xl tracking-tight flex items-center gap-2">
-            <Zap size={22} className="text-[#0044FF]" /> Événements
+            <Zap size={22} className="text-[#0044FF]" /> {t("nav.events")}
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {isPlaques
-              ? <>Recherche IA véhicules, identités, fiches complètes — et <span className="mono">{total}</span> événement(s) au total.</>
-              : <>Détections IA temps réel — <span className="mono">{total}</span> au total</>}
+              ? <>{t("events.subtitle_plaques_prefix")} <span className="mono">{total}</span> {t("events.subtitle_plaques_suffix")}</>
+              : <>{t("events.subtitle_default_prefix")} <span className="mono">{total}</span> {t("events.subtitle_default_suffix")}</>}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <select data-testid="events-camera-filter" value={cameraId} onChange={(e) => setCameraId(e.target.value)} className="border border-border bg-card text-sm px-2 py-2 outline-none">
-            <option value="">Toutes les caméras</option>
+            <option value="">{t("events.all_cameras")}</option>
             {cams.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
           <button onClick={load} data-testid="events-refresh-btn" className="p-2 border border-border hover:bg-secondary"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button>
@@ -334,7 +346,7 @@ export default function Events() {
             onChange={(e) => setSmart(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && runSmartSearch()}
             data-testid="events-smart-input"
-            placeholder="Recherche IA : « personne à 12h au téléphone », « voiture devant la cam 12 à 12h », « camions ce matin »…"
+            placeholder={t("events.smart_search_placeholder")}
             className="w-full pl-9 pr-8 py-2 bg-card border border-input outline-none text-sm focus:border-[#0044FF]"
           />
           {smart && (
@@ -351,7 +363,7 @@ export default function Events() {
           className="flex items-center gap-1 px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40"
         >
           {smartLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={13} />}
-          Recherche IA
+          {t("events.smart_search_button")}
         </button>
       </div>
 
@@ -359,7 +371,7 @@ export default function Events() {
       {smartResult && (
         <div className="border border-[#0044FF]/40 bg-[#0044FF]/5 p-2 text-[11px] mono flex flex-wrap gap-2 items-center" data-testid="events-smart-filters">
           <span className="text-[#0044FF] font-medium">
-            {(smartResult.events || []).length} événement(s) pour « {smartResult.query} »
+            {(smartResult.events || []).length} {t("events.results_for")} « {smartResult.query} »
           </span>
           {Object.entries(smartResult.filters || {})
             .filter(([_, v]) => v && (Array.isArray(v) ? v.length : true))
@@ -370,7 +382,7 @@ export default function Events() {
             ))}
           <button onClick={clearSmart} data-testid="events-smart-reset"
                   className="ml-auto text-[10px] uppercase tracking-wider text-[#0044FF] hover:underline">
-            Réinitialiser
+            {t("common.reset")}
           </button>
         </div>
       )}
@@ -383,13 +395,13 @@ export default function Events() {
       {!isPlaques && smartResult && (smartResult.vehicles || []).length > 0 && (
         <div className="border border-[#00E676]/40 bg-[#00E676]/5 p-2 text-[11px] flex items-center gap-2" data-testid="events-smart-vehicles-hint">
           <CreditCard size={13} className="text-[#00E676] shrink-0" />
-          <span>{smartResult.vehicles.length} véhicule(s) correspondent à « {smartResult.query} » — pas affichés ici (galerie événements).</span>
+          <span>{smartResult.vehicles.length} {t("events.vehicles_match_prefix")} « {smartResult.query} » {t("events.vehicles_match_suffix")}</span>
           <button
             onClick={() => { setPlaquesQuery(smartResult.query); setFiltre("tous"); }}
             data-testid="events-smart-goto-plaques"
             className="ml-auto text-[10px] uppercase tracking-wider text-[#00E676] hover:underline shrink-0"
           >
-            Voir dans Informations véhicules
+            {t("events.goto_vehicles_info")}
           </button>
         </div>
       )}
@@ -411,7 +423,7 @@ export default function Events() {
                   : "border-border hover:border-[#0044FF]/60 text-muted-foreground hover:text-foreground"
               }`}
             >
-              <F size={13} /> {f.label}
+              <F size={13} /> {t(f.labelKey)}
             </button>
           );
         })}
@@ -426,13 +438,13 @@ export default function Events() {
 
       {isPlaques && (
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground border-t border-border pt-3" data-testid="events-tiles-divider">
-          Tous les événements
+          {t("events.all_events_divider")}
         </div>
       )}
 
       {shown.length === 0 ? (
         <div className="text-muted-foreground text-sm py-20 text-center" data-testid="events-empty">
-          {smartResult ? "Aucun événement ne correspond à cette recherche IA." : "Aucun événement détecté pour ces filtres."}
+          {smartResult ? t("events.empty_smart") : t("events.empty_default")}
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
@@ -449,11 +461,11 @@ export default function Events() {
                     <div className="w-full h-full flex items-center justify-center"><CamIcon size={20} className="text-white/30" /></div>
                   )}
                   <div className="absolute top-1.5 left-1.5 flex flex-col items-start gap-0.5">
-                    <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 text-white" style={{ backgroundColor: eventTypeColor(e.type) }}>{eventTypeLabel(e.type)}</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 text-white" style={{ backgroundColor: eventTypeColor(e.type) }}>{eventTypeLabel(e.type, t)}</span>
                     {otherTypes.length > 0 && (
                       <span className="text-[9px] px-1.5 py-0.5 bg-black/70 text-white/80" data-testid="event-stack-badge"
-                            title={otherTypes.map(eventTypeLabel).join(", ")}>
-                        +{otherTypes.length} action{otherTypes.length > 1 ? "s" : ""}
+                            title={otherTypes.map((ot) => eventTypeLabel(ot, t)).join(", ")}>
+                        +{otherTypes.length} {t("events.action_lower")}{otherTypes.length > 1 ? "s" : ""}
                       </span>
                     )}
                   </div>
@@ -481,7 +493,7 @@ export default function Events() {
           <button onClick={loadMore} disabled={loadingMore} data-testid="events-load-more"
                   className="flex items-center gap-2 px-4 py-2 border border-border text-xs uppercase tracking-wider text-muted-foreground hover:text-foreground hover:border-[#0044FF]/60 disabled:opacity-50">
             {loadingMore ? <Loader2 size={13} className="animate-spin" /> : null}
-            {loadingMore ? "Chargement…" : `Charger plus (${shown.length} / ${total})`}
+            {loadingMore ? t("common.loading") : `${t("events.load_more")} (${shown.length} / ${total})`}
           </button>
         </div>
       )}

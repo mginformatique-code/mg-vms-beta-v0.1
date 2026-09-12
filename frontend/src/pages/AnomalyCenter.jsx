@@ -4,6 +4,7 @@ import api from "@/lib/api";
 import { Loader2, Sparkles, Car, Users, TrendingUp, CheckCircle2, RefreshCw, ShieldAlert, Ban, CheckSquare, Square, MapPin, ZoomIn } from "lucide-react";
 import { toast } from "sonner";
 import { VehicleDrawer } from "@/pages/Vehicles";
+import { useApp } from "@/context/AppContext";
 
 /**
  * v3.44 · Anomalies IA — menu dédié demandé explicitement (04/09), en
@@ -14,20 +15,24 @@ import { VehicleDrawer } from "@/pages/Vehicles";
  * périmètre étendu aux corrélations multi-véhicules/caméras (convoi,
  * vague) dès cette v1 — voir backend/routes/vehicle_anomaly_ai.py.
  */
-const KIND_META = {
-  per_vehicle: { label: "Véhicule", icon: Car, hint: "Écart aux habitudes réelles de ce véhicule" },
-  convoy: { label: "Convoi", icon: Users, hint: "Deux véhicules vus ensemble, de façon répétée" },
-  wave: { label: "Vague", icon: TrendingUp, hint: "Pic de véhicules distincts inhabituel sur une caméra" },
-  plate_confusion: { label: "Plaque suspecte", icon: ShieldAlert, hint: "Plusieurs marques réelles différentes détectées sous la même plaque — probable confusion ANPR" },
-  cross_site_impossible: { label: "Trajet impossible", icon: Ban, hint: "Même plaque vue sur 2 sites distincts en un temps trop court pour être plausible" },
-  long_parking: { label: "Stationnement prolongé", icon: MapPin, hint: "Véhicule stationné sans interruption au-delà du seuil configuré" },
-};
+function kindMeta(t) {
+  return {
+    per_vehicle: { label: t("anomctr.kind_per_vehicle_label"), icon: Car, hint: t("anomctr.kind_per_vehicle_hint") },
+    convoy: { label: t("anomctr.kind_convoy_label"), icon: Users, hint: t("anomctr.kind_convoy_hint") },
+    wave: { label: t("anomctr.kind_wave_label"), icon: TrendingUp, hint: t("anomctr.kind_wave_hint") },
+    plate_confusion: { label: t("anomctr.kind_plate_confusion_label"), icon: ShieldAlert, hint: t("anomctr.kind_plate_confusion_hint") },
+    cross_site_impossible: { label: t("anomctr.kind_cross_site_label"), icon: Ban, hint: t("anomctr.kind_cross_site_hint") },
+    long_parking: { label: t("anomctr.kind_long_parking_label"), icon: MapPin, hint: t("anomctr.kind_long_parking_hint") },
+  };
+}
 
-const SEVERITY_STYLE = {
-  high: { border: "#FF3333", bg: "rgba(255,51,51,0.06)", label: "CRITIQUE" },
-  warning: { border: "#FFB800", bg: "rgba(255,184,0,0.06)", label: "ATTENTION" },
-  info: { border: "#3B82F6", bg: "rgba(59,130,246,0.06)", label: "INFO" },
-};
+function severityStyle(t) {
+  return {
+    high: { border: "#FF3333", bg: "rgba(255,51,51,0.06)", label: t("anomctr.sev_high") },
+    warning: { border: "#FFB800", bg: "rgba(255,184,0,0.06)", label: t("anomctr.sev_warning") },
+    info: { border: "#3B82F6", bg: "rgba(59,130,246,0.06)", label: t("anomctr.sev_info") },
+  };
+}
 
 function fmtDateTime(iso) {
   if (!iso) return "—";
@@ -35,6 +40,9 @@ function fmtDateTime(iso) {
 }
 
 function ReportCard({ report, onAcknowledged, selected, onToggleSelect, onOpenPlate }) {
+  const { t } = useApp();
+  const KIND_META = kindMeta(t);
+  const SEVERITY_STYLE = severityStyle(t);
   const meta = KIND_META[report.kind] || KIND_META.per_vehicle;
   const sev = SEVERITY_STYLE[report.severity] || SEVERITY_STYLE.info;
   const Icon = meta.icon;
@@ -46,7 +54,7 @@ function ReportCard({ report, onAcknowledged, selected, onToggleSelect, onOpenPl
       await api.post(`/vehicles/anomaly-ai/${report.id}/acknowledge`);
       onAcknowledged(report.id);
     } catch (e) {
-      toast.error("Échec du traitement");
+      toast.error(t("anomctr.err_ack_failed"));
     } finally { setBusy(false); }
   };
 
@@ -77,7 +85,7 @@ function ReportCard({ report, onAcknowledged, selected, onToggleSelect, onOpenPl
           {(report.plates || []).map((p) => (
             <button key={p} onClick={() => onOpenPlate(p)}
                     className="flex items-center gap-1 px-1.5 py-0.5 border border-border hover:border-[#0044FF] hover:text-[#0044FF] transition-colors"
-                    title="Voir la fiche véhicule (photo HD, loupe, valider/modifier la plaque)"
+                    title={t("anomctr.plate_tooltip")}
                     data-testid={`anomaly-plate-${p}`}>
               <ZoomIn size={10} /> {p}
             </button>
@@ -87,7 +95,7 @@ function ReportCard({ report, onAcknowledged, selected, onToggleSelect, onOpenPl
           <button onClick={ack} disabled={busy}
                   className="shrink-0 flex items-center gap-1 px-2 py-1 border border-border text-[10px] uppercase tracking-wider hover:bg-secondary/60 disabled:opacity-40"
                   data-testid={`ack-btn-${report.id}`}>
-            {busy ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />} Traiter
+            {busy ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />} {t("anomctr.acknowledge_btn")}
           </button>
         )}
       </div>
@@ -96,6 +104,7 @@ function ReportCard({ report, onAcknowledged, selected, onToggleSelect, onOpenPl
 }
 
 export default function AnomalyCenter() {
+  const { t } = useApp();
   const [items, setItems] = useState([]);
   const [status, setStatus] = useState("pending");
   const [kind, setKind] = useState("");
@@ -135,8 +144,8 @@ export default function AnomalyCenter() {
     el.scrollIntoView({ behavior: "smooth", block: "center" });
     el.style.outline = "2px solid #0044FF";
     el.style.outlineOffset = "2px";
-    const t = setTimeout(() => { el.style.outline = ""; el.style.outlineOffset = ""; }, 3000);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => { el.style.outline = ""; el.style.outlineOffset = ""; }, 3000);
+    return () => clearTimeout(timer);
   }, [focusReportId, items]);
 
   const pendingIds = items.filter((r) => !r.acknowledged).map((r) => r.id);
@@ -156,9 +165,9 @@ export default function AnomalyCenter() {
       await api.post("/vehicles/anomaly-ai/bulk-acknowledge", { ids: Array.from(selected) });
       setItems((prev) => prev.filter((r) => !selected.has(r.id)));
       setSelected(new Set());
-      toast.success(`${selected.size} rapport(s) traité(s)`);
+      toast.success(`${selected.size} ${t("anomctr.reports_processed_suffix")}`);
     } catch (e) {
-      toast.error("Échec du traitement groupé");
+      toast.error(t("anomctr.err_bulk_ack_failed"));
     } finally { setBulkBusy(false); }
   };
 
@@ -166,10 +175,10 @@ export default function AnomalyCenter() {
     setRunning(true);
     try {
       await api.post("/vehicles/anomaly-ai/run");
-      toast.success("Recherche lancée en arrière-plan — les nouveaux rapports apparaîtront progressivement (jusqu'à quelques minutes).");
+      toast.success(t("anomctr.run_started_toast"));
       setTimeout(load, 15000);
     } catch (e) {
-      toast.error(e.response?.data?.detail?.message || "Échec du lancement");
+      toast.error(e.response?.data?.detail?.message || t("anomctr.err_run_failed"));
     } finally { setRunning(false); }
   };
 
@@ -180,28 +189,28 @@ export default function AnomalyCenter() {
       <div className="mb-5 flex items-start justify-between gap-4">
         <div>
           <h1 className="font-head font-bold text-2xl tracking-tight flex items-center gap-2">
-            <Sparkles size={22} className="text-[#0044FF]" /> Anomalies IA
+            <Sparkles size={22} className="text-[#0044FF]" /> {t("anomctr.title")}
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Écarts aux habitudes réelles d'un véhicule, convois répétés, pics de trafic inhabituels — expliqués en langage clair par IA, pas de simples tags.
+            {t("anomctr.subtitle")}
           </p>
         </div>
         <button onClick={runNow} disabled={running || !aiEnabled}
                 className="shrink-0 flex items-center gap-2 px-3 py-2 border border-border text-sm hover:bg-secondary disabled:opacity-40"
                 data-testid="anomaly-run-now-btn">
-          {running ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Rechercher maintenant
+          {running ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} {t("anomctr.run_now_btn")}
         </button>
       </div>
 
       {!aiEnabled && (
         <div className="border border-[#FFB800] bg-[#FFB800]/5 p-3 text-sm mb-4" data-testid="anomaly-ai-disabled-notice">
-          IA anomalies désactivée — active-la dans Administration → LLM (MG-IA) pour générer de nouveaux rapports. Les rapports déjà générés restent visibles ci-dessous.
+          {t("anomctr.ai_disabled_notice")}
         </div>
       )}
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <div className="flex border border-border">
-          {[["pending", "En attente"], ["acknowledged", "Traitées"], ["all", "Toutes"]].map(([v, l]) => (
+          {[["pending", t("anomctr.status_pending")], ["acknowledged", t("anomctr.status_acknowledged")], ["all", t("anomctr.status_all")]].map(([v, l]) => (
             <button key={v} onClick={() => setStatus(v)}
                     className={`px-3 py-1.5 text-xs ${status === v ? "bg-[#0044FF] text-white" : "hover:bg-secondary"}`}
                     data-testid={`status-filter-${v}`}>
@@ -210,7 +219,7 @@ export default function AnomalyCenter() {
           ))}
         </div>
         <div className="flex border border-border">
-          {[["", "Tout type"], ["per_vehicle", "Véhicule"], ["convoy", "Convoi"], ["wave", "Vague"], ["plate_confusion", "Plaque suspecte"], ["cross_site_impossible", "Trajet impossible"], ["long_parking", "Stationnement prolongé"]].map(([v, l]) => (
+          {[["", t("anomctr.kind_all")], ["per_vehicle", t("anomctr.kind_per_vehicle_label")], ["convoy", t("anomctr.kind_convoy_label")], ["wave", t("anomctr.kind_wave_label")], ["plate_confusion", t("anomctr.kind_plate_confusion_label")], ["cross_site_impossible", t("anomctr.kind_cross_site_label")], ["long_parking", t("anomctr.kind_long_parking_label")]].map(([v, l]) => (
             <button key={v || "all"} onClick={() => setKind(v)}
                     className={`px-3 py-1.5 text-xs ${kind === v ? "bg-[#0044FF] text-white" : "hover:bg-secondary"}`}
                     data-testid={`kind-filter-${v || "all"}`}>
@@ -227,14 +236,14 @@ export default function AnomalyCenter() {
                   className="flex items-center gap-1.5 px-2 py-1 border border-border text-xs hover:bg-secondary/60"
                   data-testid="anomaly-select-all-btn">
             {allSelected ? <CheckSquare size={13} /> : <Square size={13} />}
-            {allSelected ? "Tout désélectionner" : "Tout sélectionner"}
+            {allSelected ? t("anomctr.deselect_all") : t("anomctr.select_all")}
           </button>
           {selected.size > 0 && (
             <button onClick={bulkAcknowledge} disabled={bulkBusy}
                     className="flex items-center gap-1.5 px-2 py-1 border border-border text-xs hover:bg-secondary/60 disabled:opacity-40"
                     data-testid="anomaly-bulk-ack-btn">
               {bulkBusy ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
-              Traiter la sélection ({selected.size})
+              {t("anomctr.ack_selection")} ({selected.size})
             </button>
           )}
         </div>
@@ -248,7 +257,7 @@ export default function AnomalyCenter() {
         ))}
         {items.length === 0 && !loading && (
           <div className="text-sm text-muted-foreground text-center py-8" data-testid="anomaly-empty">
-            Aucun rapport {status === "pending" ? "en attente" : status === "acknowledged" ? "traité" : ""}.
+            {status === "pending" ? t("anomctr.no_reports_pending") : status === "acknowledged" ? t("anomctr.no_reports_acknowledged") : t("anomctr.no_reports_all")}
           </div>
         )}
       </div>

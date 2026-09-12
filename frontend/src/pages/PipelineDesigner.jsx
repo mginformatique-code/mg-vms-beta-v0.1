@@ -10,6 +10,7 @@
 import React, { useEffect, useState } from "react";
 import { Cpu, MousePointerClick, Car, GitMerge, Zap, ArrowRight, Puzzle, Search } from "lucide-react";
 import api from "@/lib/api";
+import { useApp } from "@/context/AppContext";
 
 const STAGE_META = [
   { id: "detectors",   label: "Detector",   icon: Cpu,               color: "#00E5FF", filter: (p) => p.interface === "FrameAnalyzer" || (p.categories||[]).some(c => /detect|vision|yolo/i.test(c)) },
@@ -28,6 +29,7 @@ const FUSION_STRATEGIES = [
 ];
 
 function StageBlock({ stage, count, onClick }) {
+  const { t } = useApp();
   const Icon = stage.icon;
   return (
     <button onClick={onClick}
@@ -36,13 +38,14 @@ function StageBlock({ stage, count, onClick }) {
       <Icon size={20} style={{ color: stage.color }} />
       <div className="text-xs font-medium mt-1">{stage.label}</div>
       <div className="text-[10px] mono text-muted-foreground mt-0.5">
-        {count > 0 ? `${count} sélectionné${count > 1 ? "s" : ""}` : "aucun"}
+        {count > 0 ? `${count} ${t("pdesign.selected")}` : t("common.none")}
       </div>
     </button>
   );
 }
 
 export default function PipelineDesigner() {
+  const { t } = useApp();
   const [catalog, setCatalog] = useState({ groups: [] });
   const [selection, setSelection] = useState({
     detectors: [], trackers: [], recognizers: [], consumers: [],
@@ -76,7 +79,7 @@ export default function PipelineDesigner() {
         </h1>
         <p className="text-[11px] text-muted-foreground mt-0.5">
           v0.4 · preview architecture v2 · Camera → Detector → Tracker → ANPR (Fusion) → Consumer.
-          Cette UI remplacera à terme le Plugin Manager.
+          {" "}{t("pdesign.replaces_plugin_manager")}
         </p>
       </div>
 
@@ -112,9 +115,9 @@ export default function PipelineDesigner() {
         <div className="border border-[#00E5FF]/40 p-3 mb-4 bg-secondary/20" data-testid="stage-picker">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium">
-              Sélectionner les providers pour l&apos;étape « {STAGE_META.find(s => s.id === openStage).label} »
+              {t("pdesign.select_providers_for_stage")} « {STAGE_META.find(s => s.id === openStage).label} »
             </span>
-            <button onClick={() => setOpenStage(null)} className="text-[10px] text-muted-foreground hover:text-foreground">Fermer</button>
+            <button onClick={() => setOpenStage(null)} className="text-[10px] text-muted-foreground hover:text-foreground">{t("common.close")}</button>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-1 max-h-64 overflow-y-auto">
             {stagePluginList(STAGE_META.find(s => s.id === openStage)).map((p) => {
@@ -140,7 +143,7 @@ export default function PipelineDesigner() {
         <div className="border border-border p-3 mb-4" data-testid="fusion-config">
           <div className="flex items-center gap-2 mb-2">
             <GitMerge size={14} className="text-[#FF9500]" />
-            <span className="text-xs font-medium">Fusion Engine · {selection.recognizers.length} providers ANPR combinés</span>
+            <span className="text-xs font-medium">Fusion Engine · {selection.recognizers.length} {t("pdesign.anpr_providers_combined")}</span>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5">
             {FUSION_STRATEGIES.map((s) => (
@@ -157,7 +160,7 @@ export default function PipelineDesigner() {
             ))}
           </div>
           <div className="mt-2 flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground">Seuil de confiance :</span>
+            <span className="text-[10px] text-muted-foreground">{t("pdesign.confidence_threshold")}</span>
             <input type="number" step="0.05" min="0" max="1" value={fusion.min_confidence}
               onChange={(e) => setFusion({ ...fusion, min_confidence: parseFloat(e.target.value) })}
               className="w-20 px-2 py-1 text-xs bg-card border border-input mono"
@@ -168,7 +171,7 @@ export default function PipelineDesigner() {
 
       {/* Résumé JSON */}
       <div className="border border-border p-3">
-        <div className="text-[10px] uppercase text-muted-foreground mb-2">Configuration compilée</div>
+        <div className="text-[10px] uppercase text-muted-foreground mb-2">{t("pdesign.compiled_config")}</div>
         <pre className="text-[10px] mono whitespace-pre-wrap text-muted-foreground bg-background/50 p-2 max-h-40 overflow-y-auto" data-testid="pipeline-json">
 {JSON.stringify({
   stages: STAGE_META.map(s => ({ [s.id]: selection[s.id] })).reduce((a, b) => ({ ...a, ...b }), {}),
@@ -176,7 +179,7 @@ export default function PipelineDesigner() {
 }, null, 2)}
         </pre>
         <div className="text-[10px] text-muted-foreground mt-2">
-          Cette config sera bientôt appliquée par caméra via /api/cameras/{"{id}"}/pipeline.
+          {t("pdesign.config_applied_soon")} /api/cameras/{"{id}"}/pipeline.
         </div>
       </div>
     </div>

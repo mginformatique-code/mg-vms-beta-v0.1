@@ -5,6 +5,7 @@ import "@xterm/xterm/css/xterm.css";
 import { Card } from "@/components/ui/card";
 import { Loader2, TerminalSquare, LogOut } from "lucide-react";
 import HoldToRevealInput from "@/components/ui/hold-to-reveal-input";
+import { useApp } from "@/context/AppContext";
 
 /**
  * v3.22 · Console shell hôte (Suivi des performances → Debug), style
@@ -14,6 +15,7 @@ import HoldToRevealInput from "@/components/ui/hold-to-reveal-input";
  * frontend (juste passés une fois dans le premier message WebSocket).
  */
 export default function SshConsolePanel() {
+  const { t } = useApp();
   const [status, setStatus] = useState("form"); // form | connecting | connected | error
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -81,19 +83,19 @@ export default function SshConsolePanel() {
       } else if (msg.type === "data") {
         termRef.current?.write(msg.data);
       } else if (msg.type === "error") {
-        setError(msg.message || "Échec de connexion");
+        setError(msg.message || t("sshc.connection_failed"));
         setStatus("error");
       }
     };
 
     ws.onclose = () => {
       if (status === "connected") {
-        setError("Session terminée");
+        setError(t("sshc.session_ended"));
         setStatus("error");
       }
     };
     ws.onerror = () => {
-      setError("Connexion WebSocket échouée");
+      setError(t("sshc.websocket_failed"));
       setStatus("error");
     };
   };
@@ -120,12 +122,12 @@ export default function SshConsolePanel() {
     <Card className="p-4 space-y-3" data-testid="ssh-console-panel">
       <div className="flex justify-between items-center">
         <div className="text-sm text-muted-foreground flex items-center gap-2">
-          <TerminalSquare size={15} /> Console hôte (SSH)
+          <TerminalSquare size={15} /> {t("sshc.title")}
         </div>
         {status === "connected" && (
           <button onClick={disconnect} data-testid="ssh-console-disconnect"
                   className="text-[11px] flex items-center gap-1 px-2 py-1 border border-border hover:bg-secondary">
-            <LogOut size={12} /> Fermer la session
+            <LogOut size={12} /> {t("sshc.close_session")}
           </button>
         )}
       </div>
@@ -133,30 +135,30 @@ export default function SshConsolePanel() {
       {status === "form" && (
         <form onSubmit={connect} className="space-y-2 max-w-sm" data-testid="ssh-console-login-form">
           <p className="text-[11px] text-muted-foreground">
-            Identifiants Linux réels de la machine — jamais ceux de MG-VMS, jamais stockés.
+            {t("sshc.credentials_notice")}
           </p>
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Utilisateur</label>
+            <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("sshc.username")}</label>
             <input value={username} onChange={(e) => setUsername(e.target.value)}
                    autoComplete="off" data-testid="ssh-console-username"
                    className="w-full px-3 py-2 bg-background border border-input outline-none text-sm focus:border-[#0044FF]" />
           </div>
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Mot de passe</label>
+            <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("sshc.password")}</label>
             <HoldToRevealInput value={password} onChange={(e) => setPassword(e.target.value)}
                    autoComplete="off" data-testid="ssh-console-password"
                    className="w-full px-3 py-2 bg-background border border-input outline-none text-sm focus:border-[#0044FF]" />
           </div>
           <button type="submit" disabled={!username || !password} data-testid="ssh-console-connect"
                   className="px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40">
-            Se connecter
+            {t("sshc.connect")}
           </button>
         </form>
       )}
 
       {status === "connecting" && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 size={15} className="animate-spin" /> Connexion SSH en cours…
+          <Loader2 size={15} className="animate-spin" /> {t("sshc.connecting")}
         </div>
       )}
 
@@ -165,7 +167,7 @@ export default function SshConsolePanel() {
           <p className="text-[12px] text-[#FF3333]">{error}</p>
           <button onClick={disconnect} data-testid="ssh-console-retry"
                   className="px-3 py-1.5 border border-border hover:bg-secondary text-xs">
-            Réessayer
+            {t("sshc.retry")}
           </button>
         </div>
       )}

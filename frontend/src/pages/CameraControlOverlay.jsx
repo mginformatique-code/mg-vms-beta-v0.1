@@ -37,6 +37,7 @@ import { Lightbulb, Moon, Siren, Volume2, RefreshCw, X, Loader2 } from "lucide-r
 import api from "@/lib/api";
 import { toast } from "sonner";
 import useDeviceCapabilities from "@/hooks/useDeviceCapabilities";
+import { useApp } from "@/context/AppContext";
 
 const BTN_CLS = "w-8 h-8 bg-black/70 hover:bg-[#00E5FF] hover:text-black flex items-center justify-center text-white transition-colors relative disabled:opacity-30 disabled:hover:bg-black/70 disabled:hover:text-white disabled:cursor-not-allowed";
 
@@ -51,6 +52,7 @@ function ActionBtn({ children, onClick, testid, title, active, busy }) {
 }
 
 export default function CameraControlOverlay({ cam, footer = false, visible = true }) {
+  const { t } = useApp();
   const camId = cam?.id;
   const { caps } = useDeviceCapabilities(camId);
   const [busy, setBusy] = useState(null);
@@ -77,9 +79,9 @@ export default function CameraControlOverlay({ cam, footer = false, visible = tr
     try {
       await api.post(`/devices/${camId}/light`, { enabled: next, mode: "on" });
       setLightOn(next);
-      toast.success(`Lumière ${next ? "activée" : "désactivée"}`);
+      toast.success(next ? t("camctrl.light_toast_on") : t("camctrl.light_toast_off"));
     } catch (e) {
-      toast.error(`Échec lumière : ${e?.response?.data?.detail?.message || e?.response?.data?.detail || "erreur"}`);
+      toast.error(`${t("camctrl.err_light_prefix")} ${e?.response?.data?.detail?.message || e?.response?.data?.detail || t("camctrl.generic_error")}`);
     } finally { setBusy(null); }
   };
 
@@ -89,9 +91,9 @@ export default function CameraControlOverlay({ cam, footer = false, visible = tr
     try {
       await api.post(`/devices/${camId}/ir`, { mode: next ? "on" : "off" });
       setIrOn(next);
-      toast.success(`IR ${next ? "activé" : "désactivé"}`);
+      toast.success(next ? t("camctrl.ir_toast_on") : t("camctrl.ir_toast_off"));
     } catch (e) {
-      toast.error(`Échec IR : ${e?.response?.data?.detail?.message || e?.response?.data?.detail || "erreur"}`);
+      toast.error(`${t("camctrl.err_ir_prefix")} ${e?.response?.data?.detail?.message || e?.response?.data?.detail || t("camctrl.generic_error")}`);
     } finally { setBusy(null); }
   };
 
@@ -101,9 +103,9 @@ export default function CameraControlOverlay({ cam, footer = false, visible = tr
     try {
       await api.post(`/devices/${camId}/siren`, { enabled: next });
       setSirenOn(next);
-      toast.success(`Sirène ${next ? "activée" : "désactivée"}`);
+      toast.success(next ? t("camctrl.siren_toast_on") : t("camctrl.siren_toast_off"));
     } catch (e) {
-      toast.error(`Échec sirène : ${e?.response?.data?.detail?.message || e?.response?.data?.detail || "erreur"}`);
+      toast.error(`${t("camctrl.err_siren_prefix")} ${e?.response?.data?.detail?.message || e?.response?.data?.detail || t("camctrl.generic_error")}`);
     } finally { setBusy(null); }
   };
 
@@ -113,23 +115,23 @@ export default function CameraControlOverlay({ cam, footer = false, visible = tr
     setBusy("tts");
     try {
       await api.post(`/cameras/${camId}/audio/tts`, { text });
-      toast.success("Message TTS envoyé");
+      toast.success(t("camctrl.tts_sent_toast"));
       setTtsOpen(false); setTtsText("");
     } catch (e) {
-      toast.error(`TTS : ${e?.response?.data?.detail || "erreur"}`);
+      toast.error(`TTS : ${e?.response?.data?.detail || t("camctrl.generic_error")}`);
     } finally {
       setBusy(null);
     }
   };
 
   const reboot = async () => {
-    if (!window.confirm(`Redémarrer la caméra "${cam.name}" ?\nLe flux sera indisponible 30-60 s.`)) return;
+    if (!window.confirm(`${t("camctrl.reboot_title")} "${cam.name}" ${t("camctrl.confirm_reboot_suffix")}`)) return;
     setBusy("reboot");
     try {
       await api.post(`/cameras/${camId}/reboot`);
-      toast.success("Reboot envoyé — flux indisponible ~30-60 s");
+      toast.success(t("camctrl.reboot_sent_toast"));
     } catch (e) {
-      toast.error(`Reboot : ${e?.response?.data?.detail || "erreur"}`);
+      toast.error(`Reboot : ${e?.response?.data?.detail || t("camctrl.generic_error")}`);
     } finally {
       setBusy(null);
     }
@@ -139,23 +141,23 @@ export default function CameraControlOverlay({ cam, footer = false, visible = tr
     <>
       {hasLight && (
         <ActionBtn onClick={toggleLight} testid="ctrl-light" busy={busy === "light"}
-          title={`Lumière ${lightOn ? "ON" : "OFF"}`} active={lightOn}>
+          title={`${t("camctrl.light_title_prefix")} ${lightOn ? "ON" : "OFF"}`} active={lightOn}>
           <Lightbulb size={14} />
         </ActionBtn>
       )}
       {hasIr && (
         <ActionBtn onClick={toggleIr} testid="ctrl-ir" busy={busy === "ir"}
-          title={`IR (filtre jour/nuit) ${irOn ? "ON" : "OFF"}`} active={irOn}>
+          title={`${t("camctrl.ir_title_prefix")} ${irOn ? "ON" : "OFF"}`} active={irOn}>
           <Moon size={14} />
         </ActionBtn>
       )}
       {hasSiren && (
         <ActionBtn onClick={toggleSiren} testid="ctrl-siren" busy={busy === "siren"}
-          title={`Sirène / alarme ${sirenOn ? "ON" : "OFF"}`} active={sirenOn}>
+          title={`${t("camctrl.siren_title_prefix")} ${sirenOn ? "ON" : "OFF"}`} active={sirenOn}>
           <Siren size={14} />
         </ActionBtn>
       )}
-      <ActionBtn onClick={() => setTtsOpen(true)} testid="ctrl-tts" title="TTS (parler)">
+      <ActionBtn onClick={() => setTtsOpen(true)} testid="ctrl-tts" title={t("camctrl.tts_title")}>
         {/* v3.64 · Léger décalage optique de l'icône Volume2 par rapport aux
             autres (Lightbulb/Moon/Siren/RefreshCw) à taille égale — signalé
             visuellement par l'utilisateur ("bouton du son légèrement décalé
@@ -163,7 +165,7 @@ export default function CameraControlOverlay({ cam, footer = false, visible = tr
             vertical, sans toucher aux autres icônes. */}
         <Volume2 size={14} className="translate-y-px" />
       </ActionBtn>
-      <ActionBtn onClick={reboot} testid="ctrl-reboot" title="Redémarrer la caméra" busy={busy === "reboot"}>
+      <ActionBtn onClick={reboot} testid="ctrl-reboot" title={t("camctrl.reboot_title")} busy={busy === "reboot"}>
         <RefreshCw size={14} />
       </ActionBtn>
     </>
@@ -237,27 +239,28 @@ export default function CameraControlOverlay({ cam, footer = false, visible = tr
 }
 
 function TtsPanel({ ttsText, setTtsText, onClose, onSend, busy }) {
+  const { t } = useApp();
   return (
     <>
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-[10px] uppercase text-[#00E5FF]">Message vocal</span>
+        <span className="text-[10px] uppercase text-[#00E5FF]">{t("camctrl.tts_panel_label")}</span>
         <button onClick={onClose} className="text-white/50 hover:text-white">
           <X size={12} />
         </button>
       </div>
       <textarea value={ttsText} onChange={(e) => setTtsText(e.target.value)}
-        placeholder="Tapez le message à diffuser…"
+        placeholder={t("camctrl.tts_placeholder")}
         className="w-full h-16 text-xs bg-black/50 border border-white/20 p-1.5 text-white resize-none"
         data-testid="tts-input" autoFocus />
       <div className="flex justify-end gap-1 mt-1.5">
         <button onClick={onClose}
           className="text-[10px] px-2 py-1 border border-white/20 text-white/70 hover:bg-white/10">
-          Annuler
+          {t("camctrl.cancel")}
         </button>
         <button onClick={onSend} disabled={!ttsText.trim() || busy}
           className="text-[10px] px-2 py-1 bg-[#00E5FF] text-black hover:opacity-90 disabled:opacity-40"
           data-testid="tts-send">
-          {busy ? "Envoi…" : "Diffuser"}
+          {busy ? t("camctrl.sending") : t("camctrl.broadcast")}
         </button>
       </div>
     </>

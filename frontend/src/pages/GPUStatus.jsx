@@ -16,6 +16,7 @@ function StatCard({ label, value, unit, color, testid }) {
 }
 
 function RuntimeRow({ label, runtime, gpuKey = "available" }) {
+  const { t } = useApp();
   const active = !!runtime[gpuKey];
   const Icon = active ? CheckCircle2 : XCircle;
   const color = active ? "#00E676" : "#FF3333";
@@ -25,7 +26,7 @@ function RuntimeRow({ label, runtime, gpuKey = "available" }) {
       <td className="px-3 py-2">
         <div className="flex items-center gap-2 text-xs mono">
           <Icon size={14} style={{ color }} />
-          <span style={{ color }}>{active ? "Actif" : "Inactif"}</span>
+          <span style={{ color }}>{active ? t("common.active") : t("gpu.inactive")}</span>
         </div>
       </td>
       <td className="px-3 py-2 text-[11px] mono text-muted-foreground">{runtime.version || "—"}</td>
@@ -34,7 +35,7 @@ function RuntimeRow({ label, runtime, gpuKey = "available" }) {
         {runtime.gpu_provider && ` · ${runtime.gpu_provider}`}
         {runtime.cuda_devices != null && ` · ${runtime.cuda_devices} device(s) CUDA`}
         {runtime.source && ` · ${runtime.source}`}
-        {runtime.error && <span className="text-[#FF3333]" title={runtime.error}> · erreur</span>}
+        {runtime.error && <span className="text-[#FF3333]" title={runtime.error}> · {t("gpu.error_label")}</span>}
       </td>
     </tr>
   );
@@ -55,7 +56,7 @@ export default function GPUStatus({ embedded = false }) {
       const { data } = await api.get("/system/gpu");
       setFull(data);
     } catch (e) {
-      toast.error("Impossible de charger les infos GPU");
+      toast.error(t("gpu.toast_load_error"));
     } finally {
       setLoading(false);
     }
@@ -78,7 +79,7 @@ export default function GPUStatus({ embedded = false }) {
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         {!embedded && (
           <h1 className="font-head font-bold text-2xl tracking-tight flex items-center gap-2">
-            <Zap size={22} className={isActive ? "text-[#00E676]" : "text-[#FF3333]"} /> Accélération GPU
+            <Zap size={22} className={isActive ? "text-[#00E676]" : "text-[#FF3333]"} /> {t("nav.gpu")}
           </h1>
         )}
         <div className="flex items-center gap-2 ml-auto">
@@ -86,7 +87,7 @@ export default function GPUStatus({ embedded = false }) {
             Auto-refresh {autoRefresh ? "ON (5s)" : "OFF"}
           </button>
           <button onClick={load} disabled={loading} data-testid="gpu-reload" className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border hover:bg-secondary">
-            <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Actualiser
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> {t("gpu.refresh")}
           </button>
         </div>
       </div>
@@ -100,21 +101,21 @@ export default function GPUStatus({ embedded = false }) {
           <div className="flex-1">
             <div className="font-head font-bold text-lg" style={{ color: isActive ? "#00E676" : "#FF3333" }}>
               {isActive
-                ? `${full?.vendor} · ${gpu?.name || "GPU détecté"}`
-                : "Aucun GPU détecté — pipeline IA en mode CPU"}
+                ? `${full?.vendor} · ${gpu?.name || t("gpu.gpu_detected")}`
+                : t("gpu.no_gpu_detected")}
             </div>
             <div className="text-xs text-muted-foreground mt-1">
               {isActive
                 ? <>Driver {full?.driver?.driver_version || "?"} · NVML {full?.driver?.nvml_version || "?"} · CUDA Driver {full?.driver?.cuda_driver_version || "?"}</>
-                : <>NVML : {full?.diagnostic?.nvml_error || "non initialisé"} · nvidia-smi : {full?.diagnostic?.nvidia_smi_available ? "disponible" : "introuvable"}</>}
+                : <>{t("gpu.nvml_label")} {full?.diagnostic?.nvml_error || t("gpu.not_initialized")} · {t("gpu.nvidia_smi_label")} {full?.diagnostic?.nvidia_smi_available ? t("gpu.available") : t("gpu.not_found")}</>}
             </div>
             <div className="mt-2 text-xs flex items-center gap-1">
-              <span className="mono text-muted-foreground">Pipeline IA (YOLO) :</span>
+              <span className="mono text-muted-foreground">{t("gpu.ai_pipeline_label")}</span>
               <span className={`mono font-bold ${yolo ? "text-[#00E676]" : "text-[#FF3333]"}`}>
                 {yolo ? "GPU (torch.cuda)" : "CPU (torch.cpu)"}
               </span>
               {!yolo && isActive && (
-                <span className="text-[10px] text-[#FFB800] ml-2">⚠ GPU présent mais torch.cuda inactif — vérifiez que la version torch=CUDA correspond au driver.</span>
+                <span className="text-[10px] text-[#FFB800] ml-2">⚠ {t("gpu.gpu_present_torch_inactive")}</span>
               )}
             </div>
           </div>
@@ -125,7 +126,7 @@ export default function GPUStatus({ embedded = false }) {
       {isActive && gpu && (
         <div className="mb-4">
           <div className="flex items-center gap-2 mb-2">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Métriques temps réel</div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("gpu.realtime_metrics")}</div>
             {/* v3.54 · Sélecteur dropdown retiré (doublon avec les cartes
                 cliquables de "Tous les GPU" plus bas — même état
                 `selectedGpuIdx`, un seul moyen de sélection suffit). */}
@@ -134,36 +135,36 @@ export default function GPUStatus({ embedded = false }) {
             )}
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-            <StatCard label="Utilisation GPU" value={gpu.gpu_util_pct} unit="%" testid="gpu-util"
+            <StatCard label={t("gpu.util")} value={gpu.gpu_util_pct} unit="%" testid="gpu-util"
                       color={gpu.gpu_util_pct > 80 ? "#FF3333" : gpu.gpu_util_pct > 60 ? "#FFB800" : "#00E676"} />
-            <StatCard label="Encodeur H.264/H.265" value={gpu.encoder_util_pct} unit="%" testid="gpu-encoder" />
-            <StatCard label="Décodeur (streams)" value={gpu.decoder_util_pct} unit="%" testid="gpu-decoder" />
-            <StatCard label="VRAM utilisée" value={gpu.vram_used_mb} unit="MB" testid="gpu-vram-used" />
-            <StatCard label="VRAM totale" value={gpu.vram_total_mb} unit="MB" testid="gpu-vram-total" />
-            <StatCard label="Occupation VRAM" value={gpu.vram_util_pct} unit="%" testid="gpu-vram-util"
+            <StatCard label={t("gpu.encoder")} value={gpu.encoder_util_pct} unit="%" testid="gpu-encoder" />
+            <StatCard label={t("gpu.decoder")} value={gpu.decoder_util_pct} unit="%" testid="gpu-decoder" />
+            <StatCard label={t("gpu.vram_used")} value={gpu.vram_used_mb} unit="MB" testid="gpu-vram-used" />
+            <StatCard label={t("gpu.vram_total")} value={gpu.vram_total_mb} unit="MB" testid="gpu-vram-total" />
+            <StatCard label={t("gpu.vram_util")} value={gpu.vram_util_pct} unit="%" testid="gpu-vram-util"
                       color={gpu.vram_util_pct > 90 ? "#FF3333" : "#00E676"} />
-            <StatCard label="Température" value={gpu.temperature_c} unit="°C" testid="gpu-temp"
+            <StatCard label={t("gpu.temperature")} value={gpu.temperature_c} unit="°C" testid="gpu-temp"
                       color={gpu.temperature_c > 80 ? "#FF3333" : gpu.temperature_c > 70 ? "#FFB800" : "#00E676"} />
-            <StatCard label="Puissance" value={gpu.power_w} unit="W" testid="gpu-power" />
-            <StatCard label="Ventilateur" value={gpu.fan_pct} unit="%" testid="gpu-fan" />
-            <StatCard label="Clock GPU" value={gpu.clock_graphics_mhz} unit="MHz" testid="gpu-clock-gpu" />
-            <StatCard label="Clock VRAM" value={gpu.clock_memory_mhz} unit="MHz" testid="gpu-clock-mem" />
-            <StatCard label="Compute Cap." value={gpu.cuda_compute_capability} testid="gpu-compute-cap" />
+            <StatCard label={t("gpu.power")} value={gpu.power_w} unit="W" testid="gpu-power" />
+            <StatCard label={t("gpu.fan")} value={gpu.fan_pct} unit="%" testid="gpu-fan" />
+            <StatCard label={t("gpu.clock_gpu")} value={gpu.clock_graphics_mhz} unit="MHz" testid="gpu-clock-gpu" />
+            <StatCard label={t("gpu.clock_vram")} value={gpu.clock_memory_mhz} unit="MHz" testid="gpu-clock-mem" />
+            <StatCard label={t("gpu.compute_cap")} value={gpu.cuda_compute_capability} testid="gpu-compute-cap" />
           </div>
         </div>
       )}
 
       {/* Table des runtimes détectés */}
       <div className="mb-4">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Runtimes d&apos;accélération détectés</div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">{t("gpu.detected_runtimes")}</div>
         <div className="border border-border bg-card overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted-foreground">
                 <th className="px-3 py-2">Runtime</th>
-                <th className="px-3 py-2">Statut</th>
+                <th className="px-3 py-2">{t("common.status")}</th>
                 <th className="px-3 py-2">Version</th>
-                <th className="px-3 py-2">Détails</th>
+                <th className="px-3 py-2">{t("gpu.details")}</th>
               </tr>
             </thead>
             <tbody>
@@ -179,7 +180,7 @@ export default function GPUStatus({ embedded = false }) {
       {/* Multi-GPU : liste tous les devices si > 1 */}
       {full?.devices?.length > 1 && (
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Tous les GPU ({full.devices.length})</div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">{t("gpu.all_gpus")} ({full.devices.length})</div>
           <div className="space-y-2">
             {full.devices.map((d, i) => (
               <div key={i}
@@ -202,13 +203,13 @@ export default function GPUStatus({ embedded = false }) {
       {/* Aide si aucun GPU */}
       {!isActive && (
         <div className="border border-border p-4 bg-secondary/30" data-testid="gpu-help">
-          <div className="font-head font-semibold mb-2 text-sm">Pour activer l&apos;accélération GPU sur ce serveur :</div>
+          <div className="font-head font-semibold mb-2 text-sm">{t("gpu.enable_gpu_title")}</div>
           <ol className="text-xs list-decimal ml-5 space-y-1 text-muted-foreground">
-            <li>Installer les <b className="text-foreground">pilotes NVIDIA</b> (v525+) sur l&apos;hôte : <code className="mono">sudo apt install nvidia-driver-535</code></li>
-            <li>Installer le <b className="text-foreground">NVIDIA Container Toolkit</b> si MG-VMS tourne en Docker : <code className="mono">apt install nvidia-container-toolkit</code></li>
-            <li>Lancer le container avec <code className="mono">--gpus all</code> ou <code className="mono">--runtime=nvidia</code></li>
-            <li>Vérifier que <code className="mono">nvidia-smi</code> répond dans le container avant de redémarrer MG-VMS</li>
-            <li>S&apos;assurer que la version PyTorch installée est bien la variante <code className="mono">+cuXX</code> compatible avec le driver (voir <a className="text-[#00E5FF] underline" href="https://pytorch.org/get-started/locally/" target="_blank" rel="noreferrer">pytorch.org</a>)</li>
+            <li>{t("gpu.step1_prefix")} <b className="text-foreground">{t("gpu.step1_bold")}</b> {t("gpu.step1_suffix")} <code className="mono">sudo apt install nvidia-driver-535</code></li>
+            <li>{t("gpu.step2_prefix")} <b className="text-foreground">NVIDIA Container Toolkit</b> {t("gpu.step2_suffix")} <code className="mono">apt install nvidia-container-toolkit</code></li>
+            <li>{t("gpu.step3")} <code className="mono">--gpus all</code> {t("gpu.step3_or")} <code className="mono">--runtime=nvidia</code></li>
+            <li>{t("gpu.step4_prefix")} <code className="mono">nvidia-smi</code> {t("gpu.step4_suffix")}</li>
+            <li>{t("gpu.step5_prefix")} <code className="mono">+cuXX</code> {t("gpu.step5_suffix")} <a className="text-[#00E5FF] underline" href="https://pytorch.org/get-started/locally/" target="_blank" rel="noreferrer">pytorch.org</a>)</li>
           </ol>
         </div>
       )}

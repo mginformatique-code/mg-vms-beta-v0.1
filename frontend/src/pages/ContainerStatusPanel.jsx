@@ -3,6 +3,7 @@ import api from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
+import { useApp } from "@/context/AppContext";
 
 /**
  * v3.22 · État des conteneurs Docker (Suivi des performances → Debug).
@@ -34,6 +35,7 @@ function dotColor(c) {
 }
 
 function ContainerCard({ c }) {
+  const { t } = useApp();
   const [hover, setHover] = useState(false);
   return (
     <div
@@ -50,22 +52,22 @@ function ContainerCard({ c }) {
         <span className="text-sm font-medium truncate">{c.name}</span>
       </div>
       <div className="text-[11px] text-muted-foreground mt-1">
-        {c.running ? `en marche · ${timeAgo(c.started_at)}` : c.status}
+        {c.running ? `${t("cspanel.running")} · ${timeAgo(c.started_at)}` : c.status}
         {c.health !== "n/a" && c.health ? ` · ${c.health}` : ""}
       </div>
 
       {hover && (
         <div className="absolute z-10 left-0 top-full mt-1 w-72 border border-border bg-popover shadow-lg p-3 text-[11px] space-y-1"
              data-testid={`container-tooltip-${c.name}`}>
-          <div><span className="text-muted-foreground">Nom complet : </span>{c.name}</div>
-          <div><span className="text-muted-foreground">Image : </span>{c.image}</div>
-          <div><span className="text-muted-foreground">IP interne : </span>{c.internal_ip || "—"}</div>
-          <div><span className="text-muted-foreground">Statut : </span>{c.status}{c.health !== "n/a" ? ` (${c.health})` : ""}</div>
-          <div><span className="text-muted-foreground">Démarré : </span>{c.started_at ? new Date(c.started_at).toLocaleString("fr-FR") : "—"}</div>
-          <div><span className="text-muted-foreground">Redémarrages : </span>{c.restart_count ?? 0}</div>
+          <div><span className="text-muted-foreground">{t("cspanel.full_name")} </span>{c.name}</div>
+          <div><span className="text-muted-foreground">{t("cspanel.image")} </span>{c.image}</div>
+          <div><span className="text-muted-foreground">{t("cspanel.internal_ip")} </span>{c.internal_ip || "—"}</div>
+          <div><span className="text-muted-foreground">{t("cspanel.status")} </span>{c.status}{c.health !== "n/a" ? ` (${c.health})` : ""}</div>
+          <div><span className="text-muted-foreground">{t("cspanel.started")} </span>{c.started_at ? new Date(c.started_at).toLocaleString("fr-FR") : "—"}</div>
+          <div><span className="text-muted-foreground">{t("cspanel.restarts")} </span>{c.restart_count ?? 0}</div>
           {c.ports && c.ports.length > 0 && (
             <div>
-              <span className="text-muted-foreground">Ports publiés : </span>
+              <span className="text-muted-foreground">{t("cspanel.published_ports")} </span>
               {c.ports.map((p) => p.host?.length ? `${p.container}→${p.host.join(",")}` : null).filter(Boolean).join(" · ") || "—"}
             </div>
           )}
@@ -76,15 +78,16 @@ function ContainerCard({ c }) {
 }
 
 export default function ContainerStatusPanel() {
+  const { t } = useApp();
   const [data, setData] = useState(null);
   const load = useCallback(async () => {
     try {
       const r = await api.get("/system/containers");
       setData(r.data);
     } catch (e) {
-      setData({ containers: [], stale: true, error: "endpoint indisponible" });
+      setData({ containers: [], stale: true, error: t("cspanel.endpoint_unavailable") });
     }
-  }, []);
+  }, [t]);
   useEffect(() => {
     load();
     const iv = setInterval(load, 10000);
@@ -97,13 +100,13 @@ export default function ContainerStatusPanel() {
     <Card className="p-4 space-y-3" data-testid="container-status-panel">
       <div className="flex justify-between items-center">
         <div className="text-sm text-muted-foreground">
-          État des conteneurs
+          {t("cspanel.container_status")}
           {data?.stale && containers.length > 0 && (
-            <span className="text-[#FFB800] ml-2">(instantané ancien — {data.age_seconds}s)</span>
+            <span className="text-[#FFB800] ml-2">({t("cspanel.stale_snapshot")} — {data.age_seconds}s)</span>
           )}
         </div>
         <Button size="sm" variant="ghost" onClick={load}>
-          <RefreshCw className="w-4 h-4 mr-2" />Rafraîchir
+          <RefreshCw className="w-4 h-4 mr-2" />{t("cspanel.refresh")}
         </Button>
       </div>
 

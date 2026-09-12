@@ -22,19 +22,21 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
 import { Wifi, WifiOff, ScanLine, Search, Volume2, Mic, Flashlight, Move, CircleDot, MemoryStick } from "lucide-react";
+import { useApp } from "@/context/AppContext";
 
 // v3.64 · "Trier par" — même besoin que le tri déjà construit sur la liste
 // Appareils, mais la vue ici est une grille de cartes, pas un tableau (pas
 // de colonnes à cliquer) : un simple sélecteur de champ + un tri croissant
 // implicite couvre le besoin sans réinventer un système de tri par colonne.
 const SORT_OPTIONS = [
-  { id: "name", label: "Nom" },
-  { id: "site_name", label: "Site" },
-  { id: "status", label: "Statut" },
-  { id: "plugins", label: "Plugins IA" },
+  { id: "name", labelKey: "camdisp.sort_name" },
+  { id: "site_name", labelKey: "camdisp.sort_site" },
+  { id: "status", labelKey: "camdisp.sort_status" },
+  { id: "plugins", labelKey: "camdisp.sort_plugins" },
 ];
 
 export default function CameraCenterDispatch() {
+  const { t } = useApp();
   const navigate = useNavigate();
   const [cams, setCams] = useState(null);
   const [q, setQ] = useState("");
@@ -64,19 +66,19 @@ export default function CameraCenterDispatch() {
     <div className="p-6" data-testid="camera-center-overview">
       <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Centre caméras</h1>
-          <p className="text-sm text-muted-foreground mt-1">Vue technique rapide — cliquez une caméra pour ouvrir son panneau complet.</p>
+          <h1 className="text-2xl font-bold tracking-tight">{t("camdisp.title")}</h1>
+          <p className="text-sm text-muted-foreground mt-1">{t("camdisp.subtitle")}</p>
         </div>
         <div className="flex items-center gap-2">
           <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} data-testid="camera-center-sort"
                   className="h-9 px-2 bg-background border border-input outline-none text-sm focus:border-[#0044FF]">
             {SORT_OPTIONS.map((o) => (
-              <option key={o.id} value={o.id}>Trier par : {o.label}</option>
+              <option key={o.id} value={o.id}>{t("camdisp.sort_by")} {t(o.labelKey)}</option>
             ))}
           </select>
           <div className="relative">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filtrer…" data-testid="camera-center-filter"
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("camdisp.filter_placeholder")} data-testid="camera-center-filter"
                    className="pl-8 pr-3 py-1.5 bg-background border border-input outline-none text-sm w-48 focus:border-[#0044FF]" />
           </div>
         </div>
@@ -110,13 +112,13 @@ export default function CameraCenterDispatch() {
                 <span className="font-medium text-sm truncate">{c.name}</span>
                 <span className={`flex items-center gap-1 text-[10px] uppercase tracking-wider shrink-0 ${c.status === "online" ? "text-[#00E676]" : "text-[#FF3333]"}`}>
                   {c.status === "online" ? <Wifi size={12} /> : <WifiOff size={12} />}
-                  {c.status === "online" ? "En ligne" : "Hors ligne"}
+                  {c.status === "online" ? t("camdisp.online") : t("camdisp.offline")}
                 </span>
               </div>
               <div className="text-xs text-muted-foreground mb-2 truncate">{c.site_name || "—"}</div>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-[10px] px-1.5 py-0.5 border border-border text-muted-foreground">{pluginCount} plugin{pluginCount > 1 ? "s" : ""} IA</span>
+                  <span className="text-[10px] px-1.5 py-0.5 border border-border text-muted-foreground">{pluginCount} {pluginCount > 1 ? t("camdisp.plugins_ai_plural") : t("camdisp.plugins_ai_singular")}</span>
                   {anprActive && (
                     <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 border border-[#0044FF]/40 text-[#0044FF]">
                       <ScanLine size={10} /> ANPR
@@ -125,11 +127,11 @@ export default function CameraCenterDispatch() {
                 </div>
                 {(hasSpeaker || hasMic || hasLight || hasIr || hasSdCard || hasPtz) && (
                   <div className="flex items-center gap-1 text-muted-foreground shrink-0">
-                    {hasSpeaker && <Volume2 size={12} title="Haut-parleur" />}
-                    {hasMic && <Mic size={12} title="Microphone" />}
-                    {hasLight && <Flashlight size={12} title="Lumière / projecteur" />}
-                    {hasIr && <CircleDot size={12} className="text-red-500" title="Infrarouge (vision nocturne)" />}
-                    {hasSdCard && <MemoryStick size={12} title="Carte mémoire" />}
+                    {hasSpeaker && <Volume2 size={12} title={t("camdisp.cap_speaker")} />}
+                    {hasMic && <Mic size={12} title={t("camdisp.cap_mic")} />}
+                    {hasLight && <Flashlight size={12} title={t("camdisp.cap_light")} />}
+                    {hasIr && <CircleDot size={12} className="text-red-500" title={t("camdisp.cap_ir")} />}
+                    {hasSdCard && <MemoryStick size={12} title={t("camdisp.cap_sdcard")} />}
                     {hasPtz && <Move size={12} title="PTZ" />}
                   </div>
                 )}
@@ -138,7 +140,7 @@ export default function CameraCenterDispatch() {
           );
         })}
         {sorted.length === 0 && (
-          <div className="col-span-full text-center text-muted-foreground py-12 text-sm">Aucune caméra</div>
+          <div className="col-span-full text-center text-muted-foreground py-12 text-sm">{t("camdisp.no_camera")}</div>
         )}
       </div>
     </div>

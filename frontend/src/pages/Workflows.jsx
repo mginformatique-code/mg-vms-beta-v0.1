@@ -1,45 +1,46 @@
 import React, { useState, useEffect } from "react";
+import { useApp } from "@/context/AppContext";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { toast } from "sonner";
 import { Plus, Trash2, Edit2, Save, X, Play, Zap, Loader2, ChevronRight } from "lucide-react";
 
-const TRIGGER_TYPES = [
-  { type: "event.type", label: "Événement de type",
-    fields: [{ key: "event_type", label: "Type d'événement", placeholder: "ex: plate.blacklist" }] },
-  { type: "zone.enter", label: "Zone — Entrée",
-    fields: [{ key: "zone_id", label: "ID de zone (vide = toutes)", placeholder: "uuid ou vide" }] },
-  { type: "zone.exit", label: "Zone — Sortie",
-    fields: [{ key: "zone_id", label: "ID de zone", placeholder: "uuid ou vide" }] },
-  { type: "zone.present", label: "Zone — Présence continue",
-    fields: [{ key: "zone_id", label: "ID de zone", placeholder: "uuid ou vide" }] },
-  { type: "plate.enter", label: "Plaque — Entrée (E/P/S)", fields: [] },
-  { type: "plate.exit",  label: "Plaque — Sortie (E/P/S)",  fields: [] },
+const getTriggerTypes = (t) => [
+  { type: "event.type", label: t("wf.trig_event_type"),
+    fields: [{ key: "event_type", label: t("wf.fld_event_type"), placeholder: t("wf.ph_event_type_example") }] },
+  { type: "zone.enter", label: t("wf.trig_zone_enter"),
+    fields: [{ key: "zone_id", label: t("wf.fld_zone_id_all"), placeholder: t("wf.ph_uuid_or_empty") }] },
+  { type: "zone.exit", label: t("wf.trig_zone_exit"),
+    fields: [{ key: "zone_id", label: t("wf.fld_zone_id"), placeholder: t("wf.ph_uuid_or_empty") }] },
+  { type: "zone.present", label: t("wf.trig_zone_present"),
+    fields: [{ key: "zone_id", label: t("wf.fld_zone_id"), placeholder: t("wf.ph_uuid_or_empty") }] },
+  { type: "plate.enter", label: t("wf.trig_plate_enter"), fields: [] },
+  { type: "plate.exit",  label: t("wf.trig_plate_exit"),  fields: [] },
 ];
 
-const CONDITION_TYPES = [
-  { type: "time_between", label: "Créneau horaire",
-    fields: [{ key: "start", label: "Début (HH:MM)", placeholder: "08:00" },
-             { key: "end", label: "Fin (HH:MM)", placeholder: "18:00" }] },
-  { type: "camera_is", label: "Caméra ∈ liste",
-    fields: [{ key: "cameras", label: "IDs (CSV)", isCsv: true, placeholder: "cam-1,cam-2" }] },
-  { type: "plate_in_list", label: "Statut plaque",
-    fields: [{ key: "lists", label: "Listes (CSV parmi black,white,none)", isCsv: true, placeholder: "black" }] },
-  { type: "field_equals", label: "Champ = valeur",
-    fields: [{ key: "path", label: "Chemin (ex: data.plate)", placeholder: "data.plate" },
-             { key: "value", label: "Valeur attendue", placeholder: "AB-123-CD" }] },
-  { type: "field_regex", label: "Champ ~ regex",
-    fields: [{ key: "path", label: "Chemin", placeholder: "data.plate" },
-             { key: "pattern", label: "Regex", placeholder: "^AB-" }] },
+const getConditionTypes = (t) => [
+  { type: "time_between", label: t("wf.cond_time_between"),
+    fields: [{ key: "start", label: t("wf.fld_start_hhmm"), placeholder: "08:00" },
+             { key: "end", label: t("wf.fld_end_hhmm"), placeholder: "18:00" }] },
+  { type: "camera_is", label: t("wf.cond_camera_in_list"),
+    fields: [{ key: "cameras", label: t("wf.fld_ids_csv"), isCsv: true, placeholder: "cam-1,cam-2" }] },
+  { type: "plate_in_list", label: t("wf.cond_plate_status"),
+    fields: [{ key: "lists", label: t("wf.fld_lists_csv"), isCsv: true, placeholder: "black" }] },
+  { type: "field_equals", label: t("wf.cond_field_equals"),
+    fields: [{ key: "path", label: t("wf.fld_path_example"), placeholder: "data.plate" },
+             { key: "value", label: t("wf.fld_expected_value"), placeholder: "AB-123-CD" }] },
+  { type: "field_regex", label: t("wf.cond_field_regex"),
+    fields: [{ key: "path", label: t("wf.fld_path"), placeholder: "data.plate" },
+             { key: "pattern", label: t("wf.fld_regex"), placeholder: "^AB-" }] },
 ];
 
-const ACTION_TYPES = [
+const getActionTypes = (t) => [
   { type: "webhook",        label: "Webhook HTTP" },
   { type: "mqtt",           label: "MQTT publish" },
   { type: "home_assistant", label: "Home Assistant service" },
   { type: "tuya",           label: "Tuya Cloud device" },
   { type: "plugin",         label: "Plugin EventConsumer" },
   { type: "tts",            label: "Text-to-speech" },
-  { type: "delay",          label: "Délai (chaînage)" },
+  { type: "delay",          label: t("wf.action_delay") },
 ];
 
 const EMPTY = { name: "", enabled: true, description: "",
@@ -47,6 +48,7 @@ const EMPTY = { name: "", enabled: true, description: "",
 
 
 export default function Workflows() {
+  const { t } = useApp();
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
@@ -66,7 +68,7 @@ export default function Workflows() {
   const startEdit = (w) => setEditing(w ? JSON.parse(JSON.stringify(w)) : { ...EMPTY });
 
   const save = async () => {
-    if (!editing.name) { toast.error("Nom requis"); return; }
+    if (!editing.name) { toast.error(t("wf.err_name_required")); return; }
     setSaving(true);
     try {
       const payload = {
@@ -76,10 +78,10 @@ export default function Workflows() {
       };
       if (editing.id) {
         await api.put(`/workflows/${editing.id}`, payload);
-        toast.success("Workflow mis à jour");
+        toast.success(t("wf.toast_updated"));
       } else {
         await api.post("/workflows", payload);
-        toast.success("Workflow créé");
+        toast.success(t("wf.toast_created"));
       }
       setEditing(null);
       load();
@@ -88,10 +90,10 @@ export default function Workflows() {
   };
 
   const remove = async (id) => {
-    if (!window.confirm("Supprimer ce workflow ?")) return;
+    if (!window.confirm(t("wf.confirm_delete"))) return;
     try {
       await api.delete(`/workflows/${id}`);
-      toast.success("Supprimé");
+      toast.success(t("wf.toast_deleted"));
       load();
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || e.message); }
   };
@@ -100,7 +102,7 @@ export default function Workflows() {
     try {
       const { data } = await api.post(`/workflows/${id}/run`, {});
       const ok = data.status === "ok";
-      toast[ok ? "success" : "error"](`Exécution ${data.workflow_name} → ${data.status}`);
+      toast[ok ? "success" : "error"](`${t("wf.toast_execution")} ${data.workflow_name} → ${data.status}`);
       load();
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || e.message); }
   };
@@ -113,22 +115,22 @@ export default function Workflows() {
             <Zap size={22} className="text-[#FFB800]" /> Workflows
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Automation visuelle style Home Assistant : triggers → conditions → actions
+            {t("wf.subtitle")}
           </p>
         </div>
         <button onClick={() => startEdit(null)} data-testid="workflow-create"
                 className="flex items-center gap-2 px-3 py-2 bg-[#0044FF] text-white text-sm hover:bg-[#0044FF]/90">
-          <Plus size={14} /> Nouveau workflow
+          <Plus size={14} /> {t("wf.btn_new")}
         </button>
       </div>
 
       {loading ? (
         <div className="text-center text-muted-foreground py-12">
-          <Loader2 size={20} className="animate-spin inline mr-2" /> Chargement…
+          <Loader2 size={20} className="animate-spin inline mr-2" /> {t("common.loading")}
         </div>
       ) : list.length === 0 ? (
         <div className="border border-dashed border-border p-8 text-center text-muted-foreground text-sm">
-          Aucun workflow. Clique sur &quot;Nouveau workflow&quot; pour commencer.
+          {t("wf.empty_state")}
         </div>
       ) : (
         <div className="space-y-2" data-testid="workflows-list">
@@ -150,22 +152,22 @@ export default function Workflows() {
                     <div className="text-xs text-muted-foreground mt-0.5">{w.description}</div>
                   )}
                   <div className="text-[10px] mono text-muted-foreground mt-1 flex flex-wrap gap-x-3">
-                    <span>exécutions: {w.execution_count || 0}</span>
-                    <span style={{ color: okColor }}>statut: {rt.last_status || "idle"}</span>
-                    {rt.last_run_at && <span>dernier: {new Date(rt.last_run_at).toLocaleString()}</span>}
+                    <span>{t("wf.lbl_executions")} {w.execution_count || 0}</span>
+                    <span style={{ color: okColor }}>{t("wf.lbl_status")} {rt.last_status || "idle"}</span>
+                    {rt.last_run_at && <span>{t("wf.lbl_last_run")} {new Date(rt.last_run_at).toLocaleString()}</span>}
                   </div>
                   {w.triggers?.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1 text-[10px] mono">
-                      {w.triggers.map((t, i) => (
+                      {w.triggers.map((t2, i) => (
                         <span key={i} className="px-1.5 py-0.5 border border-border">
-                          <ChevronRight size={9} className="inline" /> {t.type}
+                          <ChevronRight size={9} className="inline" /> {t2.type}
                         </span>
                       ))}
                     </div>
                   )}
                 </div>
                 <div className="flex gap-1">
-                  <button onClick={() => run(w.id)} title="Exécuter maintenant"
+                  <button onClick={() => run(w.id)} title={t("wf.tooltip_run_now")}
                           data-testid={`workflow-${w.id}-run`}
                           className="p-1.5 border border-[#00E676] text-[#00E676] hover:bg-[#00E676]/10 text-xs">
                     <Play size={11} />
@@ -202,6 +204,10 @@ export default function Workflows() {
 
 
 function WorkflowEditor({ workflow, onChange, onSave, onCancel, saving }) {
+  const { t } = useApp();
+  const TRIGGER_TYPES = getTriggerTypes(t);
+  const CONDITION_TYPES = getConditionTypes(t);
+  const ACTION_TYPES = getActionTypes(t);
   const update = (patch) => onChange({ ...workflow, ...patch });
 
   const addBlock = (kind, type) => {
@@ -226,7 +232,7 @@ function WorkflowEditor({ workflow, onChange, onSave, onCancel, saving }) {
            onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-border sticky top-0 bg-card z-10">
           <div className="font-head font-semibold">
-            {workflow.id ? "Modifier" : "Nouveau"} workflow
+            {workflow.id ? t("common.edit") : t("wf.new")} workflow
           </div>
           <button onClick={onCancel} data-testid="workflow-editor-close"><X size={16} /></button>
         </div>
@@ -234,7 +240,7 @@ function WorkflowEditor({ workflow, onChange, onSave, onCancel, saving }) {
         <div className="p-5 space-y-4">
           <div className="grid grid-cols-3 gap-3 items-end">
             <div className="col-span-2">
-              <label className="text-xs text-muted-foreground block mb-1">Nom</label>
+              <label className="text-xs text-muted-foreground block mb-1">{t("common.name")}</label>
               <input value={workflow.name} onChange={(e) => update({ name: e.target.value })}
                      data-testid="workflow-name"
                      className="w-full px-2 py-1.5 bg-background border border-input outline-none text-sm" />
@@ -243,29 +249,29 @@ function WorkflowEditor({ workflow, onChange, onSave, onCancel, saving }) {
               <input type="checkbox" checked={workflow.enabled}
                      onChange={(e) => update({ enabled: e.target.checked })}
                      data-testid="workflow-enabled" />
-              Actif
+              {t("common.active")}
             </label>
           </div>
           <div>
-            <label className="text-xs text-muted-foreground block mb-1">Description</label>
+            <label className="text-xs text-muted-foreground block mb-1">{t("wf.fld_description")}</label>
             <input value={workflow.description || ""} onChange={(e) => update({ description: e.target.value })}
                    className="w-full px-2 py-1.5 bg-background border border-input outline-none text-sm" />
           </div>
 
           {/* TRIGGERS */}
-          <Block title="Triggers (au moins un match déclenche)" color="#00E676"
-                 onAdd={(t) => addBlock("triggers", t)} choices={TRIGGER_TYPES}>
-            {(workflow.triggers || []).map((t, i) => (
-              <FieldRow key={i} spec={TRIGGER_TYPES.find(x => x.type === t.type)}
-                         obj={t} onChange={(p) => updateBlock("triggers", i, p)}
+          <Block title={t("wf.block_triggers_title")} color="#00E676"
+                 onAdd={(type) => addBlock("triggers", type)} choices={TRIGGER_TYPES}>
+            {(workflow.triggers || []).map((tr, i) => (
+              <FieldRow key={i} spec={TRIGGER_TYPES.find(x => x.type === tr.type)}
+                         obj={tr} onChange={(p) => updateBlock("triggers", i, p)}
                          onRemove={() => removeBlock("triggers", i)}
                          testid={`trigger-${i}`} />
             ))}
           </Block>
 
           {/* CONDITIONS */}
-          <Block title="Conditions (toutes doivent être vraies)" color="#FFB800"
-                 onAdd={(t) => addBlock("conditions", t)} choices={CONDITION_TYPES}>
+          <Block title={t("wf.block_conditions_title")} color="#FFB800"
+                 onAdd={(type) => addBlock("conditions", type)} choices={CONDITION_TYPES}>
             {(workflow.conditions || []).map((c, i) => (
               <FieldRow key={i} spec={CONDITION_TYPES.find(x => x.type === c.type)}
                          obj={c} onChange={(p) => updateBlock("conditions", i, p)}
@@ -275,8 +281,8 @@ function WorkflowEditor({ workflow, onChange, onSave, onCancel, saving }) {
           </Block>
 
           {/* ACTIONS */}
-          <Block title="Actions (exécutées séquentiellement)" color="#0044FF"
-                 onAdd={(t) => addBlock("actions", t)} choices={ACTION_TYPES}>
+          <Block title={t("wf.block_actions_title")} color="#0044FF"
+                 onAdd={(type) => addBlock("actions", type)} choices={ACTION_TYPES}>
             {(workflow.actions || []).map((a, i) => (
               <div key={i} className="border border-border p-2 space-y-1" data-testid={`action-${i}`}>
                 <div className="flex items-center justify-between">
@@ -301,13 +307,13 @@ function WorkflowEditor({ workflow, onChange, onSave, onCancel, saving }) {
 
         <div className="flex justify-end gap-2 px-5 py-3 border-t border-border sticky bottom-0 bg-card">
           <button onClick={onCancel} className="px-4 py-2 border border-border text-sm hover:bg-secondary">
-            Annuler
+            {t("common.cancel")}
           </button>
           <button onClick={onSave} disabled={saving}
                   data-testid="workflow-editor-save"
                   className="flex items-center gap-2 px-4 py-2 bg-[#0044FF] text-white text-sm disabled:opacity-40">
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-            Enregistrer
+            {t("common.save")}
           </button>
         </div>
       </div>
@@ -317,6 +323,7 @@ function WorkflowEditor({ workflow, onChange, onSave, onCancel, saving }) {
 
 
 function Block({ title, color, children, onAdd, choices }) {
+  const { t } = useApp();
   return (
     <div className="border-l-2 pl-3" style={{ borderColor: color }}>
       <div className="flex items-center justify-between mb-2">
@@ -324,7 +331,7 @@ function Block({ title, color, children, onAdd, choices }) {
         <select onChange={(e) => { if (e.target.value) { onAdd(e.target.value); e.target.value = ""; } }}
                 defaultValue=""
                 className="text-xs px-2 py-1 bg-background border border-input">
-          <option value="">+ Ajouter…</option>
+          <option value="">{t("wf.select_add")}</option>
           {choices.map((c) => <option key={c.type} value={c.type}>{c.label}</option>)}
         </select>
       </div>

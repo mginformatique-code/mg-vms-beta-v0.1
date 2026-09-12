@@ -14,12 +14,12 @@ import { toast } from "sonner";
  * Appareils → modifier, à côté des autres réglages caméra).
  */
 export default function DateHeurePage() {
-  const { user } = useApp();
+  const { user, t } = useApp();
   return (
     <div className="p-4 max-w-4xl" data-testid="datetime-page">
       <div className="mb-5">
-        <h1 className="font-head font-bold text-2xl tracking-tight">Date et heure</h1>
-        <p className="text-sm text-muted-foreground mt-1">Horloge serveur, redémarrage programmé, serveur de temps (NTP) pour les caméras.</p>
+        <h1 className="font-head font-bold text-2xl tracking-tight">{t("dt.title")}</h1>
+        <p className="text-sm text-muted-foreground mt-1">{t("dt.subtitle")}</p>
       </div>
 
       <SystemClockCard admin={user?.role === "admin"} />
@@ -33,6 +33,7 @@ export default function DateHeurePage() {
 // serveur à chaque seconde) — distincte de la "Date & heure serveur"
 // ci-dessus qui ne se rafraîchit que toutes les 30s.
 function LiveClockCard() {
+  const { t } = useApp();
   const [now, setNow] = useState(new Date());
   useEffect(() => {
     const iv = setInterval(() => setNow(new Date()), 1000);
@@ -40,7 +41,7 @@ function LiveClockCard() {
   }, []);
   return (
     <div className="bg-card border border-border p-5 text-center" data-testid="live-clock">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Heure en temps réel (navigateur)</div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("dt.live_clock_label")}</div>
       <div className="mono text-3xl font-bold tabular-nums">{now.toLocaleTimeString("fr-FR")}</div>
       <div className="text-xs text-muted-foreground mt-1">{now.toLocaleDateString("fr-FR", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</div>
     </div>
@@ -70,9 +71,9 @@ function StatBox({ label, value }) {
   );
 }
 
-const AUTO_REBOOT_DAYS = [
-  ["daily", "Tous les jours"], ["monday", "Lundi"], ["tuesday", "Mardi"], ["wednesday", "Mercredi"],
-  ["thursday", "Jeudi"], ["friday", "Vendredi"], ["saturday", "Samedi"], ["sunday", "Dimanche"],
+const getAutoRebootDays = (t) => [
+  ["daily", t("dt.day_daily")], ["monday", t("dt.day_monday")], ["tuesday", t("dt.day_tuesday")], ["wednesday", t("dt.day_wednesday")],
+  ["thursday", t("dt.day_thursday")], ["friday", t("dt.day_friday")], ["saturday", t("dt.day_saturday")], ["sunday", t("dt.day_sunday")],
 ];
 
 // v3.19 · Périmètre volontairement réduit à un reboot complet de la
@@ -81,6 +82,8 @@ const AUTO_REBOOT_DAYS = [
 // conteneur backend. CPU/RAM/disque/uptime existent déjà dans le tableau
 // de bord santé — pas dupliqués ici, uniquement date/heure + reboot.
 function SystemClockCard({ admin }) {
+  const { t } = useApp();
+  const AUTO_REBOOT_DAYS = getAutoRebootDays(t);
   const [info, setInfo] = useState(null);
   const [autoReboot, setAutoReboot] = useState(null);
   const [savingAuto, setSavingAuto] = useState(false);
@@ -93,12 +96,12 @@ function SystemClockCard({ admin }) {
   useEffect(() => { load(); const iv = setInterval(load, 30000); return () => clearInterval(iv); }, [admin]);
 
   const rebootNow = async () => {
-    if (!window.confirm("Redémarrer la machine maintenant ? Toutes les caméras et le service seront coupés le temps du redémarrage.")) return;
+    if (!window.confirm(t("dt.confirm_reboot"))) return;
     setRebooting(true);
     try {
       await api.post("/system/reboot");
-      toast.success("Redémarrage programmé — la machine va redémarrer sous peu.");
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+      toast.success(t("dt.toast_reboot_scheduled"));
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("dt.err_generic")); }
     finally { setRebooting(false); }
   };
 
@@ -107,18 +110,18 @@ function SystemClockCard({ admin }) {
     try {
       const { data } = await api.put("/system/auto-reboot", autoReboot);
       setAutoReboot(data);
-      toast.success("Reboot automatique mis à jour");
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+      toast.success(t("dt.toast_auto_reboot_updated"));
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("dt.err_generic")); }
     finally { setSavingAuto(false); }
   };
 
   if (!info) return null;
 
   return (
-    <SectionCard title="Horloge serveur" subtitle="Date/heure du serveur MG-VMS." icon={Clock}>
+    <SectionCard title={t("dt.clock_card_title")} subtitle={t("dt.clock_card_subtitle")} icon={Clock}>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4">
-        <StatBox label="Date & heure serveur" value={new Date(info.server_time).toLocaleString("fr-FR")} />
-        <StatBox label="Fuseau horaire" value={`${info.timezone} (UTC${info.utc_offset})`} />
+        <StatBox label={t("dt.lbl_server_datetime")} value={new Date(info.server_time).toLocaleString("fr-FR")} />
+        <StatBox label={t("dt.lbl_timezone")} value={`${info.timezone} (UTC${info.utc_offset})`} />
       </div>
 
       {admin && autoReboot && (
@@ -126,30 +129,30 @@ function SystemClockCard({ admin }) {
           <div className="border-t border-border pt-4 mb-4">
             <label className="flex items-center gap-2 text-sm mb-3">
               <input type="checkbox" checked={autoReboot.enabled} onChange={(e) => setAutoReboot({ ...autoReboot, enabled: e.target.checked })} data-testid="auto-reboot-enabled" />
-              Redémarrage automatique programmé
+              {t("dt.lbl_auto_reboot")}
             </label>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
               <div>
-                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Fréquence</label>
+                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("dt.lbl_frequency")}</label>
                 <select value={autoReboot.day} onChange={(e) => setAutoReboot({ ...autoReboot, day: e.target.value })} data-testid="auto-reboot-day"
                         className="w-full px-3 py-2 bg-background border border-input outline-none text-sm focus:border-[#0044FF]">
                   {AUTO_REBOOT_DAYS.map(([k, lbl]) => <option key={k} value={k}>{lbl}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Heure</label>
+                <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("dt.lbl_time")}</label>
                 <input type="time" value={autoReboot.time} onChange={(e) => setAutoReboot({ ...autoReboot, time: e.target.value })} data-testid="auto-reboot-time"
                        className="w-full px-3 py-2 bg-background border border-input outline-none mono focus:border-[#0044FF]" />
               </div>
             </div>
             <button onClick={saveAutoReboot} disabled={savingAuto} data-testid="auto-reboot-save" className="flex items-center gap-2 px-4 py-2 bg-[#0044FF] text-white text-sm">
-              {savingAuto && <Loader2 size={14} className="animate-spin" />}<Save size={14} /> Enregistrer
+              {savingAuto && <Loader2 size={14} className="animate-spin" />}<Save size={14} /> {t("common.save")}
             </button>
           </div>
 
           <div className="border-t border-border pt-4">
             <button onClick={rebootNow} disabled={rebooting} data-testid="system-reboot-btn" className="flex items-center gap-2 px-4 py-2 border border-[#FF3333] text-[#FF3333] text-sm hover:bg-[#FF3333]/10">
-              {rebooting ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />} Redémarrer la machine maintenant
+              {rebooting ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />} {t("dt.btn_reboot_now")}
             </button>
           </div>
         </>
@@ -165,6 +168,7 @@ function SystemClockCard({ admin }) {
 const RESYNC_PRESETS = [24, 48, 72];
 
 function NtpCard({ admin }) {
+  const { t } = useApp();
   const [cams, setCams] = useState(null);
   const [upstream, setUpstream] = useState(null);
   const [savingUpstream, setSavingUpstream] = useState(false);
@@ -199,8 +203,8 @@ function NtpCard({ admin }) {
     setSavingUpstream(true);
     try {
       await api.put("/system/ntp-upstream", { upstream });
-      toast.success("Serveur NTP amont mis à jour — MG-VMS s'y synchronisera avant de diffuser l'heure aux caméras.");
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+      toast.success(t("dt.toast_upstream_updated"));
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("dt.err_generic")); }
     finally { setSavingUpstream(false); }
   };
 
@@ -209,8 +213,8 @@ function NtpCard({ admin }) {
     try {
       const { data } = await api.put("/system/ntp-resync-interval", { hours });
       setResyncHours(data.hours);
-      toast.success(`Resynchronisation programmée toutes les ${data.hours}h`);
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+      toast.success(`${t("dt.toast_resync_scheduled_prefix")} ${data.hours}h`);
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("dt.err_generic")); }
     finally { setSavingResync(false); }
   };
 
@@ -225,11 +229,11 @@ function NtpCard({ admin }) {
       const okCount = data.ok?.length || 0;
       const errCount = data.errors?.length || 0;
       if (errCount === 0) {
-        toast.success(okCount > 0 ? `${okCount} caméra(s) resynchronisée(s)` : "Aucune caméra à synchroniser");
+        toast.success(okCount > 0 ? `${okCount} ${t("dt.lbl_cameras_resynced")}` : t("dt.toast_no_cameras_to_sync"));
       } else {
-        toast.error(`${okCount} réussie(s), ${errCount} échec(s) — voir : ${data.errors.map((e) => e.camera).join(", ")}`);
+        toast.error(`${okCount} ${t("dt.lbl_succeeded")} ${errCount} ${t("dt.lbl_failed_see")} ${data.errors.map((e) => e.camera).join(", ")}`);
       }
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("dt.err_generic")); }
     finally { setForcingSync(false); }
   };
 
@@ -247,14 +251,14 @@ function NtpCard({ admin }) {
       const okCount = data.ok?.length || 0;
       const errCount = data.errors?.length || 0;
       if (errCount === 0) {
-        toast.success(`${okCount} caméra(s) ajoutée(s) à la synchro NTP`);
+        toast.success(`${okCount} ${t("dt.lbl_cameras_added_ntp")}`);
       } else {
-        toast.error(`${okCount} réussie(s), ${errCount} échec(s) — voir : ${data.errors.map((e) => e.camera).join(", ")}`);
+        toast.error(`${okCount} ${t("dt.lbl_succeeded")} ${errCount} ${t("dt.lbl_failed_see")} ${data.errors.map((e) => e.camera).join(", ")}`);
       }
       setSelectedIds([]);
       setPickerOpen(false);
       load();
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || "Échec"); }
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail) || t("dt.err_generic")); }
     finally { setApplying(false); }
   };
 
@@ -265,11 +269,11 @@ function NtpCard({ admin }) {
   const allSelected = unmanaged.length > 0 && selectedIds.length === unmanaged.length;
 
   return (
-    <SectionCard title="Serveur de temps (NTP)" subtitle="MG-VMS sert l'heure aux caméras du réseau — évite les horloges qui dérivent ou se perdent après un reboot caméra." icon={Radio}>
+    <SectionCard title={t("dt.ntp_card_title")} subtitle={t("dt.ntp_card_subtitle")} icon={Radio}>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
-        <StatBox label="Caméras synchronisées" value={`${managed.length} / ${onvifCams.length} (ONVIF)`} />
+        <StatBox label={t("dt.lbl_cameras_synced")} value={`${managed.length} / ${onvifCams.length} (ONVIF)`} />
         <div className="border border-border p-2 text-center">
-          <div className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1">Resynchronisation</div>
+          <div className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1">{t("dt.lbl_resync")}</div>
           {admin && resyncHours !== null ? (
             <div className="flex items-center gap-1 justify-center">
               <select
@@ -281,10 +285,10 @@ function NtpCard({ admin }) {
                 }}
                 disabled={savingResync} data-testid="ntp-resync-select"
                 className="mono text-xs bg-background border border-input outline-none px-1.5 py-1 focus:border-[#0044FF]">
-                <option value={24}>24h (conseillé)</option>
+                <option value={24}>{t("dt.opt_24h_recommended")}</option>
                 <option value={48}>48h</option>
                 <option value={72}>72h</option>
-                <option value="custom">Personnalisé…</option>
+                <option value="custom">{t("dt.opt_custom")}</option>
               </select>
               {resyncCustom && (
                 <input type="number" min="1" max="720" defaultValue={resyncHours} data-testid="ntp-resync-custom"
@@ -293,7 +297,7 @@ function NtpCard({ admin }) {
               )}
             </div>
           ) : (
-            <div className="mono text-lg font-bold mt-0.5">Auto — 24h</div>
+            <div className="mono text-lg font-bold mt-0.5">{t("dt.lbl_auto_24h")}</div>
           )}
         </div>
       </div>
@@ -309,14 +313,14 @@ function NtpCard({ admin }) {
           <button onClick={forceSyncNow} disabled={forcingSync} data-testid="ntp-force-sync"
                   className="flex items-center gap-2 px-4 py-2 border border-[#0044FF] text-[#0044FF] text-sm hover:bg-[#0044FF]/10 disabled:opacity-50">
             {forcingSync ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            Forcer la synchro maintenant ({managed.length})
+            {t("dt.btn_force_sync_prefix")} ({managed.length})
           </button>
         )}
         {admin && unmanaged.length > 0 && (
           <div className="relative">
             <button onClick={() => setPickerOpen((v) => !v)} data-testid="ntp-add-cameras-btn"
                     className="flex items-center gap-2 px-4 py-2 border border-[#00E676] text-[#00E676] text-sm hover:bg-[#00E676]/10">
-              <Plus size={14} /> Ajouter des caméras ({unmanaged.length} non synchro)
+              <Plus size={14} /> {t("dt.btn_add_cameras_prefix")} ({unmanaged.length} {t("dt.lbl_not_synced")})
             </button>
             {pickerOpen && (
               <div className="absolute top-full left-0 mt-1 z-30 bg-card border border-border shadow-lg w-72" data-testid="ntp-add-cameras-panel">
@@ -325,7 +329,7 @@ function NtpCard({ admin }) {
                     <input type="checkbox" checked={allSelected}
                            onChange={(e) => setSelectedIds(e.target.checked ? unmanaged.map((c) => c.id) : [])}
                            data-testid="ntp-select-all" />
-                    Tout cocher
+                    {t("dt.lbl_select_all")}
                   </label>
                   <button onClick={() => setPickerOpen(false)} className="text-muted-foreground hover:text-foreground">
                     <X size={14} />
@@ -344,7 +348,7 @@ function NtpCard({ admin }) {
                   <button onClick={applySelected} disabled={applying || selectedIds.length === 0} data-testid="ntp-apply-selected"
                           className="w-full flex items-center justify-center gap-2 px-3 py-1.5 bg-[#0044FF] text-white text-xs disabled:opacity-40">
                     {applying && <Loader2 size={13} className="animate-spin" />}
-                    Appliquer la config NTP ({selectedIds.length})
+                    {t("dt.btn_apply_config_prefix")} ({selectedIds.length})
                   </button>
                 </div>
               </div>
@@ -353,20 +357,20 @@ function NtpCard({ admin }) {
         )}
       </div>
       <p className="text-[11px] text-muted-foreground leading-relaxed mb-4">
-        Pour activer une caméra individuellement : Appareils → modifier la caméra (mode ONVIF) → "Définir comme serveur de temps".
+        {t("dt.hint_enable_single_camera")}
       </p>
 
       {admin && upstream !== null && (
         <div className="border-t border-border pt-4">
-          <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Serveur NTP amont</label>
+          <label className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{t("dt.lbl_ntp_upstream")}</label>
           <p className="text-[11px] text-muted-foreground leading-relaxed mb-2">
-            MG-VMS se synchronise sur ce serveur avant de diffuser l'heure aux caméras. Vide = pool Debian par défaut.
+            {t("dt.ntp_upstream_hint")}
           </p>
           <div className="flex gap-2">
-            <input value={upstream} onChange={(e) => setUpstream(e.target.value)} placeholder="ex. pool.ntp.org ou 192.168.1.1" data-testid="ntp-upstream-input"
+            <input value={upstream} onChange={(e) => setUpstream(e.target.value)} placeholder={t("dt.ph_ntp_upstream_example")} data-testid="ntp-upstream-input"
                    className="flex-1 px-3 py-2 bg-background border border-input outline-none mono text-sm focus:border-[#0044FF]" />
             <button onClick={saveUpstream} disabled={savingUpstream} data-testid="ntp-upstream-save" className="flex items-center gap-2 px-4 py-2 bg-[#0044FF] text-white text-sm shrink-0">
-              {savingUpstream && <Loader2 size={14} className="animate-spin" />}<Save size={14} /> Enregistrer
+              {savingUpstream && <Loader2 size={14} className="animate-spin" />}<Save size={14} /> {t("common.save")}
             </button>
           </div>
         </div>
