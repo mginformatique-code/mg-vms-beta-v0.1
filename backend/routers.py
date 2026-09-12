@@ -3,6 +3,7 @@ import re
 import uuid
 import asyncio
 import io
+import shutil
 import csv
 import base64
 import logging
@@ -2571,37 +2572,78 @@ def _export_slug(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]+", "_", name or "camera").strip("_") or "camera"
 
 
+async def _probe_video_codec(path: str) -> Optional[str]:
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=codec_name", "-of", "default=noprint_wrappers=1:nokey=1", path,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await proc.communicate()
+        name = out.decode().strip().lower()
+        return name or None
+    except Exception:
+        return None
+
+
 async def _assemble_camera_clip(cam: dict, segs: list, codec: str, out_dir: str) -> Optional[dict]:
     """Concatène les segments d'UNE caméra en un seul MP4 (même logique que
     l'assemblage FFmpeg déjà existant, réutilisée par caméra pour l'export
-    multi-caméras v3.74). `codec=h265` réencode réellement (libx265,
-    confirmé disponible dans l'image) ; `h264` reste une copie sans
-    réencodage (rapide, comportement historique inchangé)."""
+    multi-caméras v3.74).
+
+    v3.75 · Deux bugs distincts trouvés en vérification RÉELLE (pas supposés) :
+    1) Une copie brute (`-c copy`) quand la source n'est pas déjà dans le
+       codec demandé ne convertit rien (demander "H.264" sur une caméra
+       HEVC ne faisait que copier le flux HEVC tel quel, étiqueté H.264 à
+       tort) — corrigé en vérifiant le codec RÉEL de la source au lieu de
+       supposer qu'elle correspond à la demande.
+    2) Concaténer PLUSIEURS segments par simple copie peut donner une
+       durée totale aberrante dans le conteneur de sortie sur certaines
+       caméras (constaté : ~15h annoncées pour ~33 min réelles, sur une
+       caméra à déclenchement mouvement avec un débit d'images très
+       irrégulier — le PTS interne du flux source n'est pas réinitialisé
+       proprement à chaque segment). Un réencodage régénère des timestamps
+       propres et corrige ça de façon fiable (testé et confirmé sur le cas
+       réel) — la copie sans réencodage n'est donc conservée QUE pour le
+       cas trivial d'un seul segment déjà dans le bon codec (aucune
+       concaténation, donc aucun risque)."""
     files = [s.get("file_path") for s in segs if s.get("file_path") and os.path.exists(s.get("file_path", ""))]
     if not files:
         return None
     slug = _export_slug(cam.get("name"))
     out_path = os.path.join(out_dir, f"{slug}.mp4")
-    list_path = os.path.join(out_dir, f"{slug}.txt")
-    with open(list_path, "w") as lf:
-        lf.write("\n".join(f"file '{f}'" for f in files))
-    if codec == "h265":
-        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", list_path,
-               "-c:v", "libx265", "-preset", "fast", "-crf", "28", "-c:a", "copy", out_path]
+
+    wants_h265 = codec == "h265"
+    source_codec = await _probe_video_codec(files[0])
+    source_is_h265 = source_codec in ("hevc", "h265")
+    source_is_h264 = source_codec in ("h264", "avc1")
+    codec_already_matches = (wants_h265 and source_is_h265) or (not wants_h265 and source_is_h264)
+
+    if len(files) == 1 and codec_already_matches:
+        shutil.copyfile(files[0], out_path)
+        if not os.path.exists(out_path):
+            return None
     else:
-        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", list_path,
-               "-c", "copy", out_path]
-    proc = await asyncio.create_subprocess_exec(*cmd)
-    await proc.wait()
-    os.unlink(list_path)
-    if proc.returncode != 0 or not os.path.exists(out_path):
-        return None
+        list_path = os.path.join(out_dir, f"{slug}.txt")
+        with open(list_path, "w") as lf:
+            lf.write("\n".join(f"file '{f}'" for f in files))
+        target_codec = "libx265" if wants_h265 else "libx264"
+        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-fflags", "+genpts",
+               "-f", "concat", "-safe", "0", "-i", list_path,
+               "-avoid_negative_ts", "make_zero", "-vsync", "vfr", "-max_muxing_queue_size", "4096",
+               "-c:v", target_codec, "-preset", "fast", "-crf", "28", "-c:a", "aac", out_path]
+        proc = await asyncio.create_subprocess_exec(*cmd)
+        await proc.wait()
+        os.unlink(list_path)
+        if proc.returncode != 0 or not os.path.exists(out_path):
+            return None
+
     duration_sec = int(sum(
         (datetime.fromisoformat(s["end"]) - datetime.fromisoformat(s["start"])).total_seconds() for s in segs
     ))
     return {
         "filename": f"{slug}.mp4", "size_mb": round(os.path.getsize(out_path) / 1e6, 1),
-        "duration_sec": duration_sec, "segment_count": len(segs),
+        "duration_sec": duration_sec, "segment_count": len(segs), "codec": codec,
     }
 
 
@@ -2751,7 +2793,7 @@ async def download_export(export_id: str, user: dict = Depends(require_permissio
             "site_name": c.get("site_name", ""), "file": f"../VIDEO/{filename}",
             "duration_label": _duration_label(c.get("duration_sec")),
             "duration_sec": c.get("duration_sec", 0), "size_mb": c.get("size_mb", 0),
-            "codec": (exp.get("codec") or "h264").upper(),
+            "codec": (c.get("codec") or exp.get("codec") or "h264").upper(),
         })
 
     export_json = {

@@ -3,6 +3,13 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.75-export-codec-duration-fix] — 2026-09-12 — Correctif export vidéo : codec réel + durée aberrante
+
+### Fixed
+- **Le codec annoncé (H.264) pouvait ne pas correspondre au contenu réel du fichier exporté** : demander "H.264" sur une caméra qui enregistre en HEVC ne convertissait rien (simple copie du flux d'origine, juste étiqueté H.264 à tort). Corrigé : le codec réel de la source est désormais vérifié avant de décider copie ou réencodage.
+- **Durée totale aberrante dans les exports multi-segments** (constaté en conditions réelles sur une caméra à déclenchement mouvement : ~15h annoncées pour ~33 min de contenu réel) — une concaténation par simple copie de segments à débit d'images irrégulier corrompait les métadonnées de durée du conteneur de sortie. Corrigé : dès qu'un export concatène plusieurs segments, un réencodage (avec régénération propre des timestamps) est désormais systématique — la copie rapide sans réencodage n'est conservée que pour le cas trivial d'un export ne portant que sur un seul segment déjà dans le bon codec.
+- Les deux correctifs ont été vérifiés directement sur la caméra réelle ayant révélé le problème (avant/après comparés via ffprobe).
+
 ## [v3.74-export-wizard-mgvms-player] — 2026-09-12 — Gros chantier Export vidéo : assistant multi-étapes + MG-VMS Player (1ʳᵉ tranche)
 
 ### Added
