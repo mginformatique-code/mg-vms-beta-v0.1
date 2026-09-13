@@ -3,6 +3,15 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.92-mobile-refinements] — 2026-09-13 — Interface mobile : logo sur la connexion, HD/SD, densité de grille, menu complet
+
+### Fixed
+- La page de connexion n'affichait aucun logo sur téléphone (il vivait uniquement dans le panneau décoratif desktop, invisible en dessous de 1024px) — nouvelle page de connexion dédiée mobile avec le logo bien visible.
+
+### Added
+- Vue live mobile : bouton HD/SD explicite (au lieu d'une qualité forcée), sélecteur de densité de grille 4/8/16 caméras avec pagination, logo dans la barre d'outils.
+- Onglet "Plus" : ajout de l'accès à l'intégralité des menus de l'application (pas seulement les réglages rapides) — un écran non encore optimisé mobile s'ouvre dans sa version complète plutôt que d'être inaccessible.
+
 ## [v3.91-mobile-interface] — 2026-09-13 — Nouvelle interface mobile web dédiée (remplace le projet d'appli native)
 
 ### Added
