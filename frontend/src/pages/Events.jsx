@@ -43,12 +43,16 @@ const TYPE_LABEL_KEYS = {
   "alert.critical": "events.type_alert_critical",
   "alert.warning": "events.type_alert_warning",
 };
-function eventTypeLabel(type, t) {
+// v3.94 · Exportés pour réutilisation par MobileEvents.jsx — une seule
+// source de vérité pour la taxonomie des types d'événements (une copie
+// locale devinée avait des clés fausses, ex. "motion"/"plate" au lieu des
+// vrais libellés français "Mouvement"/pas de type "plate" du tout).
+export function eventTypeLabel(type, t) {
   const key = TYPE_LABEL_KEYS[type];
   if (key) return t(key);
   return String(type || "").replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
-function eventTypeColor(type) {
+export function eventTypeColor(type) {
   return TYPE_COLORS[type] || PLUGIN_TYPE_COLORS[type] || "#0044FF";
 }
 
@@ -90,7 +94,7 @@ function pickPrimary(members) {
 // mélangés ». Le chip « Véhicules » (filtre événements par type) reste
 // séparé, inchangé — il complète toujours les autres filtres par type
 // (Personnes, Camions...), qui eux gardent le flux événements classique.
-const FILTERS = [
+export const FILTERS = [
   { id: "tous",       labelKey: "events.filter_vehicle_info", icon: CreditCard, types: null },
   { id: "vehicules",  labelKey: "events.filter_vehicles",     icon: Car,        types: ["Voiture", "Camion", "Bus", "Moto"] },
   { id: "personnes",  labelKey: "events.filter_persons",      icon: User,       types: ["Personne"] },

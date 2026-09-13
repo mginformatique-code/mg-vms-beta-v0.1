@@ -116,7 +116,73 @@ function AppRoutes() {
       <Route path="/m/live" element={<MobileProtected><MobileLive /></MobileProtected>} />
       <Route path="/m/events" element={<MobileProtected><MobileEvents /></MobileProtected>} />
       <Route path="/m/cameras" element={<MobileProtected><MobileCameras /></MobileProtected>} />
+      {/* v3.94 · Réutilise CameraCenter.jsx tel quel (13 onglets, demande
+          explicite) — rendu adapté à `basePath` interne pour ses
+          navigations précédent/suivant/retour, voir CameraCenter.jsx. */}
+      <Route path="/m/cameras/:cameraId" element={<MobileProtected><CameraCenter /></MobileProtected>} />
+      {/* v3.94 · Recherche d'enregistrements pour une caméra précise
+          (bouton ajouté à côté du pavé PTZ en vue live) — réutilise
+          Recordings.jsx tel quel, qui lit déjà `?camera=` lui-même. */}
+      <Route path="/m/recordings" element={<MobileProtected><Recordings /></MobileProtected>} />
       <Route path="/m/more" element={<MobileProtected><MobileMore /></MobileProtected>} />
+
+      {/* v3.94 · "toutes les pages compatibles avec mobile" (demande
+          explicite) — plutôt que de réécrire chaque page une par une
+          (55 routes), chaque page desktop existante est montée ICI sous
+          le shell mobile (barre basse) au lieu du shell desktop (sidebar) :
+          même contenu, même logique, réutilisés tels quels — SEULE la
+          coquille de navigation change. C'est ce qui rend l'app
+          "mobile-only" de bout en bout : plus aucun lien du menu "Plus" ne
+          fait sortir du shell mobile. L'OPTIMISATION visuelle fine de
+          chaque page (comme les 2 correctifs déjà faits sur CameraCenter :
+          onglets défilables, tableau avec overflow-x-auto) reste un travail
+          incrémental — cette étape garantit que rien n'est INACCESSIBLE ou
+          n'éjecte du shell mobile, pas que chaque page est déjà idéale sur
+          375px. */}
+      <Route path="/m/dashboard" element={<MobileProtected><Dashboard /></MobileProtected>} />
+      <Route path="/m/network" element={<MobileProtected><Network /></MobileProtected>} />
+      <Route path="/m/reports" element={<MobileProtected><Reports /></MobileProtected>} />
+      <Route path="/m/hardware" element={<MobileProtected><Hardware /></MobileProtected>} />
+      <Route path="/m/sites" element={<MobileProtected><Sites /></MobileProtected>} />
+      {/* v3.94 · "Appareils" (CRUD/ajout caméra) — chemin distinct de
+          `/m/cameras` (déjà pris par la liste de statut mobile dédiée),
+          voir MOBILE_PATH_OVERRIDES dans MobileMore.jsx. */}
+      <Route path="/m/camera-devices" element={<MobileProtected><Cameras /></MobileProtected>} />
+      <Route path="/m/map" element={<MobileProtected><MapCenter /></MobileProtected>} />
+      <Route path="/m/security-center" element={<MobileProtected><SecurityCenter /></MobileProtected>} />
+      <Route path="/m/network/tls" element={<MobileProtected><TlsSettings /></MobileProtected>} />
+      <Route path="/m/network/config" element={<MobileProtected><NetworkConfig /></MobileProtected>} />
+      <Route path="/m/security-center/mfa" element={<MobileProtected><MfaCenter /></MobileProtected>} />
+      <Route path="/m/security-center/sessions" element={<MobileProtected><SessionsCenter /></MobileProtected>} />
+      <Route path="/m/security-center/rbac" element={<MobileProtected><RbacCenter /></MobileProtected>} />
+      <Route path="/m/smart-zones" element={<MobileProtected><SmartZones /></MobileProtected>} />
+      <Route path="/m/workflows" element={<MobileProtected><Workflows /></MobileProtected>} />
+      <Route path="/m/vehicles/search" element={<MobileProtected><VehicleSearch /></MobileProtected>} />
+      <Route path="/m/alerts" element={<MobileProtected><AiAlertsCenter /></MobileProtected>} />
+      <Route path="/m/audit" element={<MobileProtected><Audit /></MobileProtected>} />
+      <Route path="/m/diagnostics" element={<MobileProtected><Diagnostics /></MobileProtected>} />
+      <Route path="/m/diagnostics/dashboard" element={<MobileProtected><HealthDashboard /></MobileProtected>} />
+      <Route path="/m/diagnostics/pipeline-inspector" element={<MobileProtected><PipelineInspectorLive /></MobileProtected>} />
+      <Route path="/m/logs-systeme" element={<MobileProtected><SystemLogs /></MobileProtected>} />
+      <Route path="/m/logs-llm" element={<MobileProtected><LlmLogs /></MobileProtected>} />
+      <Route path="/m/gpu" element={<MobileProtected><GPUStatus /></MobileProtected>} />
+      <Route path="/m/anpr-benchmark" element={<MobileProtected><AnprBenchmark /></MobileProtected>} />
+      <Route path="/m/pipeline" element={<MobileProtected><PipelineVideo /></MobileProtected>} />
+      <Route path="/m/pipeline-monitor" element={<MobileProtected><AIPipelineMonitor /></MobileProtected>} />
+      <Route path="/m/pipeline-designer" element={<MobileProtected><PipelineDesigner /></MobileProtected>} />
+      <Route path="/m/pipeline-inspector" element={<MobileProtected><PipelineInspector /></MobileProtected>} />
+      <Route path="/m/pipeline-center" element={<MobileProtected><PipelineCenter /></MobileProtected>} />
+      <Route path="/m/camera-center" element={<MobileProtected><CameraCenterDispatch /></MobileProtected>} />
+      <Route path="/m/users" element={<MobileProtected><UsersPage /></MobileProtected>} />
+      <Route path="/m/notifications" element={<MobileProtected><Notifications /></MobileProtected>} />
+      <Route path="/m/llm-settings" element={<MobileProtected><LlmSettings /></MobileProtected>} />
+      <Route path="/m/blacklist-sources" element={<MobileProtected><BlacklistSources /></MobileProtected>} />
+      <Route path="/m/mgvms-center" element={<MobileProtected><MgvmsCenterSettings /></MobileProtected>} />
+      <Route path="/m/plugins" element={<MobileProtected><Plugins /></MobileProtected>} />
+      <Route path="/m/plugins/:pluginId" element={<MobileProtected><PluginPage /></MobileProtected>} />
+      <Route path="/m/settings" element={<MobileProtected><SettingsPage /></MobileProtected>} />
+      <Route path="/m/storage" element={<MobileProtected><SettingsPage /></MobileProtected>} />
+      <Route path="/m/date-heure" element={<MobileProtected><DateHeurePage /></MobileProtected>} />
       <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
       <Route path="/welcome" element={<Protected><WelcomeCenter /></Protected>} />
       <Route path="/live" element={<Protected><LiveView /></Protected>} />

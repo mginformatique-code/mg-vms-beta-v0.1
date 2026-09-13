@@ -1,11 +1,14 @@
 /**
  * MobileCameras — liste de statut des caméras (v3.91, interface mobile).
- * Tap → ouvre MobileLive centrée sur cette caméra (pas de configuration
- * ici, réglages avancés = desktop uniquement, voir le plan).
  *
  * v3.93 · Peut être filtrée à un site (arrivée depuis MobileHome, tap sur
  * un site) — via `location.state.siteId`/`siteName`, mêmes conventions que
  * `cameraId` déjà utilisé par MobileLive.
+ *
+ * v3.94 · Tap → ouvre désormais `/m/cameras/:id` (CameraCenter réutilisé
+ * tel quel, TOUS ses onglets — demande explicite) au lieu de MobileLive :
+ * cet onglet sert à GÉRER une caméra précise (PTZ, audio, réglages), la
+ * vue live "regarder plusieurs caméras" reste l'onglet Live séparé.
  */
 import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -50,7 +53,7 @@ export default function MobileCameras() {
       )}
       <div className="p-2 flex flex-col gap-1.5">
         {shown.map((cam) => (
-          <button key={cam.id} onClick={() => navigate("/m/live", { state: { cameraId: cam.id } })}
+          <button key={cam.id} onClick={() => navigate(`/m/cameras/${cam.id}`)}
                   data-testid="mobile-camera-row"
                   className="flex items-center gap-3 border border-border bg-card p-2.5 text-left">
             <div className="w-9 h-9 shrink-0 flex items-center justify-center bg-secondary">

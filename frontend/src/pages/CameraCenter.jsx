@@ -13,7 +13,7 @@
  *   Toujours lire depuis GET /api/devices/{id}/capabilities.
  */
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams, useNavigate } from "react-router-dom";
+import { useParams, useSearchParams, useNavigate, useLocation } from "react-router-dom";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -62,6 +62,13 @@ export default function CameraCenter() {
   const { t } = useApp();
   const { cameraId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  // v3.94 · Cette page est désormais aussi montée sous `/m/cameras/:id`
+  // (onglet Caméras mobile, tous les onglets réutilisés tels quels) —
+  // les navigations internes (précédent/suivant/retour) doivent rester
+  // dans le même arbre de routes, sinon elles éjectent l'utilisateur du
+  // shell mobile vers le shell desktop en pleine navigation.
+  const basePath = location.pathname.startsWith("/m/") ? "/m/cameras" : "/camera-center";
   const [params, setParams] = useSearchParams();
   const tab = params.get("tab") || "overview";
   const setTab = (t) => setParams({ tab: t });
@@ -80,14 +87,14 @@ export default function CameraCenter() {
       nextId: idx < allCams.length - 1 ? allCams[idx + 1].id : null,
     };
   }, [allCams, cameraId]);
-  const go = (id) => id && navigate(`/camera-center/${id}?tab=${tab}`);
+  const go = (id) => id && navigate(`${basePath}/${id}?tab=${tab}`);
 
   return (
     <div data-testid="camera-center">
       <div className="p-6 space-y-4">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" onClick={() => navigate("/camera-center")}
+            <Button variant="ghost" size="sm" onClick={() => navigate(basePath)}
                     data-testid="back-to-cameras">
               <ArrowLeft className="w-4 h-4 mr-1" />{t("camc.back_to_list")}
             </Button>
@@ -162,10 +169,16 @@ export default function CameraCenter() {
       )}
 
       <Tabs value={tab} onValueChange={setTab} className="space-y-4">
-        <TabsList className="flex flex-wrap h-auto justify-start"
+        {/* v3.94 · `overflow-x-auto` remplace `flex-wrap` — 13 onglets en
+            flex-wrap sautaient sur plusieurs lignes avant même d'atteindre
+            le contenu sur un écran étroit (mobile). Un défilement horizontal
+            est strictement mieux dans les deux cas (desktop : n'a jamais
+            besoin de scroller, la largeur suffit déjà) — aucune régression
+            visuelle attendue là où ça tenait déjà sur une ligne. */}
+        <TabsList className="flex h-auto justify-start overflow-x-auto flex-nowrap"
                   data-testid="camera-center-tabs">
           {TABS.map(({ id, label, icon: Icon }) => (
-            <TabsTrigger key={id} value={id} data-testid={`cam-tab-${id}`} className="gap-2">
+            <TabsTrigger key={id} value={id} data-testid={`cam-tab-${id}`} className="gap-2 shrink-0">
               <Icon className="w-4 h-4" />
               {TAB_LABEL_KEYS[id] ? t(TAB_LABEL_KEYS[id]) : label}
             </TabsTrigger>
@@ -428,6 +441,10 @@ function StreamsTab({ cameraId }) {
   }, [cameraId]);
   return (
     <Card className="p-4" data-testid="cam-streams">
+      {/* v3.94 · `overflow-x-auto` — 5 colonnes dont une URL RTSP complète
+          débordaient sans aucun scroll horizontal sur un écran étroit
+          (mobile). Sans effet sur desktop, déjà assez large. */}
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="text-left text-muted-foreground">
           <tr><th>{t("common.name")}</th><th>{t("cam.resolution")}</th><th>FPS</th><th>Codec</th><th>URL</th></tr>
@@ -449,6 +466,7 @@ function StreamsTab({ cameraId }) {
           )}
         </tbody>
       </table>
+      </div>
     </Card>
   );
 }
@@ -1322,12 +1340,21 @@ function PTZTab({ cameraId, caps }) {
   // sans jamais l'arrêter, obligeant à cliquer "■" à chaque fois. Bascule
   // en "maintenir pour tourner" (appui = démarre, relâchement = stoppe),
   // le comportement attendu d'un joystick PTZ.
+  // v3.94 · `onTouchCancel` ajouté — sans lui, un léger mouvement du doigt
+  // pendant l'appui (ou le navigateur qui requalifie le geste en scroll)
+  // fait émettre `touchcancel` au lieu de `touchend`, jamais géré ici :
+  // `move("stop")` n'était alors jamais envoyé et la caméra continuait de
+  // tourner indéfiniment (signalé en usage réel sur mobile, où cet onglet
+  // est désormais aussi utilisé). `touchAction: none` réduit en plus le
+  // risque que le geste soit requalifié en scroll par le navigateur.
   const holdMove = (direction) => ({
     onMouseDown: (e) => { e.preventDefault(); move(direction); },
     onMouseUp: () => move("stop"),
     onMouseLeave: () => move("stop"),
     onTouchStart: (e) => { e.preventDefault(); move(direction); },
     onTouchEnd: () => move("stop"),
+    onTouchCancel: () => move("stop"),
+    style: { touchAction: "none" },
   });
   const zoom = (value) =>
     api.post(`/devices/${cameraId}/ptz/zoom`, { value })

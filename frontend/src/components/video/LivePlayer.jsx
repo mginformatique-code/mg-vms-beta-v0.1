@@ -20,7 +20,7 @@ function mjpegUrl(cameraId, hd) {
  * renvoyé par le backend + un bouton explicite pour basculer sur MJPEG.
  * Le badge reflète TOUJOURS la source réellement active — jamais un mensonge.
  */
-export default function LivePlayer({ camera, hd = false, className = "", dataTestId = "live-player" }) {
+export default function LivePlayer({ camera, hd = false, className = "", dataTestId = "live-player", bigMute = false }) {
   const videoRef = useRef(null);
   const pcRef = useRef(null);
   const [mode, setMode] = useState("connecting"); // "connecting" | "webrtc" | "mjpeg" | "error"
@@ -239,13 +239,22 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
         // v3.35 · Remonté de bottom-2 à bottom-7 : chevauchait l'horodatage
         // du bandeau de pied de tuile (Feed, LiveView.jsx, absolute bottom-0
         // inset-x-0) — signalé avec capture (icône micro par-dessus l'heure).
+        // v3.94 · `bigMute` (mobile uniquement, vue plein écran) : le bouton
+        // 13px/24px par défaut est pensé pour une mosaïque desktop dense —
+        // sur téléphone, en plein écran, il passait inaperçu (signalé
+        // "j'ai l'impression de ne pas avoir de son" — en réalité coupé par
+        // défaut, comme l'exige l'autoplay navigateur, bouton juste trop
+        // discret pour être remarqué). Repli par défaut inchangé (desktop).
         <button
           onClick={(e) => { e.stopPropagation(); setMuted((m) => !m); }}
-          className="absolute bottom-7 right-2 z-10 p-1 bg-black/60 hover:bg-black/80 text-white/90 border border-white/20"
+          className={bigMute
+            ? "absolute bottom-3 right-3 z-10 flex items-center gap-1.5 px-3 py-2 bg-black/70 hover:bg-black/85 text-white border border-white/25"
+            : "absolute bottom-7 right-2 z-10 p-1 bg-black/60 hover:bg-black/80 text-white/90 border border-white/20"}
           title={muted ? "Activer le son" : "Couper le son"}
           data-testid={`${dataTestId}-mute-btn`}
         >
-          {muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+          {muted ? <VolumeX size={bigMute ? 20 : 13} /> : <Volume2 size={bigMute ? 20 : 13} />}
+          {bigMute && <span className="text-xs">{muted ? "Son coupé" : "Son actif"}</span>}
         </button>
       )}
     </div>

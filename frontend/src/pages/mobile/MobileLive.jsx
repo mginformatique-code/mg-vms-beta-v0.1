@@ -16,7 +16,7 @@
  * visibles, sans changement de code du composant lui-même).
  */
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import useDeviceCapabilities from "@/hooks/useDeviceCapabilities";
@@ -24,7 +24,7 @@ import LivePlayer from "@/components/video/LivePlayer";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import PtzPad from "@/components/mobile/PtzPad";
 import Logo from "@/components/Logo";
-import { ChevronLeft, ChevronRight, Grid2x2, Grid3x3, LayoutGrid, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Grid2x2, Grid3x3, LayoutGrid, Loader2, Film } from "lucide-react";
 
 const SWIPE_THRESHOLD_PX = 50;
 // v3.92 · Densités de mosaïque proposées (demande explicite : "choisir
@@ -41,6 +41,7 @@ function StatusDot({ online }) {
 export default function MobileLive() {
   const { t } = useApp();
   const location = useLocation();
+  const navigate = useNavigate();
   const [cams, setCams] = useState(null);
   const [idx, setIdx] = useState(0);
   const [hd, setHd] = useState(true);
@@ -208,7 +209,7 @@ export default function MobileLive() {
     <div className="h-full flex flex-col" data-testid="mobile-live-single">
       {toolbar}
       <div className="relative flex-1 bg-black" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-        <LivePlayer camera={cam} hd={hd} className="w-full h-full" dataTestId="mobile-live-player" />
+        <LivePlayer camera={cam} hd={hd} bigMute className="w-full h-full" dataTestId="mobile-live-player" />
         <CameraControlOverlay cam={cam} />
         {cams.length > 1 && (
           <>
@@ -226,11 +227,21 @@ export default function MobileLive() {
           {cam.name}
         </div>
       </div>
-      {caps?.ptz && (
-        <div className="shrink-0 flex justify-center py-2 border-t border-border bg-card">
-          <PtzPad cameraId={cam.id} />
-        </div>
-      )}
+      {/* v3.94 · Bouton "Enregistrements" à côté du pavé PTZ (demande
+          explicite : "tu ajoutes à droite ou à gauche ... la recherche
+          d'enregistrement de la caméra en question") — réutilise
+          Recordings.jsx tel quel via `/m/recordings?camera=`, qu'il lit
+          déjà lui-même (aucune modification nécessaire). Affiché même sans
+          PTZ (une caméra fixe a aussi des enregistrements à consulter). */}
+      <div className="shrink-0 flex items-center justify-center gap-3 py-2 border-t border-border bg-card">
+        {caps?.ptz && <PtzPad cameraId={cam.id} />}
+        <button onClick={() => navigate(`/m/recordings?camera=${cam.id}`)}
+                data-testid="mobile-live-recordings-btn"
+                className="w-11 h-11 flex flex-col items-center justify-center gap-0.5 bg-black/60 text-white">
+          <Film size={16} />
+          <span className="text-[8px] uppercase">{t("mobile.live_recordings")}</span>
+        </button>
+      </div>
     </div>
   );
 }

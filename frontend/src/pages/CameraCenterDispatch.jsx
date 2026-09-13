@@ -19,7 +19,7 @@
  * capacités…) — corrigé le 31/08 (renvoyait vers Appareils par erreur).
  */
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import api from "@/lib/api";
 import { Wifi, WifiOff, ScanLine, Search, Volume2, Mic, Flashlight, Move, CircleDot, MemoryStick } from "lucide-react";
 import { useApp } from "@/context/AppContext";
@@ -38,6 +38,11 @@ const SORT_OPTIONS = [
 export default function CameraCenterDispatch() {
   const { t } = useApp();
   const navigate = useNavigate();
+  const location = useLocation();
+  // v3.94 · Montée aussi sous /m/camera-center (menu "Plus" mobile) — la
+  // navigation vers une fiche caméra doit rester dans le même arbre de
+  // routes (voir le même correctif dans CameraCenter.jsx).
+  const basePath = location.pathname.startsWith("/m/") ? "/m/cameras" : "/camera-center";
   const [cams, setCams] = useState(null);
   const [q, setQ] = useState("");
   const [sortBy, setSortBy] = useState("name");
@@ -106,7 +111,7 @@ export default function CameraCenterDispatch() {
           const hasSdCard = !!caps.sdcard;
           const hasPtz = !!c.ptz_enabled;
           return (
-            <button key={c.id} onClick={() => navigate(`/camera-center/${c.id}`)} data-testid="camera-center-card"
+            <button key={c.id} onClick={() => navigate(`${basePath}/${c.id}`)} data-testid="camera-center-card"
                     className="text-left bg-card border border-border p-3 hover:border-[#0044FF] transition-colors">
               <div className="flex items-center justify-between gap-2 mb-1.5">
                 <span className="font-medium text-sm truncate">{c.name}</span>

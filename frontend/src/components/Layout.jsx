@@ -338,7 +338,10 @@ function MgvmsCenterStatusRow({ t }) {
   );
 }
 
-function AboutDialog({ open, onOpenChange, t, isAdmin, lang }) {
+// v3.94 · Exporté pour réutilisation par MobileMore.jsx — tap sur la carte
+// compte doit ouvrir la même chose que le menu utilisateur desktop
+// (À propos + Déconnexion), demande explicite.
+export function AboutDialog({ open, onOpenChange, t, isAdmin, lang }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-testid="about-dialog">
