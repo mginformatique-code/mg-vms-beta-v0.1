@@ -3,6 +3,16 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.87-fix-streams-detected-codec] — 2026-09-13 — Correctif : codec erroné affiché pour la plupart des caméras (confiance aveugle à l'auto-déclaration ONVIF)
+
+### Fixed
+- **Le codec affiché pour chaque flux caméra (onglet Streams) venait tel quel de la déclaration ONVIF de la caméra, jamais vérifié** — signalé par l'utilisateur, capture d'écran à l'appui : une caméra annonçait "h264" en ONVIF pour son flux principal alors qu'il s'agit réellement de HEVC (vérifié en direct, pas une donnée archivée). **14 caméras sur 16** du parc étaient concernées par cette même déclaration erronée. Corrigé à la racine : chaque flux est désormais vérifié par une vraie sonde technique à la création/re-découverte de la caméra, l'auto-déclaration de la caméra n'étant gardée qu'en tout dernier recours. Les données déjà en base ont été corrigées immédiatement (sans attendre une re-découverte manuelle de chaque caméra).
+
+## [v3.86-fix-timeline-overlap] — 2026-09-13 — Correctif : chevauchement timeline / boutons caméra en vue focus
+
+### Fixed
+- La frise chronologique (timeline) et la barre de boutons d'actions caméra se chevauchaient sur environ 20 pixels en vue focus (agrandie) — la barre de boutons avait été remontée à deux reprises par le passé sans que la position de la timeline soit recalculée en conséquence. Repositionnée avec une marge nette.
+
 ## [v3.85-reolink-tts-experimental] — 2026-09-13 — Plugin expérimental : TTS natif Reolink (protocole Baichuan) — non confirmé
 
 ### Added
