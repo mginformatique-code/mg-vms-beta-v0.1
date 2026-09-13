@@ -3,6 +3,13 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.91-mobile-interface] — 2026-09-13 — Nouvelle interface mobile web dédiée (remplace le projet d'appli native)
+
+### Added
+- **MG-VMS n'avait jusqu'ici aucune gestion mobile** (confirmé : aucune media query, sidebar fixe occupant l'écran en permanence) — signalé par l'utilisateur avec captures d'écran depuis un iPhone montrant le menu poussant tout le contenu hors champ. Plutôt qu'un simple rendu "responsive" des pages desktop existantes — la majorité des 55 écrans de l'application sont des outils d'administration/technicien jamais consultés depuis un téléphone —, une **interface mobile dédiée** a été construite : navigation basse à 4 onglets (Live / Événements / Caméras / Plus), vue live plein écran caméra par caméra (balayage tactile entre caméras, pas une grille dense illisible sur petit écran), contrôles rapides (lumière, infrarouge, sirène, message vocal, PTZ) toujours visibles et utilisables au doigt.
+- La bascule entre l'interface mobile et l'interface complète (bureau) est automatique selon la taille d'écran, et peut être forcée manuellement dans les deux sens (mémorisée pour les visites suivantes).
+- Ce chantier remplace le projet d'application mobile native (Expo) resté au stade exploratoire — l'effort se concentre désormais sur cette interface web, accessible immédiatement sans installation.
+
 ## [v3.90-live-hd-transcode] — 2026-09-13 — Vue live HD réelle sur caméras HEVC (transcodage temps réel), au lieu du repli silencieux vers le sous-flux SD
 
 ### Added
