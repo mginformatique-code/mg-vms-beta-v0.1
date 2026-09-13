@@ -3,6 +3,21 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.94-mobile-full-coverage] — 2026-09-13 — Interface mobile : Caméras = Centre caméras complet, correctifs PTZ/audio/événements, toutes les pages accessibles
+
+### Fixed
+- **PTZ mobile qui "bouge sans s'arrêter"** : le relâchement du bouton n'était pas toujours détecté (le navigateur émet parfois `touchcancel` au lieu de `touchend` quand le doigt bouge légèrement pendant l'appui) — corrigé, y compris dans l'onglet PTZ du Centre caméras desktop qui avait le même défaut latent.
+- **Zoom manquant** sur le pavé PTZ rapide de la vue live mobile — ajouté.
+- **Son de la vue live "absent"** : le lecteur démarre volontairement coupé (contrainte des navigateurs), mais le bouton pour l'activer était minuscule et passait inaperçu en plein écran mobile — rendu bien plus visible.
+- **Détail d'un événement trop pauvre** : charge désormais la fiche complète (comme le fait la visionneuse desktop) au lieu de se limiter à ce qui est déjà connu dans la liste.
+
+### Added
+- L'onglet Caméras ouvre maintenant la fiche technique complète d'une caméra (tous les onglets : réseau, flux, IA, PTZ, audio...), plus une simple liste de statut.
+- Bouton d'accès direct aux enregistrements d'une caméra depuis sa vue live.
+- L'onglet Événements englobe maintenant les plaques (ANPR) — section dédiée + mêmes filtres que la version bureau.
+- Dans "Plus", le compte utilisateur ouvre désormais À propos et Déconnexion (identique à la version bureau).
+- **Toutes les pages de l'application sont désormais accessibles depuis l'interface mobile** (menu "Plus") sans jamais quitter la présentation mobile — l'optimisation visuelle fine de chaque page reste un travail progressif, mais plus aucune fonctionnalité n'est hors de portée depuis un téléphone.
+
 ## [v3.93-mobile-reolink-style] — 2026-09-13 — Interface mobile : refonte façon app Reolink (référence utilisateur)
 
 ### Added
