@@ -3,6 +3,16 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.83-fix-ir-force-on] — 2026-09-13 — Correctif : bouton IR sans effet
+
+### Fixed
+- **Le bouton IR (forcer la vision nocturne) n'avait aucun effet**, signalé sur deux modèles de caméra différents (donc un bug de code, pas un souci matériel isolé). Root cause trouvée dans la librairie `reolink-aio` : sa méthode `set_ir_lights()` ne propose pas de "ON forcé" — elle bascule uniquement entre "Auto" et "Off". Le bouton "IR ON" ne faisait donc que repasser la caméra en mode Auto (souvent déjà son état en journée), sans jamais forcer l'infrarouge. Corrigé en envoyant directement la commande caméra native, qui elle supporte bien les 3 états (Marche forcée / Arrêt / Auto) — vérifié sur une caméra réelle : l'état brut de la caméra passe maintenant correctement à "On", "Off" et "Auto" selon la demande.
+
+## [v3.82-audio-commands-journal] — 2026-09-13 — Journal des commandes audio (TTS / Sirène)
+
+### Added
+- **Nouvel onglet "Commandes audio" dans Diagnostics** : chaque message TTS et déclenchement de sirène envoyé à une caméra est désormais journalisé (qui l'a demandé, pour quelle caméra, résultat OK ou code d'erreur précis) — remplace le silence total en cas d'échec par une trace exploitable. Un statut "OK" signifie que la commande a été acceptée par la caméra / go2rtc, pas nécessairement qu'elle a été réellement entendue (limite connue, voir le suivi TTS).
+
 ## [v3.81-fix-tts-piper-deps] — 2026-09-13 — Correctif critique : TTS totalement cassé depuis plusieurs versions
 
 ### Fixed
