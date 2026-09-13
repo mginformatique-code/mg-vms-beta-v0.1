@@ -10,6 +10,7 @@ import MobileLive from "@/pages/mobile/MobileLive";
 import MobileEvents from "@/pages/mobile/MobileEvents";
 import MobileCameras from "@/pages/mobile/MobileCameras";
 import MobileMore from "@/pages/mobile/MobileMore";
+import MobileLogin from "@/pages/mobile/MobileLogin";
 import Login from "@/pages/Login";
 import ResetPassword from "@/pages/ResetPassword";
 import SsoRedirect from "@/pages/SsoRedirect";
@@ -81,6 +82,15 @@ function MobileProtected({ children }) {
   return <MobileLayout>{children}</MobileLayout>;
 }
 
+// v3.92 · Page de connexion : `Login.jsx` place son logo UNIQUEMENT dans le
+// panneau de marque `hidden lg:flex` — invisible sur tout téléphone (bug
+// réel confirmé par capture d'écran). Pas d'auth requise ici, donc pas de
+// garde `user` — seule la détection viewport décide.
+function LoginRoute() {
+  const { isMobile } = useIsMobileViewport();
+  return isMobile ? <MobileLogin /> : <Login />;
+}
+
 // v3.91 · Racine `/` — seul point de bascule automatique mobile/desktop
 // (voir useIsMobileViewport : préférence persistée, "auto" par défaut suit
 // la largeur d'écran réelle). Les liens profonds existants (/dashboard,
@@ -97,7 +107,7 @@ function RootRoute() {
 function AppRoutes() {
   return (
     <Routes>
-      <Route path="/login" element={<Login />} />
+      <Route path="/login" element={<LoginRoute />} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/sso" element={<SsoRedirect />} />
       <Route path="/" element={<RootRoute />} />

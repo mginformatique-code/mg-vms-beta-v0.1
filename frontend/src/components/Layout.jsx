@@ -23,7 +23,10 @@ const PLUGIN_ICON = {
   parking: Car, thermal: Thermometer, radar: Radar, drone: Plane, mqtt: Radio, access_control: DoorOpen,
 };
 
-const NAV = [
+// v3.92 · Exporté pour réutilisation par MobileMore.jsx ("Plus" doit lister
+// tous les menus, demande explicite) — une seule source de vérité pour la
+// structure de navigation, desktop et mobile ne peuvent plus diverger.
+export const NAV = [
   { group: "nav.operations", items: [
     // Accueil avec vrai sous-menu (Welcome Center + Tableau de bord)
     { key: "nav.home", icon: LayoutDashboard, children: [

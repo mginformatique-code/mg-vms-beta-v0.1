@@ -1,12 +1,13 @@
 /**
- * MobileLive — vue live mobile (v3.91, interface mobile dédiée).
+ * MobileLive — vue live mobile (v3.91-v3.92, interface mobile dédiée).
  *
  * Contrairement à `LiveView.jsx` (mur vidéo desktop, grille dense 1-64
  * caméras), la vue par défaut ici est UNE caméra à la fois en plein écran
  * (navigation par flèches/swipe) — une grille 3×3/4×4 est illisible sur un
  * écran de 375px de large (confirmé par exploration : ~40-90px par tuile).
- * Un mode grille secondaire (2 colonnes max) reste disponible pour un aperçu
- * d'ensemble, tap → bascule en plein écran sur cette caméra.
+ * Un mode grille secondaire (densité 4/8/16, esprit "app Reolink" — demande
+ * explicite) reste disponible pour un aperçu d'ensemble, tap → bascule en
+ * plein écran sur cette caméra.
  *
  * Réutilise tel quel `LivePlayer.jsx` (aucune modification) et
  * `CameraControlOverlay.jsx` en mode par défaut (`visible=true`, pas
@@ -22,9 +23,15 @@ import useDeviceCapabilities from "@/hooks/useDeviceCapabilities";
 import LivePlayer from "@/components/video/LivePlayer";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import PtzPad from "@/components/mobile/PtzPad";
+import Logo from "@/components/Logo";
 import { ChevronLeft, ChevronRight, Grid2x2, Rows, Loader2 } from "lucide-react";
 
 const SWIPE_THRESHOLD_PX = 50;
+// v3.92 · Densités de mosaïque proposées (demande explicite : "choisir
+// 4-8-16 caméras") — 16 utilise 4 colonnes (tuiles volontairement petites,
+// esprit "app Reolink" : aperçu dense, on tape pour agrandir), 4/8 restent
+// à 2 colonnes (lisible en portrait).
+const GRID_SIZES = [4, 8, 16];
 
 function StatusDot({ online }) {
   return <span className={`inline-block w-1.5 h-1.5 rounded-full ${online ? "bg-[#00E676]" : "bg-muted-foreground"}`} />;
@@ -35,7 +42,10 @@ export default function MobileLive() {
   const location = useLocation();
   const [cams, setCams] = useState(null);
   const [idx, setIdx] = useState(0);
+  const [hd, setHd] = useState(true);
   const [view, setView] = useState("single"); // "single" | "grid"
+  const [gridSize, setGridSize] = useState(4);
+  const [page, setPage] = useState(0);
   const touchStartX = useRef(null);
   const { caps } = useDeviceCapabilities(cams?.[idx]?.id);
   // v3.91 · Arrivée depuis MobileCameras (tap sur une caméra précise) —
@@ -59,6 +69,10 @@ export default function MobileLive() {
     const iv = setInterval(load, 20000);
     return () => { alive = false; clearInterval(iv); };
   }, []);
+
+  // v3.92 · Revient à la 1ère page à chaque changement de densité — une
+  // page 2 calculée sur l'ancienne taille n'aurait plus de sens.
+  useEffect(() => { setPage(0); }, [gridSize]);
 
   const goPrev = useCallback(() => setIdx((i) => (cams?.length ? (i - 1 + cams.length) % cams.length : 0)), [cams]);
   const goNext = useCallback(() => setIdx((i) => (cams?.length ? (i + 1) % cams.length : 0)), [cams]);
@@ -88,16 +102,39 @@ export default function MobileLive() {
     );
   }
 
+  const totalPages = Math.max(1, Math.ceil(cams.length / gridSize));
+  const pageCams = cams.slice(page * gridSize, page * gridSize + gridSize);
+  const cols = gridSize === 16 ? 4 : 2;
+
   const toolbar = (
-    <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-card shrink-0">
-      <div className="text-xs truncate min-w-0">
-        {view === "single" ? `${idx + 1} / ${cams.length}` : `${cams.length} ${t("mobile.cameras_suffix")}`}
+    <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border bg-card shrink-0">
+      <div className="flex items-center gap-1.5 min-w-0">
+        <Logo size={18} className="w-[18px] h-[18px] shrink-0" />
+        <span className="text-xs truncate">
+          {view === "single" ? `${idx + 1} / ${cams.length}` : `${cams.length} ${t("mobile.cameras_suffix")}`}
+        </span>
       </div>
-      <button onClick={() => setView((v) => (v === "single" ? "grid" : "single"))}
-              data-testid="mobile-live-view-toggle"
-              className="p-1.5 text-muted-foreground hover:text-foreground">
-        {view === "single" ? <Grid2x2 size={18} /> : <Rows size={18} />}
-      </button>
+      <div className="flex items-center gap-1 shrink-0">
+        {view === "single" && (
+          <button onClick={() => setHd((v) => !v)} data-testid="mobile-live-hdsd-toggle"
+                  className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider border border-border text-muted-foreground">
+            {hd ? "HD" : "SD"}
+          </button>
+        )}
+        {view === "grid" && GRID_SIZES.map((n) => (
+          <button key={n} onClick={() => setGridSize(n)} data-testid={`mobile-live-gridsize-${n}`}
+                  className={`px-2 py-1 text-[10px] font-bold border ${
+                    gridSize === n ? "border-[#0044FF] text-[#0044FF]" : "border-border text-muted-foreground"
+                  }`}>
+            {n}
+          </button>
+        ))}
+        <button onClick={() => setView((v) => (v === "single" ? "grid" : "single"))}
+                data-testid="mobile-live-view-toggle"
+                className="p-1.5 text-muted-foreground hover:text-foreground">
+          {view === "single" ? <Grid2x2 size={18} /> : <Rows size={18} />}
+        </button>
+      </div>
     </div>
   );
 
@@ -105,18 +142,30 @@ export default function MobileLive() {
     return (
       <div className="h-full flex flex-col">
         {toolbar}
-        <div className="flex-1 overflow-y-auto grid grid-cols-2 gap-1 p-1 content-start">
-          {cams.map((cam, i) => (
-            <button key={cam.id} onClick={() => { setIdx(i); setView("single"); }}
-                    className="relative bg-black aspect-video overflow-hidden" data-testid="mobile-live-grid-tile">
-              <LivePlayer camera={cam} hd={false} className="w-full h-full" dataTestId={`mobile-grid-player-${i}`} />
-              <div className="absolute bottom-0 inset-x-0 px-1.5 py-1 bg-gradient-to-t from-black/80 to-transparent flex items-center gap-1">
-                <StatusDot online={cam.status === "online"} />
-                <span className="text-[10px] text-white truncate">{cam.name}</span>
-              </div>
-            </button>
-          ))}
+        <div className="flex-1 overflow-y-auto grid gap-1 p-1 content-start" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+          {pageCams.map((cam) => {
+            const i = cams.indexOf(cam);
+            return (
+              <button key={cam.id} onClick={() => { setIdx(i); setView("single"); }}
+                      className="relative bg-black aspect-video overflow-hidden" data-testid="mobile-live-grid-tile">
+                <LivePlayer camera={cam} hd={false} className="w-full h-full" dataTestId={`mobile-grid-player-${i}`} />
+                <div className="absolute bottom-0 inset-x-0 px-1.5 py-1 bg-gradient-to-t from-black/80 to-transparent flex items-center gap-1">
+                  <StatusDot online={cam.status === "online"} />
+                  <span className="text-[10px] text-white truncate">{cam.name}</span>
+                </div>
+              </button>
+            );
+          })}
         </div>
+        {totalPages > 1 && (
+          <div className="shrink-0 flex items-center justify-center gap-3 py-2 border-t border-border bg-card">
+            <button onClick={() => setPage((p) => (p - 1 + totalPages) % totalPages)} data-testid="mobile-live-grid-prev-page"
+                    className="p-1.5 text-muted-foreground"><ChevronLeft size={16} /></button>
+            <span className="text-xs mono text-muted-foreground">{page + 1} / {totalPages}</span>
+            <button onClick={() => setPage((p) => (p + 1) % totalPages)} data-testid="mobile-live-grid-next-page"
+                    className="p-1.5 text-muted-foreground"><ChevronRight size={16} /></button>
+          </div>
+        )}
       </div>
     );
   }
@@ -126,7 +175,7 @@ export default function MobileLive() {
     <div className="h-full flex flex-col" data-testid="mobile-live-single">
       {toolbar}
       <div className="relative flex-1 bg-black" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-        <LivePlayer camera={cam} hd className="w-full h-full" dataTestId="mobile-live-player" />
+        <LivePlayer camera={cam} hd={hd} className="w-full h-full" dataTestId="mobile-live-player" />
         <CameraControlOverlay cam={cam} />
         {cams.length > 1 && (
           <>

@@ -3039,6 +3039,7 @@ export const translations = {
     "mobile.more_theme_light": "Clair",
     "mobile.more_lang": "Langue",
     "mobile.more_switch_desktop": "Passer en vue complète (bureau)",
+    "mobile.more_all_menus": "Tous les menus",
   },
   en: {
     "app.name": "MG-VMS",
@@ -6080,5 +6081,6 @@ export const translations = {
     "mobile.more_theme_light": "Light",
     "mobile.more_lang": "Language",
     "mobile.more_switch_desktop": "Switch to full (desktop) view",
+    "mobile.more_all_menus": "All menus",
   },
 };
