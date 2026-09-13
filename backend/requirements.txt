@@ -152,6 +152,13 @@ pandas==3.0.3
 passlib==1.7.4
 pathspec==1.1.1
 pillow==10.4.0
+# v3.81 · piper-tts avait été installé à la main dans le conteneur lors du
+# chantier v3.59/v3.60 (jamais ajouté ici) — perdu au premier rebuild
+# d'image suivant, plugin tts-notifier passé silencieusement en
+# state=missing_dependency (confirmé dans les logs backend). Root cause
+# réelle du TTS "intermittent" : depuis ce rebuild, TOUTES les tentatives
+# échouaient, pas seulement une fraction.
+piper-tts==1.8.0
 platformdirs==4.10.0
 pluggy==1.6.0
 ply==3.11
