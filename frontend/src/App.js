@@ -4,6 +4,12 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AppProvider, useApp } from "@/context/AppContext";
 import { Toaster } from "@/components/ui/sonner";
 import Layout from "@/components/Layout";
+import useIsMobileViewport from "@/hooks/useIsMobileViewport";
+import MobileLayout from "@/components/mobile/MobileLayout";
+import MobileLive from "@/pages/mobile/MobileLive";
+import MobileEvents from "@/pages/mobile/MobileEvents";
+import MobileCameras from "@/pages/mobile/MobileCameras";
+import MobileMore from "@/pages/mobile/MobileMore";
 import Login from "@/pages/Login";
 import ResetPassword from "@/pages/ResetPassword";
 import SsoRedirect from "@/pages/SsoRedirect";
@@ -66,13 +72,39 @@ function Protected({ children }) {
   return <Layout>{children}</Layout>;
 }
 
+// v3.91 · Interface mobile dédiée — même garde d'auth que `Protected`, mais
+// coquille `MobileLayout` (barre basse) au lieu de la sidebar desktop.
+function MobileProtected({ children }) {
+  const { user } = useApp();
+  if (user === null) return <div className="h-screen flex items-center justify-center bg-background text-muted-foreground">Chargement...</div>;
+  if (!user) return <Navigate to="/login" replace />;
+  return <MobileLayout>{children}</MobileLayout>;
+}
+
+// v3.91 · Racine `/` — seul point de bascule automatique mobile/desktop
+// (voir useIsMobileViewport : préférence persistée, "auto" par défaut suit
+// la largeur d'écran réelle). Les liens profonds existants (/dashboard,
+// /events, etc.) restent desktop tels quels, jamais redirigés de force.
+function RootRoute() {
+  const { user } = useApp();
+  const { isMobile } = useIsMobileViewport();
+  if (user === null) return <div className="h-screen flex items-center justify-center bg-background text-muted-foreground">Chargement...</div>;
+  if (!user) return <Navigate to="/login" replace />;
+  if (isMobile) return <Navigate to="/m/live" replace />;
+  return <Layout><WelcomeCenter /></Layout>;
+}
+
 function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/sso" element={<SsoRedirect />} />
-      <Route path="/" element={<Protected><WelcomeCenter /></Protected>} />
+      <Route path="/" element={<RootRoute />} />
+      <Route path="/m/live" element={<MobileProtected><MobileLive /></MobileProtected>} />
+      <Route path="/m/events" element={<MobileProtected><MobileEvents /></MobileProtected>} />
+      <Route path="/m/cameras" element={<MobileProtected><MobileCameras /></MobileProtected>} />
+      <Route path="/m/more" element={<MobileProtected><MobileMore /></MobileProtected>} />
       <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
       <Route path="/welcome" element={<Protected><WelcomeCenter /></Protected>} />
       <Route path="/live" element={<Protected><LiveView /></Protected>} />
