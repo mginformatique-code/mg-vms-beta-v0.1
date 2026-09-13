@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "voice_model": {
+      "type": "string",
+      "title": "Voix (modèle Piper)",
+      "description": "Voix par défaut, téléchargée automatiquement au premier usage.",
+      "enum": ["fr_FR-siwis-medium", "fr_FR-upmc-medium"],
+      "enumNames": ["Voix féminine (Siwis)", "Voix masculine (UPMC)"],
+      "default": "fr_FR-siwis-medium"
+    },
+    "speech_rate": {
+      "type": "number",
+      "title": "Vitesse de parole",
+      "description": "1.0 = normal, 1.5 = 50% plus rapide, 0.7 = plus lent.",
+      "minimum": 0.5,
+      "maximum": 2.0,
+      "default": 1.0
+    }
+  },
+  "required": []
+}

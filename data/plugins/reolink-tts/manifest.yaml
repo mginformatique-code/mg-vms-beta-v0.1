@@ -1,0 +1,31 @@
+apiVersion: mgvms.io/v1
+kind: Plugin
+metadata:
+  name: reolink-tts
+  displayName: TTS natif Reolink (Baichuan) — EXPERIMENTAL, non confirmé
+  version: 1.0.0
+  description: "EXPERIMENTAL (13/09/2026) : diffuse un message texte sur le haut-parleur d'une caméra Reolink via synthèse vocale locale (Piper) et le protocole propriétaire Reolink (Baichuan, port 9000) — contourne go2rtc/ONVIF, utile en théorie pour les modèles dont le two-way audio n'est pas exposé en ONVIF standard (ex. RLC-1224A). Implémentation techniquement correcte et vérifiée (encodage ADPCM validé par test aller-retour, protocole accepté sans erreur par la caméra, format identique à un cas réel documenté publiquement comme fonctionnel) MAIS non confirmée audible sur le matériel réel testé (2 caméras, 2 modèles) — symptôme connu et non résolu publiquement pour cette famille de caméras (voir discussion Frigate/go2rtc #20029). Non routé automatiquement pour aucune caméra tant que non confirmé — voir le chantier 'Protocole propriétaire caméra pour l'audio bidirectionnel' sur docs.mg-vms.com."
+  author: MG Informatique
+  license: GPL-3.0-or-later
+  categories:
+    - notifications
+  providerGroup: notifications
+spec:
+  runtime: python
+  entrypoint: plugin.py
+  className: ReolinkTtsPlugin
+  interface: EventConsumer
+  compatibility:
+    mgvms: ">=3.84"
+  capabilities:
+    - event.read
+    - network.outbound
+  resources:
+    cpu: low
+    memory: low
+  dependencies:
+    python:
+      - piper-tts
+  config_schema: config/schema.json
+  bus:
+    order: 200
