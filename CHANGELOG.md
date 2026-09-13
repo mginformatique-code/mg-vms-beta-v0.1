@@ -3,6 +3,11 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.85-reolink-tts-experimental] — 2026-09-13 — Plugin expérimental : TTS natif Reolink (protocole Baichuan) — non confirmé
+
+### Added
+- **Nouveau plugin `reolink-tts` (expérimental, non activé par défaut)** : tentative de contourner la limite ONVIF/go2rtc pour le TTS sur les caméras Reolink dont le haut-parleur n'est pas exposé en standard (ex. RLC-1224A), en parlant directement le protocole propriétaire Reolink ("Baichuan", port 9000) — le même canal que la sirène/lumière/IR, déjà fonctionnel. Implémentation techniquement correcte et vérifiée (encodage audio validé par un test aller-retour, protocole accepté sans erreur par deux caméras réelles) mais **le son n'a pu être confirmé audible sur aucune des deux caméras testées**. Recherche approfondie : ce symptôme exact (audio techniquement envoyé, haut-parleur silencieux) est un problème connu et non résolu publiquement pour cette famille de caméras, y compris par la communauté go2rtc/Frigate. Le plugin reste dans le dépôt pour ne pas perdre le travail de reverse-engineering déjà fait, mais n'est routé automatiquement pour aucune caméra — n'affecte aucun comportement existant. Suite documentée dans le chantier dédié sur la page Chantiers.
+
 ## [v3.84-fix-audio-output-detect] — 2026-09-13 — Correctif : détection erronée du haut-parleur sur certaines caméras Reolink
 
 ### Fixed
