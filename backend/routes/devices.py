@@ -84,6 +84,11 @@ class SirenBody(BaseModel):
     duration: Optional[int] = Field(default=None, ge=1, le=600)
 
 
+class EncodingBody(BaseModel):
+    stream: str = Field(..., description="main|sub")
+    codec: str = Field(..., description="h264|h265")
+
+
 class PTZMoveBody(BaseModel):
     direction: str = Field(..., description="up|down|left|right|upleft|upright|downleft|downright|stop")
     speed: float = Field(default=0.5, ge=0.0, le=1.0)
@@ -401,6 +406,36 @@ async def device_siren(camera_id: str, body: SirenBody,
                 error_code=e.code, error_message=str(e),
             )
         raise _driver_error_response(e)
+
+
+@devices_router.put("/{camera_id}/encoding")
+async def device_set_encoding(camera_id: str, body: EncodingBody,
+                               user: dict = Depends(require_permission("manage_cameras"))):
+    """v3.89 · Change le codec vidéo (H.264 ↔ H.265) d'un flux caméra.
+
+    Modifie la caméra elle-même — s'applique donc uniformément à tout ce
+    qui consomme ce flux (vue live, enregistrement, pipeline IA), pas
+    seulement à MG-VMS. Redécouvre la caméra juste après pour que
+    `streams_detected` (onglet Streams) reflète immédiatement le nouveau
+    codec réel, vérifié par sonde — pas une supposition.
+    """
+    if body.stream not in ("main", "sub"):
+        raise HTTPException(400, "stream doit être 'main' ou 'sub'")
+    if body.codec not in ("h264", "h265"):
+        raise HTTPException(400, "codec doit être 'h264' ou 'h265'")
+    try:
+        drv = await svc.get_driver(camera_id)
+        await drv.set_video_encoding(stream=body.stream, codec=body.codec)
+    except CameraDriverError as e:
+        raise _driver_error_response(e)
+    await log_audit(user, "camera_encoding_changed", camera_id, f"{body.stream} → {body.codec}")
+    # Laisse le temps à la caméra d'appliquer le changement avant de re-sonder.
+    await asyncio.sleep(2.0)
+    try:
+        result = await svc.discover(camera_id)
+    except CameraDriverError:
+        result = None
+    return {"success": True, "stream": body.stream, "codec": body.codec, "rediscovered": result}
 
 
 @devices_router.post("/{camera_id}/audio/start")

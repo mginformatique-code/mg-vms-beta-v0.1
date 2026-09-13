@@ -119,6 +119,15 @@ class CameraDriver(ABC):
         self._require("siren")
         await self._set_siren(enabled=enabled, duration=duration)
 
+    async def set_video_encoding(self, stream: str, codec: str) -> None:
+        """Change le codec vidéo (h264/h265) d'un flux de la caméra elle-même
+        (v3.89) — modifie la source, donc s'applique uniformément à tout ce
+        qui consomme ce flux (vue live, enregistrement, pipeline IA)."""
+        self._require("video_encoding_control")
+        if codec not in ("h264", "h265"):
+            raise ValueError("codec doit être 'h264' ou 'h265'")
+        await self._set_video_encoding(stream=stream, codec=codec)
+
     async def get_auto_tracking(self) -> dict:
         """Suivi PTZ natif de la caméra (ex. "Auto Track" Reolink) — état
         actuel : {"enabled": bool, "method": str|None}. `method` reflète le
@@ -254,6 +263,9 @@ class CameraDriver(ABC):
 
     async def _set_siren(self, enabled: bool, duration: Optional[int]) -> None:
         raise UnsupportedCapabilityError("Sirène non implémentée par ce driver")
+
+    async def _set_video_encoding(self, stream: str, codec: str) -> None:
+        raise UnsupportedCapabilityError("Changement de codec non implémenté par ce driver")
 
     async def _start_audio(self) -> None:
         raise UnsupportedCapabilityError("Sortie audio non implémentée par ce driver")

@@ -138,6 +138,19 @@ class ReolinkDriver(ONVIFDriver):
         # repositionner ou désactiver l'incrustation date/heure/nom que la
         # caméra grave elle-même dans l'image.
         caps.osd = True
+        # v3.89 · GetEnc/SetEnc existe bien sur toutes les caméras Reolink,
+        # MAIS le champ `videoEncType` nécessaire pour changer le codec est
+        # ABSENT sur tout le parc testé (4 modèles différents, voir le
+        # commentaire détaillé sur `_encoding_field_available` plus bas) —
+        # limitation firmware confirmée, pas une question de commande
+        # supportée ou non. Vérifié explicitement ici (pas supposé "True")
+        # pour ne jamais proposer un contrôle qui échouera silencieusement,
+        # comme le faisait le bouton déjà présent dans l'UI avant ce
+        # correctif.
+        try:
+            caps.video_encoding_control = await self._encoding_field_available("main")
+        except Exception:
+            caps.video_encoding_control = False
 
         chn_caps: set = set()
         if self._host_api is not None:
@@ -265,6 +278,52 @@ class ReolinkDriver(ONVIFDriver):
             )
         except ApiError as e:
             raise CameraDriverError(f"Reolink SetSiren → {e}", code="device_error") from e
+
+    # ── Codec vidéo (H.264 ↔ H.265, v3.89) ──────────────────────────
+    # v3.89 · BUG CONFIRMÉ EN CONDITIONS RÉELLES : la réponse Baichuan
+    # GetEnc (cmd_id 56) de TOUTES les caméras testées de ce parc (4
+    # modèles différents : E1 Outdoor Pro, RLC-820A, RLC-1224A, RLC-81MA)
+    # n'expose AUCUN champ `videoEncType` dans ses éléments mainStream/
+    # subStream — uniquement résolution/bitrate/framerate/profil. Sans ce
+    # champ, `reolink-aio` (Host.set_encoding → Baichuan.SetEnc) NE FAIT
+    # RIEN silencieusement (aucune exception) : c'est la root cause du
+    # bouton de bascule H264/H265 déjà présent dans l'UI mais sans effet,
+    # signalé par l'utilisateur. Vérifié aussi côté ONVIF : la seule
+    # VideoEncoderConfiguration exposée correspond au sous-flux (déjà en
+    # H264, 640x360 fixe) — le flux principal n'est éditable par AUCUNE
+    # API sur ce firmware. Plutôt que de laisser un succès muet, cette
+    # limitation est maintenant détectée AVANT d'agir et remontée
+    # clairement — jamais de fausse confirmation de succès.
+    async def _encoding_field_available(self, stream: str) -> bool:
+        try:
+            xml_body = await self._host_api.baichuan.send(cmd_id=56, channel=_CHANNEL)
+        except Exception:
+            return False
+        try:
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(xml_body)
+            stream_el = root.find(f".//{stream}Stream")
+            return stream_el is not None and stream_el.find(".//videoEncType") is not None
+        except Exception:
+            return False
+
+    async def _set_video_encoding(self, stream: str, codec: str) -> None:
+        if stream not in ("main", "sub"):
+            raise CameraDriverError(f"Flux inconnu : {stream!r} (attendu 'main' ou 'sub')", code="bad_request")
+        if not await self._encoding_field_available(stream):
+            raise CameraDriverError(
+                "Cette caméra ne permet pas de changer le codec du flux "
+                f"'{stream}' — le firmware n'expose aucun réglage de codec pour ce flux "
+                "(limitation matérielle confirmée, pas un bug MG-VMS).",
+                code="unsupported_capability",
+            )
+        try:
+            # `Host.set_encoding` (wrapper propre côté reolink-aio, valide la
+            # valeur et appelle `baichuan.SetEnc` en interne) plutôt que le
+            # message Baichuan brut directement.
+            await self._host_api.set_encoding(_CHANNEL, codec, stream=stream)
+        except ApiError as e:
+            raise CameraDriverError(f"Reolink SetEnc → {e}", code="device_error") from e
 
     # ── Suivi PTZ natif (v3.59) ─────────────────────────────────
     # `method` couvre le comportement du 2e objectif (téléobjectif) sur

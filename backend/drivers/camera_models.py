@@ -83,6 +83,7 @@ class CameraCapabilities:
     # Vidéo
     multi_stream: bool = False       # deux profils (main + sub)
     codec_h265: bool = False         # H.265 supporté
+    video_encoding_control: bool = False  # H.264 ↔ H.265 modifiable depuis MG-VMS (v3.89)
     # Audio étendu
     talkback: bool = False           # alias sémantique de two_way_audio
     upload_wav: bool = False         # upload d'un fichier audio custom
