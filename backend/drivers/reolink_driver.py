@@ -279,15 +279,24 @@ class ReolinkDriver(ONVIFDriver):
 
     # ── IR mode ───────────────────────────────────────────────────
     async def _set_ir_mode(self, mode: IRMode) -> None:
+        # v3.83 · BUG CONFIRMÉ (bouton IR sans effet, signalé sur 2 modèles
+        # différents) : `Host.set_ir_lights(channel, enable)` de reolink-aio
+        # n'est PAS un ON/OFF forcé contrairement à ce que laissait penser
+        # l'ancien commentaire ici — sa propre source mappe enable=True sur
+        # l'état Baichuan "Auto" et enable=False sur "Off". Il n'existe donc
+        # AUCUN moyen d'obtenir un IR forcé allumé via ce wrapper — cliquer
+        # "IR ON" ne faisait que repasser la caméra en Auto (souvent déjà
+        # son état de jour), d'où l'absence d'effet perceptible. Corrigé en
+        # envoyant la commande brute SetIrLights (documentée par Reolink
+        # avec les 3 états On/Off/Auto) directement via `send_setting`,
+        # plutôt que de passer par le wrapper limité à 2 états.
+        state = {IRMode.ON: "On", IRMode.OFF: "Off", IRMode.AUTO: "Auto"}[mode]
+        body = [{
+            "cmd": "SetIrLights", "action": 0,
+            "param": {"IrLights": {"channel": _CHANNEL, "state": state}},
+        }]
         try:
-            if mode == IRMode.AUTO:
-                # reolink-aio set_ir_lights est un simple ON/OFF forcé — le
-                # mode Auto natif Reolink se pilote via SetIrLights state="Auto",
-                # non exposé en high-level. On retombe sur ON (comportement
-                # "actif la nuit" par défaut) plutôt que de lever une erreur.
-                await self._host_api.set_ir_lights(_CHANNEL, True)
-            else:
-                await self._host_api.set_ir_lights(_CHANNEL, mode == IRMode.ON)
+            await self._host_api.send_setting(body)
         except ApiError as e:
             raise CameraDriverError(f"Reolink SetIrLights → {e}", code="device_error") from e
 
