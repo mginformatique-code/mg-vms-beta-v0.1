@@ -11,9 +11,14 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import useIsMobileViewport from "@/hooks/useIsMobileViewport";
 import Logo from "@/components/Logo";
-import { Video, Zap, Cctv, MoreHorizontal, Bell } from "lucide-react";
+import { Home, Video, Zap, Cctv, MoreHorizontal, Bell } from "lucide-react";
 
+// v3.93 · "Accueil" ajouté en 1ère position (référence app Reolink) — liste
+// des sites, entrée naturelle pour un déploiement multi-site (MG-VMS n'a
+// pas d'équivalent au "Home = mes appareils" de Reolink, qui est mono-site
+// par construction).
 const TABS = [
+  { to: "/m/home", key: "mobile.nav_home", icon: Home },
   { to: "/m/live", key: "mobile.nav_live", icon: Video },
   { to: "/m/events", key: "mobile.nav_events", icon: Zap },
   { to: "/m/cameras", key: "mobile.nav_cameras", icon: Cctv },
@@ -47,7 +52,7 @@ export default function MobileLayout({ children }) {
 
       <main className="flex-1 overflow-y-auto overscroll-contain">{children}</main>
 
-      <nav className="shrink-0 border-t border-border bg-card grid grid-cols-4" data-testid="mobile-tabbar"
+      <nav className="shrink-0 border-t border-border bg-card grid grid-cols-5" data-testid="mobile-tabbar"
            style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
         {TABS.map((tab) => {
           const Icon = tab.icon;
@@ -55,12 +60,12 @@ export default function MobileLayout({ children }) {
             <NavLink key={tab.to} to={tab.to}
                      data-testid={`mobile-tab-${tab.key.split("_")[1]}`}
                      className={({ isActive }) =>
-                       `flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] uppercase tracking-wider ${
+                       `flex flex-col items-center justify-center gap-0.5 py-2 px-0.5 text-[9px] uppercase ${
                          isActive ? "text-[#0044FF]" : "text-muted-foreground"
                        }`
                      }>
-              <Icon size={20} strokeWidth={1.5} />
-              {t(tab.key)}
+              <Icon size={19} strokeWidth={1.5} />
+              <span className="truncate max-w-full">{t(tab.key)}</span>
             </NavLink>
           );
         })}

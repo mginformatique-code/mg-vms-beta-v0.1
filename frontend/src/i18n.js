@@ -3024,6 +3024,9 @@ export const translations = {
     "diag.audio_err_unknown_error": "Erreur inconnue",
 
     // v3.91 · Interface mobile dédiée
+    "mobile.nav_home": "Accueil",
+    "mobile.home_no_sites": "Aucun site disponible",
+    "mobile.more_quick_settings": "Réglages rapides",
     "mobile.nav_live": "Live",
     "mobile.nav_events": "Événements",
     "mobile.nav_cameras": "Caméras",
@@ -6066,6 +6069,9 @@ export const translations = {
     "diag.audio_err_unknown_error": "Unknown error",
 
     // v3.91 · Dedicated mobile interface
+    "mobile.nav_home": "Home",
+    "mobile.home_no_sites": "No site available",
+    "mobile.more_quick_settings": "Quick settings",
     "mobile.nav_live": "Live",
     "mobile.nav_events": "Events",
     "mobile.nav_cameras": "Cameras",

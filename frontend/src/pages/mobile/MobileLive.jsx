@@ -24,14 +24,15 @@ import LivePlayer from "@/components/video/LivePlayer";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import PtzPad from "@/components/mobile/PtzPad";
 import Logo from "@/components/Logo";
-import { ChevronLeft, ChevronRight, Grid2x2, Rows, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Grid2x2, Grid3x3, LayoutGrid, Loader2 } from "lucide-react";
 
 const SWIPE_THRESHOLD_PX = 50;
 // v3.92 · Densités de mosaïque proposées (demande explicite : "choisir
 // 4-8-16 caméras") — 16 utilise 4 colonnes (tuiles volontairement petites,
 // esprit "app Reolink" : aperçu dense, on tape pour agrandir), 4/8 restent
-// à 2 colonnes (lisible en portrait).
-const GRID_SIZES = [4, 8, 16];
+// à 2 colonnes (lisible en portrait). v3.93 : choix via popover empilé
+// (icônes 16/8/4/1), pas une rangée de boutons — voir le bouton
+// "mobile-live-density-btn" plus bas.
 
 function StatusDot({ online }) {
   return <span className={`inline-block w-1.5 h-1.5 rounded-full ${online ? "bg-[#00E676]" : "bg-muted-foreground"}`} />;
@@ -46,6 +47,7 @@ export default function MobileLive() {
   const [view, setView] = useState("single"); // "single" | "grid"
   const [gridSize, setGridSize] = useState(4);
   const [page, setPage] = useState(0);
+  const [densityOpen, setDensityOpen] = useState(false);
   const touchStartX = useRef(null);
   const { caps } = useDeviceCapabilities(cams?.[idx]?.id);
   // v3.91 · Arrivée depuis MobileCameras (tap sur une caméra précise) —
@@ -121,19 +123,50 @@ export default function MobileLive() {
             {hd ? "HD" : "SD"}
           </button>
         )}
-        {view === "grid" && GRID_SIZES.map((n) => (
-          <button key={n} onClick={() => setGridSize(n)} data-testid={`mobile-live-gridsize-${n}`}
-                  className={`px-2 py-1 text-[10px] font-bold border ${
-                    gridSize === n ? "border-[#0044FF] text-[#0044FF]" : "border-border text-muted-foreground"
-                  }`}>
-            {n}
+        {/* v3.93 · Sélecteur de densité façon app Reolink : un seul bouton
+            grille, tap → popover avec les densités disponibles empilées
+            verticalement (16/8/4/vue unique) plutôt qu'une rangée de
+            boutons texte. */}
+        <div className="relative">
+          <button onClick={() => setDensityOpen((v) => !v)} data-testid="mobile-live-density-btn"
+                  className="p-1.5 text-muted-foreground hover:text-foreground">
+            {view === "single" ? <Grid2x2 size={18} /> : <Grid3x3 size={18} />}
           </button>
-        ))}
-        <button onClick={() => setView((v) => (v === "single" ? "grid" : "single"))}
-                data-testid="mobile-live-view-toggle"
-                className="p-1.5 text-muted-foreground hover:text-foreground">
-          {view === "single" ? <Grid2x2 size={18} /> : <Rows size={18} />}
-        </button>
+          {densityOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setDensityOpen(false)} />
+              <div className="absolute right-0 top-full mt-1 z-50 bg-black/90 border border-white/10 flex flex-col p-1 gap-0.5"
+                   data-testid="mobile-live-density-popover">
+                <button onClick={() => { setGridSize(16); setView("grid"); setDensityOpen(false); }}
+                        data-testid="mobile-live-density-16"
+                        className={`w-10 h-10 flex items-center justify-center hover:bg-white/10 ${
+                          view === "grid" && gridSize === 16 ? "text-[#0044FF]" : "text-white"
+                        }`}>
+                  <Grid3x3 size={20} />
+                </button>
+                <button onClick={() => { setGridSize(8); setView("grid"); setDensityOpen(false); }}
+                        data-testid="mobile-live-density-8"
+                        className={`w-10 h-10 flex items-center justify-center hover:bg-white/10 ${
+                          view === "grid" && gridSize === 8 ? "text-[#0044FF]" : "text-white"
+                        }`}>
+                  <LayoutGrid size={20} />
+                </button>
+                <button onClick={() => { setGridSize(4); setView("grid"); setDensityOpen(false); }}
+                        data-testid="mobile-live-density-4"
+                        className={`w-10 h-10 flex items-center justify-center hover:bg-white/10 ${
+                          view === "grid" && gridSize === 4 ? "text-[#0044FF]" : "text-white"
+                        }`}>
+                  <Grid2x2 size={20} />
+                </button>
+                <button onClick={() => { setView("single"); setDensityOpen(false); }}
+                        data-testid="mobile-live-density-1"
+                        className="w-10 h-10 flex items-center justify-center hover:bg-white/10">
+                  <span className={`w-5 h-5 ${view === "single" ? "bg-[#0044FF]" : "bg-white/30"}`} />
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

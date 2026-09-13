@@ -11,6 +11,7 @@ import MobileEvents from "@/pages/mobile/MobileEvents";
 import MobileCameras from "@/pages/mobile/MobileCameras";
 import MobileMore from "@/pages/mobile/MobileMore";
 import MobileLogin from "@/pages/mobile/MobileLogin";
+import MobileHome from "@/pages/mobile/MobileHome";
 import Login from "@/pages/Login";
 import ResetPassword from "@/pages/ResetPassword";
 import SsoRedirect from "@/pages/SsoRedirect";
@@ -100,7 +101,7 @@ function RootRoute() {
   const { isMobile } = useIsMobileViewport();
   if (user === null) return <div className="h-screen flex items-center justify-center bg-background text-muted-foreground">Chargement...</div>;
   if (!user) return <Navigate to="/login" replace />;
-  if (isMobile) return <Navigate to="/m/live" replace />;
+  if (isMobile) return <Navigate to="/m/home" replace />;
   return <Layout><WelcomeCenter /></Layout>;
 }
 
@@ -111,6 +112,7 @@ function AppRoutes() {
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/sso" element={<SsoRedirect />} />
       <Route path="/" element={<RootRoute />} />
+      <Route path="/m/home" element={<MobileProtected><MobileHome /></MobileProtected>} />
       <Route path="/m/live" element={<MobileProtected><MobileLive /></MobileProtected>} />
       <Route path="/m/events" element={<MobileProtected><MobileEvents /></MobileProtected>} />
       <Route path="/m/cameras" element={<MobileProtected><MobileCameras /></MobileProtected>} />
