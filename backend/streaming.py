@@ -406,6 +406,32 @@ async def _stream_registered(name: str) -> bool:
         return False
 
 
+#: v3.90 · Plafond de transcodages HEVC→H264 temps réel simultanés (voir
+#: `register_camera_stream` plus haut pour la mesure qui justifie ce chiffre :
+#: ~0,9-1,0x temps réel pour UN spectateur sur ce parc, en logiciel, le
+#: décodage HEVC 4K étant le goulot — pas le nombre de caméras HEVC ni
+#: l'encodage H264). Au-delà, mieux vaut un repli honnête vers le sous-flux
+#: (X-Stream-Quality=sd_forced_busy) que de dégrader TOUS les spectateurs HD
+#: en même temps en saturant le CPU du conteneur go2rtc.
+MAX_CONCURRENT_HD_TRANSCODES = 2
+
+
+async def hd_h264_transcode_load() -> int:
+    """Nombre RÉEL de spectateurs actuellement connectés à une variante
+    `*_hd_h264` (toutes caméras confondues), lu directement depuis go2rtc
+    (`consumers` par flux dans `GET /api/streams`) plutôt qu'un compteur
+    maintenu côté MG-VMS — un compteur local dériverait silencieusement dès
+    qu'un navigateur se déconnecte sans fermeture WHEP propre (perte réseau,
+    onglet fermé brutalement), ce que go2rtc, lui, détecte réellement."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{GO2RTC_URL}/api/streams")
+            streams = r.json() if r.status_code == 200 else {}
+    except httpx.HTTPError:
+        return MAX_CONCURRENT_HD_TRANSCODES  # go2rtc injoignable → prudence, pas de nouveau transcodage
+    return sum(len(v.get("consumers") or []) for k, v in streams.items() if k.endswith("_hd_h264"))
+
+
 async def _get_go2rtc_stream_sources(name: str) -> Optional[list[str]]:
     """Récupère les sources go2rtc actuellement enregistrées pour un stream (via
     `GET /api/streams`). Retourne None si l'appel HTTP échoue OU si le stream
@@ -547,14 +573,16 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
 
     # Résolution du pipeline effectif (auto/GPU/CPU) — construit les filtres ffmpeg optimisés
     try:
-        from video_engine import resolve_pipeline
+        from video_engine import resolve_pipeline, get_config as _video_cfg
         pipe = await resolve_pipeline(cam)
         hd_filter = pipe["mjpeg_filter_hd"]
         sd_filter = pipe["mjpeg_filter_sd"]
+        ll_suffix = "#low_latency" if (await _video_cfg()).get("low_latency") else ""
         logger.info("register_camera_stream %s → mode=%s decoder=%s preview=%s rec=%s ai=%s",
                      name, pipe["mode"], pipe["decoder"], pipe["preview"], pipe["recorder"], pipe["ai"])
     except Exception as e:
         logger.warning("video_engine.resolve_pipeline échec (fallback SW) : %s", e)
+        ll_suffix = ""
         hd_filter = "video=mjpeg"
         sd_filter = "video=mjpeg#width=640"
 
@@ -606,6 +634,29 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
     desired[f"{name}_hd"] = f"ffmpeg:{preview_source_name}#{hd_filter}"
     desired[f"{name}_sd"] = f"ffmpeg:{preview_source_name}#{sd_filter}"
 
+    # v3.90 · `{name}_hd_h264` — transcodage HEVC→H264 TEMPS RÉEL, pleine
+    # résolution, pour la vue live WebRTC (WHEP). Contrairement à `_hd`/`_sd`
+    # ci-dessus (MJPEG, servent au polling `live.mjpeg`), cette variante sert
+    # de source WebRTC de repli quand le flux principal est HEVC (WebRTC ne
+    # sait transporter que H264/VP8/VP9/AV1 vers un navigateur — jamais HEVC).
+    # Transcode depuis `name` (flux PRINCIPAL, pleine résolution) et non depuis
+    # le sous-flux `preview_source_name` : le but est justement d'offrir mieux
+    # que le sous-flux 640×360 déjà utilisé comme repli silencieux.
+    # Mesuré en conditions réelles sur ce parc (salon, HEVC 3840×2160, 12 cœurs,
+    # ffmpeg logiciel DANS le conteneur go2rtc — aucun GPU là-dedans, voir
+    # docstring `hd_filter`/`#hardware=cuda` juste au-dessus) : ~0,9-1,0x temps
+    # réel pour UN spectateur — le goulot est le DÉCODAGE logiciel HEVC 4K, pas
+    # l'encodage H264 (retester avec un downscale confirme : gain quasi nul).
+    # Viable pour un petit nombre de spectateurs HD simultanés, jamais pour
+    # toute la flotte à la fois → plafonné par `hd_h264_transcode_load()`
+    # (voir webrtc_gateway._whep_via_go2rtc, qui repli honnêtement sur le
+    # sous-flux avec X-Stream-Quality=sd_forced_busy si la charge est atteinte,
+    # plutôt que de saturer le CPU en silence).
+    # Uniquement pour les caméras dont le flux PRINCIPAL est HEVC — inutile
+    # sinon (le passthrough H264 direct est déjà gratuit).
+    if (cam.get("codec") or "").upper() in ("HEVC", "H265"):
+        desired[f"{name}_hd_h264"] = f"ffmpeg:{name}#video=h264{ll_suffix}"
+
     # ─── Étape 1 : Diff avec la config existante côté go2rtc (idempotence) ───
     if not force:
         try:
@@ -644,7 +695,7 @@ async def register_camera_stream(cam: dict, *, caller: str = "unknown",
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             # Supprime les anciens enregistrements (source + variantes) pour repartir propre
-            for src in (name, f"{name}_preview", f"{name}_hd", f"{name}_sd"):
+            for src in (name, f"{name}_preview", f"{name}_hd", f"{name}_sd", f"{name}_hd_h264"):
                 await client.delete(f"{GO2RTC_URL}/api/streams", params={"src": src})
             # v3.8 · Les 3-4 flux sont désormais publiés par la MÊME boucle, via
             # `params=` (encodage httpx), au lieu d'une URL construite à la main
@@ -692,8 +743,11 @@ async def unregister_camera_stream(camera_id: str, *, caller: str = "unknown") -
     name = _stream_name(camera_id)
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            # `_preview` : nouvelle variante v3.8, à retirer comme les autres.
-            for stream in (name, f"{name}_preview", f"{name}_hd", f"{name}_sd"):
+            # `_preview` : variante v3.8. `_hd_h264` : variante v3.90 (transcodage
+            # HEVC→H264 temps réel live) — sans son retrait ici, supprimer une
+            # caméra HEVC laisserait tourner indéfiniment le process ffmpeg de
+            # transcodage dans go2rtc (fuite de ressources CPU).
+            for stream in (name, f"{name}_preview", f"{name}_hd", f"{name}_sd", f"{name}_hd_h264"):
                 await client.delete(f"{GO2RTC_URL}/api/streams", params={"src": stream})
         _lc_record(camera_id, "destroyed", reason="DELETE from go2rtc", caller=caller)
     except httpx.HTTPError as e:
@@ -797,7 +851,7 @@ async def sync_all_streams() -> None:
             continue
         name = _stream_name(cam["id"])
         if _is_direct_rtsp(cam):
-            if go2rtc_names & {name, f"{name}_hd", f"{name}_sd"}:
+            if go2rtc_names & {name, f"{name}_hd", f"{name}_sd", f"{name}_hd_h264"}:
                 await unregister_camera_stream(cam["id"], caller="sync_all_streams@direct_rtsp_purge")
                 n_purged += 1
             continue
@@ -884,10 +938,10 @@ async def reconcile_streams_with_go2rtc() -> dict:
             })
 
     # ── Orphelins go2rtc (flux sans caméra DB) ────────────────────────
-    # Exclut : variantes _hd/_sd (déjà comptées via leur producteur),
+    # Exclut : variantes _hd/_sd/_hd_h264 (déjà comptées via leur producteur),
     # flux temporaires probe_*, et les caméras démo statiques du yaml.
     for stream_name in go2rtc_streams:
-        if stream_name.endswith("_hd") or stream_name.endswith("_sd"):
+        if stream_name.endswith("_hd") or stream_name.endswith("_sd") or stream_name.endswith("_hd_h264"):
             continue
         if stream_name.startswith("probe_"):
             continue

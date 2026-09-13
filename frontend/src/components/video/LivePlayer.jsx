@@ -200,9 +200,11 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
       {mode === "webrtc" && qualityNote && (
         <div className="absolute top-1 right-1 px-1.5 py-0.5 text-[9px] mono uppercase tracking-wider
                         bg-black/70 text-[#FFAA00] border border-[#FFAA00]/50 pointer-events-none"
-             title={`Le flux principal de cette caméra est en ${qualityNote.toUpperCase()}, que WebRTC ne sait pas transmettre à un navigateur. Le sous-flux H264 est utilisé à la place.`}
+             title={qualityNote === "busy"
+               ? "Trop de vues HD simultanées sur des caméras HEVC en ce moment (le transcodage temps réel est volontairement limité pour ne pas saturer le serveur). Le sous-flux H264 est utilisé à la place — réessayez dans un instant."
+               : `Le flux principal de cette caméra est en ${qualityNote.toUpperCase()}, que WebRTC ne sait pas transmettre à un navigateur. Le sous-flux H264 est utilisé à la place.`}
              data-testid={`${dataTestId}-quality-note`}>
-          HD indispo ({qualityNote.toUpperCase()})
+          {qualityNote === "busy" ? "HD saturé" : `HD indispo (${qualityNote.toUpperCase()})`}
         </div>
       )}
       {mode === "error" && (

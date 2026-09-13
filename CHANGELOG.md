@@ -3,6 +3,23 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.90-live-hd-transcode] — 2026-09-13 — Vue live HD réelle sur caméras HEVC (transcodage temps réel), au lieu du repli silencieux vers le sous-flux SD
+
+### Added
+- **La vue live WebRTC peut désormais servir une vraie image HD (H264, pleine résolution) même quand le flux principal d'une caméra est en HEVC** — jusqu'ici, WebRTC ne sachant transporter que du H264 vers un navigateur, demander le HD sur ces caméras retombait systématiquement sur le sous-flux basse résolution (640×360), sans réel espoir d'amélioration. Un nouveau flux `_hd_h264` transcode désormais le flux principal en temps réel (mesuré en conditions réelles sur ce parc : proche du temps réel sur un flux 4K, un cœur de CPU dédié), démarré à la demande uniquement (aucun coût tant que personne ne regarde en HD), et retiré automatiquement à la suppression de la caméra.
+- **Protection anti-saturation** : le nombre de transcodages HD simultanés est plafonné (mesuré et choisi selon la capacité réelle du serveur) — au-delà, MG-VMS revient honnêtement au sous-flux SD (badge « HD saturé » côté navigateur) plutôt que de dégrader la vue de tout le monde en saturant le CPU.
+- Fait suite au chantier de contrôle du codec (v3.87-v3.89, voir plus bas) : changer le codec DE LA CAMÉRA elle-même s'est révélé impossible sur le matériel actuel (limitation firmware confirmée sur 4 modèles) — cette fonctionnalité apporte l'amélioration réellement possible côté serveur, pour la vue live spécifiquement (l'enregistrement et l'IA travaillent déjà en pleine résolution HEVC, inchangé).
+
+## [v3.89-fix-encoding-honest-failure] — 2026-09-13 — Correctif : le bouton de changement de codec caméra (H264 ↔ H265) ne faisait rien, sans le signaler
+
+### Fixed
+- **Un ancien sélecteur H264/H265 dans la fiche caméra n'avait jamais fonctionné**, signalé par l'utilisateur. Diagnostic complet mené jusqu'au protocole natif de la caméra (Baichuan) : le firmware ne fournit tout simplement pas le champ nécessaire pour changer le codec d'enregistrement — confirmé sur 4 modèles Reolink différents, et vérifié également côté ONVIF (le flux principal n'y est pas exposé comme réglage modifiable). Une vraie limitation matérielle, pas un bug de code. MG-VMS détecte désormais cette limitation et répond par un échec clair et explicite au lieu de ne rien faire silencieusement.
+
+## [v3.88-fix-onvif-driver-codec] — 2026-09-13 — Correctif : codec erroné réaffiché après un rafraîchissement manuel des capacités caméra
+
+### Fixed
+- Suite du correctif v3.87 (codec de flux vérifié plutôt que déclaré par la caméra) : le même problème réapparaissait après un clic sur « Détecter les capacités » / « Rafraîchir », qui emprunte un second chemin de code distinct de la création de caméra. Corrigé au même endroit racine — la vérification réelle du codec s'applique désormais aux deux chemins.
+
 ## [v3.87-fix-streams-detected-codec] — 2026-09-13 — Correctif : codec erroné affiché pour la plupart des caméras (confiance aveugle à l'auto-déclaration ONVIF)
 
 ### Fixed

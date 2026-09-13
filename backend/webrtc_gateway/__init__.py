@@ -99,7 +99,7 @@ class _H264RelayTrack:
 
 async def _whep_via_go2rtc(camera_id: str, sdp_offer: str,
                             prefer_hd: bool = False,
-                            main_codec: str = "") -> Optional[str]:
+                            main_codec: str = "") -> tuple[Optional[str], str, str]:
     """Relaie l'offre SDP à go2rtc et renvoie sa réponse (ou None).
 
     C'est le vrai passthrough : go2rtc réémet le H264 de la caméra sans le
@@ -109,23 +109,49 @@ async def _whep_via_go2rtc(camera_id: str, sdp_offer: str,
     Choix de la source :
       - par défaut, la variante `_preview` (sous-flux) : légère, et toujours
         en H264 même quand le flux principal est en HEVC ;
-      - `prefer_hd` (bouton HD du mur vidéo) → flux principal, MAIS
-        uniquement s'il est en H264 : WebRTC ne sait pas transporter du HEVC
-        vers un navigateur, une caméra HEVC reste donc sur le sous-flux
-        (mieux vaut une image fluide qu'un flux qui ne démarre pas).
+      - `prefer_hd` + flux principal en H264 → passthrough intégral, aucun
+        transcodage ;
+      - `prefer_hd` + flux principal en HEVC (v3.90) → variante
+        `{name}_hd_h264` (transcodage HEVC→H264 temps réel PAR go2rtc, voir
+        `streaming.register_camera_stream` pour la mesure qui justifie cette
+        approche et sa limite), tant que `hd_h264_transcode_load()` reste
+        sous `MAX_CONCURRENT_HD_TRANSCODES` — au-delà, repli honnête sur le
+        sous-flux plutôt que de saturer le CPU du conteneur go2rtc pour tout
+        le monde à la fois.
+
+    Retourne `(answer_sdp_ou_None, source_utilisée, motif_repli)` — motif_repli
+    vaut `"unsupported"` (HEVC sans variante de transcodage disponible),
+    `"busy"` (variante disponible mais plafond de charge atteint), ou `""`
+    (HD réellement servi, ou SD demandé sans repli à signaler).
     """
     try:
-        from streaming import GO2RTC_URL, _stream_name, _stream_registered
+        from streaming import (GO2RTC_URL, _stream_name, _stream_registered,
+                                hd_h264_transcode_load, MAX_CONCURRENT_HD_TRANSCODES)
         name = _stream_name(camera_id)
         codec = (main_codec or "").lower()
-        hd_possible = prefer_hd and codec in ("h264", "avc", "")
-        if hd_possible and await _stream_registered(name):
+        fallback_reason = ""
+        if prefer_hd and codec in ("h264", "avc", "") and await _stream_registered(name):
             src = name
+        elif prefer_hd and codec in ("hevc", "h265"):
+            hd_h264_src = f"{name}_hd_h264"
+            hd_h264_ready = await _stream_registered(hd_h264_src)
+            if hd_h264_ready and await hd_h264_transcode_load() < MAX_CONCURRENT_HD_TRANSCODES:
+                src = hd_h264_src
+                logger.info("whep[%s]: HD via transcodage temps réel %s", camera_id, hd_h264_src)
+            else:
+                src = f"{name}_preview"
+                if not await _stream_registered(src):
+                    src = name
+                fallback_reason = "busy" if hd_h264_ready else "unsupported"
+                logger.info("whep[%s]: HD demandé (HEVC) mais %s — repli sur le sous-flux",
+                            camera_id, "plafond de transcodages atteint" if hd_h264_ready
+                            else "variante de transcodage indisponible")
         else:
             src = f"{name}_preview"
             if not await _stream_registered(src):
                 src = name
-            if prefer_hd and not hd_possible:
+            if prefer_hd:
+                fallback_reason = "unsupported"
                 logger.info("whep[%s]: HD demandé mais flux principal en %s — "
                             "WebRTC ne transporte pas ce codec, on reste sur le sous-flux",
                             camera_id, codec or "?")
@@ -136,13 +162,13 @@ async def _whep_via_go2rtc(camera_id: str, sdp_offer: str,
         # go2rtc répond 201 Created (pas 200) sur un handshake réussi.
         if r.status_code in (200, 201) and "v=0" in r.text:
             logger.info("whep[%s]: passthrough go2rtc via %s", camera_id, src)
-            return r.text
+            return r.text, src, fallback_reason
         logger.warning("whep[%s]: go2rtc a refusé (%s) — repli sur le pont aiortc",
                         camera_id, r.status_code)
     except Exception as e:
         logger.warning("whep[%s]: go2rtc indisponible (%s) — repli sur le pont aiortc",
                         camera_id, e)
-    return None
+    return None, "", ""
 
 
 async def whep_offer(camera_id: str, sdp_offer: str,
@@ -158,15 +184,22 @@ async def whep_offer(camera_id: str, sdp_offer: str,
         raise LookupError(f"camera {camera_id} not found")
 
     codec = str(cam.get("codec") or "")
-    answer = await _whep_via_go2rtc(camera_id, sdp_offer, prefer_hd=prefer_hd,
-                                     main_codec=codec)
+    answer, _used_src, fallback_reason = await _whep_via_go2rtc(
+        camera_id, sdp_offer, prefer_hd=prefer_hd, main_codec=codec)
     if answer:
         await upsert_runtime(camera_id, status="online")
-        # Indique au client si le HD demandé n'a PAS pu être servi, pour qu'il
-        # l'affiche au lieu de laisser croire à un bouton cassé.
-        forced = prefer_hd and codec.lower() not in ("h264", "avc", "")
+        # Indique au client si le HD demandé n'a PAS pu être servi (ou servi en
+        # dégradé), pour qu'il l'affiche au lieu de laisser croire à un bouton
+        # cassé. `busy` (v3.90) : HEVC transcodable en H264 temps réel, mais
+        # plafond de spectateurs HD simultanés atteint — distinct de
+        # `sd_forced_<codec>` (repli permanent, aucune variante de
+        # transcodage disponible pour ce codec).
         session = f"whep-g2r-{uuid.uuid4().hex[:12]}"
-        return answer, (f"{session}|sd_forced_{codec.lower()}" if forced else session)
+        if fallback_reason == "busy":
+            return answer, f"{session}|sd_forced_busy"
+        if fallback_reason == "unsupported":
+            return answer, f"{session}|sd_forced_{codec.lower()}"
+        return answer, session
 
     mgr = VideoCoreManager.instance()
     try:
