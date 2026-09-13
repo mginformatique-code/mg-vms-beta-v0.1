@@ -3,6 +3,13 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.93-mobile-reolink-style] — 2026-09-13 — Interface mobile : refonte façon app Reolink (référence utilisateur)
+
+### Added
+- Nouvel onglet "Accueil" listant les sites (tap → caméras de ce site) — inspiré de l'app Reolink, adapté au fonctionnement multi-site de MG-VMS.
+- Vue live : sélecteur de densité de grille (4/8/16 caméras) reskiné en popover d'icônes empilées, identique dans l'esprit au sélecteur de l'app Reolink.
+- Onglet "Plus" présenté en cartes groupées avec sections et lignes chevron, même esprit visuel que l'écran Paramètres de l'app Reolink.
+
 ## [v3.92-mobile-refinements] — 2026-09-13 — Interface mobile : logo sur la connexion, HD/SD, densité de grille, menu complet
 
 ### Fixed
