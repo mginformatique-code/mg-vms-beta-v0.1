@@ -3,6 +3,11 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.84-fix-audio-output-detect] — 2026-09-13 — Correctif : détection erronée du haut-parleur sur certaines caméras Reolink
+
+### Fixed
+- **Le bouton TTS apparaissait pour des caméras qui ne peuvent structurellement jamais l'utiliser** (ex. RLC-1224A) : la détection de haut-parleur était basée sur la capacité "volume" de Reolink, qui gouverne en réalité le volume de la sirène — pas la présence d'un vrai canal audio retour standard (ONVIF). Confirmé en interrogeant la caméra directement : elle déclare bien une sirène fonctionnelle, mais aucun canal audio retour ONVIF exploitable (ces caméras réservent leur haut-parleur au talk bidirectionnel via l'appli propriétaire du fabricant, jamais exposé en standard). Corrigé : seule la détection standard gouverne désormais l'apparition du bouton TTS, la sirène reste détectée séparément et continue de fonctionner normalement.
+
 ## [v3.83-fix-ir-force-on] — 2026-09-13 — Correctif : bouton IR sans effet
 
 ### Fixed
