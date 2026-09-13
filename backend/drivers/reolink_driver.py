@@ -166,10 +166,24 @@ class ReolinkDriver(ONVIFDriver):
         caps.spotlight = "floodLight" in chn_caps
         caps.siren = "siren" in chn_caps
         caps.audio_input = "audio" in chn_caps
-        caps.audio_output = "volume" in chn_caps
-        caps.two_way_audio = caps.audio_input and caps.audio_output
         caps.microphone = caps.audio_input
-        caps.speaker = caps.audio_output
+        # v3.84 · BUG CONFIRMÉ (TTS annoncé disponible puis échouant toujours
+        # avec "no_speaker" sur RLC-1224A, qui a pourtant bien un haut-parleur
+        # d'après Reolink) : `audio_output`/`speaker`/`two_way_audio` étaient
+        # dérivés de l'ability Reolink "volume", qui gouverne le volume de LA
+        # SIRÈNE/des sons d'alarme — pas la présence d'un vrai canal audio
+        # retour ONVIF. Beaucoup de caméras Reolink ont un haut-parleur
+        # utilisable pour le talk bidirectionnel UNIQUEMENT via l'app/le
+        # protocole propriétaire Reolink (Baichuan), sans exposer
+        # `GetAudioOutputs` en ONVIF standard — ce que confirme un test direct
+        # sur une RLC-1224A (`GetAudioOutputs` renvoie une liste vide côté
+        # caméra) alors que reolink-aio annonce "volume" supporté (pour la
+        # sirène). Le TTS de MG-VMS passe par le back-channel ONVIF (go2rtc),
+        # donc SEULE la détection ONVIF (déjà faite correctement par
+        # `super().get_capabilities()` juste au-dessus) doit gouverner
+        # audio_output/speaker/two_way_audio — ne pas l'écraser ici avec
+        # l'ability "volume", qui ne concerne que la sirène (déjà couverte
+        # séparément par `caps.siren`).
         caps.pir_sensor = "PIR" in chn_caps
 
         ai_map = {"ai_people": "person", "ai_vehicle": "vehicle",
