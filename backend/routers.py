@@ -275,17 +275,43 @@ async def create_camera(data: CameraInput, user: dict = Depends(require_role("te
         # sous-flux connu, et l'aperçu retombait sur le flux principal
         # (4K HEVC) — le cas coûteux qu'on cherche justement à éviter.
         # Les profils sont déjà en main ici, autant les garder.
+        # v3.87 · BUG CONFIRMÉ (signalé par l'utilisateur, capture d'écran à
+        # l'appui) : le codec affiché ici venait tel quel des métadonnées
+        # ONVIF auto-déclarées par la caméra (`p.get("codec")`), jamais
+        # vérifié — et plusieurs modèles Reolink annoncent "h264" en ONVIF
+        # alors que leur flux réel, vérifié en direct par ffprobe, est du
+        # HEVC (confirmé sur `abri_jardin_villeparisis` : ONVIF annonçait
+        # h264/h264 pour main+sub, ffprobe en direct a révélé hevc sur le
+        # flux principal). Un firmware caméra qui ment sur son propre codec
+        # ONVIF n'est malheureusement pas rare — plutôt que de faire
+        # confiance à cette déclaration, chaque profil est maintenant vérifié
+        # par une vraie sonde ffprobe (coût ponctuel, uniquement à la création
+        # /re-découverte de la caméra, jamais à chaque affichage). Le profil
+        # déjà sélectionné réutilise `ffprobe_details` (déjà calculé
+        # ci-dessus, zéro coût supplémentaire) ; les autres profils (ex. le
+        # sous-flux) sont sondés individuellement — on ne fait confiance à
+        # l'auto-déclaration ONVIF qu'en tout dernier recours, si la sonde
+        # elle-même échoue (flux temporairement injoignable).
         detected = []
         for p in profiles:
             if not (p.get("rtsp_url") or ""):
                 continue
             res = str(p.get("resolution") or "")
             m = re.match(r"^\s*(\d+)\s*[xX]\s*(\d+)\s*$", res)
+            onvif_codec = str(p.get("codec") or "").lower()
+            if p["rtsp_url"] == selected["rtsp_url"] and ffprobe_details:
+                verified_codec = (ffprobe_details.get("codec") or "").lower()
+            else:
+                _url, _details, _attempts = await asyncio.to_thread(
+                    _ffprobe_validate_exact, p["rtsp_url"], data.rtsp_transport,
+                    data.username, data.password,
+                )
+                verified_codec = (_details.get("codec") or "").lower() if _details else ""
             detected.append({
                 "name": str(p.get("name") or p.get("token") or ""),
                 "url": p["rtsp_url"],
                 "resolution": [int(m.group(1)), int(m.group(2))] if m else [0, 0],
-                "codec": str(p.get("codec") or "").lower(),
+                "codec": verified_codec or onvif_codec,
                 "fps": 0, "bitrate_kbps": 0,
             })
         if detected:
