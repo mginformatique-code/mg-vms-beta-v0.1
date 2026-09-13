@@ -1581,6 +1581,29 @@ async def diagnostics_journal(camera_id: Optional[str] = None, cause: Optional[s
     return {"total": total, "items": docs}
 
 
+@api_router.get("/diagnostics/audio-commands")
+async def diagnostics_audio_commands(camera_id: Optional[str] = None, type: Optional[str] = None,
+                                       status: Optional[str] = None, limit: int = 100, offset: int = 0,
+                                       user: dict = Depends(require_permission("view_live"))):
+    """Journal des commandes audio (TTS + sirène) envoyées aux caméras (v3.82).
+
+    Un statut "ok" signifie que la commande a été acceptée par la couche de
+    livraison (go2rtc / API caméra) — pas nécessairement que le son a été
+    réellement entendu, ce qui n'est pas vérifiable sans retour du matériel.
+    Voir audio_commands.py.
+    """
+    q: dict = {}
+    if camera_id:
+        q["camera_id"] = camera_id
+    if type:
+        q["type"] = type
+    if status:
+        q["status"] = status
+    total = await db.audio_commands.count_documents(q)
+    docs = await db.audio_commands.find(q, {"_id": 0}).sort("created_at", -1).skip(offset).limit(limit).to_list(limit)
+    return {"total": total, "items": docs}
+
+
 @api_router.get("/diagnostics/camera/{camera_id}/summary")
 async def diagnostics_camera_summary(camera_id: str, user: dict = Depends(require_permission("view_live"))):
     """Résumé d'exploitation (uptime, MTBF, moyenne reconnexion, top causes) — 30 j."""

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { useApp } from "@/context/AppContext";
-import { Activity, AlertTriangle, CheckCircle2, Download, Filter, RefreshCw, ChevronRight, Info, X, Cpu, Zap } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, Download, Filter, RefreshCw, ChevronRight, Info, X, Cpu, Zap, Volume2 } from "lucide-react";
 
 const CAUSE_COLORS = {
   "Timeout RTSP": "#FFB800",
@@ -318,6 +318,173 @@ export default function Diagnostics() {
       <AiHealthSection />
       <StreamsSyncSection />
       <StreamLifecycleSection />
+      <AudioCommandsSection />
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Section "Commandes audio" — journal TTS + sirène (v3.82)
+// Un statut "ok" veut dire "acceptée par go2rtc / l'API caméra", pas
+// "entendue" — cette dernière vérification n'est pas possible sans retour
+// du matériel (limite documentée, voir la page Chantiers).
+// ══════════════════════════════════════════════════════════════════════════
+const AUDIO_ERROR_LABEL_KEYS = {
+  plugin_missing: "diag.audio_err_plugin_missing",
+  plugin_not_ready: "diag.audio_err_plugin_not_ready",
+  cooldown: "diag.audio_err_cooldown",
+  no_speaker: "diag.audio_err_no_speaker",
+  synthesis_failed: "diag.audio_err_synthesis_failed",
+  voice_download_failed: "diag.audio_err_voice_download_failed",
+  go2rtc_rejected: "diag.audio_err_go2rtc_rejected",
+  timeout: "diag.audio_err_timeout",
+  text_missing: "diag.audio_err_text_missing",
+  unsupported_capability: "diag.audio_err_unsupported_capability",
+  device_unreachable: "diag.audio_err_device_unreachable",
+  command_timeout: "diag.audio_err_command_timeout",
+  authentication_failed: "diag.audio_err_authentication_failed",
+  device_error: "diag.audio_err_device_error",
+  unknown_error: "diag.audio_err_unknown_error",
+};
+
+function AudioCommandRow({ item, t }) {
+  const dt = item.created_at ? new Date(item.created_at) : null;
+  const isOk = item.status === "ok";
+  const typeLabel = item.type === "tts" ? t("diag.audio_type_tts") : t("diag.audio_type_siren");
+  const typeColor = item.type === "tts" ? "#00E5FF" : "#B47CFF";
+  const errorKey = AUDIO_ERROR_LABEL_KEYS[item.error_code];
+  return (
+    <tr className="border-b border-border/40 hover:bg-secondary/30" data-testid="audio-command-row">
+      <td className="px-2 py-1.5 whitespace-nowrap text-white/60 mono text-[11px]">
+        {dt ? dt.toLocaleString("fr-FR") : "—"}
+      </td>
+      <td className="px-2 py-1.5">
+        <span className="px-1.5 py-0.5 border font-bold text-[10px] mono" style={{ borderColor: typeColor, color: typeColor }}>
+          {typeLabel}
+        </span>
+      </td>
+      <td className="px-2 py-1.5 text-xs font-medium">{item.camera_name || item.camera_id}</td>
+      <td className="px-2 py-1.5 text-xs text-muted-foreground">{item.requested_by || "—"}</td>
+      <td className="px-2 py-1.5 text-xs text-white/70 max-w-sm truncate" title={item.text}>{item.text || "—"}</td>
+      <td className="px-2 py-1.5">
+        {isOk ? (
+          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#00E676]">
+            <CheckCircle2 size={12} /> {t("diag.audio_result_ok")}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#FF3333]" title={item.error_message || ""}>
+            <AlertTriangle size={12} /> {errorKey ? t(errorKey) : (item.error_code || t("diag.audio_err_unknown_error"))}
+          </span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function AudioCommandsSection() {
+  const { t } = useApp();
+  const [items, setItems] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [cams, setCams] = useState([]);
+  const [filter, setFilter] = useState({ camera_id: "", type: "", status: "" });
+  const [loading, setLoading] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "100", offset: "0" });
+      if (filter.camera_id) params.set("camera_id", filter.camera_id);
+      if (filter.type) params.set("type", filter.type);
+      if (filter.status) params.set("status", filter.status);
+      const { data } = await api.get(`/diagnostics/audio-commands?${params}`);
+      setItems(data.items || []);
+      setTotal(data.total || 0);
+    } catch (e) { /* silent — section secondaire */ }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { api.get("/cameras").then((r) => setCams(r.data || [])).catch(() => {}); }, []);
+  useEffect(() => {
+    load();
+    if (!autoRefresh) return;
+    const iv = setInterval(load, 8000);
+    return () => clearInterval(iv);
+  }, [filter, autoRefresh]);
+
+  const errorCount = items.filter((i) => i.status === "error").length;
+
+  return (
+    <div className="mt-8 border border-border bg-card p-4" data-testid="audio-commands-section">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h2 className="font-head font-semibold text-lg flex items-center gap-2">
+            <Volume2 size={16} className="text-[#00E5FF]" />
+            {t("diag.audio_commands_title")}
+          </h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            {t("diag.audio_commands_desc")}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-xs mono cursor-pointer">
+            <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
+            {t("diag.audio_autorefresh_8s")}
+          </label>
+          <button onClick={load} disabled={loading} className="px-2 py-1 text-xs border border-border hover:bg-secondary flex items-center gap-1">
+            <RefreshCw size={12} className={loading ? "animate-spin" : ""} /> {t("diag.refresh_alt")}
+          </button>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <Filter size={14} className="text-muted-foreground" />
+        <select value={filter.camera_id} onChange={(e) => setFilter({ ...filter, camera_id: e.target.value })}
+                className="px-2 py-1 text-xs bg-background border border-input">
+          <option value="">{t("diag.filter_all_cameras")}</option>
+          {cams.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select value={filter.type} onChange={(e) => setFilter({ ...filter, type: e.target.value })}
+                className="px-2 py-1 text-xs bg-background border border-input">
+          <option value="">{t("diag.audio_filter_all_types")}</option>
+          <option value="tts">{t("diag.audio_type_tts")}</option>
+          <option value="siren">{t("diag.audio_type_siren")}</option>
+        </select>
+        <select value={filter.status} onChange={(e) => setFilter({ ...filter, status: e.target.value })}
+                className="px-2 py-1 text-xs bg-background border border-input">
+          <option value="">{t("diag.audio_filter_all_results")}</option>
+          <option value="ok">{t("diag.audio_result_ok_short")}</option>
+          <option value="error">{t("diag.audio_result_error_short")}</option>
+        </select>
+        <span className="ml-auto text-xs mono">
+          <span className="text-muted-foreground">{total} {t("diag.audio_commands_suffix")}</span>
+          {errorCount > 0 && <span className="text-[#FF3333] ml-2 font-bold">{errorCount} {t("diag.audio_errors_suffix")}</span>}
+        </span>
+      </div>
+
+      <div className="border border-border bg-background overflow-x-auto max-h-[500px] overflow-y-auto">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-card border-b border-border">
+            <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+              <th className="px-2 py-1.5">{t("diag.th_datetime")}</th>
+              <th className="px-2 py-1.5">{t("diag.audio_th_type")}</th>
+              <th className="px-2 py-1.5">{t("diag.th_camera")}</th>
+              <th className="px-2 py-1.5">{t("diag.audio_th_requested_by")}</th>
+              <th className="px-2 py-1.5">{t("diag.audio_th_message")}</th>
+              <th className="px-2 py-1.5">{t("diag.audio_th_result")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.length === 0 ? (
+              <tr><td colSpan={6} className="px-3 py-8 text-center text-muted-foreground text-sm">
+                <Info size={14} className="inline mr-1" /> {t("diag.audio_empty")}
+              </td></tr>
+            ) : items.map((item) => (
+              <AudioCommandRow key={item.id} item={item} t={t} />
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

@@ -380,11 +380,26 @@ async def device_osd_set(camera_id: str, body: OSDBody,
 @devices_router.post("/{camera_id}/siren")
 async def device_siren(camera_id: str, body: SirenBody,
                         user: dict = Depends(require_permission("manage_cameras"))):
+    from audio_commands import log_audio_command
+    from database import db
+    cam = await db.cameras.find_one({"id": camera_id}, {"_id": 0, "name": 1})
+    cam_name = (cam or {}).get("name", camera_id)
     try:
         drv = await svc.get_driver(camera_id)
         await drv.set_siren(enabled=body.enabled, duration=body.duration)
+        if body.enabled:
+            await log_audio_command(
+                type_="siren", camera_id=camera_id, camera_name=cam_name,
+                requested_by=user.get("email", "system"), status="ok",
+            )
         return {"success": True}
     except CameraDriverError as e:
+        if body.enabled:
+            await log_audio_command(
+                type_="siren", camera_id=camera_id, camera_name=cam_name,
+                requested_by=user.get("email", "system"), status="error",
+                error_code=e.code, error_message=str(e),
+            )
         raise _driver_error_response(e)
 
 

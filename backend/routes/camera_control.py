@@ -378,6 +378,8 @@ async def play_tts(camera_id: str,
     if not cam:
         raise HTTPException(404, "Caméra introuvable")
 
+    import time
+    t0 = time.monotonic()
     from smart_zones.actuators import dispatch_action
     result = await dispatch_action({
         "type": "tts",
@@ -389,5 +391,15 @@ async def play_tts(camera_id: str,
             "plugin_name": (body or {}).get("plugin_name") or "tts-notifier",
         },
     }, {"camera_id": camera_id, "camera_name": cam.get("name")})
+
+    from audio_commands import log_audio_command, classify_tts_error
+    ok = bool(result.get("ok"))
+    await log_audio_command(
+        type_="tts", camera_id=camera_id, camera_name=cam.get("name", camera_id),
+        requested_by=user.get("email", "system"), status="ok" if ok else "error",
+        error_code=None if ok else classify_tts_error(result.get("error")),
+        error_message=None if ok else result.get("error"),
+        text=text, duration_ms=int((time.monotonic() - t0) * 1000),
+    )
     await log_audit(user, "camera_tts", cam.get("name", camera_id), text[:80])
     return result
