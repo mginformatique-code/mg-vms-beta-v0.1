@@ -3,6 +3,12 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.81-fix-tts-piper-deps] — 2026-09-13 — Correctif critique : TTS totalement cassé depuis plusieurs versions
+
+### Fixed
+- **Le TTS ne fonctionnait plus du tout depuis le chantier v3.60** (pas seulement "par intermittence" comme documenté jusqu'ici) : le moteur de synthèse vocale **Piper** avait été installé à la main dans le conteneur au moment de sa mise en service, mais jamais ajouté à `backend/requirements.txt` — un rebuild d'image ultérieur (l'un des nombreux effectués depuis) l'a silencieusement effacé. Le plugin `tts-notifier` passait alors en état "dépendance manquante", refusant proprement toute demande — un symptôme qui, vu de l'extérieur, ressemblait à s'y méprendre à l'échec silencieux déjà connu et documenté (limitation go2rtc/back-channel, elle bien réelle et toujours d'actualité pour une fraction résiduelle des messages).
+- Piper est désormais déclaré dans les dépendances du projet et persistera à chaque reconstruction future de l'image — vérifié : le plugin recharge correctement, la synthèse vocale produit à nouveau un fichier audio valide.
+
 ## [v3.80-i18n-wave3] — 2026-09-12 — Traduction : dernière vague (pages restantes + composants partagés)
 
 ### Added
