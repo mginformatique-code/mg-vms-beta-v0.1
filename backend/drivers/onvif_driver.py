@@ -333,6 +333,29 @@ class ONVIFDriver(CameraDriver):
                         bitrate = int(getattr(rate, "BitrateLimit", 0) or 0)
                     encoding = getattr(v, "Encoding", "H264") or "H264"
                     codec = "h265" if "265" in str(encoding).upper() else "h264"
+                # v3.88 · BUG CONFIRMÉ (signalé par l'utilisateur, capture
+                # d'écran à l'appui) : `Encoding` est l'auto-déclaration ONVIF
+                # de la caméra, jamais vérifiée — plusieurs modèles Reolink
+                # annoncent "H264" ici alors que leur flux réel, vérifié en
+                # direct par ffprobe, est du HEVC (confirmé sur plusieurs
+                # caméras : ONVIF ment, le flux réel ne ment pas). Un premier
+                # correctif avait déjà traité ce même bug côté création de
+                # caméra (routers.py) — celui-ci couvre le second endroit où
+                # il existait, `GetStreams`/`discover()`, utilisé par les
+                # boutons "Détecter capacités"/"Rafraîchir". On ne fait
+                # confiance à l'auto-déclaration ONVIF qu'en dernier recours,
+                # si la vérification réelle échoue (flux temporairement
+                # injoignable) — coût ponctuel, uniquement lors d'un clic
+                # explicite sur ces boutons, jamais à chaque affichage.
+                try:
+                    from streaming import _ffprobe_validate_exact
+                    _url, _details, _attempts = await asyncio.to_thread(
+                        _ffprobe_validate_exact, uri.Uri, "tcp", self.username, self.password,
+                    )
+                    if _details and _details.get("codec"):
+                        codec = _details["codec"].lower()
+                except Exception as e:
+                    logger.debug("Vérification ffprobe du codec échouée pour %s (%s) — auto-déclaration ONVIF conservée", uri.Uri, e)
                 out.append(StreamInfo(
                     name=("main" if i == 0 else "sub" if i == 1 else f"stream{i}"),
                     url=uri.Uri,
