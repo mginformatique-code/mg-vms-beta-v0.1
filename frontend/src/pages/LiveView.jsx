@@ -482,8 +482,16 @@ function FocusTimeline({ cameraId, onSelect }) {
   // v3.1.4 · bottom-14 (au lieu de bottom-6) : CameraControlOverlay occupe déjà
   // bottom-2 sur ~32px (5 boutons projecteur/IR/sirène/TTS/reboot) — la
   // timeline chevauchait cette barre et rendait ses icônes injoignables.
+  // v3.86 · CameraControlOverlay a été remonté deux fois depuis (v3.36 puis
+  // v3.66, jusqu'à bottom-10) sans que cette valeur soit mise à jour en
+  // conséquence — la barre de boutons (bottom-10, ~36px de haut avec le
+  // padding) atteint désormais ~76px depuis le bas, dépassant largement les
+  // bottom-14 (56px) d'origine : ~20px de chevauchement réel, signalé par
+  // l'utilisateur ("bouton et timeline quasi au même niveau"). Remonté à
+  // bottom-24 (96px) pour retrouver une marge nette (~20px) au-dessus de la
+  // barre de boutons.
   return (
-    <div className="absolute bottom-14 inset-x-2 pointer-events-auto" data-testid="focus-timeline">
+    <div className="absolute bottom-24 inset-x-2 pointer-events-auto" data-testid="focus-timeline">
       <div className="bg-black/85 border border-white/10 px-2 py-2 space-y-1.5">
         <div className="flex items-center justify-between">
           <span className="text-[9px] uppercase tracking-wider text-white/60 mono">
