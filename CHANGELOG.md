@@ -3,6 +3,15 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.114-mobile-activity-timeline-dnd] — 2026-09-14 — Timeline d'activité (vraie référence bureau), retour des Alertes IA, réorganisation des tuiles
+
+### Added
+- La timeline sous la vue live mobile affiche désormais l'activité récente (détections IA + plaques), comme sur la version bureau — remplace la timeline d'enregistrements qui faisait doublon avec la page Enregistrements dédiée. Fenêtres 15 min / 30 min / 1h / 3h / aujourd'hui, miniatures cliquables.
+- Glisser-déposer des tuiles caméra en mode grille (appui long puis glisser) pour les réorganiser librement — l'ordre choisi est mémorisé sur le téléphone.
+
+### Changed
+- "Alertes IA" est de retour dans le menu Plus mobile — l'onglet Événements ne montrait pas le même contenu (deux sources de données distinctes en interne), contrairement à ce qui avait été supposé en le retirant.
+
 ## [v3.113-mobile-live-picker-grid-fullscreen] — 2026-09-14 — Sélecteur de caméras en tuiles, correctif plantage grille 16 vues, plein écran, défilement
 
 ### Fixed

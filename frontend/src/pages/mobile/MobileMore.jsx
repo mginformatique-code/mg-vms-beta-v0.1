@@ -44,12 +44,15 @@ function Card({ children, testId }) {
 const MOBILE_PATH_OVERRIDES = { "/cameras": "/m/camera-devices" };
 const mobilePathFor = (to) => MOBILE_PATH_OVERRIDES[to] || `/m${to}`;
 
-// v3.103 · "Alertes IA" retiré du menu Plus mobile UNIQUEMENT (demande
-// explicite : "le menu événements fait la même chose") — l'onglet
-// Événements mobile couvre déjà ce contenu. Le menu desktop (Layout.jsx,
-// NAV partagé) reste inchangé, cette exclusion est purement locale à ce
-// fichier.
-const HIDDEN_MOBILE_PATHS = ["/alerts"];
+// v3.103 · "Alertes IA" avait été retiré du menu Plus mobile sur
+// l'hypothèse que l'onglet Événements couvrait le même contenu.
+// v3.114 · Hypothèse invalidée à l'usage ("j'ai pas les alertes IA dans
+// Événements") : `db.alerts` (scénarios IA, collisions, blacklist...) et
+// `db.events` sont deux collections distinctes — Événements ne montre
+// jamais ce que /alerts affiche. Réactivé — liste vide gardée en place
+// (plutôt que suppression du mécanisme) pour une exclusion future propre
+// si un jour un vrai remplacement équivalent existe sur mobile.
+const HIDDEN_MOBILE_PATHS = [];
 
 function Row({ icon: Icon, label, onClick, testId, value, chevron = true }) {
   return (

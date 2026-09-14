@@ -15,7 +15,7 @@
  * pas au toucher, donc ici les contrôles restent simplement toujours
  * visibles, sans changement de code du composant lui-même).
  */
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import { toast } from "sonner";
@@ -24,7 +24,7 @@ import useDeviceCapabilities from "@/hooks/useDeviceCapabilities";
 import LivePlayer from "@/components/video/LivePlayer";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import MobilePtzPanel from "@/components/mobile/MobilePtzPanel";
-import MobileRecordingsTimeline from "@/components/mobile/MobileRecordingsTimeline";
+import MobileFocusTimeline from "@/components/mobile/MobileFocusTimeline";
 import Logo from "@/components/Logo";
 import {
   ChevronLeft, ChevronRight, Grid2x2, Grid3x3, LayoutGrid, Loader2, Film, Move,
@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 
 const SWIPE_THRESHOLD_PX = 50;
+const CAMERA_ORDER_KEY = "mgvms_mobile_camera_order";
 // v3.92 · Densités de mosaïque proposées (demande explicite : "choisir
 // 4-8-16 caméras") — 16 utilise 4 colonnes (tuiles volontairement petites,
 // esprit "app Reolink" : aperçu dense, on tape pour agrandir), 4/8 restent
@@ -53,8 +54,20 @@ function StatusDot({ online }) {
 // passer en vue plein écran (seul endroit qui ouvre un vrai flux WebRTC).
 // Corrige aussi partiellement la fiabilité WebRTC en grille dense (une
 // grille qui ne fait plus AUCUNE connexion WebRTC ne peut plus en perdre).
-function GridTile({ cam, onClick }) {
+const LONG_PRESS_MS = 350;
+
+// v3.114 · Glisser-déposer des tuiles pour réorganiser la grille (demande
+// explicite). Le drag&drop HTML5 natif (`draggable`) n'existe pas sur
+// tactile — implémenté à la main : un appui long (350ms) démarre le
+// déplacement (distingue "taper pour ouvrir" de "glisser pour
+// réorganiser"), puis `document.elementFromPoint` sous le doigt pendant
+// `touchmove` détecte la tuile survolée pour réordonner en direct
+// (géré par le parent via `onReorderOver`/`onReorderEnd`).
+function GridTile({ cam, onClick, onDragStart, onReorderOver, onReorderEnd, isDragging }) {
   const [thumbUrl, setThumbUrl] = useState(null);
+  const pressTimer = useRef(null);
+  const movedRef = useRef(false);
+
   useEffect(() => {
     let alive = true;
     let currentUrl = null;
@@ -77,8 +90,30 @@ function GridTile({ cam, onClick }) {
     return () => { alive = false; clearInterval(iv); if (currentUrl) URL.revokeObjectURL(currentUrl); };
   }, [cam.id]);
 
+  const handleTouchStart = () => {
+    movedRef.current = false;
+    pressTimer.current = setTimeout(() => { onDragStart(cam.id); }, LONG_PRESS_MS);
+  };
+  const handleTouchMove = (e) => {
+    movedRef.current = true;
+    if (!isDragging) { clearTimeout(pressTimer.current); return; }
+    const touch = e.touches[0];
+    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+    const tileEl = el?.closest("[data-cam-id]");
+    if (tileEl) onReorderOver(tileEl.dataset.camId);
+  };
+  const handleTouchEnd = () => {
+    clearTimeout(pressTimer.current);
+    if (isDragging) onReorderEnd();
+  };
+
   return (
-    <button onClick={onClick} className="relative bg-black aspect-video overflow-hidden rounded-lg" data-testid="mobile-live-grid-tile">
+    <button data-cam-id={cam.id} onClick={() => { if (!isDragging && !movedRef.current) onClick(); }}
+            onTouchStart={handleTouchStart} onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}
+            style={{ touchAction: isDragging ? "none" : "pan-y" }}
+            className={`relative bg-black aspect-video overflow-hidden rounded-lg transition-transform ${isDragging ? "opacity-60 scale-95 ring-2 ring-[#0044FF]" : ""}`}
+            data-testid="mobile-live-grid-tile">
       {thumbUrl ? (
         <img src={thumbUrl} alt="" className="w-full h-full object-cover" />
       ) : (
@@ -114,6 +149,12 @@ export default function MobileLive() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isLandscape, setIsLandscape] = useState(() => window.matchMedia("(orientation: landscape)").matches);
   const videoWrapRef = useRef(null);
+  // v3.114 · Ordre personnalisé des tuiles (glisser-déposer, demande
+  // explicite) — persisté en localStorage, fusionné avec la liste réelle
+  // à chaque rafraîchissement (une caméra ajoutée/supprimée n'efface pas
+  // l'ordre choisi pour les autres).
+  const [camOrder, setCamOrder] = useState(null); // [camId, ...] | null
+  const [draggingId, setDraggingId] = useState(null);
   // v3.102 · Remplace l'overlay plein écran v3.98 par un panneau INLINE
   // sous la vidéo (demande explicite, référence app Reolink : "ça s'ouvre
   // dans l'encadré blanc, rien devant la vue live") — `panelMode` choisit
@@ -126,7 +167,16 @@ export default function MobileLive() {
   const playerRef = useRef(null);
   const [playerStatus, setPlayerStatus] = useState({ muted: true, recording: false, mode: "connecting", busy: false });
   const touchStart = useRef(null);
-  const { caps } = useDeviceCapabilities(cams?.[idx]?.id);
+  // v3.114 · `orderedCams` — liste affichée après application de l'ordre
+  // personnalisé (grille ET vue plein écran partagent le même ordre, pour
+  // que les flèches précédent/suivant restent cohérentes avec la grille).
+  const orderedCams = useMemo(() => {
+    if (!cams) return null;
+    if (!camOrder) return cams;
+    const byId = new Map(cams.map((c) => [c.id, c]));
+    return camOrder.map((id) => byId.get(id)).filter(Boolean);
+  }, [cams, camOrder]);
+  const { caps } = useDeviceCapabilities(orderedCams?.[idx]?.id);
   // v3.91 · Arrivée depuis MobileCameras (tap sur une caméra précise) —
   // consommé une seule fois dès que la liste charge, par id (pas par index,
   // robuste à un ordre de tri différent entre les deux appels /cameras).
@@ -138,15 +188,60 @@ export default function MobileLive() {
       if (!alive) return;
       const list = r.data || [];
       setCams(list);
-      if (requestedCameraId.current) {
-        const found = list.findIndex((c) => c.id === requestedCameraId.current);
-        if (found >= 0) setIdx(found);
-        requestedCameraId.current = null;
-      }
+      // v3.114 · Fusionne l'ordre sauvegardé (localStorage) avec la liste
+      // réelle DANS LE MÊME EFFET que le chargement des caméras — évite un
+      // rendu intermédiaire où `camOrder` est encore vide pendant que
+      // `cams` est déjà rempli, qui décalerait temporairement l'index visé
+      // par `requestedCameraId`.
+      setCamOrder((prevOrder) => {
+        let base = prevOrder;
+        if (!base) {
+          try {
+            const saved = JSON.parse(localStorage.getItem(CAMERA_ORDER_KEY) || "null");
+            if (Array.isArray(saved)) base = saved;
+          } catch { /* ignore */ }
+        }
+        const ids = list.map((c) => c.id);
+        const idSet = new Set(ids);
+        const kept = (base || []).filter((id) => idSet.has(id));
+        const missing = ids.filter((id) => !kept.includes(id));
+        const finalOrder = [...kept, ...missing];
+        if (requestedCameraId.current) {
+          const found = finalOrder.indexOf(requestedCameraId.current);
+          if (found >= 0) setIdx(found);
+          requestedCameraId.current = null;
+        }
+        return finalOrder;
+      });
     }).catch(() => {});
     load();
     const iv = setInterval(load, 20000);
     return () => { alive = false; clearInterval(iv); };
+  }, []);
+
+  const handleDragStart = useCallback((camId) => setDraggingId(camId), []);
+  const handleReorderOver = useCallback((overId) => {
+    setDraggingId((currentDraggingId) => {
+      if (!currentDraggingId || overId === currentDraggingId) return currentDraggingId;
+      setCamOrder((prev) => {
+        const base = prev || (orderedCams ? orderedCams.map((c) => c.id) : []);
+        const next = [...base];
+        const from = next.indexOf(currentDraggingId);
+        const to = next.indexOf(overId);
+        if (from === -1 || to === -1) return prev;
+        next.splice(from, 1);
+        next.splice(to, 0, currentDraggingId);
+        return next;
+      });
+      return currentDraggingId;
+    });
+  }, [orderedCams]);
+  const handleReorderEnd = useCallback(() => {
+    setDraggingId(null);
+    setCamOrder((order) => {
+      if (order) { try { localStorage.setItem(CAMERA_ORDER_KEY, JSON.stringify(order)); } catch { /* ignore */ } }
+      return order;
+    });
   }, []);
 
   // v3.98 · Ferme le panneau PTZ si on change de caméra (swipe/flèches)
@@ -181,8 +276,8 @@ export default function MobileLive() {
     }
   };
 
-  const goPrev = useCallback(() => setIdx((i) => (cams?.length ? (i - 1 + cams.length) % cams.length : 0)), [cams]);
-  const goNext = useCallback(() => setIdx((i) => (cams?.length ? (i + 1) % cams.length : 0)), [cams]);
+  const goPrev = useCallback(() => setIdx((i) => (orderedCams?.length ? (i - 1 + orderedCams.length) % orderedCams.length : 0)), [orderedCams]);
+  const goNext = useCallback(() => setIdx((i) => (orderedCams?.length ? (i + 1) % orderedCams.length : 0)), [orderedCams]);
 
   // v3.109 · Même correctif que VehicleDetail (MobileEvents.jsx) : exige un
   // geste nettement horizontal (|dx| > |dy|) avant de changer de caméra,
@@ -294,15 +389,17 @@ export default function MobileLive() {
             cams") — la grille garde le nombre de colonnes choisi mais
             grandit avec TOUTES les caméras, défilement vertical naturel. */}
         <div className="flex-1 overflow-y-auto grid gap-1 p-1 content-start" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
-          {cams.map((cam, i) => (
-            <GridTile key={cam.id} cam={cam} onClick={() => { setIdx(i); setView("single"); }} />
+          {orderedCams.map((cam, i) => (
+            <GridTile key={cam.id} cam={cam} onClick={() => { setIdx(i); setView("single"); }}
+                      isDragging={draggingId === cam.id}
+                      onDragStart={handleDragStart} onReorderOver={handleReorderOver} onReorderEnd={handleReorderEnd} />
           ))}
         </div>
       </div>
     );
   }
 
-  const cam = cams[idx];
+  const cam = orderedCams[idx];
   // v3.113 · "quand je mets en paysage ça rend très mal" — la vidéo restait
   // à ~32% de hauteur même en paysage (où la hauteur d'écran disponible
   // est bien plus faible qu'en portrait), donnant une bande vidéo minuscule
@@ -413,13 +510,13 @@ export default function MobileLive() {
           )
         )}
 
-        {/* v3.103 · Timeline des enregistrements du jour, toujours visible
-            sous la rangée d'icônes (demande explicite : "en dessous des
-            boutons faudrait ajouter la timeline des camera stp, que les
-            elements de la timeline soit cliquables aussi") — indépendante
-            de panelMode, pas seulement affichée quand le panneau PTZ est
-            ouvert. */}
-        <MobileRecordingsTimeline cameraId={cam.id} />
+        {/* v3.103 · Timeline sous la rangée d'icônes, toujours visible,
+            indépendante de panelMode.
+            v3.114 · Remplacée par la VRAIE référence demandée — la
+            timeline d'ACTIVITÉ façon `FocusTimeline` de LiveView.jsx
+            desktop (événements + plaques récents), pas les segments
+            d'enregistrement (qui ont déjà leur page dédiée). */}
+        <MobileFocusTimeline cameraId={cam.id} />
       </div>
     </div>
   );
