@@ -52,7 +52,7 @@ export default function PipelineCenter() {
   const setTab = (v) => setParams({ tab: v });
 
   return (
-    <div className="p-6 space-y-6" data-testid="pipeline-center">
+    <div className="p-3 sm:p-6 space-y-6" data-testid="pipeline-center">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">{t("nav.pipeline_center")}</h1>
@@ -197,6 +197,7 @@ function TrackingPanel() {
       <div className="text-sm text-muted-foreground mb-3">
         {t("pcenter.tracking_desc")}
       </div>
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="text-left text-muted-foreground">
           <tr>
@@ -218,6 +219,7 @@ function TrackingPanel() {
           )}
         </tbody>
       </table>
+      </div>
     </Card>
   );
 }
@@ -236,6 +238,7 @@ function PluginsPanel() {
   }, []);
   return (
     <Card className="p-4" data-testid="plugins-panel">
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="text-left text-muted-foreground">
           <tr>
@@ -261,6 +264,7 @@ function PluginsPanel() {
           ))}
         </tbody>
       </table>
+      </div>
     </Card>
   );
 }
@@ -311,6 +315,7 @@ function TrackingDiagnosticsPanel() {
       <div className="text-xs text-muted-foreground mb-3">
         {t("pcenter.tracking_diag_desc")}
       </div>
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="text-left text-muted-foreground text-xs uppercase tracking-wider">
           <tr>
@@ -341,6 +346,7 @@ function TrackingDiagnosticsPanel() {
           )}
         </tbody>
       </table>
+      </div>
     </Card>
   );
 }

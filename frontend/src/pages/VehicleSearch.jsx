@@ -149,6 +149,7 @@ function DetailModal({ item, onClose }) {
               <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2 flex items-center gap-1">
                 <ScanLine size={12} /> {t("veh.multi_engine_readings_label")} ({readings.length})
               </div>
+              <div className="overflow-x-auto">
               <table className="w-full text-sm" data-testid="veh-detail-readings">
                 <thead className="text-left text-muted-foreground text-xs">
                   <tr>
@@ -167,6 +168,7 @@ function DetailModal({ item, onClose }) {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
         </div>

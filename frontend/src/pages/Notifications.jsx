@@ -47,7 +47,7 @@ export default function Notifications() {
   };
 
   const ChannelHead = ({ ch, icon: Icon, name }) => (
-    <div className="flex items-center justify-between mb-4 pb-3 border-b border-border">
+    <div className="flex items-center justify-between flex-wrap gap-2 mb-4 pb-3 border-b border-border">
       <div className="flex items-center gap-2"><Icon size={18} className="text-[#0044FF]" /><span className="font-head font-semibold">{name}</span>
         {cfg[ch].enabled && <span className="text-[9px] uppercase tracking-wider mg-online flex items-center gap-1"><CheckCircle2 size={12} /> {t("common.active")}</span>}
       </div>

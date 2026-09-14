@@ -612,18 +612,18 @@ export default function Cameras() {
                   <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("cam.wizard_title")}</span>
                   <span className="text-[10px] text-muted-foreground">{t("cam.wizard_hint")}</span>
                 </div>
-                <div className="grid grid-cols-4 gap-2">
-                  <select value={form.wiz_brand} onChange={(e) => setForm({ ...form, wiz_brand: e.target.value, wiz_model_idx: 0, wiz_stream: "main" })} className="inp text-xs" data-testid="wiz-brand">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <select value={form.wiz_brand} onChange={(e) => setForm({ ...form, wiz_brand: e.target.value, wiz_model_idx: 0, wiz_stream: "main" })} className="inp text-xs min-w-0" data-testid="wiz-brand">
                     <option value="">{t("cam.manufacturer_ph")}</option>
                     {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                   </select>
-                  <select value={form.wiz_model_idx} onChange={(e) => setForm({ ...form, wiz_model_idx: Number(e.target.value), wiz_stream: "main" })} className="inp text-xs" disabled={!currentBrand} data-testid="wiz-model">
+                  <select value={form.wiz_model_idx} onChange={(e) => setForm({ ...form, wiz_model_idx: Number(e.target.value), wiz_stream: "main" })} className="inp text-xs min-w-0" disabled={!currentBrand} data-testid="wiz-model">
                     {currentBrand?.models?.map((m, i) => <option key={i} value={i}>{m.name}</option>)}
                   </select>
-                  <select value={form.wiz_stream} onChange={(e) => setForm({ ...form, wiz_stream: e.target.value })} className="inp text-xs" disabled={!currentModel} data-testid="wiz-stream">
+                  <select value={form.wiz_stream} onChange={(e) => setForm({ ...form, wiz_stream: e.target.value })} className="inp text-xs min-w-0" disabled={!currentModel} data-testid="wiz-stream">
                     {currentModel?.streams?.map((s) => <option key={s} value={s}>{streamLabel(s, t)}</option>)}
                   </select>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 min-w-0">
                     <input type="number" min="1" max="64" placeholder={t("cam.wizard_channel_ph")}
                       value={form.wiz_channel} onChange={(e) => setForm({ ...form, wiz_channel: e.target.value })}
                       className="inp text-xs mono" style={{ width: 60 }} title={t("cam.channel_title")} data-testid="wiz-channel" />

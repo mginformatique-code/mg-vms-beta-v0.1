@@ -34,7 +34,7 @@ export default function Sites() {
 
   return (
     <div className="p-4">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
         <h1 className="font-head font-bold text-2xl tracking-tight">{t("sites.title")}</h1>
         {can("technician") && <button onClick={openNew} data-testid="add-site-btn" className="flex items-center gap-2 px-3 py-2 bg-[#0044FF] text-white text-sm hover:bg-[#0033cc]"><Plus size={16} /> {t("sites.add")}</button>}
       </div>

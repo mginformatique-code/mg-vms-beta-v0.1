@@ -728,7 +728,7 @@ function StreamLifecycleSection() {
       )}
 
       {/* Journal détaillé (chronologique, plus récent en bas) */}
-      <div className="border border-border bg-background max-h-[500px] overflow-y-auto" data-testid="lifecycle-journal">
+      <div className="border border-border bg-background max-h-[500px] overflow-y-auto overflow-x-auto" data-testid="lifecycle-journal">
         {loading && entries.length === 0 && (
           <div className="p-4 text-center text-muted-foreground text-sm">
             <RefreshCw size={14} className="inline animate-spin mr-1" /> {t("diag.loading")}

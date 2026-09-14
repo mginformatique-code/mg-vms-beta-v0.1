@@ -133,10 +133,10 @@ export default function Hardware() {
           <p className="text-sm text-muted-foreground">{t("hw.assign_intro")}</p>
           <div className="border border-border bg-card divide-y divide-border">
             {Object.keys(cfg.options).map((fn) => (
-              <div key={fn} className="flex items-center justify-between px-4 py-2.5 gap-4" data-testid={`hw-assign-row-${fn}`}>
+              <div key={fn} className="flex items-center justify-between flex-wrap px-4 py-2.5 gap-2" data-testid={`hw-assign-row-${fn}`}>
                 <span className="text-sm font-medium">{cfg.labels[fn]}</span>
                 <select value={cfg.assignments[fn]} onChange={(e) => setAssign(fn, e.target.value)} disabled={!can("admin")}
-                  data-testid={`hw-assign-${fn}`} className="px-3 py-1.5 bg-background border border-input text-sm outline-none min-w-[180px] disabled:opacity-60">
+                  data-testid={`hw-assign-${fn}`} className="px-3 py-1.5 bg-background border border-input text-sm outline-none min-w-0 disabled:opacity-60">
                   {cfg.options[fn].map((o) => <option key={o} value={o}>{optLabel(o)}</option>)}
                 </select>
               </div>

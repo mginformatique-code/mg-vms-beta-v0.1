@@ -94,7 +94,7 @@ export default function UsersPage() {
 
   return (
     <div className="p-4">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
         <h1 className="font-head font-bold text-2xl tracking-tight flex items-center gap-2"><UserCog size={22} /> {t("users.title")}</h1>
         <button onClick={() => setOpen(true)} data-testid="add-user-btn" className="flex items-center gap-2 px-3 py-2 bg-[#0044FF] text-white text-sm hover:bg-[#0033cc]"><Plus size={16} /> {t("users.add")}</button>
       </div>
