@@ -3,6 +3,12 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.97-mobile-camera-center-tab] — 2026-09-14 — Onglet "Centre caméras" mobile corrigé + onglets glissables au doigt
+
+### Fixed
+- L'onglet "Centre caméras" en bas de l'interface mobile ouvrait une liste simplifiée au lieu de la vraie page technique (tri, filtre, plugins IA par caméra) déjà présente dans l'application — corrigé, il ouvre maintenant la bonne page.
+- Les onglets de la fiche caméra (et quelques rangées défilables similaires) sont maintenant garantis glissables au doigt, sans ambiguïté avec d'autres gestes de la page.
+
 ## [v3.96-mobile-width-sweep] — 2026-09-14 — Correctifs de largeur mobile sur les pages restantes
 
 ### Fixed
