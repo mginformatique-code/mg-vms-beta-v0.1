@@ -3,6 +3,26 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.102-mobile-ptz-panel-redesign] — 2026-09-14 — Panneau PTZ repensé (inline, plus de superposition), presets/patrouille, qualité SD par défaut
+
+### Fixed
+- Le menu PTZ mobile se superposait en plein écran à la vidéo (référence app Reolink fournie par l'utilisateur : le menu doit s'ouvrir dans le cadre sous la vidéo, jamais par-dessus) — corrigé : la vidéo reste désormais visible en permanence.
+
+### Changed
+- La vidéo live mobile occupe environ la moitié de l'écran au lieu de le remplir, laissant de la place au panneau de contrôles en dessous.
+- Qualité vidéo par défaut de la vue live mobile passée de HD à SD (HD reste accessible via le bouton dédié).
+
+### Added
+- Presets et patrouille automatique dans le panneau PTZ mobile, mêmes fonctions que la fiche caméra complète.
+
+## [v3.100-mobile-login-status-and-controls-repositioned] — 2026-09-14 — Badges d'état sur la connexion mobile, contrôles vidéo déplacés hors de l'image
+
+### Added
+- La page de connexion mobile affiche désormais les mêmes badges d'état que la version bureau (caméras en ligne/hors ligne, ANPR, moteur IA).
+
+### Changed
+- Les boutons son, photo et enregistrement de la vue live mobile ne se superposent plus à l'image — ils rejoignent la barre PTZ/Enregistrements sous la vidéo, qui reste entièrement dégagée.
+
 ## [v3.99-mobile-capture-and-vehicle-record] — 2026-09-14 — Capture photo/vidéo sur le téléphone, fiche véhicule complète, bouton PTZ instantané
 
 ### Fixed
