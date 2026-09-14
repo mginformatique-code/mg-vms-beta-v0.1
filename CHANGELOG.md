@@ -3,6 +3,11 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.108-mobile-plates-tab-dedup] — 2026-09-14 — Correctif : l'onglet Plaques mobile listait chaque détection au lieu d'une fiche par véhicule
+
+### Fixed
+- Le nouvel onglet Plaques (v3.107) listait chaque détection ANPR individuelle — une même plaque pouvait apparaître des dizaines de fois d'affilée. Il utilise désormais la même liste agrégée que la page Véhicules du bureau : une seule fiche par plaque, avec le nombre total de passages, comme prévu.
+
 ## [v3.107-mobile-plates-tab] — 2026-09-14 — Onglet Plaques dédié (mobile)
 
 ### Added

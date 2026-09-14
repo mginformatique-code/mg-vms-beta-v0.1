@@ -54,65 +54,81 @@ function passageThumbUrl(passageId) {
 // vrai onglet dédié — demande explicite : "on change de système... un
 // onglet plaques stp, et tu me supprimeras les plaques récentes en haut
 // de page" (mobile uniquement, la version bureau garde ses `FILTERS`
-// intacts). Liste complète paginée (`GET /plates`, même pattern
-// charger-plus que le flux d'événements) plutôt que 10 mini-cartes.
+// intacts).
+// v3.108 · Corrigé : la première version listait `GET /plates` (CHAQUE
+// détection ANPR individuelle — une même plaque revenait des dizaines de
+// fois d'affilée). Remplacé par `GET /vehicles` — la VRAIE liste "une
+// entrée par plaque" déjà utilisée par la page Véhicules desktop
+// (regroupement des lectures répétées/variantes OCR proches côté
+// backend, `passages_count` agrégé) — demande explicite : "j'ai pas la
+// superposition des plaques qui revienne" (les doublons ne sont plus
+// fusionnés en une seule fiche).
 function PlatesTab({ onSelectVehicle }) {
   const { t } = useApp();
-  const [plates, setPlates] = useState(null);
+  const [items, setItems] = useState(null);
+  const [total, setTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
 
   const load = useCallback(() => {
-    setPlates(null);
-    api.get("/plates", { params: { limit: PAGE_SIZE } })
-       .then((r) => { setPlates(r.data || []); setHasMore((r.data || []).length === PAGE_SIZE); })
-       .catch(() => setPlates([]));
+    setItems(null);
+    api.get("/vehicles", { params: { limit: PAGE_SIZE, offset: 0 } })
+       .then((r) => { setItems(r.data.items || []); setTotal(r.data.total || 0); })
+       .catch(() => setItems([]));
   }, []);
   useEffect(() => { load(); }, [load]);
 
   const loadMore = async () => {
     setLoadingMore(true);
     try {
-      const r = await api.get("/plates", { params: { limit: PAGE_SIZE, offset: plates.length } });
-      setPlates((prev) => [...prev, ...(r.data || [])]);
-      setHasMore((r.data || []).length === PAGE_SIZE);
+      const r = await api.get("/vehicles", { params: { limit: PAGE_SIZE, offset: items.length } });
+      setItems((prev) => [...prev, ...(r.data.items || [])]);
+      setTotal(r.data.total || 0);
     } catch (e) {} finally { setLoadingMore(false); }
   };
 
-  if (plates === null) {
+  if (items === null) {
     return (
       <div className="flex items-center justify-center text-muted-foreground py-16" data-testid="mobile-plates-tab-loading">
         <Loader2 size={20} className="animate-spin" />
       </div>
     );
   }
-  if (plates.length === 0) {
+  if (items.length === 0) {
     return <div className="text-muted-foreground text-sm py-16 text-center">{t("mobile.events_plates_empty")}</div>;
   }
 
   return (
     <div data-testid="mobile-plates-tab">
       <div className="flex flex-col gap-2">
-        {plates.map((p, i) => (
-          <button key={p.id} onClick={() => onSelectVehicle(plates.map((pp) => pp.plate), i)} data-testid="mobile-plates-tab-row"
+        {items.map((v, i) => (
+          <button key={v.plate} onClick={() => onSelectVehicle(items.map((vv) => vv.plate), i)} data-testid="mobile-plates-tab-row"
                   className="flex items-center gap-3 rounded-xl border border-border bg-card p-2 text-left">
-            <img src={passageThumbUrl(p.id)} alt={p.plate} loading="lazy"
-                 className="w-16 h-12 rounded-lg object-cover bg-secondary shrink-0"
-                 onError={(e) => { e.currentTarget.style.display = "none"; }} />
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-bold mono truncate">{p.plate}</div>
-              <div className="text-[11px] text-muted-foreground truncate">{p.camera_name}</div>
-              <div className="text-[11px] mono text-muted-foreground">{new Date(p.timestamp).toLocaleString("fr-FR")}</div>
+            <div className="w-16 h-12 rounded-lg bg-secondary shrink-0 overflow-hidden">
+              {v.best_thumb_id && (
+                <img src={passageThumbUrl(v.best_thumb_id)} alt={v.plate} loading="lazy"
+                     className="w-full h-full object-cover"
+                     onError={(e) => { e.currentTarget.style.display = "none"; }} />
+              )}
             </div>
-            {p.list_status && p.list_status !== "none" && (
-              <span className={`text-[9px] uppercase font-bold shrink-0 ${p.list_status === "black" ? "text-[#FF3333]" : "text-[#FFB800]"}`}>
-                {p.list_status === "black" ? t("mobile.events_plate_blacklist") : t("mobile.events_plate_whitelist")}
-              </span>
-            )}
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-bold mono truncate">{v.plate}</div>
+              <div className="text-[11px] text-muted-foreground truncate">
+                {[v.vehicle_make, v.vehicle_model, v.vehicle_color].filter(Boolean).join(" · ") || "—"}
+              </div>
+              <div className="text-[11px] mono text-muted-foreground">{v.last_seen ? new Date(v.last_seen).toLocaleString("fr-FR") : "—"}</div>
+            </div>
+            <div className="flex flex-col items-end gap-1 shrink-0">
+              <span className="text-[10px] mono text-muted-foreground">{v.passages_count} {t("mobile.vehicle_passages").toLowerCase()}</span>
+              {v.list_status && v.list_status !== "none" && (
+                <span className={`text-[9px] uppercase font-bold ${v.list_status === "black" ? "text-[#FF3333]" : "text-[#FFB800]"}`}>
+                  {v.list_status === "black" ? t("mobile.events_plate_blacklist") : t("mobile.events_plate_whitelist")}
+                </span>
+              )}
+            </div>
           </button>
         ))}
       </div>
-      {hasMore && (
+      {items.length < total && (
         <div className="flex justify-center pt-3">
           <button onClick={loadMore} disabled={loadingMore} data-testid="mobile-plates-tab-load-more"
                   className="flex items-center gap-2 px-4 py-2 rounded-full border border-border text-xs uppercase tracking-wider text-muted-foreground disabled:opacity-50">
