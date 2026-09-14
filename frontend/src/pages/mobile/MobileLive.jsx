@@ -24,7 +24,7 @@ import LivePlayer from "@/components/video/LivePlayer";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import PtzPad from "@/components/mobile/PtzPad";
 import Logo from "@/components/Logo";
-import { ChevronLeft, ChevronRight, Grid2x2, Grid3x3, LayoutGrid, Loader2, Film } from "lucide-react";
+import { ChevronLeft, ChevronRight, Grid2x2, Grid3x3, LayoutGrid, Loader2, Film, Move, X } from "lucide-react";
 
 const SWIPE_THRESHOLD_PX = 50;
 // v3.92 · Densités de mosaïque proposées (demande explicite : "choisir
@@ -49,6 +49,7 @@ export default function MobileLive() {
   const [gridSize, setGridSize] = useState(4);
   const [page, setPage] = useState(0);
   const [densityOpen, setDensityOpen] = useState(false);
+  const [ptzOpen, setPtzOpen] = useState(false);
   const touchStartX = useRef(null);
   const { caps } = useDeviceCapabilities(cams?.[idx]?.id);
   // v3.91 · Arrivée depuis MobileCameras (tap sur une caméra précise) —
@@ -76,6 +77,10 @@ export default function MobileLive() {
   // v3.92 · Revient à la 1ère page à chaque changement de densité — une
   // page 2 calculée sur l'ancienne taille n'aurait plus de sens.
   useEffect(() => { setPage(0); }, [gridSize]);
+  // v3.98 · Ferme l'overlay PTZ si on change de caméra (swipe/flèches)
+  // pendant qu'il est ouvert — évite de piloter le PTZ de la caméra
+  // précédente en croyant contrôler la nouvelle.
+  useEffect(() => { setPtzOpen(false); }, [idx]);
 
   const goPrev = useCallback(() => setIdx((i) => (cams?.length ? (i - 1 + cams.length) % cams.length : 0)), [cams]);
   const goNext = useCallback(() => setIdx((i) => (cams?.length ? (i + 1) % cams.length : 0)), [cams]);
@@ -227,21 +232,44 @@ export default function MobileLive() {
           {cam.name}
         </div>
       </div>
-      {/* v3.94 · Bouton "Enregistrements" à côté du pavé PTZ (demande
-          explicite : "tu ajoutes à droite ou à gauche ... la recherche
-          d'enregistrement de la caméra en question") — réutilise
-          Recordings.jsx tel quel via `/m/recordings?camera=`, qu'il lit
-          déjà lui-même (aucune modification nécessaire). Affiché même sans
-          PTZ (une caméra fixe a aussi des enregistrements à consulter). */}
-      <div className="shrink-0 flex items-center justify-center gap-3 py-2 border-t border-border bg-card">
-        {caps?.ptz && <PtzPad cameraId={cam.id} />}
+      {/* v3.98 · Rangée d'icônes façon app Reolink (demande explicite),
+          plus le pavé PTZ toujours affiché en dur : "PTZ" ouvre une
+          page superposée (même zone que la vidéo) avec le pavé/zoom/
+          vitesse + un bouton Retour, "Lecture" navigue directement vers
+          les enregistrements de cette caméra (Recordings.jsx réutilisé
+          tel quel via `/m/recordings?camera=`, qui lit déjà ce paramètre
+          lui-même). */}
+      <div className="shrink-0 flex items-center justify-center gap-4 py-2 border-t border-border bg-card">
+        {caps?.ptz && (
+          <button onClick={() => setPtzOpen(true)} data-testid="mobile-live-ptz-open-btn"
+                  className="flex flex-col items-center gap-0.5 text-muted-foreground">
+            <Move size={20} />
+            <span className="text-[9px] uppercase">PTZ</span>
+          </button>
+        )}
         <button onClick={() => navigate(`/m/recordings?camera=${cam.id}`)}
                 data-testid="mobile-live-recordings-btn"
-                className="w-11 h-11 flex flex-col items-center justify-center gap-0.5 bg-black/60 text-white">
-          <Film size={16} />
-          <span className="text-[8px] uppercase">{t("mobile.live_recordings")}</span>
+                className="flex flex-col items-center gap-0.5 text-muted-foreground">
+          <Film size={20} />
+          <span className="text-[9px] uppercase">{t("mobile.live_recordings")}</span>
         </button>
       </div>
+
+      {ptzOpen && (
+        <div className="fixed inset-0 z-50 bg-black flex flex-col" data-testid="mobile-ptz-overlay">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-white/10 shrink-0">
+            <button onClick={() => setPtzOpen(false)} data-testid="mobile-ptz-back"
+                    className="flex items-center gap-1.5 text-white text-sm">
+              <X size={18} /> {t("mobile.ptz_back")}
+            </button>
+            <span className="text-white text-sm truncate">{cam.name}</span>
+            <span className="w-14" />
+          </div>
+          <div className="flex-1 flex items-center justify-center">
+            <PtzPad cameraId={cam.id} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

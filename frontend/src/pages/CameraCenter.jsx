@@ -1374,6 +1374,21 @@ function PTZTab({ cameraId, caps }) {
     api.post(`/devices/${cameraId}/ptz/zoom`, { value })
        .then(() => {})
        .catch((e) => toast.error(e.response?.data?.detail?.message || t("camc.error_generic")));
+  // v3.98 · Le zoom ONVIF est un ContinuousMove, comme pan/tilt — un simple
+  // onClick ne l'arrêtait jamais, la caméra zoomait jusqu'à sa butée
+  // physique à chaque appui (root cause confirmée côté backend :
+  // onvif_driver.py::_ptz_zoom, jamais de stop dédié). Backend corrigé
+  // pour que `ptz/move {direction:"stop"}` arrête aussi le zoom sur le
+  // même profil — réutilisé ici via le même pattern holdMove.
+  const holdZoom = (value) => ({
+    onMouseDown: (e) => { e.preventDefault(); zoom(value); },
+    onMouseUp: () => move("stop"),
+    onMouseLeave: () => move("stop"),
+    onTouchStart: (e) => { e.preventDefault(); zoom(value); },
+    onTouchEnd: () => move("stop"),
+    onTouchCancel: () => move("stop"),
+    style: { touchAction: "none" },
+  });
   const gotoPreset = (id) =>
     // v3.47 · id est un token opaque ("000", "004"...) — surtout PAS
     // Number(id), qui perdait les zéros de tête et envoyait un token qui
@@ -1526,8 +1541,8 @@ function PTZTab({ cameraId, caps }) {
             <div>
               <div className="text-sm text-muted-foreground mb-2">Zoom</div>
               <div className="flex gap-2">
-                <Button variant="outline" onClick={() => zoom(-0.5)} data-testid="ptz-zoom-out">−</Button>
-                <Button variant="outline" onClick={() => zoom(0.5)} data-testid="ptz-zoom-in">+</Button>
+                <Button variant="outline" {...holdZoom(-0.5)} data-testid="ptz-zoom-out">−</Button>
+                <Button variant="outline" {...holdZoom(0.5)} data-testid="ptz-zoom-in">+</Button>
               </div>
             </div>
           )}

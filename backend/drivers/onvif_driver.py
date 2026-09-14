@@ -388,7 +388,17 @@ class ONVIFDriver(CameraDriver):
         req.ProfileToken = token
         req.Velocity = {"PanTilt": {"x": x * v, "y": y * v}}
         if direction == "stop":
-            await asyncio.to_thread(self._ptz.Stop, {"ProfileToken": token})
+            # v3.98 · `PanTilt`/`Zoom` explicites plutôt qu'un Stop() sans
+            # filtre — la norme ONVIF laisse le comportement par défaut à
+            # l'appréciation du vendeur quand ces champs sont omis. Root
+            # cause du zoom "qui ne s'arrête jamais" (signalé en usage
+            # réel) : `_ptz_zoom` ci-dessous lance un `ContinuousMove` sur
+            # l'axe Zoom mais n'a jamais eu de repli "stop" dédié, et rien
+            # jusqu'ici ne garantissait qu'un Stop pan/tilt coupe aussi un
+            # zoom en cours sur les caméras qui respectent le défaut le
+            # plus restrictif de la norme (ne rien arrêter si non demandé
+            # explicitement).
+            await asyncio.to_thread(self._ptz.Stop, {"ProfileToken": token, "PanTilt": True, "Zoom": True})
         else:
             await asyncio.to_thread(self._ptz.ContinuousMove, req)
 
@@ -397,10 +407,16 @@ class ONVIFDriver(CameraDriver):
             raise UnsupportedCapabilityError("Service PTZ indispo")
         v = max(-1.0, min(1.0, value))
         profiles = await asyncio.to_thread(self._media.GetProfiles)
+        token = profiles[0].token
         req = self._ptz.create_type("ContinuousMove")
-        req.ProfileToken = profiles[0].token
+        req.ProfileToken = token
         req.Velocity = {"Zoom": {"x": v}}
         await asyncio.to_thread(self._ptz.ContinuousMove, req)
+        # v3.98 · Pas de méthode "stop zoom" dédiée : `ptz_move("stop", ...)`
+        # ci-dessus arrête désormais explicitement PanTilt ET Zoom sur le
+        # même profil — le frontend appelle cette route existante au
+        # relâchement du bouton zoom (pattern "maintenir pour zoomer",
+        # identique à holdMove), pas de nouvel endpoint nécessaire.
 
     async def _ptz_preset(self, preset_id, speed: Optional[float] = None) -> None:
         if self._ptz is None:

@@ -29,7 +29,7 @@ import { Camera as CamIcon, Loader2, X, CreditCard } from "lucide-react";
 
 const PAGE_SIZE = 20;
 
-function PlatesSection() {
+function PlatesSection({ onSelect }) {
   const { t } = useApp();
   const [plates, setPlates] = useState(null);
   useEffect(() => {
@@ -46,8 +46,8 @@ function PlatesSection() {
       </div>
       <div className="flex gap-2 overflow-x-auto pb-1" style={{ touchAction: "pan-x" }}>
         {plates.map((p) => (
-          <div key={p.id} data-testid="mobile-plate-card"
-               className="shrink-0 w-32 border border-border bg-card p-2">
+          <button key={p.id} onClick={() => onSelect(p)} data-testid="mobile-plate-card"
+               className="shrink-0 w-32 border border-border bg-card p-2 text-left">
             <div className="text-sm font-bold mono truncate">{p.plate}</div>
             <div className="text-[10px] text-muted-foreground truncate">{p.camera_name}</div>
             <div className="text-[10px] mono text-muted-foreground">{new Date(p.timestamp).toLocaleTimeString("fr-FR")}</div>
@@ -56,7 +56,7 @@ function PlatesSection() {
                 {p.list_status === "black" ? t("mobile.events_plate_blacklist") : t("mobile.events_plate_whitelist")}
               </div>
             )}
-          </div>
+          </button>
         ))}
       </div>
     </div>
@@ -72,6 +72,7 @@ export default function MobileEvents() {
   const [hasMore, setHasMore] = useState(false);
   const [detailId, setDetailId] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [detailKind, setDetailKind] = useState("event"); // "event" | "plate"
   const isPlaques = filtre === "tous";
   const activeFilter = FILTERS.find((f) => f.id === filtre) || FILTERS[0];
 
@@ -99,10 +100,17 @@ export default function MobileEvents() {
     } catch (e) {} finally { setLoadingMore(false); }
   };
 
-  const openDetail = (e) => {
-    setDetailId(e.id);
-    setDetail(e);
-    api.get(`/events/${e.id}`).then((r) => setDetail(r.data)).catch(() => {});
+  // v3.98 · Une seule fiche de détail pour événements ET plaques (demande
+  // explicite : "que ça affiche les fiches véhicules à l'écran") — seule
+  // l'URL de fiche complète change (`/events/{id}` vs `/plates/{id}`), le
+  // reste de l'objet (plate/vehicle_*/confidence/list_status) a la même
+  // forme des deux côtés.
+  const openDetail = (item, kind = "event") => {
+    setDetailId(item.id);
+    setDetailKind(kind);
+    setDetail(item);
+    const url = kind === "plate" ? `/plates/${item.id}` : `/events/${item.id}`;
+    api.get(url).then((r) => setDetail(r.data)).catch(() => {});
   };
   const closeDetail = () => { setDetailId(null); setDetail(null); };
 
@@ -123,7 +131,7 @@ export default function MobileEvents() {
         })}
       </div>
 
-      {isPlaques && <PlatesSection />}
+      {isPlaques && <PlatesSection onSelect={(p) => openDetail(p, "plate")} />}
 
       {loading ? (
         <div className="flex items-center justify-center text-muted-foreground py-16" data-testid="mobile-events-loading">
@@ -175,17 +183,19 @@ export default function MobileEvents() {
             </button>
           </div>
           <div className="flex-1 flex items-center justify-center p-2 min-h-0 overflow-hidden">
-            {(detail?.thumbnail || detail?.thumbnail_sm) ? (
-              <img src={detail.thumbnail || detail.thumbnail_sm} alt={detail.type} className="max-w-full max-h-full object-contain" />
+            {(detail?.thumbnail || detail?.thumbnail_sm || detail?.frame_thumb || detail?.vehicle_crop) ? (
+              <img src={detail.thumbnail || detail.thumbnail_sm || detail.frame_thumb || detail.vehicle_crop} alt={detail.type || detail.plate} className="max-w-full max-h-full object-contain" />
             ) : (
               <CamIcon size={40} className="text-white/30" />
             )}
           </div>
           <div className="px-3 py-3 border-t border-white/10 text-white/90 text-sm space-y-1.5 overflow-y-auto max-h-[40%]">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: eventTypeColor(detail?.type) }} />
-              <span className="font-medium">{eventTypeLabel(detail?.type, t)}</span>
-            </div>
+            {detail?.type && (
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: eventTypeColor(detail.type) }} />
+                <span className="font-medium">{eventTypeLabel(detail.type, t)}</span>
+              </div>
+            )}
             <div className="text-white/70 text-xs">{detail && new Date(detail.timestamp).toLocaleString("fr-FR")}</div>
             {detail?.site_name && <div className="text-xs text-white/70">{t("mobile.events_detail_site")}: {detail.site_name}</div>}
             {detail?.plate && <div className="mono font-bold text-base">{detail.plate}</div>}
