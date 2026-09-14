@@ -24,7 +24,10 @@ import LivePlayer from "@/components/video/LivePlayer";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import PtzPad from "@/components/mobile/PtzPad";
 import Logo from "@/components/Logo";
-import { ChevronLeft, ChevronRight, Grid2x2, Grid3x3, LayoutGrid, Loader2, Film, Move, X } from "lucide-react";
+import {
+  ChevronLeft, ChevronRight, Grid2x2, Grid3x3, LayoutGrid, Loader2, Film, Move, X,
+  Camera as CameraIcon, Video as VideoIcon, Square, Volume2, VolumeX,
+} from "lucide-react";
 
 const SWIPE_THRESHOLD_PX = 50;
 // v3.92 · Densités de mosaïque proposées (demande explicite : "choisir
@@ -50,6 +53,11 @@ export default function MobileLive() {
   const [page, setPage] = useState(0);
   const [densityOpen, setDensityOpen] = useState(false);
   const [ptzOpen, setPtzOpen] = useState(false);
+  // v3.101 · Mute/screenshot/enregistrement pilotés depuis CETTE barre
+  // d'icônes (plus d'overlay sur la vidéo, demande explicite) — LivePlayer
+  // expose ses actions via ref et son état via ce callback.
+  const playerRef = useRef(null);
+  const [playerStatus, setPlayerStatus] = useState({ muted: true, recording: false, mode: "connecting", busy: false });
   const touchStartX = useRef(null);
   const { caps } = useDeviceCapabilities(cams?.[idx]?.id);
   // v3.91 · Arrivée depuis MobileCameras (tap sur une caméra précise) —
@@ -214,7 +222,8 @@ export default function MobileLive() {
     <div className="h-full flex flex-col" data-testid="mobile-live-single">
       {toolbar}
       <div className="relative flex-1 bg-black" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-        <LivePlayer camera={cam} hd={hd} bigMute capture className="w-full h-full" dataTestId="mobile-live-player" />
+        <LivePlayer ref={playerRef} camera={cam} hd={hd} externalControls onStatusChange={setPlayerStatus}
+                    className="w-full h-full" dataTestId="mobile-live-player" />
         <CameraControlOverlay cam={cam} />
         {cams.length > 1 && (
           <>
@@ -238,8 +247,12 @@ export default function MobileLive() {
           vitesse + un bouton Retour, "Lecture" navigue directement vers
           les enregistrements de cette caméra (Recordings.jsx réutilisé
           tel quel via `/m/recordings?camera=`, qui lit déjà ce paramètre
-          lui-même). */}
-      <div className="shrink-0 flex items-center justify-center gap-4 py-2 border-t border-border bg-card">
+          lui-même).
+          v3.101 · Son/capture photo/enregistrement déplacés ICI depuis la
+          vidéo (demande explicite : "que rien ne soit sur l'emplacement de
+          la vidéo") — pilotés via `playerRef` (LivePlayer expose ses
+          actions, voir `externalControls`). */}
+      <div className="shrink-0 flex items-center justify-center gap-4 py-2 border-t border-border bg-card flex-wrap">
         {/* v3.99 · Bouton toujours affiché (demande explicite : "le bouton
             met 15 sec à apparaître" — il était gated par `caps?.ptz`, dont
             le chargement asynchrone causait ce délai visible/le
@@ -256,6 +269,28 @@ export default function MobileLive() {
           <Film size={20} />
           <span className="text-[9px] uppercase">{t("mobile.live_recordings")}</span>
         </button>
+        {playerStatus.mode === "webrtc" && (
+          <button onClick={() => playerRef.current?.toggleMute()} data-testid="mobile-live-mute-btn"
+                  className="flex flex-col items-center gap-0.5 text-muted-foreground">
+            {playerStatus.muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+            <span className="text-[9px] uppercase">{playerStatus.muted ? t("mobile.live_muted") : t("mobile.live_unmuted")}</span>
+          </button>
+        )}
+        {playerStatus.mode === "webrtc" && (
+          <button onClick={() => playerRef.current?.takeScreenshot()} disabled={playerStatus.busy}
+                  data-testid="mobile-live-screenshot-btn"
+                  className="flex flex-col items-center gap-0.5 text-muted-foreground disabled:opacity-40">
+            <CameraIcon size={20} />
+            <span className="text-[9px] uppercase">{t("mobile.live_screenshot")}</span>
+          </button>
+        )}
+        {playerStatus.mode === "webrtc" && (
+          <button onClick={() => playerRef.current?.toggleRecord()} data-testid="mobile-live-record-btn"
+                  className={`flex flex-col items-center gap-0.5 ${playerStatus.recording ? "text-[#FF3333]" : "text-muted-foreground"}`}>
+            {playerStatus.recording ? <Square size={20} /> : <VideoIcon size={20} />}
+            <span className="text-[9px] uppercase">{playerStatus.recording ? t("mobile.live_stop") : t("mobile.live_record")}</span>
+          </button>
+        )}
       </div>
 
       {ptzOpen && (

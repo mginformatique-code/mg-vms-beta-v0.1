@@ -10,6 +10,13 @@
  * logique de connexion/2FA/mot de passe oublié que `Login.jsx` (dupliquée
  * ici volontairement, code court, pour ne prendre aucun risque sur le flux
  * desktop déjà en production).
+ *
+ * v3.100 · Badges d'état (caméras en ligne/hors ligne, ANPR, moteur IA)
+ * ajoutés — ils vivent dans le MÊME panneau de marque desktop `hidden
+ * lg:flex` que le logo, donc absents ici pour la même raison ("ajoute les
+ * mêmes infos que la page desktop", capture d'écran à l'appui). Même
+ * source que Login.jsx : `GET /system/public-status`, endpoint PUBLIC
+ * (consulté avant authentification), sondé toutes les 15s.
  */
 import React, { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -19,6 +26,15 @@ import { Loader2, Moon, Sun, Languages, Clock } from "lucide-react";
 import { toast } from "sonner";
 import Logo from "@/components/Logo";
 import HoldToRevealInput from "@/components/ui/hold-to-reveal-input";
+
+function StatusBadge({ ok, label, testId }) {
+  return (
+    <span data-testid={testId} className="flex items-center gap-1.5 text-[11px] mono text-muted-foreground">
+      <span className={`w-1.5 h-1.5 rounded-full ${ok ? "bg-[#00E676]" : "bg-[#FF3333]"}`} />
+      {label}
+    </span>
+  );
+}
 
 export default function MobileLogin() {
   const { login, t, theme, toggleTheme, lang, toggleLang, user } = useApp();
@@ -33,8 +49,17 @@ export default function MobileLogin() {
   const [error, setError] = useState("");
   const [forgotMode, setForgotMode] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
+  const [pub, setPub] = useState(null);
 
   useEffect(() => { if (user) navigate("/"); }, [user, navigate]);
+
+  useEffect(() => {
+    let mounted = true;
+    const load = () => api.get("/system/public-status").then((r) => { if (mounted) setPub(r.data); }).catch(() => {});
+    load();
+    const iv = setInterval(load, 15000);
+    return () => { mounted = false; clearInterval(iv); };
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -67,10 +92,22 @@ export default function MobileLogin() {
         <button onClick={toggleTheme} className="p-2 text-muted-foreground">{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}</button>
       </div>
 
-      <div className="flex flex-col items-center pt-6 pb-8">
+      <div className="flex flex-col items-center pt-6 pb-6">
         <Logo size={64} className="w-16 h-16" data-testid="mobile-login-logo" />
         <div className="font-head font-black text-lg tracking-tight mt-2">MG-VMS</div>
         <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">MG Informatique</div>
+      </div>
+
+      {/* v3.100 · Mêmes badges que le panneau de marque desktop (masqué sur
+          mobile) — état public du système, visible avant connexion. */}
+      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 pb-6" data-testid="mobile-login-status-badges">
+        <StatusBadge ok={pub === null ? false : pub.cameras_online > 0} testId="mobile-badge-online"
+                     label={pub === null ? "…" : `${pub.cameras_online} ONLINE`} />
+        {pub?.cameras_offline > 0 && (
+          <StatusBadge ok={false} testId="mobile-badge-offline" label={`${pub.cameras_offline} OFFLINE`} />
+        )}
+        <StatusBadge ok={!!pub?.anpr_active} testId="mobile-badge-anpr" label={`ANPR ${pub?.anpr_active ? "ACTIVE" : "OFF"}`} />
+        <StatusBadge ok={!!pub?.ai_engine} testId="mobile-badge-ai" label={`AI ENGINE ${pub?.ai_engine ? "ON" : "OFF"}`} />
       </div>
 
       {forgotMode ? (

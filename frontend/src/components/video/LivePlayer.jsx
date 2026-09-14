@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Volume2, VolumeX, Camera as CameraIcon, Video as VideoIcon, Square } from "lucide-react";
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { Volume2, VolumeX } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL || ""}/api`;
 const WHEP_TIMEOUT_MS = 8000;
@@ -61,8 +61,23 @@ function pickRecorderMimeType() {
  * que l'utilisateur ne comprenait pas) : on affiche le message d'erreur
  * renvoyé par le backend + un bouton explicite pour basculer sur MJPEG.
  * Le badge reflète TOUJOURS la source réellement active — jamais un mensonge.
+ *
+ * v3.101 · `externalControls` (mobile) — demande explicite : "que rien ne
+ * soit sur l'emplacement de la vidéo". Le mute et le screenshot/
+ * enregistrement (ajoutés v3.94/v3.99 en overlay sur la vidéo) sont
+ * déplacés dans la barre d'icônes SOUS la vidéo (à côté de PTZ/Enreg.,
+ * voir MobileLive.jsx) — plus aucun bouton flottant sur l'image. Quand
+ * `externalControls` est vrai, ce composant n'affiche plus lui-même de
+ * bouton mute/capture : il expose ces actions via `ref`
+ * (`takeScreenshot`/`toggleRecord`/`toggleMute`) et signale son état
+ * (`muted`/`recording`/`mode`) au parent via `onStatusChange`, qui rend
+ * ses propres boutons. Comportement par défaut (desktop, `externalControls`
+ * absent) strictement inchangé — petit bouton mute en coin, pas de capture.
  */
-export default function LivePlayer({ camera, hd = false, className = "", dataTestId = "live-player", bigMute = false, capture = false }) {
+const LivePlayer = forwardRef(function LivePlayer(
+  { camera, hd = false, className = "", dataTestId = "live-player", externalControls = false, onStatusChange },
+  ref
+) {
   const videoRef = useRef(null);
   const pcRef = useRef(null);
   const recorderRef = useRef(null);
@@ -265,6 +280,21 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
     setRecording(true);
   };
 
+  useImperativeHandle(ref, () => ({
+    takeScreenshot,
+    toggleRecord,
+    toggleMute: () => setMuted((m) => !m),
+  }));
+
+  // v3.101 · Le parent (bouton externe) a besoin de savoir muted/recording/
+  // mode pour afficher la bonne icône — `onStatusChange` n'est volontairement
+  // pas dans les deps : il change de référence à chaque render du parent,
+  // ce qui provoquerait une boucle de re-render.
+  useEffect(() => {
+    if (externalControls) onStatusChange?.({ muted, recording, mode, busy });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [muted, recording, mode, busy, externalControls]);
+
   const badge = mode === "webrtc"
     ? { txt: "WEBRTC", color: "#00E5FF" }
     : mode === "mjpeg"
@@ -326,47 +356,25 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
       >
         {badge.txt}
       </span>
-      {mode === "webrtc" && (
+      {/* v3.101 · Bouton mute interne SEULEMENT si `externalControls` n'est
+          pas utilisé (desktop, comportement historique inchangé) — en mode
+          externe, le mute vit dans la barre d'icônes du parent (voir
+          MobileLive.jsx), plus aucun bouton flottant sur la vidéo. */}
+      {mode === "webrtc" && !externalControls && (
         // v3.35 · Remonté de bottom-2 à bottom-7 : chevauchait l'horodatage
         // du bandeau de pied de tuile (Feed, LiveView.jsx, absolute bottom-0
         // inset-x-0) — signalé avec capture (icône micro par-dessus l'heure).
-        // v3.94 · `bigMute` (mobile uniquement, vue plein écran) : le bouton
-        // 13px/24px par défaut est pensé pour une mosaïque desktop dense —
-        // sur téléphone, en plein écran, il passait inaperçu (signalé
-        // "j'ai l'impression de ne pas avoir de son" — en réalité coupé par
-        // défaut, comme l'exige l'autoplay navigateur, bouton juste trop
-        // discret pour être remarqué). Repli par défaut inchangé (desktop).
         <button
           onClick={(e) => { e.stopPropagation(); setMuted((m) => !m); }}
-          className={bigMute
-            ? "absolute bottom-3 right-3 z-10 flex items-center gap-1.5 px-3 py-2 bg-black/70 hover:bg-black/85 text-white border border-white/25"
-            : "absolute bottom-7 right-2 z-10 p-1 bg-black/60 hover:bg-black/80 text-white/90 border border-white/20"}
+          className="absolute bottom-7 right-2 z-10 p-1 bg-black/60 hover:bg-black/80 text-white/90 border border-white/20"
           title={muted ? "Activer le son" : "Couper le son"}
           data-testid={`${dataTestId}-mute-btn`}
         >
-          {muted ? <VolumeX size={bigMute ? 20 : 13} /> : <Volume2 size={bigMute ? 20 : 13} />}
-          {bigMute && <span className="text-xs">{muted ? "Son coupé" : "Son actif"}</span>}
+          {muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
         </button>
-      )}
-      {/* v3.99 · Capture côté navigateur (demande explicite : icônes
-          appareil photo / caméra cinéma, enregistrées sur le téléphone) —
-          `capture` (mobile uniquement, comme `bigMute`) évite d'ajouter ces
-          boutons à la mosaïque desktop dense où ils n'ont pas leur place. */}
-      {capture && mode === "webrtc" && (
-        <div className="absolute bottom-3 left-3 z-10 flex items-center gap-2">
-          <button onClick={(e) => { e.stopPropagation(); takeScreenshot(); }} disabled={busy}
-                  className="p-2.5 bg-black/70 hover:bg-black/85 text-white border border-white/25 disabled:opacity-50"
-                  title="Capturer une image" data-testid={`${dataTestId}-screenshot-btn`}>
-            <CameraIcon size={18} />
-          </button>
-          <button onClick={(e) => { e.stopPropagation(); toggleRecord(); }}
-                  className={`p-2.5 border text-white ${recording ? "bg-[#FF3333] border-[#FF3333]" : "bg-black/70 hover:bg-black/85 border-white/25"}`}
-                  title={recording ? "Arrêter l'enregistrement" : "Enregistrer une vidéo"}
-                  data-testid={`${dataTestId}-record-btn`}>
-            {recording ? <Square size={18} /> : <VideoIcon size={18} />}
-          </button>
-        </div>
       )}
     </div>
   );
-}
+});
+
+export default LivePlayer;
