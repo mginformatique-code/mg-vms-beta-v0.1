@@ -181,8 +181,15 @@ export default function CameraCenter() {
             le contenu sur un écran étroit (mobile). Un défilement horizontal
             est strictement mieux dans les deux cas (desktop : n'a jamais
             besoin de scroller, la largeur suffit déjà) — aucune régression
-            visuelle attendue là où ça tenait déjà sur une ligne. */}
+            visuelle attendue là où ça tenait déjà sur une ligne.
+            v3.97 · `touchAction: pan-x` + `WebkitOverflowScrolling: touch`
+            ajoutés explicitement (demande : "que cette action soit possible
+            au doigt") — `overflow-x-auto` seul est déjà glissable au doigt
+            sur mobile, mais sans indication explicite de l'axe autorisé, un
+            geste peut être intercepté ailleurs (scroll vertical de la page,
+            gestes Radix) ; `pan-x` lève toute ambiguïté. */}
         <TabsList className="flex h-auto justify-start overflow-x-auto flex-nowrap"
+                  style={{ touchAction: "pan-x", WebkitOverflowScrolling: "touch" }}
                   data-testid="camera-center-tabs">
           {TABS.map(({ id, label, icon: Icon }) => (
             <TabsTrigger key={id} value={id} data-testid={`cam-tab-${id}`} className="gap-2 shrink-0">

@@ -44,7 +44,7 @@ function PlatesSection() {
       <div className="flex items-center gap-1.5 px-1 pb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
         <CreditCard size={13} /> {t("mobile.events_plates_title")}
       </div>
-      <div className="flex gap-2 overflow-x-auto pb-1">
+      <div className="flex gap-2 overflow-x-auto pb-1" style={{ touchAction: "pan-x" }}>
         {plates.map((p) => (
           <div key={p.id} data-testid="mobile-plate-card"
                className="shrink-0 w-32 border border-border bg-card p-2">
@@ -108,7 +108,7 @@ export default function MobileEvents() {
 
   return (
     <div className="p-2" data-testid="mobile-events-list">
-      <div className="flex gap-1.5 overflow-x-auto pb-2 -mx-2 px-2" data-testid="mobile-events-filter-chips">
+      <div className="flex gap-1.5 overflow-x-auto pb-2 -mx-2 px-2" style={{ touchAction: "pan-x" }} data-testid="mobile-events-filter-chips">
         {FILTERS.map((f) => {
           const F = f.icon;
           const active = filtre === f.id;

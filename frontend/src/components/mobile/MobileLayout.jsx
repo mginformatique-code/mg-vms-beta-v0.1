@@ -21,7 +21,13 @@ const TABS = [
   { to: "/m/home", key: "mobile.nav_home", icon: Home },
   { to: "/m/live", key: "mobile.nav_live", icon: Video },
   { to: "/m/events", key: "mobile.nav_events", icon: Zap },
-  { to: "/m/cameras", key: "mobile.nav_cameras", icon: Cctv },
+  // v3.97 · Pointe vers `/m/camera-center` (CameraCenterDispatch — tri,
+  // filtre, plugins IA par caméra, déjà mobile-friendly) plutôt que la
+  // simple liste de statut `/m/cameras` : signalé par l'utilisateur comme
+  // la vraie page "Centre caméras" attendue, déjà présente dans l'app
+  // (atteinte jusqu'ici seulement via le menu Plus). `/m/cameras` reste
+  // utilisée pour le fil site->caméras depuis Accueil (MobileHome).
+  { to: "/m/camera-center", key: "mobile.nav_cameras", icon: Cctv },
   { to: "/m/more", key: "mobile.nav_more", icon: MoreHorizontal },
 ];
 
