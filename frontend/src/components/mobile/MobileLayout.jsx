@@ -7,11 +7,12 @@
  * (desktop) — même contexte auth/thème/langue/alertes, aucun état dupliqué.
  */
 import React from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import useIsMobileViewport from "@/hooks/useIsMobileViewport";
 import Logo from "@/components/Logo";
-import { Home, Video, Zap, Cctv, MoreHorizontal, Bell } from "lucide-react";
+import useMobileScrollRestore from "@/hooks/useMobileScrollRestore";
+import { Home, Video, Zap, Cctv, MoreHorizontal, Bell, ChevronLeft } from "lucide-react";
 
 // v3.93 · "Accueil" ajouté en 1ère position (référence app Reolink) — liste
 // des sites, entrée naturelle pour un déploiement multi-site (MG-VMS n'a
@@ -34,19 +35,36 @@ const TABS = [
 export default function MobileLayout({ children }) {
   const { t, alertPing } = useApp();
   const navigate = useNavigate();
+  const location = useLocation();
   const { setMode } = useIsMobileViewport();
   const [alertCount, setAlertCount] = React.useState(0);
   React.useEffect(() => { if (alertPing) setAlertCount((c) => c + 1); }, [alertPing]);
+  const mainRef = React.useRef(null);
+  useMobileScrollRestore(mainRef);
+
+  // v3.103 · Bouton retour affiché sur toute page qui n'est PAS un des 5
+  // onglets racine (demande explicite : ajouter un moyen de revenir en
+  // arrière depuis les ~46 pages desktop montées sous /m/..., accessibles
+  // uniquement via le menu Plus jusqu'ici — rien ne les distinguait d'un
+  // onglet racine). `navigate(-1)` réutilise l'historique du navigateur,
+  // donc "Plus" retrouve sa position de scroll (voir useMobileScrollRestore).
+  const isTopLevel = TABS.some((tab) => tab.to === location.pathname);
 
   return (
     <div className="h-[100dvh] flex flex-col bg-background text-foreground overflow-hidden" data-testid="mobile-shell">
       <header className="h-12 shrink-0 border-b border-border bg-card flex items-center justify-between px-3">
-        <div className="flex items-center gap-2">
-          <Logo size={26} className="w-[26px] h-[26px]" />
-          <span className="font-head font-black text-sm tracking-tight">MG-VMS</span>
+        <div className="flex items-center gap-2 min-w-0">
+          {!isTopLevel && (
+            <button onClick={() => navigate(-1)} data-testid="mobile-topbar-back"
+                    className="p-1 -ml-1 text-foreground shrink-0">
+              <ChevronLeft size={22} />
+            </button>
+          )}
+          <Logo size={26} className="w-[26px] h-[26px] shrink-0" />
+          <span className="font-head font-black text-sm tracking-tight truncate">MG-VMS</span>
         </div>
         <button onClick={() => navigate("/m/events")} data-testid="mobile-topbar-alerts"
-                className="relative p-2 -mr-2 text-muted-foreground">
+                className="relative p-2 -mr-2 text-muted-foreground shrink-0">
           <Bell size={19} strokeWidth={1.5} />
           {alertCount > 0 && (
             <span className="absolute top-0.5 right-0.5 min-w-4 h-4 px-1 bg-[#FF3333] text-white text-[9px] font-bold flex items-center justify-center rounded-full">
@@ -56,7 +74,7 @@ export default function MobileLayout({ children }) {
         </button>
       </header>
 
-      <main className="flex-1 overflow-y-auto overscroll-contain">{children}</main>
+      <main ref={mainRef} className="flex-1 overflow-y-auto overscroll-contain">{children}</main>
 
       <nav className="shrink-0 border-t border-border bg-card grid grid-cols-5" data-testid="mobile-tabbar"
            style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>

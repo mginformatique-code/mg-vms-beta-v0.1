@@ -30,12 +30,15 @@
  * présentes côté desktop. Les onglets Timeline/Heatmap desktop (analytique
  * visuelle, peu adaptée à 375px) restent hors périmètre v1.
  */
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import { toast } from "sonner";
 import { FILTERS, eventTypeColor, eventTypeLabel } from "@/pages/Events";
-import { Camera as CamIcon, Loader2, X, CreditCard, Ban, ShieldCheck, Undo2 } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Camera as CamIcon, Loader2, X, CreditCard, Ban, ShieldCheck, Undo2, ChevronLeft, ChevronRight } from "lucide-react";
+
+const SWIPE_THRESHOLD_PX = 50;
 
 const PAGE_SIZE = 20;
 
@@ -62,8 +65,8 @@ function PlatesSection({ onSelect }) {
         <CreditCard size={13} /> {t("mobile.events_plates_title")}
       </div>
       <div className="flex gap-2 overflow-x-auto pb-1" style={{ touchAction: "pan-x" }}>
-        {plates.map((p) => (
-          <button key={p.id} onClick={() => onSelect(p.plate)} data-testid="mobile-plate-card"
+        {plates.map((p, i) => (
+          <button key={p.id} onClick={() => onSelect(plates.map((pp) => pp.plate), i)} data-testid="mobile-plate-card"
                className="shrink-0 w-32 border border-border bg-card p-2 text-left">
             <div className="text-sm font-bold mono truncate">{p.plate}</div>
             <div className="text-[10px] text-muted-foreground truncate">{p.camera_name}</div>
@@ -81,17 +84,109 @@ function PlatesSection({ onSelect }) {
 }
 
 // v3.99 · Fiche véhicule consolidée, réutilise GET /vehicles/{plate} —
-// mêmes champs que `TabOverview` desktop (VehicleDrawer), sans les onglets
-// Timeline/Heatmap (analytique visuelle, hors périmètre mobile v1).
-function VehicleDetail({ plate, onClose }) {
+// mêmes champs que `TabOverview` desktop (VehicleDrawer).
+// v3.103 · Ajout des onglets Timeline/Heatmap desktop (demande explicite,
+// screenshot desktop à l'appui) + fond/texte reconstruits sur les tokens
+// de thème (`bg-background`/`text-foreground`/`border-border`) au lieu de
+// `bg-black/95`+`text-white` codés en dur ("j'aimerais que ça respecte le
+// thème noir ou blanc") + navigation tactile gauche/droite entre fiches
+// (glissement, seuil identique à MobileLive) pilotée par le parent via
+// `onPrev`/`onNext`/`hasPrev`/`hasNext` (liste de plaques du contexte
+// d'ouverture — plaques récentes ou plaques des événements affichés).
+function VehicleTimelineTab({ plate }) {
+  const { t } = useApp();
+  const [items, setItems] = useState(null);
+  useEffect(() => {
+    setItems(null);
+    api.get(`/vehicles/${encodeURIComponent(plate)}/passages`, { params: { limit: 100 } })
+       .then((r) => setItems(r.data.items || [])).catch(() => setItems([]));
+  }, [plate]);
+
+  if (items === null) return <div className="flex justify-center py-8"><Loader2 size={18} className="animate-spin text-muted-foreground" /></div>;
+  if (items.length === 0) return <div className="text-xs text-muted-foreground text-center py-8">{t("mobile.vehicle_no_passages")}</div>;
+
+  const groups = new Map();
+  for (const p of items) {
+    const key = new Date(p.timestamp).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  }
+
+  return (
+    <div className="space-y-4" data-testid="mobile-vehicle-timeline">
+      {Array.from(groups.entries()).map(([day, rows]) => (
+        <div key={day}>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">{day}</div>
+          <div className="border-l-2 border-[#0044FF]/40 pl-3 space-y-2">
+            {rows.map((p) => (
+              <div key={p.id} className="flex items-center gap-2.5 text-xs" data-testid={`mobile-vehicle-timeline-item-${p.id}`}>
+                <span className="mono text-[#0044FF] w-11 shrink-0">{new Date(p.timestamp).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span>
+                <img src={passageThumbUrl(p.id)} alt={p.camera_name} className="w-14 h-10 object-cover bg-secondary shrink-0" loading="lazy" />
+                <span className="min-w-0 flex-1 truncate text-foreground">{p.camera_name}</span>
+                <span className="mono shrink-0" style={{ color: (p.confidence || 0) > 0.9 ? "#00E676" : "#FFB800" }}>{Math.round((p.confidence || 0) * 100)}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function VehicleHeatmapTab({ plate }) {
+  const { t } = useApp();
+  const [d, setD] = useState(null);
+  useEffect(() => {
+    setD(null);
+    api.get(`/vehicles/${encodeURIComponent(plate)}/heatmap`).then((r) => setD(r.data)).catch(() => setD({ by_hour: [], by_dow: [], dow_labels: [] }));
+  }, [plate]);
+  if (!d) return <div className="flex justify-center py-8"><Loader2 size={18} className="animate-spin text-muted-foreground" /></div>;
+  const maxH = Math.max(1, ...(d.by_hour?.length ? d.by_hour : [0]));
+  const maxD = Math.max(1, ...(d.by_dow?.length ? d.by_dow : [0]));
+  return (
+    <div className="space-y-5" data-testid="mobile-vehicle-heatmap">
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">{t("mobile.vehicle_heatmap_hour")}</div>
+        <div className="space-y-1">
+          {(d.by_hour || []).map((count, h) => (
+            <div key={h} className="flex items-center gap-2 text-[10px] mono" data-testid={`mobile-heatmap-hour-${h}`}>
+              <span className="w-6 text-muted-foreground">{String(h).padStart(2, "0")}</span>
+              <div className="h-2 flex-1 bg-secondary/40 relative overflow-hidden">
+                <div className="h-full bg-[#0044FF]" style={{ width: `${(count / maxH) * 100}%` }} />
+              </div>
+              <span className="w-6 text-right text-muted-foreground">{count}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">{t("mobile.vehicle_heatmap_dow")}</div>
+        <div className="space-y-1">
+          {(d.by_dow || []).map((count, i) => (
+            <div key={i} className="flex items-center gap-2 text-[10px] mono" data-testid={`mobile-heatmap-dow-${i}`}>
+              <span className="w-14 text-muted-foreground truncate">{d.dow_labels?.[i] ?? i}</span>
+              <div className="h-2 flex-1 bg-secondary/40 relative overflow-hidden">
+                <div className="h-full bg-[#00E676]" style={{ width: `${(count / maxD) * 100}%` }} />
+              </div>
+              <span className="w-6 text-right text-muted-foreground">{count}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VehicleDetail({ plate, onClose, onPrev, onNext, hasPrev, hasNext }) {
   const { t } = useApp();
   const [d, setD] = useState(null);
   const [saving, setSaving] = useState(false);
+  const touchStartX = useRef(null);
 
   const load = useCallback(() => {
     api.get(`/vehicles/${encodeURIComponent(plate)}`).then((r) => setD(r.data)).catch(() => {});
   }, [plate]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { setD(null); load(); }, [load]);
 
   const setWatch = async (listType) => {
     setSaving(true);
@@ -107,66 +202,108 @@ function VehicleDetail({ plate, onClose }) {
     } finally { setSaving(false); }
   };
 
+  const onTouchStart = (e) => { touchStartX.current = e.touches[0].clientX; };
+  const onTouchEnd = (e) => {
+    if (touchStartX.current == null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    if (dx > SWIPE_THRESHOLD_PX && hasPrev) onPrev();
+    else if (dx < -SWIPE_THRESHOLD_PX && hasNext) onNext();
+    touchStartX.current = null;
+  };
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/95 flex flex-col" data-testid="mobile-vehicle-detail">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-white/10 shrink-0">
-        <span className="text-white text-lg font-bold mono truncate">{d?.plate || plate}</span>
-        <button onClick={onClose} data-testid="mobile-vehicle-detail-close" className="text-white p-1">
+    <div className="fixed inset-0 z-50 bg-background flex flex-col" data-testid="mobile-vehicle-detail"
+         onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
+        <span className="text-foreground text-lg font-bold mono truncate">{d?.plate || plate}</span>
+        <button onClick={onClose} data-testid="mobile-vehicle-detail-close" className="text-foreground p-1">
           <X size={20} />
         </button>
       </div>
       {!d ? (
-        <div className="flex-1 flex items-center justify-center"><Loader2 size={20} className="animate-spin text-white/50" /></div>
+        <div className="flex-1 flex items-center justify-center"><Loader2 size={20} className="animate-spin text-muted-foreground" /></div>
       ) : (
         <div className="flex-1 overflow-y-auto">
-          {d.best_thumb_id && (
-            <img src={passageThumbUrl(d.best_thumb_id)} alt={d.plate}
-                 className="w-full max-h-56 object-cover" data-testid="mobile-vehicle-thumb" />
-          )}
-          <div className="p-3 text-white/90 text-sm space-y-3">
+          <div className="relative">
+            {d.best_thumb_id && (
+              <img src={passageThumbUrl(d.best_thumb_id)} alt={d.plate}
+                   className="w-full max-h-56 object-cover" data-testid="mobile-vehicle-thumb" />
+            )}
+            {hasPrev && (
+              <button onClick={onPrev} data-testid="mobile-vehicle-prev"
+                      className="absolute left-1 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center bg-black/50 text-white">
+                <ChevronLeft size={20} />
+              </button>
+            )}
+            {hasNext && (
+              <button onClick={onNext} data-testid="mobile-vehicle-next"
+                      className="absolute right-1 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center bg-black/50 text-white">
+                <ChevronRight size={20} />
+              </button>
+            )}
+          </div>
+          <div className="p-3">
             {(d.vehicle_make || d.vehicle_model || d.vehicle_color) && (
-              <div className="text-base font-medium">
+              <div className="text-base font-medium text-foreground mb-3">
                 {[d.vehicle_make, d.vehicle_model, d.vehicle_color].filter(Boolean).join(" · ")}
               </div>
             )}
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div><span className="text-white/50">{t("mobile.vehicle_type")}</span><br />{d.vehicle_type || "—"}</div>
-              <div><span className="text-white/50">{t("mobile.vehicle_country")}</span><br />{d.country || "—"}</div>
-              <div><span className="text-white/50">{t("mobile.vehicle_passages")}</span><br />{d.passages_count ?? "—"}</div>
-              <div><span className="text-white/50">{t("mobile.vehicle_cameras")}</span><br />{d.cameras_count ?? "—"}</div>
-              <div><span className="text-white/50">{t("mobile.vehicle_first_seen")}</span><br />{d.first_seen ? new Date(d.first_seen).toLocaleString("fr-FR") : "—"}</div>
-              <div><span className="text-white/50">{t("mobile.vehicle_last_seen")}</span><br />{d.last_seen ? new Date(d.last_seen).toLocaleString("fr-FR") : "—"}</div>
-              <div><span className="text-white/50">{t("mobile.vehicle_avg_confidence")}</span><br />{d.avg_confidence != null ? `${Math.round(d.avg_confidence * 100)}%` : "—"}</div>
-              <div><span className="text-white/50">{t("mobile.vehicle_avg_visit")}</span><br />{d.avg_visit_duration_min != null ? `${d.avg_visit_duration_min} min` : "—"}</div>
-            </div>
-            {d.engines?.length > 0 && (
-              <div className="text-[11px] text-white/50">{t("mobile.vehicle_engines")}: {d.engines.join(", ")}</div>
-            )}
 
-            <div className="pt-2 border-t border-white/10">
-              <div className="text-[11px] uppercase tracking-wider text-white/50 mb-2">{t("mobile.vehicle_watchlist")}</div>
-              {d.list_status && d.list_status !== "none" && (
-                <div className={`text-xs font-bold uppercase mb-2 ${d.list_status === "black" ? "text-[#FF3333]" : "text-[#FFB800]"}`}>
-                  {d.list_status === "black" ? t("mobile.events_plate_blacklist") : t("mobile.events_plate_whitelist")}
+            <Tabs defaultValue="overview" key={plate}>
+              <TabsList className="grid grid-cols-3 rounded-none bg-secondary/40 border border-border h-auto p-0" data-testid="mobile-vehicle-tabs">
+                <TabsTrigger value="overview" className="rounded-none text-xs py-2">{t("veh.tab_overview")}</TabsTrigger>
+                <TabsTrigger value="timeline" className="rounded-none text-xs py-2">Timeline</TabsTrigger>
+                <TabsTrigger value="heatmap" className="rounded-none text-xs py-2">Heatmap</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="overview" className="mt-3">
+                <div className="grid grid-cols-2 gap-2 text-xs text-foreground">
+                  <div><span className="text-muted-foreground">{t("mobile.vehicle_type")}</span><br />{d.vehicle_type || "—"}</div>
+                  <div><span className="text-muted-foreground">{t("mobile.vehicle_country")}</span><br />{d.country || "—"}</div>
+                  <div><span className="text-muted-foreground">{t("mobile.vehicle_passages")}</span><br />{d.passages_count ?? "—"}</div>
+                  <div><span className="text-muted-foreground">{t("mobile.vehicle_cameras")}</span><br />{d.cameras_count ?? "—"}</div>
+                  <div><span className="text-muted-foreground">{t("mobile.vehicle_first_seen")}</span><br />{d.first_seen ? new Date(d.first_seen).toLocaleString("fr-FR") : "—"}</div>
+                  <div><span className="text-muted-foreground">{t("mobile.vehicle_last_seen")}</span><br />{d.last_seen ? new Date(d.last_seen).toLocaleString("fr-FR") : "—"}</div>
+                  <div><span className="text-muted-foreground">{t("mobile.vehicle_avg_confidence")}</span><br />{d.avg_confidence != null ? `${Math.round(d.avg_confidence * 100)}%` : "—"}</div>
+                  <div><span className="text-muted-foreground">{t("mobile.vehicle_avg_visit")}</span><br />{d.avg_visit_duration_min != null ? `${d.avg_visit_duration_min} min` : "—"}</div>
                 </div>
-              )}
-              <div className="flex gap-2">
-                <button onClick={() => setWatch("black")} disabled={saving} data-testid="mobile-vehicle-blacklist"
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 border border-[#FF3333]/50 text-[#FF3333] text-xs uppercase disabled:opacity-40">
-                  <Ban size={13} /> {t("mobile.events_plate_blacklist")}
-                </button>
-                <button onClick={() => setWatch("white")} disabled={saving} data-testid="mobile-vehicle-whitelist"
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 border border-[#FFB800]/50 text-[#FFB800] text-xs uppercase disabled:opacity-40">
-                  <ShieldCheck size={13} /> {t("mobile.events_plate_whitelist")}
-                </button>
-                {d.list_status && d.list_status !== "none" && (
-                  <button onClick={() => setWatch(null)} disabled={saving} data-testid="mobile-vehicle-unwatch"
-                          className="flex-1 flex items-center justify-center gap-1.5 py-2 border border-white/20 text-white/70 text-xs uppercase disabled:opacity-40">
-                    <Undo2 size={13} /> {t("mobile.vehicle_remove_watch")}
-                  </button>
+                {d.engines?.length > 0 && (
+                  <div className="text-[11px] text-muted-foreground mt-2">{t("mobile.vehicle_engines")}: {d.engines.join(", ")}</div>
                 )}
-              </div>
-            </div>
+
+                <div className="pt-3 mt-3 border-t border-border">
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">{t("mobile.vehicle_watchlist")}</div>
+                  {d.list_status && d.list_status !== "none" && (
+                    <div className={`text-xs font-bold uppercase mb-2 ${d.list_status === "black" ? "text-[#FF3333]" : "text-[#FFB800]"}`}>
+                      {d.list_status === "black" ? t("mobile.events_plate_blacklist") : t("mobile.events_plate_whitelist")}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <button onClick={() => setWatch("black")} disabled={saving} data-testid="mobile-vehicle-blacklist"
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2 border border-[#FF3333]/50 text-[#FF3333] text-xs uppercase disabled:opacity-40">
+                      <Ban size={13} /> {t("mobile.events_plate_blacklist")}
+                    </button>
+                    <button onClick={() => setWatch("white")} disabled={saving} data-testid="mobile-vehicle-whitelist"
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2 border border-[#FFB800]/50 text-[#FFB800] text-xs uppercase disabled:opacity-40">
+                      <ShieldCheck size={13} /> {t("mobile.events_plate_whitelist")}
+                    </button>
+                    {d.list_status && d.list_status !== "none" && (
+                      <button onClick={() => setWatch(null)} disabled={saving} data-testid="mobile-vehicle-unwatch"
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 border border-border text-muted-foreground text-xs uppercase disabled:opacity-40">
+                        <Undo2 size={13} /> {t("mobile.vehicle_remove_watch")}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="timeline" className="mt-3">
+                <VehicleTimelineTab plate={plate} />
+              </TabsContent>
+              <TabsContent value="heatmap" className="mt-3">
+                <VehicleHeatmapTab plate={plate} />
+              </TabsContent>
+            </Tabs>
           </div>
         </div>
       )}
@@ -183,7 +320,26 @@ export default function MobileEvents() {
   const [hasMore, setHasMore] = useState(false);
   const [detailId, setDetailId] = useState(null);
   const [detail, setDetail] = useState(null);
-  const [vehiclePlate, setVehiclePlate] = useState(null);
+  // v3.103 · Remplace `vehiclePlate` seul par une liste + index navigable
+  // (demande explicite : "que ce puisse être déplaçable de droite à
+  // gauche... pour passer d'une fiche véhicule à une autre") — la liste
+  // dépend du contexte d'ouverture (plaques récentes, ou plaques des
+  // événements actuellement chargés), jamais un simple plate isolé.
+  const [vehicleNav, setVehicleNav] = useState(null); // { list: [plate...], index } | null
+  const vehiclePlate = vehicleNav ? vehicleNav.list[vehicleNav.index] : null;
+  const openVehicle = (list, index) => setVehicleNav({ list, index });
+  const closeVehicle = () => setVehicleNav(null);
+  const prevVehicle = () => setVehicleNav((v) => v && ({ ...v, index: (v.index - 1 + v.list.length) % v.list.length }));
+  const nextVehicle = () => setVehicleNav((v) => v && ({ ...v, index: (v.index + 1) % v.list.length }));
+  // Plaques dédupliquées des événements actuellement chargés, dans l'ordre
+  // d'affichage — utilisé quand on ouvre une fiche depuis une carte
+  // événement plutôt que depuis la section "Plaques récentes".
+  const openVehicleFromEvents = (plate) => {
+    const list = [];
+    for (const e of events) if (e.plate && !list.includes(e.plate)) list.push(e.plate);
+    const index = Math.max(0, list.indexOf(plate));
+    openVehicle(list.length ? list : [plate], index);
+  };
   const isPlaques = filtre === "tous";
   const activeFilter = FILTERS.find((f) => f.id === filtre) || FILTERS[0];
 
@@ -235,7 +391,7 @@ export default function MobileEvents() {
         })}
       </div>
 
-      {isPlaques && <PlatesSection onSelect={setVehiclePlate} />}
+      {isPlaques && <PlatesSection onSelect={openVehicle} />}
 
       {loading ? (
         <div className="flex items-center justify-center text-muted-foreground py-16" data-testid="mobile-events-loading">
@@ -263,7 +419,7 @@ export default function MobileEvents() {
                 <div className="text-[11px] text-muted-foreground truncate">{e.camera_name}</div>
                 <div className="text-[11px] mono text-muted-foreground">{new Date(e.timestamp).toLocaleString("fr-FR")}</div>
                 {e.plate && (
-                  <button onClick={(ev) => { ev.stopPropagation(); setVehiclePlate(e.plate); }}
+                  <button onClick={(ev) => { ev.stopPropagation(); openVehicleFromEvents(e.plate); }}
                           data-testid="mobile-event-plate-link"
                           className="text-[11px] mono font-bold mt-0.5 underline decoration-dotted">
                     {e.plate}
@@ -285,47 +441,53 @@ export default function MobileEvents() {
       )}
 
       {detailId && (
-        <div className="fixed inset-0 z-50 bg-black/95 flex flex-col" data-testid="mobile-event-detail">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
-            <span className="text-white text-sm truncate">{detail?.camera_name}</span>
-            <button onClick={closeDetail} data-testid="mobile-event-detail-close" className="text-white p-1">
+        // v3.103 · Fond/texte reconstruits sur les tokens de thème (même
+        // correctif que VehicleDetail ci-dessus — bug identique, même
+        // fichier) au lieu de `bg-black/95`+`text-white` codés en dur.
+        <div className="fixed inset-0 z-50 bg-background flex flex-col" data-testid="mobile-event-detail">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+            <span className="text-foreground text-sm truncate">{detail?.camera_name}</span>
+            <button onClick={closeDetail} data-testid="mobile-event-detail-close" className="text-foreground p-1">
               <X size={20} />
             </button>
           </div>
-          <div className="flex-1 flex items-center justify-center p-2 min-h-0 overflow-hidden">
+          <div className="flex-1 flex items-center justify-center p-2 min-h-0 overflow-hidden bg-black">
             {(detail?.thumbnail || detail?.thumbnail_sm) ? (
               <img src={detail.thumbnail || detail.thumbnail_sm} alt={detail.type} className="max-w-full max-h-full object-contain" />
             ) : (
               <CamIcon size={40} className="text-white/30" />
             )}
           </div>
-          <div className="px-3 py-3 border-t border-white/10 text-white/90 text-sm space-y-1.5 overflow-y-auto max-h-[40%]">
+          <div className="px-3 py-3 border-t border-border text-foreground text-sm space-y-1.5 overflow-y-auto max-h-[40%]">
             {detail?.type && (
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: eventTypeColor(detail.type) }} />
                 <span className="font-medium">{eventTypeLabel(detail.type, t)}</span>
               </div>
             )}
-            <div className="text-white/70 text-xs">{detail && new Date(detail.timestamp).toLocaleString("fr-FR")}</div>
-            {detail?.site_name && <div className="text-xs text-white/70">{t("mobile.events_detail_site")}: {detail.site_name}</div>}
+            <div className="text-muted-foreground text-xs">{detail && new Date(detail.timestamp).toLocaleString("fr-FR")}</div>
+            {detail?.site_name && <div className="text-xs text-muted-foreground">{t("mobile.events_detail_site")}: {detail.site_name}</div>}
             {detail?.plate && (
-              <button onClick={() => setVehiclePlate(detail.plate)} data-testid="mobile-event-detail-plate-link"
+              <button onClick={() => openVehicleFromEvents(detail.plate)} data-testid="mobile-event-detail-plate-link"
                       className="mono font-bold text-base underline decoration-dotted">
                 {detail.plate}
               </button>
             )}
             {(detail?.vehicle_make || detail?.vehicle_model) && (
-              <div className="text-xs text-white/70">{[detail.vehicle_make, detail.vehicle_model, detail.vehicle_color].filter(Boolean).join(" · ")}</div>
+              <div className="text-xs text-muted-foreground">{[detail.vehicle_make, detail.vehicle_model, detail.vehicle_color].filter(Boolean).join(" · ")}</div>
             )}
-            {detail?.vehicle_type && <div className="text-xs text-white/70">{t("mobile.events_detail_vehicle_type")}: {detail.vehicle_type}</div>}
-            {detail?.direction && <div className="text-xs text-white/70">{t("mobile.events_detail_direction")}: {detail.direction}</div>}
-            {detail?.confidence != null && <div className="text-xs text-white/70">{t("mobile.events_detail_confidence")}: {Math.round(detail.confidence * 100)}%</div>}
-            {detail?.motion_pct != null && <div className="text-xs text-white/70">{t("mobile.events_detail_motion")}: {detail.motion_pct}%</div>}
+            {detail?.vehicle_type && <div className="text-xs text-muted-foreground">{t("mobile.events_detail_vehicle_type")}: {detail.vehicle_type}</div>}
+            {detail?.direction && <div className="text-xs text-muted-foreground">{t("mobile.events_detail_direction")}: {detail.direction}</div>}
+            {detail?.confidence != null && <div className="text-xs text-muted-foreground">{t("mobile.events_detail_confidence")}: {Math.round(detail.confidence * 100)}%</div>}
+            {detail?.motion_pct != null && <div className="text-xs text-muted-foreground">{t("mobile.events_detail_motion")}: {detail.motion_pct}%</div>}
           </div>
         </div>
       )}
 
-      {vehiclePlate && <VehicleDetail plate={vehiclePlate} onClose={() => setVehiclePlate(null)} />}
+      {vehiclePlate && (
+        <VehicleDetail plate={vehiclePlate} onClose={closeVehicle} onPrev={prevVehicle} onNext={nextVehicle}
+                       hasPrev={vehicleNav.list.length > 1} hasNext={vehicleNav.list.length > 1} />
+      )}
     </div>
   );
 }

@@ -23,6 +23,7 @@ import useDeviceCapabilities from "@/hooks/useDeviceCapabilities";
 import LivePlayer from "@/components/video/LivePlayer";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
 import MobilePtzPanel from "@/components/mobile/MobilePtzPanel";
+import MobileRecordingsTimeline from "@/components/mobile/MobileRecordingsTimeline";
 import Logo from "@/components/Logo";
 import {
   ChevronLeft, ChevronRight, Grid2x2, Grid3x3, LayoutGrid, Loader2, Film, Move,
@@ -229,12 +230,12 @@ export default function MobileLive() {
   return (
     <div className="h-full flex flex-col" data-testid="mobile-live-single">
       {toolbar}
-      {/* v3.102 · Vidéo limitée à ~45% de la hauteur disponible (demande
-          explicite : "que les vidéos live ne prennent que la moitié de
-          l'écran", référence app Reolink) — au lieu de `flex-1`, qui la
-          faisait remplir tout l'espace restant. Le panneau sous la vidéo
-          (icônes + contenu PTZ) prend le reste, défilable si besoin. */}
-      <div className="relative bg-black shrink-0" style={{ flex: "0 0 45%" }}
+      {/* v3.103 · Réduit à ~32% (demande explicite : "ça prend encore pas
+          mal de place, il faudrait qu'il reste la moitié de la place en
+          bas de page au moins" — la v3.102 à 45% n'était pas assez
+          agressive). Avec la barre du haut (~48px) déduite, le panneau du
+          bas conserve nettement plus de la moitié de l'écran. */}
+      <div className="relative bg-black shrink-0" style={{ flex: "0 0 32%" }}
            onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
         <LivePlayer ref={playerRef} camera={cam} hd={hd} externalControls onStatusChange={setPlayerStatus}
                     className="w-full h-full" dataTestId="mobile-live-player" />
@@ -316,6 +317,14 @@ export default function MobileLive() {
             </div>
           )
         )}
+
+        {/* v3.103 · Timeline des enregistrements du jour, toujours visible
+            sous la rangée d'icônes (demande explicite : "en dessous des
+            boutons faudrait ajouter la timeline des camera stp, que les
+            elements de la timeline soit cliquables aussi") — indépendante
+            de panelMode, pas seulement affichée quand le panneau PTZ est
+            ouvert. */}
+        <MobileRecordingsTimeline cameraId={cam.id} />
       </div>
     </div>
   );

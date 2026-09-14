@@ -3,6 +3,20 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.103-mobile-timeline-vehicle-nav-back-button] — 2026-09-14 — Timeline d'enregistrements sur la vue live, fiche véhicule à onglets et navigable, bouton retour
+
+### Added
+- La vue live mobile affiche désormais la timeline des enregistrements du jour sous les boutons PTZ/Enregistrements — chaque segment est cliquable et ouvre directement la vidéo correspondante.
+- La fiche véhicule mobile (plaques récentes/événements) gagne les onglets Timeline et Heatmap, identiques à la version bureau — plus seulement la vue d'ensemble.
+- La fiche véhicule se glisse désormais du doigt vers la gauche/droite pour passer d'un véhicule à l'autre, sans revenir à la liste.
+- Un bouton retour apparaît en haut à gauche sur toutes les pages mobiles accessibles depuis le menu Plus, pour revenir en arrière sans perdre sa place — la position de défilement de la page précédente (ex. le menu Plus) est désormais conservée au retour.
+
+### Changed
+- La vidéo live mobile occupe environ un tiers de l'écran au lieu de la moitié, laissant plus de place aux contrôles et à la nouvelle timeline en dessous.
+- La fiche véhicule et le détail d'un événement mobile respectent maintenant le thème clair/sombre de l'application (fond et texte n'étaient plus codés en noir fixe).
+- L'entrée de menu "Alertes IA" a été retirée du menu Plus mobile (redondante avec l'onglet Événements, qui couvre déjà ce contenu).
+- Le tableau des caméras (menu Plus → Caméras) garantit désormais le défilement tactile horizontal, comme les autres tableaux larges de l'application.
+
 ## [v3.102-mobile-ptz-panel-redesign] — 2026-09-14 — Panneau PTZ repensé (inline, plus de superposition), presets/patrouille, qualité SD par défaut
 
 ### Fixed

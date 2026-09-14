@@ -439,7 +439,14 @@ export default function Cameras() {
         </div>
       </div>
 
-      <div className="border border-border bg-card overflow-x-auto">
+      {/* v3.103 · `touchAction: pan-x` explicite (même motif que
+          CameraCenter.jsx v3.97) — `overflow-x-auto` seul est déjà
+          glissable au doigt, mais sans indication explicite de l'axe
+          autorisé un geste peut être intercepté ailleurs (scroll vertical
+          de la page). Cette table a plus de colonnes que d'espace visible
+          sur 375px (IP/Actions coupées), donc le défilement tactile
+          horizontal doit être garanti, pas seulement probable. */}
+      <div className="border border-border bg-card overflow-x-auto" style={{ touchAction: "pan-x", WebkitOverflowScrolling: "touch" }}>
         <table className="w-full text-sm">
           <thead><tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted-foreground">
             <SortTh label={t("common.status")} colKey="status" activeKey={sortKey} activeDir={sortDir} onSort={toggleSort} />

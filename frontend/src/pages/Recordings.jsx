@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import VirtualGrid from "@/components/VirtualGrid";
 import ExportWizard from "@/components/ExportWizard";
 
-const MODE_COLORS = { continuous: "#0044FF", motion: "#FFB800", ai: "#00E676" };
+export const MODE_COLORS = { continuous: "#0044FF", motion: "#FFB800", ai: "#00E676" };
 const DAY_SEC = 86400;
 const MIN_SPAN_SEC = 60; // zoom max : fenêtre d'1 minute
 

@@ -44,6 +44,13 @@ function Card({ children, testId }) {
 const MOBILE_PATH_OVERRIDES = { "/cameras": "/m/camera-devices" };
 const mobilePathFor = (to) => MOBILE_PATH_OVERRIDES[to] || `/m${to}`;
 
+// v3.103 · "Alertes IA" retiré du menu Plus mobile UNIQUEMENT (demande
+// explicite : "le menu événements fait la même chose") — l'onglet
+// Événements mobile couvre déjà ce contenu. Le menu desktop (Layout.jsx,
+// NAV partagé) reste inchangé, cette exclusion est purement locale à ce
+// fichier.
+const HIDDEN_MOBILE_PATHS = ["/alerts"];
+
 function Row({ icon: Icon, label, onClick, testId, value, chevron = true }) {
   return (
     <button onClick={onClick} data-testid={testId}
@@ -118,7 +125,8 @@ export default function MobileMore() {
       </Card>
 
       {NAV.map((g) => {
-        const items = flatten(g.items.filter((it) => (!it.role || can(it.role)) && (!it.perm || hasPerm(it.perm))));
+        const items = flatten(g.items.filter((it) => (!it.role || can(it.role)) && (!it.perm || hasPerm(it.perm))))
+          .filter((it) => !HIDDEN_MOBILE_PATHS.includes(it.to));
         if (items.length === 0) return null;
         return (
           <React.Fragment key={g.group}>
