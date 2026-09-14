@@ -3,6 +3,16 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.99-mobile-capture-and-vehicle-record] — 2026-09-14 — Capture photo/vidéo sur le téléphone, fiche véhicule complète, bouton PTZ instantané
+
+### Fixed
+- Le bouton PTZ de la vue live mobile mettait jusqu'à 15 secondes à apparaître (le temps que la caméra confirme sa capacité PTZ) — affiché instantanément désormais, avec un message clair si la caméra n'a effectivement pas de PTZ.
+
+### Added
+- Capture photo et vidéo directement depuis la vue live mobile, enregistrées sur le téléphone (feuille de partage native).
+- Les plaques récentes ouvrent maintenant la fiche véhicule complète (passages, première/dernière vue, caméras, confiance moyenne, durée de visite) avec les actions liste noire/liste blanche, comme sur la version bureau.
+- Les notifications peuvent être fermées d'un glissement vers le haut, plus seulement via le bouton de fermeture.
+
 ## [v3.98-ptz-zoom-fix-and-mobile-polish] — 2026-09-14 — Correctif : le zoom PTZ ne s'arrêtait jamais (desktop et mobile)
 
 ### Fixed
