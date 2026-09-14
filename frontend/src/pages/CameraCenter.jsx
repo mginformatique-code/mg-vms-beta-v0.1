@@ -91,9 +91,13 @@ export default function CameraCenter() {
 
   return (
     <div data-testid="camera-center">
-      <div className="p-6 space-y-4">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+      {/* v3.95 · `p-6`→`p-3 sm:p-6` : padding desktop conservé à partir de
+          640px, resserré en dessous (signalé "rends bien mais un peu trop
+          large" — le vrai coupable est surtout la rangée d'en-tête
+          ci-dessous, non wrap, qui forçait un débordement horizontal). */}
+      <div className="p-3 sm:p-6 space-y-4">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap">
             <Button variant="ghost" size="sm" onClick={() => navigate(basePath)}
                     data-testid="back-to-cameras">
               <ArrowLeft className="w-4 h-4 mr-1" />{t("camc.back_to_list")}
@@ -107,10 +111,13 @@ export default function CameraCenter() {
               <ChevronRight className="w-4 h-4" />
             </Button>
             <div>
-              <h1 className="text-3xl font-bold tracking-tight" data-testid="cam-title">
+              {/* v3.95 · `text-3xl` (~30px) forçait un titre long (modèle
+                  caméra) à déborder sur un écran de 375px — réduit en
+                  dessous de 640px, taille desktop inchangée. */}
+              <h1 className="text-xl sm:text-3xl font-bold tracking-tight break-words" data-testid="cam-title">
                 {info?.model || info?.manufacturer || cameraId}
               </h1>
-              <div className="flex gap-2 items-center text-sm text-muted-foreground">
+              <div className="flex gap-2 items-center text-sm text-muted-foreground flex-wrap">
                 <span className="font-mono">{cameraId}</span>
                 {info?.manufacturer && <Badge variant="outline">{info.manufacturer}</Badge>}
                 {info?.firmware && <span>FW {info.firmware}</span>}
@@ -118,7 +125,7 @@ export default function CameraCenter() {
               </div>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Button variant="outline" onClick={refresh} data-testid="cam-refresh">
               <RefreshCw className="w-4 h-4 mr-2" />{t("camc.refresh")}
             </Button>
