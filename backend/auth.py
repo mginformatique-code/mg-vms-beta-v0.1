@@ -159,6 +159,21 @@ def has_permission(user: dict, perm: str) -> bool:
 MAX_LOGIN_ATTEMPTS = 5
 LOCKOUT_MINUTES = 15
 
+# v3.110 · Défense en profondeur #0 : verrouillage PAR IP SEULE (toutes
+# adresses email confondues), en plus du verrouillage IP:email existant
+# ci-dessus — question explicite en session : "est-ce que toute cette
+# sécu s'applique si quelqu'un déploie MG-VMS via internet ?". Gap réel
+# identifié : `identifier = f"{ip}:{email}"` ne protège QUE contre le
+# bourrinage d'un même couple IP+email — un attaquant qui essaie une
+# adresse email différente à chaque tentative depuis la même IP
+# (énumération/credential stuffing classique) ne déclenche jamais ce
+# verrou-là, ni le verrou par compte (chaque email n'est tenté qu'une
+# ou deux fois). Seuil volontairement plus haut que le verrou par couple
+# (20 contre 5) pour ne pas bloquer un IP partagée (bureau/NAT) sur de
+# simples fautes de frappe occasionnelles de plusieurs utilisateurs.
+MAX_IP_ATTEMPTS = 20
+IP_LOCKOUT_MINUTES = 30
+
 # v1.0-rc4.6 · Verrouillage PAR COMPTE (persistant, indépendant du lockout
 # IP:email ci-dessus qui reste actif comme défense en profondeur).
 MAX_ACCOUNT_ATTEMPTS = 5
@@ -380,14 +395,14 @@ async def _check_lockout(identifier: str):
             raise HTTPException(status_code=423, detail=f"Compte temporairement verrouillé. Réessayez dans {remaining} min.")
 
 
-async def _register_failure(identifier: str) -> int:
+async def _register_failure(identifier: str, max_attempts: int = MAX_LOGIN_ATTEMPTS, lockout_minutes: int = LOCKOUT_MINUTES) -> int:
     if _testing_mode():
         return 0
     rec = await db.login_attempts.find_one({"identifier": identifier})
     count = (rec["count"] + 1) if rec else 1
     update = {"identifier": identifier, "count": count, "last_at": datetime.now(timezone.utc).isoformat()}
-    if count >= MAX_LOGIN_ATTEMPTS:
-        update["locked_until"] = (datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_MINUTES)).isoformat()
+    if count >= max_attempts:
+        update["locked_until"] = (datetime.now(timezone.utc) + timedelta(minutes=lockout_minutes)).isoformat()
     await db.login_attempts.update_one({"identifier": identifier}, {"$set": update}, upsert=True)
     return count
 
@@ -467,6 +482,9 @@ async def login(data: LoginInput, request: Request, response: Response):
     email = data.email.lower()
     ip = _client_ip(request)
     identifier = f"{ip}:{email}"
+    # ── Défense en profondeur #0 : rate-limit IP seule, tous emails
+    # confondus (auto 30 min) — voir MAX_IP_ATTEMPTS ci-dessus.
+    await _check_lockout(ip)
     # ── Défense en profondeur #1 : rate-limit IP:email (auto 15 min) ────
     await _check_lockout(identifier)
 
@@ -483,11 +501,13 @@ async def login(data: LoginInput, request: Request, response: Response):
     if not user or not verify_password(data.password, user["password_hash"]):
         # Rate-limit IP:email (existant)
         count_ip = await _register_failure(identifier)
+        # v3.110 · Rate-limit IP seule, tous emails confondus (défense #0)
+        count_ip_wide = await _register_failure(ip, MAX_IP_ATTEMPTS, IP_LOCKOUT_MINUTES)
         # Compteur PAR COMPTE (nouveau v1.0-rc4.6) — noop silencieux si user absent
         acct = await _account_track_failure(email, ip) if user else {}
         await log_audit(
             None, "login_failed", email,
-            f"IP {count_ip}/{MAX_LOGIN_ATTEMPTS} · compte {acct.get('count', 0)}/{MAX_ACCOUNT_ATTEMPTS}",
+            f"IP {count_ip}/{MAX_LOGIN_ATTEMPTS} · IP globale {count_ip_wide}/{MAX_IP_ATTEMPTS} · compte {acct.get('count', 0)}/{MAX_ACCOUNT_ATTEMPTS}",
             ip,
         )
         raise HTTPException(status_code=401, detail="Email ou mot de passe invalide")
@@ -521,6 +541,11 @@ async def login(data: LoginInput, request: Request, response: Response):
             used_recovery = True
 
     await _clear_attempts(identifier)
+    # v3.110 · Un login réussi depuis cette IP prouve qu'elle n'est pas
+    # purement malveillante à cet instant — évite de pénaliser une IP
+    # partagée (bureau/NAT) juste parce que d'autres personnes derrière
+    # elle se sont trompées de mot de passe.
+    await _clear_attempts(ip)
     # v1.0-rc4.6 · Reset compteur PAR COMPTE + last_login_at/ip
     await _account_track_success(user, ip)
     # v0.5.4 · Session tracking + timeout configurable

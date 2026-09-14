@@ -3,6 +3,14 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.110-auth-ip-wide-lockout] — 2026-09-14 — Verrouillage par IP (tous comptes confondus), correctif WebRTC WAN
+
+### Added
+- Nouvelle protection anti-brute-force : une IP qui échoue 20 fois en 15 min, même en essayant des adresses email différentes à chaque tentative, est désormais bloquée 30 min — comble une vraie lacune de l'existant (le verrouillage précédent ne portait que sur un couple IP+email identique, jamais déclenché par une énumération d'emails). S'applique automatiquement à tout déploiement MG-VMS, sans configuration.
+
+### Fixed
+- Vue live WebRTC mobile inutilisable hors réseau local (5G) — go2rtc n'annonçait que son IP LAN comme candidat de connexion. Un second candidat découvert via STUN a été ajouté (nécessite en complément une redirection de port UDP 8555 sur le routeur, à faire manuellement par déploiement).
+
 ## [v3.109-mobile-bugfixes-pinch-zoom-nav] — 2026-09-14 — Correctifs multiples : loupe, swipe involontaire, notifications cliquables, pincement sur la timeline
 
 ### Fixed
