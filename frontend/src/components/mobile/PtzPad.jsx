@@ -24,8 +24,20 @@
  * Vitesse réglable ajoutée (demande explicite) — persistée en
  * localStorage par caméra, même convention que `ptzSpeed` desktop
  * (CameraCenter.jsx::PTZTab).
+ *
+ * v3.112 · Régression réelle signalée en test sur internet (pas seulement
+ * LAN) : "tu appuies une fois dessus et ça continue sans s'arrêter". Root
+ * cause : `move(direction)` puis `move("stop")` sont deux requêtes HTTP
+ * indépendantes, tirées l'une juste après l'autre sans jamais attendre la
+ * première — sur une connexion à latence variable (le cas d'usage change
+ * depuis les tests via live.mg-vms.com), rien ne garantit que le serveur
+ * traite "démarrer" AVANT "arrêter" : si "arrêter" arrive en premier (pas
+ * d'effet, rien à arrêter), puis "démarrer" arrive ensuite, la caméra part
+ * en mouvement et ne reçoit plus jamais d'ordre d'arrêt. Corrigé en
+ * attendant la résolution de la requête de démarrage avant d'envoyer
+ * l'arrêt — garantit l'ordre côté serveur même sur une connexion lente.
  */
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import api from "@/lib/api";
 import { toast } from "sonner";
 import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Minus, Plus } from "lucide-react";
@@ -52,15 +64,25 @@ export default function PtzPad({ cameraId }) {
     api.post(`/devices/${cameraId}/ptz/zoom`, { value })
        .catch((e) => toast.error(e.response?.data?.detail?.message || "Zoom indisponible"));
 
-  const holdAction = (start) => ({
-    onMouseDown: (e) => { e.preventDefault(); start(); },
-    onMouseUp: () => move("stop"),
-    onMouseLeave: () => move("stop"),
-    onTouchStart: (e) => { e.preventDefault(); start(); },
-    onTouchEnd: () => move("stop"),
-    onTouchCancel: () => move("stop"),
-    style: TOUCH_STYLE,
-  });
+  // v3.112 · `pending` retient la requête de démarrage en cours — l'arrêt
+  // attend sa résolution avant de partir, pour ne jamais risquer que
+  // "stop" atteigne le serveur avant "start" sur une connexion lente.
+  const pending = useRef(null);
+  const holdAction = (start) => {
+    const doStop = async () => {
+      try { await pending.current; } catch { /* déjà géré par le .catch de start() */ }
+      move("stop");
+    };
+    return {
+      onMouseDown: (e) => { e.preventDefault(); pending.current = start(); },
+      onMouseUp: doStop,
+      onMouseLeave: doStop,
+      onTouchStart: (e) => { e.preventDefault(); pending.current = start(); },
+      onTouchEnd: doStop,
+      onTouchCancel: doStop,
+      style: TOUCH_STYLE,
+    };
+  };
   const holdMove = (direction) => holdAction(() => move(direction));
   const holdZoom = (value) => holdAction(() => zoom(value));
 

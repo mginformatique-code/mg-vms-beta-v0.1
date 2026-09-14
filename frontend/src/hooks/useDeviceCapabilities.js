@@ -56,6 +56,16 @@ export default function useDeviceCapabilities(cameraId) {
 
   const load = useCallback(async () => {
     if (!cameraId) return;
+    // v3.112 · `caps` restait à la valeur de la caméra PRÉCÉDENTE tant que
+    // la nouvelle sonde ONVIF (jusqu'à 20-30s, chaîne d'appels SOAP réels)
+    // n'avait pas répondu — en changeant de caméra (swipe mobile), l'UI
+    // affichait donc "PTZ non disponible" pendant tout ce temps si la
+    // caméra précédente n'était pas PTZ, même quand la nouvelle l'est
+    // vraiment. Réinitialisé explicitement AVANT l'appel réseau pour que
+    // l'UI distingue correctement "en cours de vérification" de "vérifié,
+    // indisponible".
+    setCaps(null);
+    setInfo(null);
     setLoading(true);
     setError(null);
     try {

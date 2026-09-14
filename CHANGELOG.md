@@ -3,6 +3,16 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.112-mobile-ptz-race-notif-badge] — 2026-09-14 — Correctif PTZ ne s'arrêtant plus, badge notifications sur Événements
+
+### Fixed
+- Régression PTZ mobile : le bouton pouvait continuer à bouger la caméra en boucle après un seul appui, surtout sensible sur une connexion internet à latence variable — l'ordre "démarrer"/"arrêter" n'était pas garanti entre deux requêtes indépendantes. L'arrêt attend désormais la confirmation du démarrage avant de partir.
+- Le panneau PTZ affichait parfois "non disponible" pendant 20-30 secondes après avoir changé de caméra, alors que la nouvelle caméra est bien PTZ — il gardait par erreur l'information de la caméra précédente pendant la vérification.
+- Le bouton de patrouille automatique se figeait un instant (grisé sans bouger) avant de sauter à sa position finale — il change désormais de position immédiatement au tap.
+
+### Changed
+- La cloche de notification dans l'en-tête mobile, jugée inutile, a été retirée — le compteur de nouvelles alertes est désormais affiché directement sur l'onglet "Événements" de la barre de navigation basse.
+
 ## [v3.111-recorder-wallclock-timestamps] — 2026-09-14 — Correctif critique : segments d'enregistrement tronqués (2 min ressortant parfois à 2 secondes)
 
 ### Fixed

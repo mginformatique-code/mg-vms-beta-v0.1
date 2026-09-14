@@ -7,12 +7,12 @@
  * (desktop) — même contexte auth/thème/langue/alertes, aucun état dupliqué.
  */
 import React from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import useIsMobileViewport from "@/hooks/useIsMobileViewport";
 import Logo from "@/components/Logo";
 import useMobileScrollRestore from "@/hooks/useMobileScrollRestore";
-import { Home, Video, Zap, Cctv, MoreHorizontal, Bell, ChevronLeft } from "lucide-react";
+import { Home, Video, Zap, Cctv, MoreHorizontal, ChevronLeft } from "lucide-react";
 
 // v3.93 · "Accueil" ajouté en 1ère position (référence app Reolink) — liste
 // des sites, entrée naturelle pour un déploiement multi-site (MG-VMS n'a
@@ -35,9 +35,15 @@ const TABS = [
 export default function MobileLayout({ children }) {
   const { t, alertPing } = useApp();
   const navigate = useNavigate();
+  const location = useLocation();
   const { setMode } = useIsMobileViewport();
   const [alertCount, setAlertCount] = React.useState(0);
   React.useEffect(() => { if (alertPing) setAlertCount((c) => c + 1); }, [alertPing]);
+  // v3.112 · "la cloche des notifs ne sert à rien, supprime-la, ajoute
+  // plutôt le compteur sur Événements" — la cloche du header est retirée
+  // (voir header ci-dessous) ; son compteur vit désormais directement sur
+  // l'onglet Événements de la barre basse, remis à zéro dès qu'on y est.
+  React.useEffect(() => { if (location.pathname === "/m/events") setAlertCount(0); }, [location.pathname]);
   const mainRef = React.useRef(null);
   useMobileScrollRestore(mainRef);
 
@@ -58,15 +64,6 @@ export default function MobileLayout({ children }) {
           <Logo size={26} className="w-[26px] h-[26px] shrink-0" />
           <span className="font-head font-black text-sm tracking-tight truncate">MG-VMS</span>
         </div>
-        <button onClick={() => navigate("/m/events")} data-testid="mobile-topbar-alerts"
-                className="relative p-2 -mr-2 text-muted-foreground shrink-0">
-          <Bell size={19} strokeWidth={1.5} />
-          {alertCount > 0 && (
-            <span className="absolute top-0.5 right-0.5 min-w-4 h-4 px-1 bg-[#FF3333] text-white text-[9px] font-bold flex items-center justify-center rounded-full">
-              {alertCount}
-            </span>
-          )}
-        </button>
       </header>
 
       <main ref={mainRef} className="flex-1 overflow-y-auto overscroll-contain">{children}</main>
@@ -75,6 +72,7 @@ export default function MobileLayout({ children }) {
            style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
         {TABS.map((tab) => {
           const Icon = tab.icon;
+          const isEvents = tab.key === "mobile.nav_events";
           return (
             <NavLink key={tab.to} to={tab.to}
                      data-testid={`mobile-tab-${tab.key.split("_")[1]}`}
@@ -83,7 +81,15 @@ export default function MobileLayout({ children }) {
                          isActive ? "text-[#0044FF]" : "text-muted-foreground"
                        }`
                      }>
-              <Icon size={19} strokeWidth={1.5} />
+              <span className="relative">
+                <Icon size={19} strokeWidth={1.5} />
+                {isEvents && alertCount > 0 && (
+                  <span className="absolute -top-1 -right-2 min-w-3.5 h-3.5 px-1 bg-[#FF3333] text-white text-[8px] font-bold flex items-center justify-center rounded-full"
+                        data-testid="mobile-tab-events-badge">
+                    {alertCount > 99 ? "99+" : alertCount}
+                  </span>
+                )}
+              </span>
               <span className="truncate max-w-full">{t(tab.key)}</span>
             </NavLink>
           );

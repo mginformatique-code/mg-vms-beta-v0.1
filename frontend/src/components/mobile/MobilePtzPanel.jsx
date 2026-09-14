@@ -65,14 +65,22 @@ export default function MobilePtzPanel({ cameraId }) {
        .catch((e) => toast.error(e.response?.data?.detail?.message || "Échec de la suppression"));
   };
 
+  // v3.112 · "le bouton patrouille est un peu bug" — le bouton attendait la
+  // réponse réseau avant de bouger : au tap, il se grisait (disabled) SANS
+  // changer de position, puis sautait à sa position finale une fois la
+  // requête terminée — deux temps visuels au lieu d'un slide immédiat.
+  // Bascule maintenant optimiste (déplacement immédiat au tap), annulée
+  // proprement si la requête échoue.
   const togglePatrol = () => {
     if (!patrol) return;
+    const previous = patrol;
     const next = { ...patrol, enabled: !patrol.enabled, preset_ids: patrol.preset_ids.length ? patrol.preset_ids : (presets || []).map((p) => p.id) };
+    setPatrol(next);
     setBusy(true);
     api.put(`/devices/${cameraId}/ptz/patrol`, {
       enabled: next.enabled, dwell_seconds: next.dwell_seconds, preset_ids: next.preset_ids, speed: next.speed,
-    }).then((r) => setPatrol({ ...next, running: !!r.data.running }))
-      .catch((e) => toast.error(e.response?.data?.detail?.message || "Échec patrouille"))
+    }).then((r) => setPatrol((p) => ({ ...p, running: !!r.data.running })))
+      .catch((e) => { toast.error(e.response?.data?.detail?.message || "Échec patrouille"); setPatrol(previous); })
       .finally(() => setBusy(false));
   };
 
