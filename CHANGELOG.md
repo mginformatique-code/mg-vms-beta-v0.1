@@ -3,6 +3,17 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.98-ptz-zoom-fix-and-mobile-polish] — 2026-09-14 — Correctif : le zoom PTZ ne s'arrêtait jamais (desktop et mobile)
+
+### Fixed
+- **Le zoom d'une caméra PTZ continuait indéfiniment après un clic**, aussi bien sur la fiche caméra (bureau) que sur la vue live mobile — un défaut réel, présent depuis longtemps mais jamais remarqué avant un usage tactile assidu. Le zoom fonctionne comme le déplacement (démarre au clic, s'arrête au relâchement), plus jamais en boucle.
+
+### Added
+- Vitesse PTZ réglable directement depuis la vue live mobile.
+- Le bouton PTZ de la vue live mobile ouvre désormais un écran dédié (pavé + zoom + vitesse) avec un bouton retour, au lieu d'occuper en permanence l'espace sous la vidéo.
+- Les plaques récentes (onglet Événements) sont cliquables et affichent la fiche du véhicule correspondant.
+- L'onglet Accueil affiche désormais un message de bienvenue, la version installée et l'état CPU/RAM/GPU.
+
 ## [v3.97-mobile-camera-center-tab] — 2026-09-14 — Onglet "Centre caméras" mobile corrigé + onglets glissables au doigt
 
 ### Fixed
