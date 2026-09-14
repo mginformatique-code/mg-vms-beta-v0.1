@@ -3,6 +3,14 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.107-mobile-plates-tab] — 2026-09-14 — Onglet Plaques dédié (mobile)
+
+### Added
+- Nouvel onglet "Plaques" dans les événements mobile, liste complète et paginée (comme le flux d'événements), au lieu du bandeau réduit à 10 plaques affiché jusqu'ici en haut de l'onglet Informations véhicules.
+
+### Removed
+- Le bandeau "Plaques récentes" en haut de l'onglet Informations véhicules mobile a été retiré — son contenu vit désormais dans le nouvel onglet Plaques dédié. Aucun changement côté bureau.
+
 ## [v3.106-mobile-thumb-cache] — 2026-09-14 — Miniatures caméra mises en cache (plus de rechargement à chaque actualisation)
 
 ### Fixed

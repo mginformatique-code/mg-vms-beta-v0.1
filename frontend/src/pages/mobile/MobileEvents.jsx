@@ -49,36 +49,78 @@ function passageThumbUrl(passageId) {
   return `${base}/api/vehicles/passage/${passageId}/thumb?kind=frame&token=${encodeURIComponent(token)}`;
 }
 
-function PlatesSection({ onSelect }) {
+// v3.107 · Remplace `PlatesSection` (bandeau "Plaques récentes" glissable
+// horizontalement, embarqué en tête de "Informations véhicules") par un
+// vrai onglet dédié — demande explicite : "on change de système... un
+// onglet plaques stp, et tu me supprimeras les plaques récentes en haut
+// de page" (mobile uniquement, la version bureau garde ses `FILTERS`
+// intacts). Liste complète paginée (`GET /plates`, même pattern
+// charger-plus que le flux d'événements) plutôt que 10 mini-cartes.
+function PlatesTab({ onSelectVehicle }) {
   const { t } = useApp();
   const [plates, setPlates] = useState(null);
-  useEffect(() => {
-    let alive = true;
-    api.get("/plates", { params: { limit: 10 } }).then((r) => { if (alive) setPlates(r.data || []); }).catch(() => { if (alive) setPlates([]); });
-    return () => { alive = false; };
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+
+  const load = useCallback(() => {
+    setPlates(null);
+    api.get("/plates", { params: { limit: PAGE_SIZE } })
+       .then((r) => { setPlates(r.data || []); setHasMore((r.data || []).length === PAGE_SIZE); })
+       .catch(() => setPlates([]));
   }, []);
-  if (plates === null) return null;
-  if (plates.length === 0) return null;
-  return (
-    <div className="mb-3" data-testid="mobile-events-plates-section">
-      <div className="flex items-center gap-1.5 px-1 pb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
-        <CreditCard size={13} /> {t("mobile.events_plates_title")}
+  useEffect(() => { load(); }, [load]);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const r = await api.get("/plates", { params: { limit: PAGE_SIZE, offset: plates.length } });
+      setPlates((prev) => [...prev, ...(r.data || [])]);
+      setHasMore((r.data || []).length === PAGE_SIZE);
+    } catch (e) {} finally { setLoadingMore(false); }
+  };
+
+  if (plates === null) {
+    return (
+      <div className="flex items-center justify-center text-muted-foreground py-16" data-testid="mobile-plates-tab-loading">
+        <Loader2 size={20} className="animate-spin" />
       </div>
-      <div className="flex gap-2 overflow-x-auto pb-1" style={{ touchAction: "pan-x" }}>
+    );
+  }
+  if (plates.length === 0) {
+    return <div className="text-muted-foreground text-sm py-16 text-center">{t("mobile.events_plates_empty")}</div>;
+  }
+
+  return (
+    <div data-testid="mobile-plates-tab">
+      <div className="flex flex-col gap-2">
         {plates.map((p, i) => (
-          <button key={p.id} onClick={() => onSelect(plates.map((pp) => pp.plate), i)} data-testid="mobile-plate-card"
-               className="shrink-0 w-32 rounded-xl border border-border bg-card p-2 text-left">
-            <div className="text-sm font-bold mono truncate">{p.plate}</div>
-            <div className="text-[10px] text-muted-foreground truncate">{p.camera_name}</div>
-            <div className="text-[10px] mono text-muted-foreground">{new Date(p.timestamp).toLocaleTimeString("fr-FR")}</div>
+          <button key={p.id} onClick={() => onSelectVehicle(plates.map((pp) => pp.plate), i)} data-testid="mobile-plates-tab-row"
+                  className="flex items-center gap-3 rounded-xl border border-border bg-card p-2 text-left">
+            <img src={passageThumbUrl(p.id)} alt={p.plate} loading="lazy"
+                 className="w-16 h-12 rounded-lg object-cover bg-secondary shrink-0"
+                 onError={(e) => { e.currentTarget.style.display = "none"; }} />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-bold mono truncate">{p.plate}</div>
+              <div className="text-[11px] text-muted-foreground truncate">{p.camera_name}</div>
+              <div className="text-[11px] mono text-muted-foreground">{new Date(p.timestamp).toLocaleString("fr-FR")}</div>
+            </div>
             {p.list_status && p.list_status !== "none" && (
-              <div className={`text-[9px] uppercase font-bold mt-1 ${p.list_status === "black" ? "text-[#FF3333]" : "text-[#FFB800]"}`}>
+              <span className={`text-[9px] uppercase font-bold shrink-0 ${p.list_status === "black" ? "text-[#FF3333]" : "text-[#FFB800]"}`}>
                 {p.list_status === "black" ? t("mobile.events_plate_blacklist") : t("mobile.events_plate_whitelist")}
-              </div>
+              </span>
             )}
           </button>
         ))}
       </div>
+      {hasMore && (
+        <div className="flex justify-center pt-3">
+          <button onClick={loadMore} disabled={loadingMore} data-testid="mobile-plates-tab-load-more"
+                  className="flex items-center gap-2 px-4 py-2 rounded-full border border-border text-xs uppercase tracking-wider text-muted-foreground disabled:opacity-50">
+            {loadingMore && <Loader2 size={13} className="animate-spin" />}
+            {t("mobile.events_load_more")}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -440,10 +482,16 @@ export default function MobileEvents() {
     const index = Math.max(0, list.indexOf(plate));
     openVehicle(list.length ? list : [plate], index);
   };
-  const isPlaques = filtre === "tous";
+  // v3.107 · "Plaques" est un onglet mobile SUPPLÉMENTAIRE (pas un des
+  // `FILTERS` partagés avec le bureau, qui restent inchangés) — son
+  // contenu vient de `/plates` (PlatesTab), pas de `/events`, donc le
+  // chargement d'événements ci-dessous est explicitement sauté quand il
+  // est actif (pas d'appel /events inutile en arrière-plan).
+  const isPlatesTab = filtre === "plaques";
   const activeFilter = FILTERS.find((f) => f.id === filtre) || FILTERS[0];
 
   const load = useCallback(async () => {
+    if (isPlatesTab) { setLoading(false); return; }
     setLoading(true);
     try {
       const params = { limit: PAGE_SIZE, offset: 0 };
@@ -452,7 +500,7 @@ export default function MobileEvents() {
       setEvents(r.data || []);
       setHasMore((r.data || []).length === PAGE_SIZE);
     } catch (e) { setEvents([]); } finally { setLoading(false); }
-  }, [activeFilter]);
+  }, [activeFilter, isPlatesTab]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -506,11 +554,19 @@ export default function MobileEvents() {
             </button>
           );
         })}
+        {/* v3.107 · Onglet mobile-only, demande explicite — n'existe pas
+            dans `FILTERS` (partagé avec le bureau), ajouté séparément ici. */}
+        <button onClick={() => setFiltre("plaques")} data-testid="mobile-events-filter-plaques"
+                className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border ${
+                  isPlatesTab ? "border-[#0044FF] bg-[#0044FF]/10 text-[#0044FF] font-medium" : "border-border text-muted-foreground"
+                }`}>
+          <CreditCard size={13} /> {t("mobile.events_filter_plates")}
+        </button>
       </div>
 
-      {isPlaques && <PlatesSection onSelect={openVehicle} />}
-
-      {loading ? (
+      {isPlatesTab ? (
+        <PlatesTab onSelectVehicle={openVehicle} />
+      ) : loading ? (
         <div className="flex items-center justify-center text-muted-foreground py-16" data-testid="mobile-events-loading">
           <Loader2 size={20} className="animate-spin" />
         </div>
@@ -547,7 +603,7 @@ export default function MobileEvents() {
           ))}
         </div>
       )}
-      {hasMore && (
+      {!isPlatesTab && hasMore && (
         <div className="flex justify-center pt-3">
           <button onClick={loadMore} disabled={loadingMore} data-testid="mobile-events-load-more"
                   className="flex items-center gap-2 px-4 py-2 rounded-full border border-border text-xs uppercase tracking-wider text-muted-foreground disabled:opacity-50">
