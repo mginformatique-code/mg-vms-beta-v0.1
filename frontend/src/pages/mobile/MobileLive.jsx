@@ -214,7 +214,7 @@ export default function MobileLive() {
     <div className="h-full flex flex-col" data-testid="mobile-live-single">
       {toolbar}
       <div className="relative flex-1 bg-black" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-        <LivePlayer camera={cam} hd={hd} bigMute className="w-full h-full" dataTestId="mobile-live-player" />
+        <LivePlayer camera={cam} hd={hd} bigMute capture className="w-full h-full" dataTestId="mobile-live-player" />
         <CameraControlOverlay cam={cam} />
         {cams.length > 1 && (
           <>
@@ -240,13 +240,16 @@ export default function MobileLive() {
           tel quel via `/m/recordings?camera=`, qui lit déjà ce paramètre
           lui-même). */}
       <div className="shrink-0 flex items-center justify-center gap-4 py-2 border-t border-border bg-card">
-        {caps?.ptz && (
-          <button onClick={() => setPtzOpen(true)} data-testid="mobile-live-ptz-open-btn"
-                  className="flex flex-col items-center gap-0.5 text-muted-foreground">
-            <Move size={20} />
-            <span className="text-[9px] uppercase">PTZ</span>
-          </button>
-        )}
+        {/* v3.99 · Bouton toujours affiché (demande explicite : "le bouton
+            met 15 sec à apparaître" — il était gated par `caps?.ptz`, dont
+            le chargement asynchrone causait ce délai visible/le
+            "pop-in"). Le statut PTZ réel n'est vérifié qu'à l'OUVERTURE
+            de l'overlay, plus sur la présence du bouton lui-même. */}
+        <button onClick={() => setPtzOpen(true)} data-testid="mobile-live-ptz-open-btn"
+                className="flex flex-col items-center gap-0.5 text-muted-foreground">
+          <Move size={20} />
+          <span className="text-[9px] uppercase">PTZ</span>
+        </button>
         <button onClick={() => navigate(`/m/recordings?camera=${cam.id}`)}
                 data-testid="mobile-live-recordings-btn"
                 className="flex flex-col items-center gap-0.5 text-muted-foreground">
@@ -266,7 +269,15 @@ export default function MobileLive() {
             <span className="w-14" />
           </div>
           <div className="flex-1 flex items-center justify-center">
-            <PtzPad cameraId={cam.id} />
+            {caps === null ? (
+              <Loader2 size={24} className="animate-spin text-white/50" />
+            ) : caps?.ptz ? (
+              <PtzPad cameraId={cam.id} />
+            ) : (
+              <div className="text-white/50 text-sm px-6 text-center" data-testid="mobile-ptz-unavailable">
+                {t("mobile.ptz_always_note")}
+              </div>
+            )}
           </div>
         </div>
       )}

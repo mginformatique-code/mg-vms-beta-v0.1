@@ -257,7 +257,11 @@ function App() {
         <SessionExpiryWatcher />
         <InactivityWatcher />
         <AppDebugPanel />
-        <Toaster position="top-right" />
+        {/* v3.99 · `swipeDirections` explicite — demande : "glissées vers le
+            haut sans avoir à cliquer sur la croix". sonner permet déjà de
+            glisser pour fermer, mais les directions autorisées ne
+            couvraient pas forcément "haut" pour une position top-right. */}
+        <Toaster position="top-right" swipeDirections={["top", "right", "left"]} />
       </BrowserRouter>
     </AppProvider>
   );

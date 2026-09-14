@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Volume2, VolumeX } from "lucide-react";
+import { Volume2, VolumeX, Camera as CameraIcon, Video as VideoIcon, Square } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL || ""}/api`;
 const WHEP_TIMEOUT_MS = 8000;
@@ -11,6 +11,48 @@ function mjpegUrl(cameraId, hd) {
   return `${API}/stream/${cameraId}/live.mjpeg?token=${encodeURIComponent(token)}&hd=${hd ? 1 : 0}`;
 }
 
+// v3.99 · Screenshot/enregistrement CÔTÉ NAVIGATEUR (demande explicite :
+// "le tout doit être enregistré sur le téléphone") — rien à voir avec les
+// enregistrements serveur (Recordings.jsx) : ceci capture littéralement ce
+// que l'utilisateur voit à l'écran, à la volée, et le sauvegarde sur SON
+// appareil. `navigator.share` (feuille de partage "Enregistrer
+// l'image/vidéo") est tentée en premier — c'est le mécanisme fiable sur
+// mobile (iOS Safari en particulier ignore souvent `<a download>` pour un
+// blob vidéo, l'ouvrant à la place dans un lecteur) ; repli sur le
+// téléchargement classique si `share` est indisponible/refusé (desktop).
+async function saveBlobToDevice(blob, filename) {
+  try {
+    const file = new File([blob], filename, { type: blob.type });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file] });
+      return true;
+    }
+  } catch (e) {
+    if (e?.name === "AbortError") return false; // l'utilisateur a annulé le partage — pas une erreur
+  }
+  try {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function pickRecorderMimeType() {
+  // Safari (iOS/macOS) sait enregistrer directement en MP4 — évite un
+  // fichier .webm illisible par la Photothèque iOS. Chrome/Firefox
+  // n'exposent que VP8/VP9 dans un conteneur WebM.
+  const candidates = ["video/mp4", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+  for (const c of candidates) {
+    if (window.MediaRecorder?.isTypeSupported?.(c)) return c;
+  }
+  return "";
+}
+
 /**
  * LivePlayer — WebRTC (WHEP/aiortc) en priorité pour la qualité/latence.
  * Si WHEP échoue ou n'aboutit pas sous WHEP_TIMEOUT_MS, PAS de bascule
@@ -20,9 +62,13 @@ function mjpegUrl(cameraId, hd) {
  * renvoyé par le backend + un bouton explicite pour basculer sur MJPEG.
  * Le badge reflète TOUJOURS la source réellement active — jamais un mensonge.
  */
-export default function LivePlayer({ camera, hd = false, className = "", dataTestId = "live-player", bigMute = false }) {
+export default function LivePlayer({ camera, hd = false, className = "", dataTestId = "live-player", bigMute = false, capture = false }) {
   const videoRef = useRef(null);
   const pcRef = useRef(null);
+  const recorderRef = useRef(null);
+  const chunksRef = useRef([]);
+  const [recording, setRecording] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState("connecting"); // "connecting" | "webrtc" | "mjpeg" | "error"
   const [errorMsg, setErrorMsg] = useState("");
   // Codec du flux principal quand le HD demandé a dû être refusé (ex. "hevc")
@@ -169,10 +215,55 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
         pcRef.current = null;
       }
       if (videoRef.current) videoRef.current.srcObject = null;
+      // v3.99 · Un enregistrement en cours ne doit pas survivre à un
+      // changement de caméra (swipe) ou au démontage — sinon il continue
+      // silencieusement de capturer un flux qui n'est plus affiché.
+      if (recorderRef.current && recorderRef.current.state !== "inactive") {
+        try { recorderRef.current.stop(); } catch { /* ignore */ }
+      }
     };
     // `hd` fait partie des dépendances : basculer HD/SD doit relancer la
     // négociation WHEP (la qualité se choisit à la connexion, côté go2rtc).
   }, [camera?.id, hd]);
+
+  const takeScreenshot = async () => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return;
+    setBusy(true);
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext("2d").drawImage(video, 0, 0);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (blob) await saveBlobToDevice(blob, `mgvms_${(camera?.name || "camera").replace(/\s+/g, "_")}_${Date.now()}.png`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleRecord = () => {
+    if (recording) {
+      recorderRef.current?.stop();
+      return;
+    }
+    const stream = videoRef.current?.srcObject;
+    if (!stream) return;
+    const mimeType = pickRecorderMimeType();
+    const mr = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    chunksRef.current = [];
+    mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+    mr.onstop = async () => {
+      setRecording(false);
+      const blob = new Blob(chunksRef.current, { type: mr.mimeType || "video/webm" });
+      chunksRef.current = [];
+      const ext = (mr.mimeType || "").includes("mp4") ? "mp4" : "webm";
+      await saveBlobToDevice(blob, `mgvms_${(camera?.name || "camera").replace(/\s+/g, "_")}_${Date.now()}.${ext}`);
+    };
+    mr.start();
+    recorderRef.current = mr;
+    setRecording(true);
+  };
 
   const badge = mode === "webrtc"
     ? { txt: "WEBRTC", color: "#00E5FF" }
@@ -256,6 +347,25 @@ export default function LivePlayer({ camera, hd = false, className = "", dataTes
           {muted ? <VolumeX size={bigMute ? 20 : 13} /> : <Volume2 size={bigMute ? 20 : 13} />}
           {bigMute && <span className="text-xs">{muted ? "Son coupé" : "Son actif"}</span>}
         </button>
+      )}
+      {/* v3.99 · Capture côté navigateur (demande explicite : icônes
+          appareil photo / caméra cinéma, enregistrées sur le téléphone) —
+          `capture` (mobile uniquement, comme `bigMute`) évite d'ajouter ces
+          boutons à la mosaïque desktop dense où ils n'ont pas leur place. */}
+      {capture && mode === "webrtc" && (
+        <div className="absolute bottom-3 left-3 z-10 flex items-center gap-2">
+          <button onClick={(e) => { e.stopPropagation(); takeScreenshot(); }} disabled={busy}
+                  className="p-2.5 bg-black/70 hover:bg-black/85 text-white border border-white/25 disabled:opacity-50"
+                  title="Capturer une image" data-testid={`${dataTestId}-screenshot-btn`}>
+            <CameraIcon size={18} />
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); toggleRecord(); }}
+                  className={`p-2.5 border text-white ${recording ? "bg-[#FF3333] border-[#FF3333]" : "bg-black/70 hover:bg-black/85 border-white/25"}`}
+                  title={recording ? "Arrêter l'enregistrement" : "Enregistrer une vidéo"}
+                  data-testid={`${dataTestId}-record-btn`}>
+            {recording ? <Square size={18} /> : <VideoIcon size={18} />}
+          </button>
+        </div>
       )}
     </div>
   );
