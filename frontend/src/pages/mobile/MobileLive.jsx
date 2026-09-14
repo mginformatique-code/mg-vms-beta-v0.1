@@ -22,10 +22,10 @@ import api from "@/lib/api";
 import useDeviceCapabilities from "@/hooks/useDeviceCapabilities";
 import LivePlayer from "@/components/video/LivePlayer";
 import CameraControlOverlay from "@/pages/CameraControlOverlay";
-import PtzPad from "@/components/mobile/PtzPad";
+import MobilePtzPanel from "@/components/mobile/MobilePtzPanel";
 import Logo from "@/components/Logo";
 import {
-  ChevronLeft, ChevronRight, Grid2x2, Grid3x3, LayoutGrid, Loader2, Film, Move, X,
+  ChevronLeft, ChevronRight, Grid2x2, Grid3x3, LayoutGrid, Loader2, Film, Move,
   Camera as CameraIcon, Video as VideoIcon, Square, Volume2, VolumeX,
 } from "lucide-react";
 
@@ -47,12 +47,20 @@ export default function MobileLive() {
   const navigate = useNavigate();
   const [cams, setCams] = useState(null);
   const [idx, setIdx] = useState(0);
-  const [hd, setHd] = useState(true);
+  // v3.102 · Qualité par défaut SD (demande explicite) — HD reste un choix
+  // actif de l'utilisateur (bouton HD/SD), pas un défaut qui consomme de la
+  // bande passante avant même d'avoir été demandé.
+  const [hd, setHd] = useState(false);
   const [view, setView] = useState("single"); // "single" | "grid"
   const [gridSize, setGridSize] = useState(4);
   const [page, setPage] = useState(0);
   const [densityOpen, setDensityOpen] = useState(false);
-  const [ptzOpen, setPtzOpen] = useState(false);
+  // v3.102 · Remplace l'overlay plein écran v3.98 par un panneau INLINE
+  // sous la vidéo (demande explicite, référence app Reolink : "ça s'ouvre
+  // dans l'encadré blanc, rien devant la vue live") — `panelMode` choisit
+  // ce qui s'affiche dans ce panneau ("ptz" ou rien), la vidéo reste
+  // toujours visible au-dessus, jamais couverte.
+  const [panelMode, setPanelMode] = useState(null); // null | "ptz"
   // v3.101 · Mute/screenshot/enregistrement pilotés depuis CETTE barre
   // d'icônes (plus d'overlay sur la vidéo, demande explicite) — LivePlayer
   // expose ses actions via ref et son état via ce callback.
@@ -85,10 +93,10 @@ export default function MobileLive() {
   // v3.92 · Revient à la 1ère page à chaque changement de densité — une
   // page 2 calculée sur l'ancienne taille n'aurait plus de sens.
   useEffect(() => { setPage(0); }, [gridSize]);
-  // v3.98 · Ferme l'overlay PTZ si on change de caméra (swipe/flèches)
+  // v3.98 · Ferme le panneau PTZ si on change de caméra (swipe/flèches)
   // pendant qu'il est ouvert — évite de piloter le PTZ de la caméra
   // précédente en croyant contrôler la nouvelle.
-  useEffect(() => { setPtzOpen(false); }, [idx]);
+  useEffect(() => { setPanelMode(null); }, [idx]);
 
   const goPrev = useCallback(() => setIdx((i) => (cams?.length ? (i - 1 + cams.length) % cams.length : 0)), [cams]);
   const goNext = useCallback(() => setIdx((i) => (cams?.length ? (i + 1) % cams.length : 0)), [cams]);
@@ -221,7 +229,13 @@ export default function MobileLive() {
   return (
     <div className="h-full flex flex-col" data-testid="mobile-live-single">
       {toolbar}
-      <div className="relative flex-1 bg-black" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+      {/* v3.102 · Vidéo limitée à ~45% de la hauteur disponible (demande
+          explicite : "que les vidéos live ne prennent que la moitié de
+          l'écran", référence app Reolink) — au lieu de `flex-1`, qui la
+          faisait remplir tout l'espace restant. Le panneau sous la vidéo
+          (icônes + contenu PTZ) prend le reste, défilable si besoin. */}
+      <div className="relative bg-black shrink-0" style={{ flex: "0 0 45%" }}
+           onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
         <LivePlayer ref={playerRef} camera={cam} hd={hd} externalControls onStatusChange={setPlayerStatus}
                     className="w-full h-full" dataTestId="mobile-live-player" />
         <CameraControlOverlay cam={cam} />
@@ -241,81 +255,68 @@ export default function MobileLive() {
           {cam.name}
         </div>
       </div>
-      {/* v3.98 · Rangée d'icônes façon app Reolink (demande explicite),
-          plus le pavé PTZ toujours affiché en dur : "PTZ" ouvre une
-          page superposée (même zone que la vidéo) avec le pavé/zoom/
-          vitesse + un bouton Retour, "Lecture" navigue directement vers
-          les enregistrements de cette caméra (Recordings.jsx réutilisé
-          tel quel via `/m/recordings?camera=`, qui lit déjà ce paramètre
-          lui-même).
-          v3.101 · Son/capture photo/enregistrement déplacés ICI depuis la
-          vidéo (demande explicite : "que rien ne soit sur l'emplacement de
-          la vidéo") — pilotés via `playerRef` (LivePlayer expose ses
-          actions, voir `externalControls`). */}
-      <div className="shrink-0 flex items-center justify-center gap-4 py-2 border-t border-border bg-card flex-wrap">
-        {/* v3.99 · Bouton toujours affiché (demande explicite : "le bouton
-            met 15 sec à apparaître" — il était gated par `caps?.ptz`, dont
-            le chargement asynchrone causait ce délai visible/le
-            "pop-in"). Le statut PTZ réel n'est vérifié qu'à l'OUVERTURE
-            de l'overlay, plus sur la présence du bouton lui-même. */}
-        <button onClick={() => setPtzOpen(true)} data-testid="mobile-live-ptz-open-btn"
-                className="flex flex-col items-center gap-0.5 text-muted-foreground">
-          <Move size={20} />
-          <span className="text-[9px] uppercase">PTZ</span>
-        </button>
-        <button onClick={() => navigate(`/m/recordings?camera=${cam.id}`)}
-                data-testid="mobile-live-recordings-btn"
-                className="flex flex-col items-center gap-0.5 text-muted-foreground">
-          <Film size={20} />
-          <span className="text-[9px] uppercase">{t("mobile.live_recordings")}</span>
-        </button>
-        {playerStatus.mode === "webrtc" && (
-          <button onClick={() => playerRef.current?.toggleMute()} data-testid="mobile-live-mute-btn"
+
+      {/* v3.98 · Rangée d'icônes façon app Reolink, plus le panneau PTZ
+          (demande explicite) : "PTZ" ouvre son contenu ICI, dans ce même
+          panneau sous la vidéo — jamais par-dessus l'image. "Lecture"
+          navigue directement vers les enregistrements de cette caméra
+          (Recordings.jsx réutilisé tel quel via `/m/recordings?camera=`).
+          v3.101 · Son/capture photo/enregistrement vivent dans cette même
+          rangée (pilotés via `playerRef`, LivePlayer expose ses actions). */}
+      <div className="flex-1 overflow-y-auto flex flex-col bg-card" data-testid="mobile-live-panel">
+        <div className="shrink-0 flex items-center justify-center gap-4 py-2 border-b border-border flex-wrap">
+          {/* v3.99 · Bouton toujours affiché (demande explicite : "le bouton
+              met 15 sec à apparaître" — il était gated par `caps?.ptz`, dont
+              le chargement asynchrone causait ce délai visible/le
+              "pop-in"). Le statut PTZ réel n'est vérifié qu'à l'ouverture
+              du panneau, plus sur la présence du bouton lui-même. */}
+          <button onClick={() => setPanelMode((m) => (m === "ptz" ? null : "ptz"))} data-testid="mobile-live-ptz-open-btn"
+                  className={`flex flex-col items-center gap-0.5 ${panelMode === "ptz" ? "text-[#0044FF]" : "text-muted-foreground"}`}>
+            <Move size={20} />
+            <span className="text-[9px] uppercase">PTZ</span>
+          </button>
+          <button onClick={() => navigate(`/m/recordings?camera=${cam.id}`)}
+                  data-testid="mobile-live-recordings-btn"
                   className="flex flex-col items-center gap-0.5 text-muted-foreground">
-            {playerStatus.muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
-            <span className="text-[9px] uppercase">{playerStatus.muted ? t("mobile.live_muted") : t("mobile.live_unmuted")}</span>
+            <Film size={20} />
+            <span className="text-[9px] uppercase">{t("mobile.live_recordings")}</span>
           </button>
-        )}
-        {playerStatus.mode === "webrtc" && (
-          <button onClick={() => playerRef.current?.takeScreenshot()} disabled={playerStatus.busy}
-                  data-testid="mobile-live-screenshot-btn"
-                  className="flex flex-col items-center gap-0.5 text-muted-foreground disabled:opacity-40">
-            <CameraIcon size={20} />
-            <span className="text-[9px] uppercase">{t("mobile.live_screenshot")}</span>
-          </button>
-        )}
-        {playerStatus.mode === "webrtc" && (
-          <button onClick={() => playerRef.current?.toggleRecord()} data-testid="mobile-live-record-btn"
-                  className={`flex flex-col items-center gap-0.5 ${playerStatus.recording ? "text-[#FF3333]" : "text-muted-foreground"}`}>
-            {playerStatus.recording ? <Square size={20} /> : <VideoIcon size={20} />}
-            <span className="text-[9px] uppercase">{playerStatus.recording ? t("mobile.live_stop") : t("mobile.live_record")}</span>
-          </button>
+          {playerStatus.mode === "webrtc" && (
+            <button onClick={() => playerRef.current?.toggleMute()} data-testid="mobile-live-mute-btn"
+                    className="flex flex-col items-center gap-0.5 text-muted-foreground">
+              {playerStatus.muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+              <span className="text-[9px] uppercase">{playerStatus.muted ? t("mobile.live_muted") : t("mobile.live_unmuted")}</span>
+            </button>
+          )}
+          {playerStatus.mode === "webrtc" && (
+            <button onClick={() => playerRef.current?.takeScreenshot()} disabled={playerStatus.busy}
+                    data-testid="mobile-live-screenshot-btn"
+                    className="flex flex-col items-center gap-0.5 text-muted-foreground disabled:opacity-40">
+              <CameraIcon size={20} />
+              <span className="text-[9px] uppercase">{t("mobile.live_screenshot")}</span>
+            </button>
+          )}
+          {playerStatus.mode === "webrtc" && (
+            <button onClick={() => playerRef.current?.toggleRecord()} data-testid="mobile-live-record-btn"
+                    className={`flex flex-col items-center gap-0.5 ${playerStatus.recording ? "text-[#FF3333]" : "text-muted-foreground"}`}>
+              {playerStatus.recording ? <Square size={20} /> : <VideoIcon size={20} />}
+              <span className="text-[9px] uppercase">{playerStatus.recording ? t("mobile.live_stop") : t("mobile.live_record")}</span>
+            </button>
+          )}
+        </div>
+
+        {panelMode === "ptz" && (
+          caps === null ? (
+            <div className="flex-1 flex items-center justify-center py-8"><Loader2 size={20} className="animate-spin text-muted-foreground" /></div>
+          ) : caps?.ptz ? (
+            <MobilePtzPanel cameraId={cam.id} />
+          ) : (
+            <div className="text-muted-foreground text-sm px-6 py-8 text-center" data-testid="mobile-ptz-unavailable">
+              {t("mobile.ptz_always_note")}
+            </div>
+          )
         )}
       </div>
-
-      {ptzOpen && (
-        <div className="fixed inset-0 z-50 bg-black flex flex-col" data-testid="mobile-ptz-overlay">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-white/10 shrink-0">
-            <button onClick={() => setPtzOpen(false)} data-testid="mobile-ptz-back"
-                    className="flex items-center gap-1.5 text-white text-sm">
-              <X size={18} /> {t("mobile.ptz_back")}
-            </button>
-            <span className="text-white text-sm truncate">{cam.name}</span>
-            <span className="w-14" />
-          </div>
-          <div className="flex-1 flex items-center justify-center">
-            {caps === null ? (
-              <Loader2 size={24} className="animate-spin text-white/50" />
-            ) : caps?.ptz ? (
-              <PtzPad cameraId={cam.id} />
-            ) : (
-              <div className="text-white/50 text-sm px-6 text-center" data-testid="mobile-ptz-unavailable">
-                {t("mobile.ptz_always_note")}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
