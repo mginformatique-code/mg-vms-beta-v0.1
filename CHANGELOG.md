@@ -3,6 +3,14 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.95-mobile-camera-center-width] — 2026-09-14 — Interface mobile : onglet "Centre caméras" renommé + correctif largeur
+
+### Fixed
+- La fiche technique caméra débordait horizontalement sur téléphone (rangée d'en-tête avec plusieurs boutons + titre qui ne passaient jamais à la ligne) — corrigé, tailles desktop inchangées.
+
+### Changed
+- L'onglet "Caméras" est renommé "Centre caméras", reflétant ce qu'il ouvre réellement (la fiche technique complète, pas une simple liste).
+
 ## [v3.94-mobile-full-coverage] — 2026-09-13 — Interface mobile : Caméras = Centre caméras complet, correctifs PTZ/audio/événements, toutes les pages accessibles
 
 ### Fixed
