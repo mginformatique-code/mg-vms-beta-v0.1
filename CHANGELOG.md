@@ -3,6 +3,17 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.113-mobile-live-picker-grid-fullscreen] — 2026-09-14 — Sélecteur de caméras en tuiles, correctif plantage grille 16 vues, plein écran, défilement
+
+### Fixed
+- Le mode grille 16 vues faisait planter l'application — il ouvrait 16 connexions vidéo simultanées, plus que la plupart des téléphones ne peuvent décoder en même temps. La grille affiche désormais un aperçu image rafraîchi automatiquement (comme une miniature qui se met à jour) plutôt qu'un flux vidéo complet par tuile ; toucher une tuile ouvre la vraie vue live en plein écran.
+- Rendu très dégradé en orientation paysage — la vidéo occupe désormais une part bien plus grande de l'écran dans ce sens.
+
+### Added
+- La vue Live ouvre désormais sur un écran de sélection en tuiles (façon Reolink) au lieu d'atterrir directement sur une caméra au hasard — sauf en arrivant sur une caméra précise depuis le Centre caméras, qui va toujours droit à la vue plein écran.
+- Bouton plein écran à côté des boutons PTZ / Enregistrements / Son / Photo / Vidéo.
+- Les grilles à forte densité (8/16 caméras) se parcourent maintenant par défilement vertical, sans pagination.
+
 ## [v3.112-mobile-ptz-race-notif-badge] — 2026-09-14 — Correctif PTZ ne s'arrêtant plus, badge notifications sur Événements
 
 ### Fixed

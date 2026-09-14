@@ -18,6 +18,7 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
+import { toast } from "sonner";
 import api from "@/lib/api";
 import useDeviceCapabilities from "@/hooks/useDeviceCapabilities";
 import LivePlayer from "@/components/video/LivePlayer";
@@ -27,7 +28,7 @@ import MobileRecordingsTimeline from "@/components/mobile/MobileRecordingsTimeli
 import Logo from "@/components/Logo";
 import {
   ChevronLeft, ChevronRight, Grid2x2, Grid3x3, LayoutGrid, Loader2, Film, Move,
-  Camera as CameraIcon, Video as VideoIcon, Square, Volume2, VolumeX,
+  Camera as CameraIcon, Video as VideoIcon, Square, Volume2, VolumeX, Maximize, Minimize,
 } from "lucide-react";
 
 const SWIPE_THRESHOLD_PX = 50;
@@ -42,6 +43,55 @@ function StatusDot({ online }) {
   return <span className={`inline-block w-1.5 h-1.5 rounded-full ${online ? "bg-[#00E676]" : "bg-muted-foreground"}`} />;
 }
 
+// v3.113 · La grille rendait un <LivePlayer> (donc une connexion WebRTC
+// complète) PAR TUILE — 16 connexions vidéo simultanées, chacune avec son
+// propre décodeur, dépasse ce que la plupart des téléphones peuvent tenir
+// (plantage signalé). Remplacé par des tuiles en aperçu JPEG rafraîchi
+// (même endpoint que la miniature de MobileCameras.jsx, réutilisé ici à un
+// rythme plus rapide car c'est un aperçu "live-ish", pas une icône
+// statique) — aucune connexion vidéo tant qu'on ne tape pas la tuile pour
+// passer en vue plein écran (seul endroit qui ouvre un vrai flux WebRTC).
+// Corrige aussi partiellement la fiabilité WebRTC en grille dense (une
+// grille qui ne fait plus AUCUNE connexion WebRTC ne peut plus en perdre).
+function GridTile({ cam, onClick }) {
+  const [thumbUrl, setThumbUrl] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    let currentUrl = null;
+    const token = localStorage.getItem("mg_token") || "";
+    const base = process.env.REACT_APP_BACKEND_URL || "";
+    const fetchFrame = () => {
+      fetch(`${base}/api/stream/${cam.id}/frame.jpeg?hd=0`, { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => (r.ok ? r.blob() : Promise.reject()))
+        .then((blob) => {
+          if (!alive) return;
+          const url = URL.createObjectURL(blob);
+          if (currentUrl) URL.revokeObjectURL(currentUrl);
+          currentUrl = url;
+          setThumbUrl(url);
+        })
+        .catch(() => {});
+    };
+    fetchFrame();
+    const iv = setInterval(fetchFrame, 6000);
+    return () => { alive = false; clearInterval(iv); if (currentUrl) URL.revokeObjectURL(currentUrl); };
+  }, [cam.id]);
+
+  return (
+    <button onClick={onClick} className="relative bg-black aspect-video overflow-hidden rounded-lg" data-testid="mobile-live-grid-tile">
+      {thumbUrl ? (
+        <img src={thumbUrl} alt="" className="w-full h-full object-cover" />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center"><CameraIcon size={18} className="text-white/20" /></div>
+      )}
+      <div className="absolute bottom-0 inset-x-0 px-1.5 py-1 bg-gradient-to-t from-black/80 to-transparent flex items-center gap-1">
+        <StatusDot online={cam.status === "online"} />
+        <span className="text-[10px] text-white truncate">{cam.name}</span>
+      </div>
+    </button>
+  );
+}
+
 export default function MobileLive() {
   const { t } = useApp();
   const location = useLocation();
@@ -52,10 +102,18 @@ export default function MobileLive() {
   // actif de l'utilisateur (bouton HD/SD), pas un défaut qui consomme de la
   // bande passante avant même d'avoir été demandé.
   const [hd, setHd] = useState(false);
-  const [view, setView] = useState("single"); // "single" | "grid"
-  const [gridSize, setGridSize] = useState(4);
-  const [page, setPage] = useState(0);
+  // v3.113 · "quand on clique sur live on arrive direct sur une vue caméra
+  // sans choisir laquelle... un système à la Reolink avec des tuiles pour
+  // sélectionner la caméra avant d'être envoyé sur la vue live" — la grille
+  // de sélection est désormais la vue PAR DÉFAUT ; seule une arrivée
+  // ciblée depuis MobileCameras (state.cameraId, tap sur une caméra
+  // précise) saute directement en vue plein écran, comme avant.
+  const [view, setView] = useState(location.state?.cameraId ? "single" : "grid"); // "single" | "grid"
+  const [gridSize, setGridSize] = useState(8);
   const [densityOpen, setDensityOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isLandscape, setIsLandscape] = useState(() => window.matchMedia("(orientation: landscape)").matches);
+  const videoWrapRef = useRef(null);
   // v3.102 · Remplace l'overlay plein écran v3.98 par un panneau INLINE
   // sous la vidéo (demande explicite, référence app Reolink : "ça s'ouvre
   // dans l'encadré blanc, rien devant la vue live") — `panelMode` choisit
@@ -91,13 +149,37 @@ export default function MobileLive() {
     return () => { alive = false; clearInterval(iv); };
   }, []);
 
-  // v3.92 · Revient à la 1ère page à chaque changement de densité — une
-  // page 2 calculée sur l'ancienne taille n'aurait plus de sens.
-  useEffect(() => { setPage(0); }, [gridSize]);
   // v3.98 · Ferme le panneau PTZ si on change de caméra (swipe/flèches)
   // pendant qu'il est ouvert — évite de piloter le PTZ de la caméra
   // précédente en croyant contrôler la nouvelle.
   useEffect(() => { setPanelMode(null); }, [idx]);
+
+  // v3.113 · Bouton plein écran (demande explicite) — plein écran sur le
+  // conteneur vidéo lui-même (pas tout le document) pour que les contrôles
+  // superposés (CameraControlOverlay, flèches, nom de la caméra) restent
+  // visibles ET fonctionnels une fois en plein écran, pas seulement le
+  // flux vidéo brut.
+  useEffect(() => {
+    const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
+  useEffect(() => {
+    const mq = window.matchMedia("(orientation: landscape)");
+    const handler = (e) => setIsLandscape(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  const toggleFullscreen = () => {
+    if (!videoWrapRef.current) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else {
+      videoWrapRef.current.requestFullscreen?.().catch(() => {
+        toast.error(t("mobile.live_fullscreen_unavailable"));
+      });
+    }
+  };
 
   const goPrev = useCallback(() => setIdx((i) => (cams?.length ? (i - 1 + cams.length) % cams.length : 0)), [cams]);
   const goNext = useCallback(() => setIdx((i) => (cams?.length ? (i + 1) % cams.length : 0)), [cams]);
@@ -133,9 +215,7 @@ export default function MobileLive() {
     );
   }
 
-  const totalPages = Math.max(1, Math.ceil(cams.length / gridSize));
-  const pageCams = cams.slice(page * gridSize, page * gridSize + gridSize);
-  const cols = gridSize === 16 ? 4 : 2;
+  const cols = gridSize === 16 ? 4 : gridSize === 8 ? 3 : 2;
 
   const toolbar = (
     <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border bg-card shrink-0">
@@ -155,9 +235,14 @@ export default function MobileLive() {
         {/* v3.93 · Sélecteur de densité façon app Reolink : un seul bouton
             grille, tap → popover avec les densités disponibles empilées
             verticalement (16/8/4/vue unique) plutôt qu'une rangée de
-            boutons texte. */}
+            boutons texte.
+            v3.113 · En vue plein écran, ce bouton ramène directement à la
+            grille de sélection (plus besoin d'ouvrir le popover pour
+            revenir en arrière) — le popover de densité ne concerne que le
+            mode grille lui-même. */}
         <div className="relative">
-          <button onClick={() => setDensityOpen((v) => !v)} data-testid="mobile-live-density-btn"
+          <button onClick={() => (view === "single" ? setView("grid") : setDensityOpen((v) => !v))}
+                  data-testid="mobile-live-density-btn"
                   className="p-1.5 text-muted-foreground hover:text-foreground">
             {view === "single" ? <Grid2x2 size={18} /> : <Grid3x3 size={18} />}
           </button>
@@ -204,44 +289,30 @@ export default function MobileLive() {
     return (
       <div className="h-full flex flex-col">
         {toolbar}
+        {/* v3.113 · Plus de pagination (demande explicite : "qu'on puisse
+            défiler vers le bas de l'écran pour afficher le reste des
+            cams") — la grille garde le nombre de colonnes choisi mais
+            grandit avec TOUTES les caméras, défilement vertical naturel. */}
         <div className="flex-1 overflow-y-auto grid gap-1 p-1 content-start" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
-          {pageCams.map((cam) => {
-            const i = cams.indexOf(cam);
-            return (
-              <button key={cam.id} onClick={() => { setIdx(i); setView("single"); }}
-                      className="relative bg-black aspect-video overflow-hidden rounded-lg" data-testid="mobile-live-grid-tile">
-                <LivePlayer camera={cam} hd={false} className="w-full h-full" dataTestId={`mobile-grid-player-${i}`} />
-                <div className="absolute bottom-0 inset-x-0 px-1.5 py-1 bg-gradient-to-t from-black/80 to-transparent flex items-center gap-1">
-                  <StatusDot online={cam.status === "online"} />
-                  <span className="text-[10px] text-white truncate">{cam.name}</span>
-                </div>
-              </button>
-            );
-          })}
+          {cams.map((cam, i) => (
+            <GridTile key={cam.id} cam={cam} onClick={() => { setIdx(i); setView("single"); }} />
+          ))}
         </div>
-        {totalPages > 1 && (
-          <div className="shrink-0 flex items-center justify-center gap-3 py-2 border-t border-border bg-card">
-            <button onClick={() => setPage((p) => (p - 1 + totalPages) % totalPages)} data-testid="mobile-live-grid-prev-page"
-                    className="p-1.5 text-muted-foreground"><ChevronLeft size={16} /></button>
-            <span className="text-xs mono text-muted-foreground">{page + 1} / {totalPages}</span>
-            <button onClick={() => setPage((p) => (p + 1) % totalPages)} data-testid="mobile-live-grid-next-page"
-                    className="p-1.5 text-muted-foreground"><ChevronRight size={16} /></button>
-          </div>
-        )}
       </div>
     );
   }
 
   const cam = cams[idx];
+  // v3.113 · "quand je mets en paysage ça rend très mal" — la vidéo restait
+  // à ~32% de hauteur même en paysage (où la hauteur d'écran disponible
+  // est bien plus faible qu'en portrait), donnant une bande vidéo minuscule
+  // au milieu d'un grand vide. En plein écran (bouton dédié ci-dessous),
+  // l'élément occupe tout le viewport nativement (Fullscreen API).
+  const videoFlex = isFullscreen ? "1 1 100%" : isLandscape ? "0 0 70%" : "0 0 32%";
   return (
     <div className="h-full flex flex-col" data-testid="mobile-live-single">
-      {toolbar}
-      {/* v3.103 · Réduit à ~32% (demande explicite : "ça prend encore pas
-          mal de place, il faudrait qu'il reste la moitié de la place en
-          bas de page au moins" — la v3.102 à 45% n'était pas assez
-          agressive). Avec la barre du haut (~48px) déduite, le panneau du
-          bas conserve nettement plus de la moitié de l'écran. */}
-      <div className="relative bg-black shrink-0" style={{ flex: "0 0 32%" }}
+      {!isFullscreen && toolbar}
+      <div ref={videoWrapRef} className="relative bg-black shrink-0" style={{ flex: videoFlex }}
            onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
         <LivePlayer ref={playerRef} camera={cam} hd={hd} externalControls onStatusChange={setPlayerStatus}
                     className="w-full h-full" dataTestId="mobile-live-player" />
@@ -261,6 +332,19 @@ export default function MobileLive() {
         <div className="absolute top-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-black/60 text-white text-xs truncate max-w-[70%]">
           {cam.name}
         </div>
+        {/* v3.113 · Le bouton plein écran vit dans la rangée d'icônes
+            ci-dessous (pas sur la vidéo — demande explicite passée : "que
+            rien ne soit sur l'emplacement de la vidéo"). Cette icône de
+            SORTIE n'existe que PENDANT le plein écran lui-même : une fois
+            actif, la rangée d'icônes n'est plus visible (hors de l'élément
+            mis en plein écran par le navigateur), donc un moyen de sortir
+            doit vivre à l'intérieur de ce même élément. */}
+        {isFullscreen && (
+          <button onClick={toggleFullscreen} data-testid="mobile-live-fullscreen-exit-btn"
+                  className="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center bg-black/50 text-white">
+            <Minimize size={16} />
+          </button>
+        )}
       </div>
 
       {/* v3.98 · Rangée d'icônes façon app Reolink, plus le panneau PTZ
@@ -310,6 +394,11 @@ export default function MobileLive() {
               <span className="text-[9px] uppercase">{playerStatus.recording ? t("mobile.live_stop") : t("mobile.live_record")}</span>
             </button>
           )}
+          <button onClick={toggleFullscreen} data-testid="mobile-live-fullscreen-btn"
+                  className="flex flex-col items-center gap-0.5 text-muted-foreground">
+            <Maximize size={20} />
+            <span className="text-[9px] uppercase">{t("mobile.live_fullscreen")}</span>
+          </button>
         </div>
 
         {panelMode === "ptz" && (
