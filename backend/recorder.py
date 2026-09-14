@@ -109,10 +109,36 @@ async def _start_ffmpeg(cam: dict) -> None:
         # prématuré — voir _probe_duration). N'affecte pas la copie des
         # données vidéo/audio elles-mêmes (`-c copy` reste sans réencodage).
         "-fflags", "+genpts",
+        # v3.111 · Root cause confirmée en prod (14/09) : sur 40917 segments
+        # indexés, 10717 (26%) faisaient moins de 60s — signalé à plusieurs
+        # reprises comme "critique". Preuve concrète isolée : une caméra
+        # avec des coupures RTSP connues (rue_vers_villers_telephoto,
+        # timeouts confirmés dans les logs go2rtc au même moment) a produit
+        # des dizaines de segments consécutifs démarrant exactement 2s
+        # l'un après l'autre, chacun ne durant que 1-2s — bien plus rapide
+        # que le tick du watchdog (30s, voir recorder_loop), donc PAS un
+        # crash/relance de processus : c'est le muxer `segment` lui-même
+        # qui déraille, en plein milieu d'un SEUL processus ffmpeg. Le
+        # muxer `segment` décide qu'un segment est écoulé en se basant sur
+        # les PTS du FLUX SOURCE — quand go2rtc/la caméra a une
+        # discontinuité de timestamps (reconnexion, gigue réseau), le calcul
+        # de "temps écoulé" peut devenir n'importe quoi et déclencher des
+        # rollovers en rafale. `+genpts` seul (ci-dessus) régénère des PTS
+        # manquants mais ne corrige pas un vrai SAUT de PTS déjà présent.
+        # `-use_wallclock_as_timestamps 1` rend le minutage des segments
+        # totalement indépendant des PTS (possiblement corrompus) de la
+        # source : chaque paquet reçoit un timestamp basé sur l'horloge
+        # système au moment de sa réception — pratique standard pour
+        # l'enregistrement `-c copy` de flux RTSP instables. Combiné à
+        # `-avoid_negative_ts make_zero` (évite un timestamp négatif au
+        # tout début d'un segment, cas limite classique avec l'horloge
+        # système comme source de PTS).
+        "-use_wallclock_as_timestamps", "1",
         "-i", src,
         "-c", "copy", "-f", "segment",
         "-segment_time", str(SEGMENT_SECONDS),
         "-reset_timestamps", "1", "-strftime", "1",
+        "-avoid_negative_ts", "make_zero",
         str(out),
     ]
     # v3.1.4 · stderr n'était jamais capturé (DEVNULL) — quand ffmpeg crashait

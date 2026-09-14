@@ -3,6 +3,12 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.111-recorder-wallclock-timestamps] — 2026-09-14 — Correctif critique : segments d'enregistrement tronqués (2 min ressortant parfois à 2 secondes)
+
+### Fixed
+- **Root cause identifiée avec preuve en base** : sur 40917 segments indexés, 10717 (26%) faisaient moins de 60 secondes au lieu des ~120 secondes attendues. Cas concret isolé : une caméra avec des coupures RTSP connues a produit des dizaines de segments consécutifs de 1 à 2 secondes chacun, démarrant exactement 2 secondes l'un après l'autre — bien plus rapide que le cycle de surveillance du service d'enregistrement (30s), donc pas un redémarrage de processus mais le découpage interne d'enregistrement qui déraillait en cours de route, déclenché par une discontinuité de temporisation du flux source (reconnexion caméra, gigue réseau).
+- Le minutage des segments est désormais basé sur l'horloge du serveur au moment de la réception de chaque paquet, plutôt que sur la temporisation embarquée dans le flux de la caméra — ce flux embarqué pouvant devenir incohérent lors d'une instabilité réseau/caméra, ce qui déclenchait ce découpage prématuré en rafale.
+
 ## [v3.110-auth-ip-wide-lockout] — 2026-09-14 — Verrouillage par IP (tous comptes confondus), correctif WebRTC WAN
 
 ### Added
