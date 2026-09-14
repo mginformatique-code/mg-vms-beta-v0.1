@@ -67,7 +67,7 @@ export default function MobileLive() {
   // expose ses actions via ref et son état via ce callback.
   const playerRef = useRef(null);
   const [playerStatus, setPlayerStatus] = useState({ muted: true, recording: false, mode: "connecting", busy: false });
-  const touchStartX = useRef(null);
+  const touchStart = useRef(null);
   const { caps } = useDeviceCapabilities(cams?.[idx]?.id);
   // v3.91 · Arrivée depuis MobileCameras (tap sur une caméra précise) —
   // consommé une seule fois dès que la liste charge, par id (pas par index,
@@ -102,13 +102,19 @@ export default function MobileLive() {
   const goPrev = useCallback(() => setIdx((i) => (cams?.length ? (i - 1 + cams.length) % cams.length : 0)), [cams]);
   const goNext = useCallback(() => setIdx((i) => (cams?.length ? (i + 1) % cams.length : 0)), [cams]);
 
-  const onTouchStart = (e) => { touchStartX.current = e.touches[0].clientX; };
+  // v3.109 · Même correctif que VehicleDetail (MobileEvents.jsx) : exige un
+  // geste nettement horizontal (|dx| > |dy|) avant de changer de caméra,
+  // pour ne jamais confondre un swipe volontaire avec un frôlement diagonal.
+  const onTouchStart = (e) => { touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; };
   const onTouchEnd = (e) => {
-    if (touchStartX.current == null) return;
-    const dx = e.changedTouches[0].clientX - touchStartX.current;
-    if (dx > SWIPE_THRESHOLD_PX) goPrev();
-    else if (dx < -SWIPE_THRESHOLD_PX) goNext();
-    touchStartX.current = null;
+    if (touchStart.current == null) return;
+    const dx = e.changedTouches[0].clientX - touchStart.current.x;
+    const dy = e.changedTouches[0].clientY - touchStart.current.y;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      if (dx > SWIPE_THRESHOLD_PX) goPrev();
+      else if (dx < -SWIPE_THRESHOLD_PX) goNext();
+    }
+    touchStart.current = null;
   };
 
   if (cams === null) {

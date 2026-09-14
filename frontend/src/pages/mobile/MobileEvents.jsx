@@ -280,7 +280,14 @@ function VehicleHeatmapTab({ plate }) {
 // tactiles : évite que le glissement d'exploration de la loupe déclenche
 // aussi la navigation gauche/droite entre fiches véhicule (swipe posé sur
 // le conteneur parent, voir plus bas).
-function MobileMagnifier({ src, alt, className, zoom = 2.5, size = 160 }) {
+// v3.109 · Correctif : le wrapper `inline-block` (ajouté pour le cas
+// "image centrée dans un flex", event detail) shrink-wrap sa largeur au
+// lieu de suivre `w-full` — cassait silencieusement la photo pleine
+// largeur de la fiche véhicule (bug réel signalé : "la loupe fonctionne
+// dans événements, mais pas dans plaques"). Nouveau prop `fullWidth`
+// choisit le bon mode d'affichage par appelant plutôt qu'un seul
+// comportement pour les deux usages.
+function MobileMagnifier({ src, alt, className, zoom = 2.5, size = 160, fullWidth = false }) {
   const containerRef = useRef(null);
   const [lens, setLens] = useState(null);
 
@@ -305,7 +312,7 @@ function MobileMagnifier({ src, alt, className, zoom = 2.5, size = 160 }) {
   const onTouchEnd = (e) => { e.stopPropagation(); setLens(null); };
 
   return (
-    <div ref={containerRef} className="relative inline-block" style={{ touchAction: "none" }}
+    <div ref={containerRef} className={`relative ${fullWidth ? "block w-full" : "inline-block"}`} style={{ touchAction: "none" }}
          onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd}>
       <img src={src} alt={alt} className={className}
            onError={(e) => { e.target.style.display = "none"; }} data-testid="mobile-magnifier-source-img" />
@@ -329,7 +336,7 @@ function VehicleDetail({ plate, onClose, onPrev, onNext, hasPrev, hasNext }) {
   const { t } = useApp();
   const [d, setD] = useState(null);
   const [saving, setSaving] = useState(false);
-  const touchStartX = useRef(null);
+  const touchStart = useRef(null);
 
   const load = useCallback(() => {
     api.get(`/vehicles/${encodeURIComponent(plate)}`).then((r) => setD(r.data)).catch(() => {});
@@ -350,13 +357,24 @@ function VehicleDetail({ plate, onClose, onPrev, onNext, hasPrev, hasNext }) {
     } finally { setSaving(false); }
   };
 
-  const onTouchStart = (e) => { touchStartX.current = e.touches[0].clientX; };
+  // v3.109 · Correctif réel signalé : "je regardais une plaque... ça m'a
+  // changé de fiche véhicule automatiquement" — le swipe ne comparait que
+  // le déplacement horizontal, donc un simple défilement vertical du
+  // contenu (onglet Timeline/Heatmap, liste de passages) avec un léger
+  // angle de doigt suffisait à dépasser le seuil et à déclencher un
+  // changement de véhicule involontaire. Exige maintenant un geste
+  // NETTEMENT horizontal (|dx| > |dy|) avant de considérer que c'est un
+  // swipe plutôt qu'un défilement.
+  const onTouchStart = (e) => { touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; };
   const onTouchEnd = (e) => {
-    if (touchStartX.current == null) return;
-    const dx = e.changedTouches[0].clientX - touchStartX.current;
-    if (dx > SWIPE_THRESHOLD_PX && hasPrev) onPrev();
-    else if (dx < -SWIPE_THRESHOLD_PX && hasNext) onNext();
-    touchStartX.current = null;
+    if (touchStart.current == null) return;
+    const dx = e.changedTouches[0].clientX - touchStart.current.x;
+    const dy = e.changedTouches[0].clientY - touchStart.current.y;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      if (dx > SWIPE_THRESHOLD_PX && hasPrev) onPrev();
+      else if (dx < -SWIPE_THRESHOLD_PX && hasNext) onNext();
+    }
+    touchStart.current = null;
   };
 
   return (
@@ -374,8 +392,8 @@ function VehicleDetail({ plate, onClose, onPrev, onNext, hasPrev, hasNext }) {
         <div className="flex-1 overflow-y-auto">
           <div className="relative">
             {d.best_thumb_id && (
-              <img src={passageThumbUrl(d.best_thumb_id)} alt={d.plate}
-                   className="w-full max-h-56 object-cover" data-testid="mobile-vehicle-thumb" />
+              <MobileMagnifier src={passageThumbUrl(d.best_thumb_id)} alt={d.plate} fullWidth
+                                className="w-full max-h-56 object-cover" />
             )}
             {hasPrev && (
               <button onClick={onPrev} data-testid="mobile-vehicle-prev"

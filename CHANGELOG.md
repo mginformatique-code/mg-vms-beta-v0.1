@@ -3,6 +3,16 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.109-mobile-bugfixes-pinch-zoom-nav] — 2026-09-14 — Correctifs multiples : loupe, swipe involontaire, notifications cliquables, pincement sur la timeline
+
+### Fixed
+- La loupe tactile de la fiche véhicule ne fonctionnait pas du tout (elle n'était jamais réellement branchée sur la photo, malgré l'apparence) — elle fonctionne désormais aussi bien sur la fiche véhicule que sur le détail d'un événement.
+- Un défilement vertical (onglet Timeline/Heatmap d'une fiche véhicule, vue live) pouvait être pris à tort pour un glissement horizontal et faire changer de véhicule ou de caméra tout seul — corrigé en exigeant un geste nettement horizontal avant de considérer que c'est un swipe.
+- Cliquer sur une notification d'alerte en temps réel ne faisait que la fermer, sans jamais amener nulle part — un bouton "Voir" ouvre désormais la caméra concernée (mobile : vue Live directement dessus).
+
+### Added
+- Pincement à deux doigts pour zoomer/dézoomer sur la timeline des enregistrements de la vue live mobile (un doigt pour naviguer une fois zoomé, bouton de réinitialisation du zoom).
+
 ## [v3.108-mobile-plates-tab-dedup] — 2026-09-14 — Correctif : l'onglet Plaques mobile listait chaque détection au lieu d'une fiche par véhicule
 
 ### Fixed

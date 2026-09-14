@@ -3,6 +3,7 @@ import api from "@/lib/api";
 import { translations } from "@/i18n";
 import { toast } from "sonner";
 import { bumpWsMessage, bumpWsReconnect, bumpEviction, setAiDetectionsMapSize } from "@/lib/perf";
+import { navigateTo } from "@/lib/navigation";
 
 // v0.7.e · Wave B · TTL des entrées aiDetections (une caméra qui n'a
 // pas émis depuis N secondes est purgée pour éviter l'accumulation
@@ -151,9 +152,25 @@ export function AppProvider({ children }) {
             setAlertPing((p) => p + 1);
             const fr = (localStorage.getItem("mg_lang") || "fr") === "fr";
             const txt = `${fr ? "Alerte" : "Alert"}: ${msg.data.message}`;
-            if (msg.data.severity === "critical") toast.error(txt);
-            else if (msg.data.severity === "warning") toast.warning(txt);
-            else toast.info(txt);
+            // v3.109 · "cliquer [sur la notification] ne fait rien... il
+            // faudrait que cela amène à l'événement en question" — le
+            // wrapper Toaster (sonner.jsx) ferme déjà le toast au clic sur
+            // son corps, sans jamais naviguer nulle part. Un bouton
+            // d'action explicite navigue vers la caméra concernée (mobile :
+            // vue Live directement sur cette caméra, réutilise le même
+            // `location.state.cameraId` que MobileCameras → MobileLive ;
+            // desktop : Alertes IA, page existante). Pas de lien direct
+            // alerte→événement en base (collections distinctes), donc la
+            // cible la plus fiable est "la caméra à l'instant de l'alerte".
+            const goToAlert = () => {
+              const onMobile = window.location.pathname.startsWith("/m/");
+              if (onMobile) navigateTo("/m/live", { state: { cameraId: msg.data.camera_id } });
+              else navigateTo("/alerts");
+            };
+            const opts = msg.data.camera_id ? { action: { label: fr ? "Voir" : "View", onClick: goToAlert } } : undefined;
+            if (msg.data.severity === "critical") toast.error(txt, opts);
+            else if (msg.data.severity === "warning") toast.warning(txt, opts);
+            else toast.info(txt, opts);
           }
         };
         ws.onclose = () => { if (alive) { bumpWsReconnect(); retry = setTimeout(connect, 4000); } };

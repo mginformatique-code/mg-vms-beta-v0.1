@@ -1,6 +1,7 @@
 import "@/App.css";
 import React from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
+import { setNavigate } from "@/lib/navigation";
 import { AppProvider, useApp } from "@/context/AppContext";
 import { Toaster } from "@/components/ui/sonner";
 import Layout from "@/components/Layout";
@@ -249,10 +250,23 @@ function AppRoutes() {
   );
 }
 
+// v3.109 · `AppContext.jsx` (WebSocket temps réel, toasts d'alerte) est
+// monté AU-DESSUS de `<BrowserRouter>` ci-dessous — `useNavigate()` n'y
+// est pas disponible. Ce petit composant, lui rendu À L'INTÉRIEUR du
+// Router, capture `useNavigate()` une seule fois dans `lib/navigation.js`
+// pour que le handler WebSocket puisse naviguer au clic sur une alerte
+// ("il faudrait que cela amène à l'événement en question").
+function NavigationBridge() {
+  const navigate = useNavigate();
+  React.useEffect(() => { setNavigate(navigate); }, [navigate]);
+  return null;
+}
+
 function App() {
   return (
     <AppProvider>
       <BrowserRouter>
+        <NavigationBridge />
         <AppRoutes />
         <SessionExpiryWatcher />
         <InactivityWatcher />
