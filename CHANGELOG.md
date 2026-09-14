@@ -3,6 +3,11 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.106-mobile-thumb-cache] — 2026-09-14 — Miniatures caméra mises en cache (plus de rechargement à chaque actualisation)
+
+### Fixed
+- La miniature de chaque caméra (liste de statut mobile) était re-téléchargée depuis la caméra à chaque actualisation de page, rendant l'affichage lent — elle est désormais mise en cache sur le téléphone pendant 1h30 : un rechargement de page réutilise la miniature déjà en cache au lieu de re-solliciter la caméra.
+
 ## [v3.105-mobile-magnifier-video-radius-fix] — 2026-09-14 — Loupe tactile sur les photos, lecture vidéo des événements, arrondi CSS effectif
 
 ### Fixed

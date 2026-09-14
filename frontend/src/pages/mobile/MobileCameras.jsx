@@ -14,13 +14,21 @@
  * miniature de la caméra, qui s'actualise toutes seules toutes les 1h")
  * — réutilise `GET /api/stream/{id}/frame.jpeg` (existant, déjà utilisé
  * pour le debug IA/l'aperçu snapshot desktop), en basse résolution
- * (`hd=0`, largement suffisant pour un carré de 36px) pour ne pas
- * solliciter inutilement les caméras. Le paramètre `_h` (numéro d'heure
- * Unix) ne change qu'une fois par heure, donc le navigateur ne recharge
- * l'image qu'à ce rythme — pas de minuteur dédié, le poll `/cameras`
- * déjà en place (20s) suffit à déclencher le re-rendu qui détecte le
- * changement. Icône caméra en fallback (superposée en dessous, révélée
- * par `onError`) si le flux est indisponible.
+ * (`hd=0`, largement suffisant pour un carré de 44px) pour ne pas
+ * solliciter inutilement les caméras.
+ *
+ * v3.106 · La v3.104 changeait juste l'URL de l'`<img>` une fois par
+ * heure — ça évitait de recharger entre deux rendus React, mais PAS
+ * entre deux rechargements de PAGE (F5) : sans en-tête de cache côté
+ * `frame.jpeg` (flux dynamique), chaque `<img>` neuve retape la caméra
+ * en direct, d'où la lenteur signalée ("ça charge la photo à chaque
+ * actualisation... c'est long"). Remplacé par un vrai cache CÔTÉ
+ * NAVIGATEUR : `fetch()` le JPEG une fois, converti en data URL, stocké
+ * dans localStorage avec un horodatage — tant que l'entrée a moins de
+ * `THUMB_TTL_MS` (1h30, milieu de la fourchette "1-2h" demandée), AUCUNE
+ * requête réseau n'est refaite, même après un rechargement complet de
+ * page. Icône caméra en fallback tant qu'aucune miniature n'est en cache
+ * ou disponible.
  */
 import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -28,11 +36,69 @@ import { useApp } from "@/context/AppContext";
 import api from "@/lib/api";
 import { Cctv, Loader2, ChevronLeft } from "lucide-react";
 
-function cameraSnapshotUrl(camId) {
-  const token = localStorage.getItem("mg_token") || "";
-  const base = process.env.REACT_APP_BACKEND_URL || "";
-  const hourBucket = Math.floor(Date.now() / 3_600_000);
-  return `${base}/api/stream/${camId}/frame.jpeg?hd=0&_h=${hourBucket}&token=${encodeURIComponent(token)}`;
+const THUMB_TTL_MS = 90 * 60 * 1000;
+const THUMB_CACHE_PREFIX = "mgvms_cam_thumb_";
+
+function readCachedThumb(camId) {
+  try {
+    const raw = localStorage.getItem(THUMB_CACHE_PREFIX + camId);
+    if (!raw) return null;
+    const { data, at } = JSON.parse(raw);
+    if (!data || Date.now() - at > THUMB_TTL_MS) return null;
+    return data;
+  } catch { return null; }
+}
+
+function useCachedCameraThumb(camId) {
+  const [dataUrl, setDataUrl] = useState(() => readCachedThumb(camId));
+
+  useEffect(() => {
+    const cached = readCachedThumb(camId);
+    if (cached) { setDataUrl(cached); return; }
+    let alive = true;
+    const token = localStorage.getItem("mg_token") || "";
+    const base = process.env.REACT_APP_BACKEND_URL || "";
+    fetch(`${base}/api/stream/${camId}/frame.jpeg?hd=0`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => { if (!r.ok) throw new Error("snapshot indisponible"); return r.blob(); })
+      .then((blob) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      }))
+      .then((data) => {
+        if (!alive) return;
+        setDataUrl(data);
+        try { localStorage.setItem(THUMB_CACHE_PREFIX + camId, JSON.stringify({ data, at: Date.now() })); } catch {}
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [camId]);
+
+  return dataUrl;
+}
+
+function CameraRow({ cam, onClick, t }) {
+  const thumb = useCachedCameraThumb(cam.id);
+  return (
+    <button onClick={onClick} data-testid="mobile-camera-row"
+            className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5 text-left">
+      <div className="relative w-11 h-11 shrink-0 flex items-center justify-center bg-secondary rounded-lg overflow-hidden">
+        <Cctv size={16} className="text-muted-foreground" />
+        {thumb && <img src={thumb} alt="" className="absolute inset-0 w-full h-full object-cover" />}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm truncate">{cam.name}</div>
+        <div className="text-[11px] text-muted-foreground truncate">{cam.site_name || cam.ip}</div>
+      </div>
+      <div className="flex items-center gap-1.5 shrink-0">
+        <span className={`w-1.5 h-1.5 rounded-full ${cam.status === "online" ? "bg-[#00E676]" : "bg-muted-foreground"}`} />
+        <span className="text-[10px] uppercase text-muted-foreground">
+          {cam.status === "online" ? t("mobile.cameras_online") : t("mobile.cameras_offline")}
+        </span>
+      </div>
+    </button>
+  );
 }
 
 export default function MobileCameras() {
@@ -72,26 +138,7 @@ export default function MobileCameras() {
       )}
       <div className="p-2 flex flex-col gap-1.5">
         {shown.map((cam) => (
-          <button key={cam.id} onClick={() => navigate(`/m/cameras/${cam.id}`)}
-                  data-testid="mobile-camera-row"
-                  className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5 text-left">
-            <div className="relative w-11 h-11 shrink-0 flex items-center justify-center bg-secondary rounded-lg overflow-hidden">
-              <Cctv size={16} className="text-muted-foreground" />
-              <img src={cameraSnapshotUrl(cam.id)} alt="" loading="lazy"
-                   className="absolute inset-0 w-full h-full object-cover"
-                   onError={(e) => { e.currentTarget.style.display = "none"; }} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-sm truncate">{cam.name}</div>
-              <div className="text-[11px] text-muted-foreground truncate">{cam.site_name || cam.ip}</div>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <span className={`w-1.5 h-1.5 rounded-full ${cam.status === "online" ? "bg-[#00E676]" : "bg-muted-foreground"}`} />
-              <span className="text-[10px] uppercase text-muted-foreground">
-                {cam.status === "online" ? t("mobile.cameras_online") : t("mobile.cameras_offline")}
-              </span>
-            </div>
-          </button>
+          <CameraRow key={cam.id} cam={cam} t={t} onClick={() => navigate(`/m/cameras/${cam.id}`)} />
         ))}
       </div>
     </div>
