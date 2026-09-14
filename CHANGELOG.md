@@ -3,6 +3,11 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.96-mobile-width-sweep] — 2026-09-14 — Correctifs de largeur mobile sur les pages restantes
+
+### Fixed
+- Débordements horizontaux corrigés sur plusieurs pages accessibles depuis l'interface mobile : Suivi des performances (tableaux sans défilement), Diagnostics (journal des flux), Ressources matérielles (ligne d'assignation trop rigide), assistant RTSP de la fiche caméra (grille à 4 colonnes fixe), et quelques en-têtes de page par prudence. Aucun changement visuel côté bureau.
+
 ## [v3.95-mobile-camera-center-width] — 2026-09-14 — Interface mobile : onglet "Centre caméras" renommé + correctif largeur
 
 ### Fixed
