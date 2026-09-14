@@ -86,3 +86,17 @@
 .fade-up { animation: fade-up 0.4s ease-out both; }
 
 [data-debug-wrapper="true"] { display: contents !important; }
+
+/* v3.104 · L'app desktop garde son identité "technique" volontairement
+   carrée (--radius: 0.125rem ci-dessus, quasi nul) — l'interface mobile
+   dédiée (MobileLayout.jsx, data-testid="mobile-shell") a reçu un passage
+   d'arrondi explicite ("moins carré, plus iPhone friendly") sur SES
+   composants via des classes rounded-lg/rounded-md/rounded-sm — mais ces
+   utilitaires Tailwind se résolvent tous via var(--radius) (voir
+   tailwind.config.js), donc sans cette surcharge scoped ils restaient
+   quasi plats, hérités du thème desktop. Cette règle ne s'applique qu'à
+   l'arbre du shell mobile (sélecteur par attribut, pas de classe
+   supplémentaire à poser) — zéro effet sur le reste de l'application. */
+[data-testid="mobile-shell"] {
+  --radius: 0.875rem;
+}

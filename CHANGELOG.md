@@ -3,6 +3,16 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.105-mobile-magnifier-video-radius-fix] — 2026-09-14 — Loupe tactile sur les photos, lecture vidéo des événements, arrondi CSS effectif
+
+### Fixed
+- L'arrondi ajouté en v3.104 sur les cartes/boutons mobiles restait quasiment invisible sur certains éléments — ils héritaient de l'angle très carré du thème bureau (variable de rayon partagée) au lieu d'un rayon propre à l'interface mobile. L'interface mobile a désormais son propre rayon, sans rien changer côté bureau.
+
+### Added
+- Loupe tactile sur la photo de la fiche véhicule et sur celle du détail d'un événement (appui maintenu), reprenant l'effet déjà présent au survol de la souris sur la version bureau — la lentille se décale automatiquement sur le côté opposé au doigt pour ne jamais être masquée.
+- Lecture de la vidéo autour de l'événement directement depuis le détail mobile, comme sur la version bureau (recherche automatique de l'enregistrement qui couvre l'instant de l'événement).
+- Appui sur le nom d'une caméra dans l'onglet Timeline de la fiche véhicule : affiche ses statistiques (nombre de passages, première/dernière vue), équivalent tactile du survol souris de la version bureau.
+
 ## [v3.104-mobile-thumbnails-rounded-ui] — 2026-09-14 — Miniatures caméra, interface arrondie, bouton retour sur toutes les pages
 
 ### Added
