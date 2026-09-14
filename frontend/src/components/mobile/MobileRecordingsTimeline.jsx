@@ -57,12 +57,12 @@ export default function MobileRecordingsTimeline({ cameraId }) {
         <div className="text-xs text-muted-foreground text-center py-3">{t("mobile.timeline_empty")}</div>
       ) : (
         <>
-          <div className="relative h-8 bg-secondary/50" data-testid="mobile-timeline-bar">
+          <div className="relative h-8 bg-secondary/50 rounded-lg overflow-hidden" data-testid="mobile-timeline-bar">
             {segments.map((seg) => (
               <button key={seg.id} onClick={() => setPlaying(seg)} data-testid={`mobile-timeline-seg-${seg.id}`}
                       title={fmtTime(seg.start)}
                       style={{ ...segPos(seg), backgroundColor: MODE_COLORS[seg.mode] || MODE_COLORS.continuous }}
-                      className="absolute top-1 bottom-1">
+                      className="absolute top-1 bottom-1 rounded-sm">
                 {seg.has_event && <span className="absolute -top-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[#FF3333]" />}
               </button>
             ))}
@@ -80,7 +80,7 @@ export default function MobileRecordingsTimeline({ cameraId }) {
 
       {playing && (
         <div className="fixed inset-0 z-[60] bg-background flex flex-col" data-testid="mobile-timeline-player">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
+          <div className="flex items-center justify-between px-3 py-2.5 border-b border-border shrink-0">
             <span className="text-sm text-foreground mono">{fmtTime(playing.start)} – {fmtTime(playing.end)}</span>
             <button onClick={() => setPlaying(null)} data-testid="mobile-timeline-player-close" className="p-1 text-foreground">
               <X size={20} />

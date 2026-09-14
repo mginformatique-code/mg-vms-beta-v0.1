@@ -7,7 +7,7 @@
  * (desktop) — même contexte auth/thème/langue/alertes, aucun état dupliqué.
  */
 import React from "react";
-import { NavLink, useNavigate, useLocation } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import useIsMobileViewport from "@/hooks/useIsMobileViewport";
 import Logo from "@/components/Logo";
@@ -35,31 +35,26 @@ const TABS = [
 export default function MobileLayout({ children }) {
   const { t, alertPing } = useApp();
   const navigate = useNavigate();
-  const location = useLocation();
   const { setMode } = useIsMobileViewport();
   const [alertCount, setAlertCount] = React.useState(0);
   React.useEffect(() => { if (alertPing) setAlertCount((c) => c + 1); }, [alertPing]);
   const mainRef = React.useRef(null);
   useMobileScrollRestore(mainRef);
 
-  // v3.103 · Bouton retour affiché sur toute page qui n'est PAS un des 5
-  // onglets racine (demande explicite : ajouter un moyen de revenir en
-  // arrière depuis les ~46 pages desktop montées sous /m/..., accessibles
-  // uniquement via le menu Plus jusqu'ici — rien ne les distinguait d'un
-  // onglet racine). `navigate(-1)` réutilise l'historique du navigateur,
-  // donc "Plus" retrouve sa position de scroll (voir useMobileScrollRestore).
-  const isTopLevel = TABS.some((tab) => tab.to === location.pathname);
+  // v3.104 · Bouton retour actif sur TOUTES les pages, y compris les 5
+  // onglets racine (demande explicite : "que ce soit actif sur toutes les
+  // pages" — la v3.103 le réservait aux pages non-racine). `navigate(-1)`
+  // réutilise l'historique du navigateur, donc "Plus" retrouve sa position
+  // de scroll (voir useMobileScrollRestore) même en repartant d'un onglet.
 
   return (
     <div className="h-[100dvh] flex flex-col bg-background text-foreground overflow-hidden" data-testid="mobile-shell">
       <header className="h-12 shrink-0 border-b border-border bg-card flex items-center justify-between px-3">
         <div className="flex items-center gap-2 min-w-0">
-          {!isTopLevel && (
-            <button onClick={() => navigate(-1)} data-testid="mobile-topbar-back"
-                    className="p-1 -ml-1 text-foreground shrink-0">
-              <ChevronLeft size={22} />
-            </button>
-          )}
+          <button onClick={() => navigate(-1)} data-testid="mobile-topbar-back"
+                  className="p-1 -ml-1 text-foreground shrink-0">
+            <ChevronLeft size={22} />
+          </button>
           <Logo size={26} className="w-[26px] h-[26px] shrink-0" />
           <span className="font-head font-black text-sm tracking-tight truncate">MG-VMS</span>
         </div>

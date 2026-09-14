@@ -95,7 +95,7 @@ export default function MobilePtzPanel({ cameraId }) {
         ) : (
           <div className="flex gap-1.5 overflow-x-auto pb-1" style={{ touchAction: "pan-x" }}>
             {presets.map((p) => (
-              <div key={p.id} className="shrink-0 flex items-center gap-1 border border-border bg-background px-2 py-1.5">
+              <div key={p.id} className="shrink-0 flex items-center gap-1 rounded-full border border-border bg-background px-3 py-1.5">
                 <button onClick={() => gotoPreset(p.id)} data-testid="mobile-ptz-preset-goto" className="text-xs">{p.name}</button>
                 <button onClick={() => deletePreset(p)} data-testid="mobile-ptz-preset-delete" className="text-muted-foreground">
                   <XIcon size={12} />

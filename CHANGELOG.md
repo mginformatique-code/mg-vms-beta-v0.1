@@ -3,6 +3,15 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.104-mobile-thumbnails-rounded-ui] — 2026-09-14 — Miniatures caméra, interface arrondie, bouton retour sur toutes les pages
+
+### Added
+- Chaque caméra de la liste de statut mobile affiche désormais une vraie miniature (pas une icône générique), actualisée automatiquement environ une fois par heure.
+
+### Changed
+- Interface mobile arrondie sur l'ensemble des écrans (cartes, boutons, vignettes, onglets, puces de filtre) pour un rendu moins anguleux, plus proche des conventions iOS.
+- Le bouton retour en haut à gauche est désormais actif sur toutes les pages mobiles, y compris les 5 onglets principaux (pas seulement les pages ouvertes depuis le menu Plus).
+
 ## [v3.103-mobile-timeline-vehicle-nav-back-button] — 2026-09-14 — Timeline d'enregistrements sur la vue live, fiche véhicule à onglets et navigable, bouton retour
 
 ### Added

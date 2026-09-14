@@ -142,7 +142,7 @@ export default function MobileLive() {
       <div className="flex items-center gap-1 shrink-0">
         {view === "single" && (
           <button onClick={() => setHd((v) => !v)} data-testid="mobile-live-hdsd-toggle"
-                  className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider border border-border text-muted-foreground">
+                  className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md border border-border text-muted-foreground">
             {hd ? "HD" : "SD"}
           </button>
         )}
@@ -158,33 +158,33 @@ export default function MobileLive() {
           {densityOpen && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setDensityOpen(false)} />
-              <div className="absolute right-0 top-full mt-1 z-50 bg-black/90 border border-white/10 flex flex-col p-1 gap-0.5"
+              <div className="absolute right-0 top-full mt-1 z-50 bg-black/90 border border-white/10 rounded-xl flex flex-col p-1 gap-0.5"
                    data-testid="mobile-live-density-popover">
                 <button onClick={() => { setGridSize(16); setView("grid"); setDensityOpen(false); }}
                         data-testid="mobile-live-density-16"
-                        className={`w-10 h-10 flex items-center justify-center hover:bg-white/10 ${
+                        className={`w-10 h-10 rounded-lg flex items-center justify-center hover:bg-white/10 ${
                           view === "grid" && gridSize === 16 ? "text-[#0044FF]" : "text-white"
                         }`}>
                   <Grid3x3 size={20} />
                 </button>
                 <button onClick={() => { setGridSize(8); setView("grid"); setDensityOpen(false); }}
                         data-testid="mobile-live-density-8"
-                        className={`w-10 h-10 flex items-center justify-center hover:bg-white/10 ${
+                        className={`w-10 h-10 rounded-lg flex items-center justify-center hover:bg-white/10 ${
                           view === "grid" && gridSize === 8 ? "text-[#0044FF]" : "text-white"
                         }`}>
                   <LayoutGrid size={20} />
                 </button>
                 <button onClick={() => { setGridSize(4); setView("grid"); setDensityOpen(false); }}
                         data-testid="mobile-live-density-4"
-                        className={`w-10 h-10 flex items-center justify-center hover:bg-white/10 ${
+                        className={`w-10 h-10 rounded-lg flex items-center justify-center hover:bg-white/10 ${
                           view === "grid" && gridSize === 4 ? "text-[#0044FF]" : "text-white"
                         }`}>
                   <Grid2x2 size={20} />
                 </button>
                 <button onClick={() => { setView("single"); setDensityOpen(false); }}
                         data-testid="mobile-live-density-1"
-                        className="w-10 h-10 flex items-center justify-center hover:bg-white/10">
-                  <span className={`w-5 h-5 ${view === "single" ? "bg-[#0044FF]" : "bg-white/30"}`} />
+                        className="w-10 h-10 rounded-lg flex items-center justify-center hover:bg-white/10">
+                  <span className={`w-5 h-5 rounded-md ${view === "single" ? "bg-[#0044FF]" : "bg-white/30"}`} />
                 </button>
               </div>
             </>
@@ -203,7 +203,7 @@ export default function MobileLive() {
             const i = cams.indexOf(cam);
             return (
               <button key={cam.id} onClick={() => { setIdx(i); setView("single"); }}
-                      className="relative bg-black aspect-video overflow-hidden" data-testid="mobile-live-grid-tile">
+                      className="relative bg-black aspect-video overflow-hidden rounded-lg" data-testid="mobile-live-grid-tile">
                 <LivePlayer camera={cam} hd={false} className="w-full h-full" dataTestId={`mobile-grid-player-${i}`} />
                 <div className="absolute bottom-0 inset-x-0 px-1.5 py-1 bg-gradient-to-t from-black/80 to-transparent flex items-center gap-1">
                   <StatusDot online={cam.status === "online"} />
@@ -243,16 +243,16 @@ export default function MobileLive() {
         {cams.length > 1 && (
           <>
             <button onClick={goPrev} data-testid="mobile-live-prev"
-                    className="absolute left-1 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center bg-black/50 text-white">
+                    className="absolute left-1 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full flex items-center justify-center bg-black/50 text-white">
               <ChevronLeft size={20} />
             </button>
             <button onClick={goNext} data-testid="mobile-live-next"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center bg-black/50 text-white">
+                    className="absolute right-1 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full flex items-center justify-center bg-black/50 text-white">
               <ChevronRight size={20} />
             </button>
           </>
         )}
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-black/60 text-white text-xs truncate max-w-[70%]">
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-black/60 text-white text-xs truncate max-w-[70%]">
           {cam.name}
         </div>
       </div>

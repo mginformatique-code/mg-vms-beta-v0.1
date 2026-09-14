@@ -30,7 +30,7 @@ import api from "@/lib/api";
 import { toast } from "sonner";
 import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Minus, Plus } from "lucide-react";
 
-const BTN = "w-11 h-11 flex items-center justify-center bg-black/60 active:bg-[#00E5FF] active:text-black text-white select-none";
+const BTN = "w-11 h-11 rounded-xl flex items-center justify-center bg-black/60 active:bg-[#00E5FF] active:text-black text-white select-none";
 const TOUCH_STYLE = { touchAction: "none" };
 
 export default function PtzPad({ cameraId }) {
@@ -72,7 +72,7 @@ export default function PtzPad({ cameraId }) {
           <button className={BTN} {...holdMove("up")} data-testid="mobile-ptz-up"><ArrowUp size={18} /></button>
           <div />
           <button className={BTN} {...holdMove("left")} data-testid="mobile-ptz-left"><ArrowLeft size={18} /></button>
-          <div className="w-11 h-11 bg-black/30" />
+          <div className="w-11 h-11 rounded-xl bg-black/30" />
           <button className={BTN} {...holdMove("right")} data-testid="mobile-ptz-right"><ArrowRight size={18} /></button>
           <div />
           <button className={BTN} {...holdMove("down")} data-testid="mobile-ptz-down"><ArrowDown size={18} /></button>
@@ -85,9 +85,9 @@ export default function PtzPad({ cameraId }) {
       </div>
       <div className="flex items-center gap-2 text-white text-xs" data-testid="mobile-ptz-speed">
         <span className="uppercase tracking-wider text-white/60">Vitesse</span>
-        <button className="w-7 h-7 flex items-center justify-center bg-black/60" onClick={() => setAndSaveSpeed(speed - 0.1)} data-testid="mobile-ptz-speed-down">−</button>
+        <button className="w-7 h-7 rounded-lg flex items-center justify-center bg-black/60" onClick={() => setAndSaveSpeed(speed - 0.1)} data-testid="mobile-ptz-speed-down">−</button>
         <span className="mono w-9 text-center">{Math.round(speed * 100)}%</span>
-        <button className="w-7 h-7 flex items-center justify-center bg-black/60" onClick={() => setAndSaveSpeed(speed + 0.1)} data-testid="mobile-ptz-speed-up">+</button>
+        <button className="w-7 h-7 rounded-lg flex items-center justify-center bg-black/60" onClick={() => setAndSaveSpeed(speed + 0.1)} data-testid="mobile-ptz-speed-up">+</button>
       </div>
     </div>
   );

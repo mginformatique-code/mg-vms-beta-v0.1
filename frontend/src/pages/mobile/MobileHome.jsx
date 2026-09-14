@@ -32,7 +32,7 @@ function MiniStat({ icon: Icon, value, active = true }) {
   return (
     <div className="flex items-center gap-1.5">
       <Icon size={13} strokeWidth={1.5} className="text-muted-foreground" />
-      <div className="w-10 h-1.5 bg-secondary overflow-hidden">
+      <div className="w-10 h-1.5 bg-secondary rounded-full overflow-hidden">
         <div style={{ width: `${active ? value : 0}%`, backgroundColor: color }} className="h-full" />
       </div>
       <span className="text-[10px] mono w-8">{active ? `${value}%` : "N/A"}</span>
@@ -120,8 +120,8 @@ export default function MobileHome() {
             <button key={site.id}
                     onClick={() => navigate("/m/cameras", { state: { siteId: site.id, siteName: site.name } })}
                     data-testid="mobile-home-site-row"
-                    className="flex items-center gap-3 border border-border bg-card p-3 text-left">
-              <div className="w-10 h-10 shrink-0 flex items-center justify-center bg-secondary">
+                    className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 text-left">
+              <div className="w-10 h-10 shrink-0 flex items-center justify-center bg-secondary rounded-lg">
                 <Building2 size={18} className="text-muted-foreground" />
               </div>
               <div className="min-w-0 flex-1">

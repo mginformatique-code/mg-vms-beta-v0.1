@@ -67,7 +67,7 @@ function PlatesSection({ onSelect }) {
       <div className="flex gap-2 overflow-x-auto pb-1" style={{ touchAction: "pan-x" }}>
         {plates.map((p, i) => (
           <button key={p.id} onClick={() => onSelect(plates.map((pp) => pp.plate), i)} data-testid="mobile-plate-card"
-               className="shrink-0 w-32 border border-border bg-card p-2 text-left">
+               className="shrink-0 w-32 rounded-xl border border-border bg-card p-2 text-left">
             <div className="text-sm font-bold mono truncate">{p.plate}</div>
             <div className="text-[10px] text-muted-foreground truncate">{p.camera_name}</div>
             <div className="text-[10px] mono text-muted-foreground">{new Date(p.timestamp).toLocaleTimeString("fr-FR")}</div>
@@ -121,7 +121,7 @@ function VehicleTimelineTab({ plate }) {
             {rows.map((p) => (
               <div key={p.id} className="flex items-center gap-2.5 text-xs" data-testid={`mobile-vehicle-timeline-item-${p.id}`}>
                 <span className="mono text-[#0044FF] w-11 shrink-0">{new Date(p.timestamp).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span>
-                <img src={passageThumbUrl(p.id)} alt={p.camera_name} className="w-14 h-10 object-cover bg-secondary shrink-0" loading="lazy" />
+                <img src={passageThumbUrl(p.id)} alt={p.camera_name} className="w-14 h-10 rounded-md object-cover bg-secondary shrink-0" loading="lazy" />
                 <span className="min-w-0 flex-1 truncate text-foreground">{p.camera_name}</span>
                 <span className="mono shrink-0" style={{ color: (p.confidence || 0) > 0.9 ? "#00E676" : "#FFB800" }}>{Math.round((p.confidence || 0) * 100)}%</span>
               </div>
@@ -231,13 +231,13 @@ function VehicleDetail({ plate, onClose, onPrev, onNext, hasPrev, hasNext }) {
             )}
             {hasPrev && (
               <button onClick={onPrev} data-testid="mobile-vehicle-prev"
-                      className="absolute left-1 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center bg-black/50 text-white">
+                      className="absolute left-1 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full flex items-center justify-center bg-black/50 text-white">
                 <ChevronLeft size={20} />
               </button>
             )}
             {hasNext && (
               <button onClick={onNext} data-testid="mobile-vehicle-next"
-                      className="absolute right-1 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center bg-black/50 text-white">
+                      className="absolute right-1 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full flex items-center justify-center bg-black/50 text-white">
                 <ChevronRight size={20} />
               </button>
             )}
@@ -250,10 +250,10 @@ function VehicleDetail({ plate, onClose, onPrev, onNext, hasPrev, hasNext }) {
             )}
 
             <Tabs defaultValue="overview" key={plate}>
-              <TabsList className="grid grid-cols-3 rounded-none bg-secondary/40 border border-border h-auto p-0" data-testid="mobile-vehicle-tabs">
-                <TabsTrigger value="overview" className="rounded-none text-xs py-2">{t("veh.tab_overview")}</TabsTrigger>
-                <TabsTrigger value="timeline" className="rounded-none text-xs py-2">Timeline</TabsTrigger>
-                <TabsTrigger value="heatmap" className="rounded-none text-xs py-2">Heatmap</TabsTrigger>
+              <TabsList className="grid grid-cols-3 rounded-xl bg-secondary/40 border border-border h-auto p-1 gap-1" data-testid="mobile-vehicle-tabs">
+                <TabsTrigger value="overview" className="rounded-lg text-xs py-2">{t("veh.tab_overview")}</TabsTrigger>
+                <TabsTrigger value="timeline" className="rounded-lg text-xs py-2">Timeline</TabsTrigger>
+                <TabsTrigger value="heatmap" className="rounded-lg text-xs py-2">Heatmap</TabsTrigger>
               </TabsList>
 
               <TabsContent value="overview" className="mt-3">
@@ -280,16 +280,16 @@ function VehicleDetail({ plate, onClose, onPrev, onNext, hasPrev, hasNext }) {
                   )}
                   <div className="flex gap-2">
                     <button onClick={() => setWatch("black")} disabled={saving} data-testid="mobile-vehicle-blacklist"
-                            className="flex-1 flex items-center justify-center gap-1.5 py-2 border border-[#FF3333]/50 text-[#FF3333] text-xs uppercase disabled:opacity-40">
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border border-[#FF3333]/50 text-[#FF3333] text-xs uppercase disabled:opacity-40">
                       <Ban size={13} /> {t("mobile.events_plate_blacklist")}
                     </button>
                     <button onClick={() => setWatch("white")} disabled={saving} data-testid="mobile-vehicle-whitelist"
-                            className="flex-1 flex items-center justify-center gap-1.5 py-2 border border-[#FFB800]/50 text-[#FFB800] text-xs uppercase disabled:opacity-40">
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border border-[#FFB800]/50 text-[#FFB800] text-xs uppercase disabled:opacity-40">
                       <ShieldCheck size={13} /> {t("mobile.events_plate_whitelist")}
                     </button>
                     {d.list_status && d.list_status !== "none" && (
                       <button onClick={() => setWatch(null)} disabled={saving} data-testid="mobile-vehicle-unwatch"
-                              className="flex-1 flex items-center justify-center gap-1.5 py-2 border border-border text-muted-foreground text-xs uppercase disabled:opacity-40">
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border border-border text-muted-foreground text-xs uppercase disabled:opacity-40">
                         <Undo2 size={13} /> {t("mobile.vehicle_remove_watch")}
                       </button>
                     )}
@@ -382,7 +382,7 @@ export default function MobileEvents() {
           const active = filtre === f.id;
           return (
             <button key={f.id} onClick={() => setFiltre(f.id)} data-testid={`mobile-events-filter-${f.id}`}
-                    className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs border ${
+                    className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border ${
                       active ? "border-[#0044FF] bg-[#0044FF]/10 text-[#0044FF] font-medium" : "border-border text-muted-foreground"
                     }`}>
               <F size={13} /> {t(f.labelKey)}
@@ -403,8 +403,8 @@ export default function MobileEvents() {
         <div className="flex flex-col gap-2">
           {events.map((e) => (
             <button key={e.id} onClick={() => openDetail(e)} data-testid="mobile-event-card"
-                    className="flex items-center gap-3 border border-border bg-card p-2 text-left">
-              <div className="relative w-20 h-14 shrink-0 bg-black overflow-hidden">
+                    className="flex items-center gap-3 rounded-xl border border-border bg-card p-2 text-left">
+              <div className="relative w-20 h-14 shrink-0 bg-black rounded-lg overflow-hidden">
                 {(e.thumbnail_sm || e.thumbnail) ? (
                   <img src={e.thumbnail_sm || e.thumbnail} alt={e.type} className="w-full h-full object-cover" loading="lazy" />
                 ) : (
@@ -433,7 +433,7 @@ export default function MobileEvents() {
       {hasMore && (
         <div className="flex justify-center pt-3">
           <button onClick={loadMore} disabled={loadingMore} data-testid="mobile-events-load-more"
-                  className="flex items-center gap-2 px-4 py-2 border border-border text-xs uppercase tracking-wider text-muted-foreground disabled:opacity-50">
+                  className="flex items-center gap-2 px-4 py-2 rounded-full border border-border text-xs uppercase tracking-wider text-muted-foreground disabled:opacity-50">
             {loadingMore && <Loader2 size={13} className="animate-spin" />}
             {t("mobile.events_load_more")}
           </button>
