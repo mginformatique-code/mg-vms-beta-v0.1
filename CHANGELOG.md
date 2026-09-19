@@ -3,6 +3,14 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.116-mobile-2fa-input-numeric] — 2026-09-19 — Correctif champ code 2FA mobile, clavier numérique forcé
+
+### Fixed
+- Le champ de saisie du code 2FA sur mobile affichait un texte d'aide illisible tant qu'il était vide (une phrase complète étirée par l'espacement pensé pour 6 chiffres) — corrigé, le champ vide affiche désormais un exemple numérique cohérent.
+
+### Added
+- Le clavier numérique s'ouvre désormais directement pour la saisie du code 2FA sur téléphone, au lieu du clavier complet — avec auto-remplissage natif si le code arrive par SMS.
+
 ## [v3.115-retention-async-mobile-fullscreen-zoom] — 2026-09-19 — Correctif purge bloquante (faux "trous" d'enregistrement), plein écran iOS, verrouillage du zoom mobile
 
 ### Fixed

@@ -153,8 +153,21 @@ export default function MobileLogin() {
           ) : (
             <>
               <label className="block text-xs uppercase tracking-wider text-muted-foreground mb-1">{t("login.twofa")}</label>
-              <input data-testid="mobile-login-totp" value={totp} onChange={(e) => setTotp(e.target.value)} placeholder={t("login.twofa_hint")} autoFocus
-                className="w-full mb-2 px-3 py-2.5 bg-card border border-input focus:border-[#0044FF] outline-none text-sm mono tracking-[0.4em] text-center" />
+              {/* v3.116 · "le texte pour saisir le code 2FA est mal formaté" —
+                  root cause : `login.twofa_hint` est une PHRASE ("Saisissez
+                  le code à 6 chiffres"), mais `tracking-[0.4em]` (espacement
+                  pensé pour 6 chiffres) l'étirait en un texte illisible tant
+                  que le champ est vide. La phrase reste affichée juste
+                  au-dessus (label ci-dessus, sans cet espacement) ; le
+                  placeholder redevient un simple exemple numérique cohérent
+                  avec le style du champ. `inputMode="numeric"` + `pattern`
+                  forcent le clavier numérique sur téléphone (demande
+                  explicite) au lieu du clavier complet par défaut ;
+                  `autoComplete="one-time-code"` permet en prime l'auto-
+                  remplissage natif iOS/Android depuis un SMS/code copié. */}
+              <input data-testid="mobile-login-totp" value={totp} onChange={(e) => setTotp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="000000" autoFocus inputMode="numeric" pattern="[0-9]*" maxLength={6} autoComplete="one-time-code"
+                className="w-full mb-2 px-3 py-2.5 bg-card border border-input focus:border-[#0044FF] outline-none text-lg mono tracking-[0.4em] text-center" />
             </>
           )}
 
