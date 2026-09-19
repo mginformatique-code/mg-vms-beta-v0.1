@@ -42,6 +42,15 @@ MIN_FREE_GB = float(os.environ.get("RECORD_MIN_FREE_GB", "2"))
 _processes: dict[str, asyncio.subprocess.Process] = {}
 _pools_cache: dict = {}  # id -> {path, max_size_gb, enabled, ...}
 _stderr_logs: dict[str, Path] = {}  # camera_id -> chemin du log stderr ffmpeg (dernier restart)
+# v3.115 · Tâche de purge en arrière-plan (voir recorder_loop) — même si
+# `_apply_retention` ne bloque plus l'event loop (I/O déportées sur
+# `_recorder_executor`), l'AWAIT direct dans recorder_loop retardait
+# quand même l'indexation des ticks suivants de sa propre durée (jusqu'à
+# plusieurs minutes sur un gros lot de suppressions). En tâche de fond,
+# recorder_loop continue d'indexer les nouveaux segments normalement
+# PENDANT que la purge tourne. Le garde `.done()` évite deux purges
+# concurrentes si un lot est exceptionnellement long.
+_retention_task: asyncio.Task | None = None
 
 
 async def _load_pools() -> None:
@@ -357,10 +366,37 @@ async def _load_retention_config() -> dict:
     }
 
 
+def _delete_file_sync(path_str: str) -> int:
+    """Supprime un fichier, retourne sa taille en octets (0 si absent/erreur).
+
+    v3.115 · Extrait de `_apply_retention` pour tourner sur `_recorder_executor`
+    au lieu du thread event-loop principal — `Path.exists/stat/unlink` sont
+    des appels BLOQUANTS, et `RECORDINGS_DIR` est un stockage réseau
+    (`/mnt/storage/...`) où chacun peut prendre un temps non négligeable.
+    Constaté en prod : une purge de 85 fichiers a bloqué le recorder_loop
+    ~5-6 minutes d'affilée (log "85 supprimés par quota" suivi d'un trou
+    apparent dans /recordings/timeline) — les fichiers étaient en réalité
+    déjà écrits sur disque en continu pendant ce temps, seule L'INDEXATION
+    en base (`_index_segments`, tourne dans la même boucle) était gelée en
+    attendant que la purge synchrone se termine. Aucune perte réelle de
+    séquence vidéo, mais l'app semblait "ne plus enregistrer" pendant la
+    purge."""
+    try:
+        p = Path(path_str)
+        if p.exists():
+            size = p.stat().st_size
+            p.unlink(missing_ok=True)
+            return size
+    except OSError:
+        pass
+    return 0
+
+
 async def _apply_retention() -> dict:
     """Purge : (1) par âge, puis (2) par quota disque en supprimant les plus anciens.
     Retourne un rapport de purge."""
     cfg = await _load_retention_config()
+    loop = asyncio.get_running_loop()
     deleted_age = 0
     freed_bytes_age = 0
 
@@ -371,14 +407,10 @@ async def _apply_retention() -> dict:
         {"_id": 0, "id": 1, "file_path": 1, "size_bytes": 1},
     ).to_list(5000)
     for rec in old:
-        try:
-            p = Path(rec["file_path"])
-            if p.exists():
-                freed_bytes_age += p.stat().st_size
-                p.unlink(missing_ok=True)
-                deleted_age += 1
-        except OSError:
-            pass
+        freed = await loop.run_in_executor(_recorder_executor, _delete_file_sync, rec["file_path"])
+        if freed:
+            freed_bytes_age += freed
+            deleted_age += 1
     if old:
         await db.recordings.delete_many({"id": {"$in": [r["id"] for r in old]}})
 
@@ -386,7 +418,7 @@ async def _apply_retention() -> dict:
     deleted_quota = 0
     freed_bytes_quota = 0
     while True:
-        du = shutil.disk_usage(RECORDINGS_DIR)
+        du = await loop.run_in_executor(_recorder_executor, shutil.disk_usage, RECORDINGS_DIR)
         free_gb = du.free / 1e9
         used_pct = 100.0 * du.used / du.total
         if free_gb >= cfg["min_free_gb"] and used_pct <= cfg["max_disk_pct"]:
@@ -398,13 +430,8 @@ async def _apply_retention() -> dict:
         )
         if not oldest:
             break  # rien à supprimer
-        try:
-            p = Path(oldest["file_path"])
-            if p.exists():
-                freed_bytes_quota += p.stat().st_size
-                p.unlink(missing_ok=True)
-        except OSError:
-            pass
+        freed = await loop.run_in_executor(_recorder_executor, _delete_file_sync, oldest["file_path"])
+        freed_bytes_quota += freed
         await db.recordings.delete_one({"id": oldest["id"]})
         deleted_quota += 1
         if deleted_quota > 5000:
@@ -696,7 +723,11 @@ async def recorder_loop() -> None:
             if tick % 4 == 0:
                 await _refresh_recent_flags()
             if tick % 20 == 0:
-                await _apply_retention()
+                global _retention_task
+                if _retention_task is None or _retention_task.done():
+                    _retention_task = asyncio.create_task(_apply_retention())
+                else:
+                    logger.info("recorder_loop : purge précédente encore en cours, cycle ignoré")
         except Exception:
             logger.exception("recorder_loop : erreur, reprise dans 30s")
         await asyncio.sleep(30)

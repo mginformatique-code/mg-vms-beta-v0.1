@@ -47,6 +47,19 @@ export default function MobileLayout({ children }) {
   const mainRef = React.useRef(null);
   useMobileScrollRestore(mainRef);
 
+  // v3.115 · "tu penses pouvoir bloquer le mode zoom-dezoom ?" — verrouille
+  // le pincement de zoom natif du navigateur, MOBILE UNIQUEMENT (restauré
+  // à la valeur d'origine au démontage, donc jamais appliqué aux routes
+  // desktop qui partagent le même index.html/meta viewport). Un pincement
+  // accidentel sur l'app zoomait toute la page au lieu d'agir dans l'app.
+  React.useEffect(() => {
+    const meta = document.querySelector('meta[name="viewport"]');
+    if (!meta) return;
+    const original = meta.getAttribute("content");
+    meta.setAttribute("content", "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no");
+    return () => { meta.setAttribute("content", original); };
+  }, []);
+
   // v3.104 · Bouton retour actif sur TOUTES les pages, y compris les 5
   // onglets racine (demande explicite : "que ce soit actif sur toutes les
   // pages" — la v3.103 le réservait aux pages non-racine). `navigate(-1)`

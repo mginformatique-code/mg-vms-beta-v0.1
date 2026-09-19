@@ -3,6 +3,19 @@
 Format inspiré de Keep a Changelog. Dates au format AAAA-MM.
 
 
+## [v3.115-retention-async-mobile-fullscreen-zoom] — 2026-09-19 — Correctif purge bloquante (faux "trous" d'enregistrement), plein écran iOS, verrouillage du zoom mobile
+
+### Fixed
+- **Faux "trous" dans les enregistrements** : la purge de rétention (suppression des anciens fichiers pour libérer de l'espace disque) bloquait le processus qui enregistre les nouveaux segments en base pendant toute sa durée (plusieurs minutes sur un gros lot) — la vidéo continuait pourtant d'être écrite sur le disque sans interruption réelle, seule son apparition dans l'application était retardée. La purge tourne désormais en tâche de fond, sans plus jamais retarder l'indexation des nouveaux enregistrements ni bloquer le reste de l'application.
+- Le bouton plein écran de la vue live mobile ne faisait rien sur téléphone (Safari iOS ne supporte pas la mise en plein écran d'un élément quelconque, contrairement à Android) — un mode plein écran de secours a été ajouté pour ces navigateurs.
+- Le plein écran restait parfois bloqué en changeant d'onglet — il se ferme désormais automatiquement en quittant la vue live.
+
+### Added
+- Verrouillage du pincement de zoom du navigateur sur l'interface mobile (un pincement accidentel zoomait toute la page au lieu d'agir dans l'application) — sans effet sur la version bureau.
+
+### Notes
+- Vérifié séparément : l'interruption d'environ 6h sur une caméra précise dans la nuit du 18 au 19/09 est une vraie coupure réseau/caméra (confirmée dans les journaux de connexion), pas un défaut logiciel.
+
 ## [v3.114-mobile-activity-timeline-dnd] — 2026-09-14 — Timeline d'activité (vraie référence bureau), retour des Alertes IA, réorganisation des tuiles
 
 ### Added

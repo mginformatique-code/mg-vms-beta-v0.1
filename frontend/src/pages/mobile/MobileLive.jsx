@@ -254,11 +254,31 @@ export default function MobileLive() {
   // superposés (CameraControlOverlay, flèches, nom de la caméra) restent
   // visibles ET fonctionnels une fois en plein écran, pas seulement le
   // flux vidéo brut.
+  // v3.115 · "le mode full screen ne fonctionne pas sur téléphone" — root
+  // cause : Safari iOS n'implémente PAS l'API Fullscreen standard sur un
+  // élément quelconque (seulement `webkitEnterFullscreen`, réservé à
+  // `<video>` seul, non applicable ici puisque les contrôles superposés
+  // doivent rester visibles). `requestFullscreen` y est simplement
+  // `undefined` — l'appel optionnel `?.()` d'avant ne faisait donc
+  // RIEN, sans la moindre erreur à rattraper. Repli CSS pour les
+  // navigateurs sans l'API : le conteneur vidéo passe en `position:fixed`
+  // couvrant tout le viewport, sans dépendre d'une fonctionnalité
+  // navigateur absente sur iOS.
+  const supportsNativeFullscreen = typeof document !== "undefined" && !!document.documentElement.requestFullscreen;
   useEffect(() => {
+    if (!supportsNativeFullscreen) return;
     const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange", onFsChange);
-    return () => document.removeEventListener("fullscreenchange", onFsChange);
-  }, []);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFsChange);
+      // v3.115 · "quand je change d'onglet ça fait des bugs" — en SPA, la
+      // navigation vers un autre onglet démonte ce composant SANS jamais
+      // déclencher la sortie native du plein écran : le navigateur restait
+      // bloqué en plein écran sur un élément qui n'existe plus. Sortie
+      // forcée au démontage.
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    };
+  }, [supportsNativeFullscreen]);
   useEffect(() => {
     const mq = window.matchMedia("(orientation: landscape)");
     const handler = (e) => setIsLandscape(e.matches);
@@ -267,10 +287,14 @@ export default function MobileLive() {
   }, []);
   const toggleFullscreen = () => {
     if (!videoWrapRef.current) return;
+    if (!supportsNativeFullscreen) {
+      setIsFullscreen((v) => !v);
+      return;
+    }
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {});
     } else {
-      videoWrapRef.current.requestFullscreen?.().catch(() => {
+      videoWrapRef.current.requestFullscreen().catch(() => {
         toast.error(t("mobile.live_fullscreen_unavailable"));
       });
     }
@@ -405,11 +429,18 @@ export default function MobileLive() {
   // est bien plus faible qu'en portrait), donnant une bande vidéo minuscule
   // au milieu d'un grand vide. En plein écran (bouton dédié ci-dessous),
   // l'élément occupe tout le viewport nativement (Fullscreen API).
+  // v3.115 · Sur Safari iOS (pas d'API Fullscreen, voir plus haut), le
+  // "plein écran" est simulé en CSS pur (`fixed inset-0`) — ignore le flux
+  // flex normal pour couvrir tout le viewport, y compris l'en-tête/la
+  // barre d'onglets de MobileLayout.
+  const cssFullscreenFallback = isFullscreen && !supportsNativeFullscreen;
   const videoFlex = isFullscreen ? "1 1 100%" : isLandscape ? "0 0 70%" : "0 0 32%";
   return (
     <div className="h-full flex flex-col" data-testid="mobile-live-single">
       {!isFullscreen && toolbar}
-      <div ref={videoWrapRef} className="relative bg-black shrink-0" style={{ flex: videoFlex }}
+      <div ref={videoWrapRef}
+           className={`relative bg-black shrink-0 ${cssFullscreenFallback ? "fixed inset-0 z-[100]" : ""}`}
+           style={cssFullscreenFallback ? undefined : { flex: videoFlex }}
            onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
         <LivePlayer ref={playerRef} camera={cam} hd={hd} externalControls onStatusChange={setPlayerStatus}
                     className="w-full h-full" dataTestId="mobile-live-player" />
